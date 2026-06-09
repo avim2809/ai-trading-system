@@ -1,0 +1,301 @@
+export interface StrategyInfo {
+  name: string
+  default_params: Record<string, unknown>
+  summary: string
+  description: string
+}
+
+export interface RunSummary {
+  run_id: string
+  status: string
+  start_time: string
+  end_time: string | null
+  notes: string
+  metrics: Record<string, number>
+}
+
+export interface RunDetail extends RunSummary {
+  config: Record<string, unknown>
+  config_hash: string
+  seed: number
+  artifacts_dir: string
+}
+
+export interface RunRequest {
+  strategies: string[]
+  strategy_params: Record<string, Record<string, unknown>>
+  universe_symbols: string[] | null
+  start_date: string
+  end_date: string
+  initial_capital: number
+  commission_pct: number
+  slippage_pct: number
+  rebalance_frequency: string
+  risk_overrides: Record<string, number>
+  data_source: string
+  seed: number
+  notes: string
+}
+
+export interface ReportData {
+  portfolio: Record<string, number>
+  strategies?: Record<string, Record<string, number>>
+  period?: { start: string; end: string }
+  final_nav?: number
+  data_points: number
+}
+
+export interface EquityData {
+  dates: string[]
+  values: number[]
+  drawdown: number[]
+}
+
+export interface Signal {
+  symbol: string
+  strategy: string
+  score: number
+  confidence: number
+  horizon: string
+  asof: string
+  meta: Record<string, unknown>
+}
+
+export interface SignalSet {
+  domain: string
+  asof: string
+  signals: Signal[]
+}
+
+export interface Thesis {
+  side: string
+  symbol: string
+  conviction: number
+  rationale: string
+  supporting: string[]
+}
+
+export interface DebateResult {
+  symbol: string
+  net_conviction: number
+  bull_thesis: Thesis | null
+  bear_thesis: Thesis | null
+}
+
+export interface TradeProposal {
+  asof: string
+  targets: Record<string, number>
+  per_strategy: Record<string, Record<string, number>>
+  notes: string
+}
+
+export interface RiskDecision {
+  approved: boolean
+  adjusted_targets: Record<string, number>
+  violations: string[]
+  actions: string[]
+}
+
+export interface ExecutionFill {
+  symbol: string
+  side: string
+  quantity: number
+  strategy: string
+}
+
+export interface ExecutionReport {
+  fills: ExecutionFill[]
+  turnover: number
+  costs: number
+}
+
+export interface BlackboardView {
+  asof: string
+  signal_sets: SignalSet[]
+  theses: Thesis[]
+  debate_results: DebateResult[]
+  proposal: TradeProposal | null
+  risk_decision: RiskDecision | null
+  execution_report: ExecutionReport | null
+}
+
+export interface StepRequest {
+  strategies: string[]
+  strategy_params: Record<string, Record<string, unknown>>
+  symbols: string[]
+  asof_date: string
+  data_source: string
+  seed: number
+}
+
+export interface ConfigDefaults {
+  universe: Record<string, unknown>
+  backtest: Record<string, unknown>
+  risk: Record<string, unknown>
+}
+
+// ── Live Trading Types ──
+
+export interface LastCycle {
+  cycle_id: string
+  timestamp: string
+  orders_generated: number
+}
+
+export interface LiveStatus {
+  state: 'running' | 'stopped'
+  broker: string
+  broker_connected: boolean
+  next_run: string | null
+  active_strategies: string[]
+  approval_mode: string
+  uptime_seconds: number | null
+  last_cycle: LastCycle | null
+}
+
+export interface LiveStartRequest {
+  broker: string
+  strategies?: string[]
+  schedule?: string
+  approval_mode?: string
+}
+
+export interface BrokerPosition {
+  symbol: string
+  quantity: number
+  avg_cost: number
+  market_value: number
+  unrealized_pnl: number
+}
+
+export interface AccountInfo {
+  cash: number
+  equity: number
+  buying_power: number
+  currency: string
+}
+
+export interface OrderRecord {
+  order_id: string
+  symbol: string
+  side: string
+  quantity: number
+  filled_quantity: number
+  avg_fill_price: number
+  status: string
+  strategy?: string
+  timestamp: string | null
+}
+
+export interface CycleRecord {
+  cycle_id: string
+  timestamp: string
+  orders_generated: number
+  orders_submitted: number
+  orders_queued: number
+  error: string | null
+}
+
+export interface ApprovalOrder {
+  symbol: string
+  side: string
+  quantity: number
+  order_type: string
+  limit_price: number | null
+  strategy: string
+}
+
+export interface PendingApproval {
+  approval_id: string
+  created_at: string
+  expires_at: string
+  status: string
+  strategy: string
+  orders: ApprovalOrder[]
+  reject_reason: string | null
+}
+
+export interface ApprovalDetail extends PendingApproval {
+  blackboard_snapshot: BlackboardView
+}
+
+export interface LiveConfigStrategies {
+  enabled: string[]
+  auto_approve: string[]
+  require_approval: string[]
+}
+
+export interface LiveConfigRisk {
+  kill_switch_drawdown: number
+  max_daily_trades: number
+  max_daily_turnover: number
+}
+
+export interface LiveConfigUniverse {
+  symbols: string[]
+}
+
+export interface LiveConfig {
+  broker: string
+  schedule: string
+  approval_mode: string
+  strategies: LiveConfigStrategies
+  risk: LiveConfigRisk
+  universe: LiveConfigUniverse
+}
+
+// ── LLM / AI Types ──
+
+export interface LLMProvider {
+  name: string
+  models: string[]
+  has_key: boolean
+}
+
+export interface LLMConfig {
+  provider: {
+    default_model: string
+    temperature: number
+    max_tokens: number
+  }
+  agent_modes: Record<string, 'quant' | 'llm_enhanced' | 'llm_only'>
+  optimization: {
+    compression_enabled: boolean
+    compression_ratio: number
+    cache_enabled: boolean
+  }
+  rag: {
+    persist_dir: string
+    embedding_model: string
+    default_n_results: number
+  }
+  backtest_policy: string
+}
+
+export interface LLMCacheStats {
+  hits: number
+  misses: number
+  total_cost_saved: number
+  entries: number
+  db_size_mb: number
+}
+
+export interface RAGStats {
+  collections: Record<string, { count: number; description: string }>
+}
+
+export interface LLMTestResult {
+  status: string
+  model: string
+  response_time_ms: number
+}
+
+export interface EmbeddingModelInfo {
+  model_id: string
+  name: string
+  dimensions: number
+  size_mb: number
+  quality: 'good' | 'better' | 'excellent'
+  speed: 'very_fast' | 'fast' | 'medium'
+  description: string
+}

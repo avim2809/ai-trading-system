@@ -1,0 +1,13 @@
+# Example per-strategy parameters (strategy #1: cross-sectional momentum).
+# Loaded by firm.config.load_strategy_config("cross_sectional_momentum").
+
+name: cross_sectional_momentum
+enabled: true
+params:
+  lookback_months: 12
+  skip_months: 1          # 12-1 momentum (skip most recent month)
+  long_quantile: 0.10     # top decile long
+  short_quantile: 0.10    # bottom decile short
+  min_history_days: 200
+horizon: 1M
+capital_budget: 0.10      # fraction of risk capital allocated to this strategy

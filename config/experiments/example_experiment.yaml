@@ -1,0 +1,51 @@
+name: "baseline_momentum"
+description: "Cross-sectional momentum strategy baseline"
+
+backtest:
+  start_date: "2018-01-01"
+  end_date: "2023-12-31"
+  initial_capital: 10_000_000
+  commission_pct: 0.001
+  slippage_pct: 0.0005
+  rebalance_frequency: "weekly"
+
+universe:
+  index: "SP500"
+  min_market_cap: 1_000_000_000
+
+strategies:
+  enabled:
+    - momentum
+    - trend
+    - mean_reversion
+    - gann
+  params:
+    momentum:
+      lookback_months: 12
+      skip_months: 1
+      top_pct: 0.1
+      bottom_pct: 0.1
+    trend:
+      fast_window: 50
+      slow_window: 200
+    mean_reversion:
+      lookback_days: 5
+    gann:
+      pivot_lookback: 60
+      pivot_order: 5
+      cycle_tolerance_days: 3
+      swing_period: 2
+      retracement_lookback: 120
+
+risk:
+  max_position_pct: 0.05
+  max_gross_exposure: 2.0
+  max_net_exposure: 0.5
+  vol_target: 0.15
+  max_drawdown_pct: 0.20
+
+allocation:
+  method: "conviction_weighted"
+  max_positions: 50
+
+seed: 42

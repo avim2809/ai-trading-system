@@ -1,0 +1,31 @@
+provider:
+  default_model: "gpt-4o"
+  temperature: 0.3
+  max_tokens: 2000
+
+optimization:
+  compression_enabled: true
+  compression_ratio: 0.5
+  cache_enabled: true
+  cache_db: "data/llm_cache.db"
+  cache_ttl_hours: 168
+
+rag:
+  persist_dir: "data/vectordb"
+  embedding_model: "all-MiniLM-L6-v2"
+  chunk_size: 500
+  chunk_overlap: 50
+  reranking: true
+  default_n_results: 5
+
+agent_modes:
+  technical_analyst: "quant"
+  fundamental_analyst: "quant"
+  sentiment_analyst: "llm_enhanced"
+  bull_researcher: "llm_enhanced"
+  bear_researcher: "llm_enhanced"
+  debate: "llm_enhanced"
+  trader: "quant"
+  risk: "quant"
+
+backtest_policy: "cache_only"

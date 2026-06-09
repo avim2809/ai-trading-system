@@ -1,0 +1,178 @@
+"""Alpha Vantage adapter - news & sentiment (and EOD prices as a fallback).
+
+Docs: https://www.alphavantage.co/documentation/. Endpoints used:
+
+* News sentiment: ``function=NEWS_SENTIMENT``
+* Daily adjusted: ``function=TIME_SERIES_DAILY_ADJUSTED``
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Sequence
+
+import pandas as pd
+
+from firm.config import Settings, get_settings
+from firm.data import schemas
+from firm.data.providers._rest import RestClient
+from firm.data.providers.base import DataProvider, ProviderError
+from firm.logging_setup import get_logger
+
+log = get_logger(__name__)
+
+_BASE_URL = "https://www.alphavantage.co"
+
+
+class AlphaVantageProvider(DataProvider):
+    """Adapter for the Alpha Vantage REST API (news sentiment, prices)."""
+
+    name = "alphavantage"
+
+    def __init__(self, settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
+        self._api_key = self.settings.require("alphavantage_api_key")
+        self._client = RestClient(_BASE_URL, self.settings)
+
+    def get_prices(
+        self,
+        symbols: Sequence[str],
+        start: datetime,
+        end: datetime,
+        *,
+        adjusted: bool = True,
+    ) -> pd.DataFrame:
+        frames: list[pd.DataFrame] = []
+        start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
+        for symbol in symbols:
+            payload = self._client.get_json(
+                "/query",
+                params={
+                    "function": "TIME_SERIES_DAILY_ADJUSTED",
+                    "symbol": symbol,
+                    "outputsize": "full",
+                    "apikey": self._api_key,
+                },
+            )
+            series = payload.get("Time Series (Daily)")
+            if not series:
+                log.info(
+                    "alphavantage_no_prices",
+                    extra={"context": {"symbol": symbol, "note": payload.get("Note", "")}},
+                )
+                continue
+            records = []
+            for day, vals in series.items():
+                ts = pd.Timestamp(day)
+                if not (start_ts <= ts <= end_ts):
+                    continue
+                records.append(
+                    {
+                        schemas.COL_DATE: ts.normalize(),
+                        schemas.COL_SYMBOL: symbol,
+                        schemas.COL_OPEN: float(vals["1. open"]),
+                        schemas.COL_HIGH: float(vals["2. high"]),
+                        schemas.COL_LOW: float(vals["3. low"]),
+                        schemas.COL_CLOSE: float(vals["4. close"]),
+                        schemas.COL_ADJ_CLOSE: float(vals["5. adjusted close"]),
+                        schemas.COL_VOLUME: float(vals["6. volume"]),
+                    }
+                )
+            if records:
+                frames.append(pd.DataFrame(records))
+        if not frames:
+            return self.empty_prices()
+        return (
+            pd.concat(frames, ignore_index=True)
+            .sort_values([schemas.COL_SYMBOL, schemas.COL_DATE])
+            .reset_index(drop=True)
+        )
+
+    def get_fundamentals(
+        self, symbols: Sequence[str], start: datetime, end: datetime
+    ) -> pd.DataFrame:
+        raise NotImplementedError(
+            "AlphaVantageProvider fundamentals are not wired; use FMPProvider."
+        )
+
+    def get_news_sentiment(
+        self, symbols: Sequence[str], start: datetime, end: datetime
+    ) -> pd.DataFrame:
+        start_str = pd.Timestamp(start).strftime("%Y%m%dT%H%M")
+        end_str = pd.Timestamp(end).strftime("%Y%m%dT%H%M")
+        rows: list[dict] = []
+        want = {s.upper() for s in symbols}
+        # Alpha Vantage accepts up to 50 tickers per call; chunk to be safe.
+        for chunk in _chunks(list(symbols), 50):
+            payload = self._client.get_json(
+                "/query",
+                params={
+                    "function": "NEWS_SENTIMENT",
+                    "tickers": ",".join(chunk),
+                    "time_from": start_str,
+                    "time_to": end_str,
+                    "limit": 1000,
+                    "apikey": self._api_key,
+                },
+            )
+            if "Information" in payload or "Note" in payload:
+                raise ProviderError(
+                    f"Alpha Vantage rate limit/info: {payload.get('Information') or payload.get('Note')}"
+                )
+            for art in payload.get("feed", []) or []:
+                published = _parse_av_time(art.get("time_published"))
+                for ts_obj in art.get("ticker_sentiment", []) or []:
+                    sym = str(ts_obj.get("ticker", "")).upper()
+                    if sym not in want:
+                        continue
+                    rows.append(
+                        {
+                            schemas.COL_ASOF: published,
+                            schemas.COL_SYMBOL: sym,
+                            schemas.COL_SENTIMENT: float(
+                                ts_obj.get("ticker_sentiment_score", 0.0) or 0.0
+                            ),
+                            schemas.COL_RELEVANCE: float(
+                                ts_obj.get("relevance_score", 0.0) or 0.0
+                            ),
+                            schemas.COL_HEADLINE: art.get("title", ""),
+                            schemas.COL_SOURCE: art.get("source", "alphavantage"),
+                            schemas.COL_URL: art.get("url", ""),
+                        }
+                    )
+        if not rows:
+            return self.empty_news()
+        return (
+            pd.DataFrame(rows)
+            .sort_values([schemas.COL_SYMBOL, schemas.COL_ASOF])
+            .reset_index(drop=True)
+        )
+
+    def get_corporate_actions(
+        self, symbols: Sequence[str], start: datetime, end: datetime
+    ) -> pd.DataFrame:
+        raise NotImplementedError(
+            "AlphaVantageProvider does not expose discrete corporate actions; use PolygonProvider."
+        )
+
+    def get_universe_constituents(
+        self, index: str, asof: datetime | None = None
+    ) -> pd.DataFrame:
+        raise NotImplementedError(
+            "AlphaVantageProvider does not supply index constituents; use FMPProvider."
+        )
+
+
+def _parse_av_time(value: str | None) -> pd.Timestamp:
+    """Parse Alpha Vantage ``YYYYMMDDTHHMMSS`` timestamps."""
+    if not value:
+        return pd.NaT
+    try:
+        return pd.Timestamp(datetime.strptime(value, "%Y%m%dT%H%M%S"))
+    except ValueError:
+        return pd.to_datetime(value, errors="coerce")
+
+
+def _chunks(items: list, size: int):
+    for i in range(0, len(items), size):
+        yield items[i : i + size]

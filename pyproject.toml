@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "firm"
+version = "0.1.0"
+description = "Multi-agent AI stock investment firm – backtested alpha strategies with point-in-time data integrity"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas",
+    "numpy",
+    "scipy",
+    "scikit-learn",
+    "matplotlib",
+    "seaborn",
+    "backtrader",
+    "pydantic",
+    "pydantic-settings",
+    "pyyaml",
+    "pyarrow",
+    "requests",
+    "statsmodels",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+    "httpx",
+]
+api = [
+    "fastapi",
+    "uvicorn[standard]",
+]
+live = [
+    "alpaca-py",
+    "ib_insync",
+    "apscheduler>=3.10",
+]
+llm = [
+    "litellm>=1.40",
+    "tiktoken",
+    "chromadb>=0.5",
+    "sentence-transformers",
+    "feedparser",
+]
+
+[project.scripts]
+fetch-data = "firm.scripts.fetch_data:main"
+run-backtest = "firm.scripts.run_backtest:main"
+firm-api = "firm.api.app:run"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

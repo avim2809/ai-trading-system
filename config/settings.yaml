@@ -1,0 +1,26 @@
+universe:
+  index: "SP500"
+  min_market_cap: 1_000_000_000
+  min_avg_volume: 500_000
+
+backtest:
+  start_date: "2018-01-01"
+  end_date: "2023-12-31"
+  initial_capital: 10_000_000
+  commission_pct: 0.001
+  slippage_pct: 0.0005
+  rebalance_frequency: "weekly"
+
+risk:
+  max_position_pct: 0.05
+  max_gross_exposure: 2.0
+  max_net_exposure: 0.5
+  max_sector_pct: 0.25
+  vol_target: 0.15
+  max_drawdown_pct: 0.20
+
+data:
+  cache_dir: "data/cache"
+  price_provider: "polygon"
+  fundamental_provider: "fmp"
+  sentiment_provider: "tiingo"

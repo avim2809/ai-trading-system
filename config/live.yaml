@@ -1,0 +1,13 @@
+broker: "alpaca_paper"
+schedule: "market_open"
+approval_mode: "semi_auto"
+strategies:
+  enabled: [momentum, trend, mean_reversion]
+  auto_approve: [trend]
+  require_approval: [momentum, mean_reversion]
+risk:
+  kill_switch_drawdown: 0.10
+  max_daily_trades: 50
+  max_daily_turnover: 0.5
+universe:
+  symbols: [AAPL, MSFT, GOOG, AMZN, META, TSLA, NVDA, JPM, V, JNJ]

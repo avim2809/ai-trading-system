@@ -1,0 +1,109 @@
+"""Backtest report generation: text, dict, and JSON outputs.
+
+Combines portfolio-level metrics with per-strategy attribution into a
+single structured report that can be serialised, printed, or fed into
+downstream dashboards.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from textwrap import dedent
+
+import pandas as pd
+
+from firm.contracts.models import PortfolioSnapshot
+from firm.eval.metrics import compute_all_metrics
+from firm.portfolio.attribution import PerformanceAttribution
+
+
+class BacktestReport:
+    """Generate comprehensive backtest reports."""
+
+    def __init__(
+        self,
+        returns: pd.Series,
+        attribution: PerformanceAttribution,
+        snapshots: list[PortfolioSnapshot],
+    ) -> None:
+        self.returns = returns
+        self.attribution = attribution
+        self.snapshots = snapshots
+
+    # ------------------------------------------------------------------
+    # Portfolio-level
+    # ------------------------------------------------------------------
+
+    def portfolio_summary(self) -> dict[str, float]:
+        """Overall portfolio metrics."""
+        return compute_all_metrics(self.returns)
+
+    # ------------------------------------------------------------------
+    # Strategy-level
+    # ------------------------------------------------------------------
+
+    def strategy_summary(self) -> pd.DataFrame:
+        """Per-strategy metrics table (strategy × metric)."""
+        return self.attribution.summary()
+
+    # ------------------------------------------------------------------
+    # Serialisation helpers
+    # ------------------------------------------------------------------
+
+    def to_text(self) -> str:
+        """Format as a human-readable text report."""
+        lines: list[str] = []
+
+        lines.append("=" * 60)
+        lines.append("BACKTEST REPORT")
+        lines.append("=" * 60)
+
+        if self.snapshots:
+            lines.append(
+                f"Period : {self.snapshots[0].asof:%Y-%m-%d}"
+                f" → {self.snapshots[-1].asof:%Y-%m-%d}"
+            )
+            lines.append(f"Final NAV: {self.snapshots[-1].nav:,.2f}")
+        lines.append(f"Data points: {len(self.returns)}")
+        lines.append("")
+
+        lines.append("--- Portfolio Metrics ---")
+        for k, v in self.portfolio_summary().items():
+            lines.append(f"  {k:30s}: {v:>12.6f}")
+        lines.append("")
+
+        strat = self.strategy_summary()
+        if not strat.empty:
+            lines.append("--- Strategy Attribution ---")
+            lines.append(strat.to_string())
+            lines.append("")
+
+        lines.append("=" * 60)
+        return "\n".join(lines)
+
+    def to_dict(self) -> dict:
+        """Full report as nested dict (JSON-serialisable)."""
+        result: dict = {
+            "portfolio": self.portfolio_summary(),
+            "data_points": len(self.returns),
+        }
+
+        if self.snapshots:
+            result["period"] = {
+                "start": self.snapshots[0].asof.isoformat(),
+                "end": self.snapshots[-1].asof.isoformat(),
+            }
+            result["final_nav"] = self.snapshots[-1].nav
+
+        strat = self.strategy_summary()
+        if not strat.empty:
+            result["strategies"] = strat.to_dict(orient="index")
+
+        return result
+
+    def save(self, path: str) -> None:
+        """Save report to JSON file."""
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(self.to_dict(), indent=2, default=str))

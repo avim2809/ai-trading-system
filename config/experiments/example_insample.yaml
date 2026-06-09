@@ -1,0 +1,27 @@
+# Example experiment definition.
+# Loaded by firm.config.load_experiment_config("example_insample").
+
+name: example_insample
+description: In-sample sanity run on a small large-cap universe.
+
+universe:
+  source: static
+  symbols: [AAPL, MSFT, AMZN, GOOGL, META, NVDA, JPM, XOM, JNJ, PG]
+
+period:
+  start: "2018-01-01"
+  end: "2021-12-31"
+  mode: in_sample           # in_sample | oos | walk_forward
+  walk_forward:
+    train_years: 2
+    test_years: 1
+
+strategies:
+  - cross_sectional_momentum
+
+backtest:
+  rebalance_frequency: weekly
+  starting_cash: 1_000_000
+
+reproducibility:
+  seed: 20240101
