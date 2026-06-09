@@ -44,53 +44,40 @@ Every step can run in pure quant mode, AI-enhanced mode (quant + LLM reasoning),
 
 ## Architecture
 
+```mermaid
+flowchart TD
+  Frontend["React Frontend (9 pages)"] -->|REST API| API["FastAPI (30+ endpoints)"]
+  API --> BacktestEng["Backtest Engine (Backtrader)"]
+  API --> LiveEng["Live Trading Engine (Alpaca / IBKR)"]
+  API --> LLMPipe["LLM / RAG Pipeline (LiteLLM + ChromaDB)"]
+  BacktestEng --> Orch
+  LiveEng --> Orch
+  LLMPipe --> Orch
+
+  subgraph Orch [Orchestrator]
+    direction TB
+    Analysts["3 Analysts (Technical, Fundamental, Sentiment)"]
+    Analysts -->|signals| Research["Bull vs Bear Researchers"]
+    Research -->|theses| Debate[Debate / Synthesis]
+    Debate -->|conviction| PM[Portfolio Manager]
+    PM -->|proposal| Risk["Risk Manager (veto power)"]
+    Risk -->|approved| Exec[Execution Agent]
+  end
 ```
-                    ┌─────────────────────────────────────────┐
-                    │           React Frontend (9 pages)       │
-                    └──────────────────┬──────────────────────┘
-                                       │ REST API
-                    ┌──────────────────┴──────────────────────┐
-                    │         FastAPI  (30+ endpoints)         │
-                    └──────────────────┬──────────────────────┘
-                                       │
-          ┌────────────────────────────┼────────────────────────────┐
-          │                            │                            │
-   ┌──────┴──────┐            ┌────────┴────────┐          ┌───────┴───────┐
-   │  Backtest   │            │  Live Trading   │          │  LLM / RAG   │
-   │  Engine     │            │  Engine         │          │  Pipeline    │
-   │  (Backtrader)│           │  (Alpaca/IBKR)  │          │  (LiteLLM +  │
-   └──────┬──────┘            └────────┬────────┘          │   ChromaDB)  │
-          │                            │                    └───────┬───────┘
-          └────────────────┬───────────┘                            │
-                           │                                       │
-                ┌──────────┴──────────┐                            │
-                │    Orchestrator     │◄───────────────────────────┘
-                │                     │
-                │  ┌───────────────┐  │
-                │  │  3 Analysts   │  │    Signal aggregation
-                │  │  (Tech/Fund/  │  │    + cross-sectional
-                │  │   Sentiment)  │  │    z-scoring
-                │  └───────┬───────┘  │
-                │          │          │
-                │  ┌───────┴───────┐  │
-                │  │ Bull vs Bear  │  │    Competing theses
-                │  │  Researchers  │  │    + debate synthesis
-                │  └───────┬───────┘  │
-                │          │          │
-                │  ┌───────┴───────┐  │
-                │  │ Portfolio Mgr │  │    Conviction-weighted
-                │  │               │  │    allocation
-                │  └───────┬───────┘  │
-                │          │          │
-                │  ┌───────┴───────┐  │
-                │  │ Risk Manager  │  │    6 constraints
-                │  │  (veto power) │  │    + circuit breaker
-                │  └───────┬───────┘  │
-                │          │          │
-                │  ┌───────┴───────┐  │
-                │  │  Execution    │  │    Order generation
-                │  └───────────────┘  │    + fill tracking
-                └─────────────────────┘
+
+```mermaid
+flowchart LR
+  subgraph DataFlow [Data Flow]
+    direction LR
+    Providers["Data Providers (Polygon, Tiingo, AV, FMP)"] --> PIT["PIT DataStore (date <= asof)"]
+    PIT --> Strategies["11 Strategies"]
+    Strategies --> Signals["Standardized Signals"]
+    Signals --> Pipeline["Agent Pipeline"]
+    Pipeline --> Orders["Orders"]
+    Orders --> Engine{"Backtest or Live?"}
+    Engine -->|backtest| BT[Backtrader Cerebro]
+    Engine -->|live| Broker["Alpaca / IBKR"]
+  end
 ```
 
 ### No Look-Ahead Guarantee
