@@ -136,6 +136,10 @@ class IBKRBroker(Broker):
         else:
             ib_order = MarketOrder(action, abs(qty))
 
+        # Forward the idempotency token as the IBKR order reference.
+        if order.client_order_id:
+            ib_order.orderRef = order.client_order_id
+
         trade = ib.placeOrder(contract, ib_order)
         ib.sleep(0.5)
 

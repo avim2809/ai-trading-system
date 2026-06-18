@@ -48,11 +48,27 @@ def sync_portfolio_from_broker(
     broker_positions = broker.get_positions()
     broker_map: dict[str, BrokerPosition] = {p.symbol: p for p in broker_positions}
 
-    all_symbols = set(portfolio.holdings.keys()) | set(broker_map.keys())
+    # Pending (in-flight) quantity per symbol, signed by side.  An order that
+    # was submitted last cycle but has not yet settled at the broker explains a
+    # gap between internal and broker positions; without this, the reconciler
+    # would "snap" internal state back to the pre-fill value and the next cycle
+    # would re-submit the same order.
+    pending = _pending_quantities(broker)
+
+    all_symbols = (
+        set(portfolio.holdings.keys()) | set(broker_map.keys()) | set(pending.keys())
+    )
     for sym in sorted(all_symbols):
         internal_qty = portfolio.holdings.get(sym, 0.0)
         broker_pos = broker_map.get(sym)
         broker_qty = broker_pos.quantity if broker_pos else 0.0
+        # Expected broker quantity once in-flight orders settle.
+        expected_qty = broker_qty + pending.get(sym, 0.0)
+
+        # If internal already matches the post-settlement view, the difference
+        # is explained by an in-flight order; leave internal state untouched.
+        if abs(internal_qty - expected_qty) <= 0.001:
+            continue
 
         if abs(internal_qty - broker_qty) > 0.001:
             discrepancies.append({
@@ -79,3 +95,20 @@ def sync_portfolio_from_broker(
         portfolio.record_snapshot(datetime.utcnow(), prices)
 
     return discrepancies
+
+
+def _pending_quantities(broker: Broker) -> dict[str, float]:
+    """Return per-symbol unfilled order quantity, signed (+buy / -sell)."""
+    pending: dict[str, float] = {}
+    try:
+        open_orders = broker.get_open_orders()
+    except Exception:
+        log.warning("Could not fetch open orders for reconciliation", exc_info=True)
+        return pending
+    for o in open_orders:
+        remaining = max(0.0, o.quantity - o.filled_quantity)
+        if remaining <= 0:
+            continue
+        sign = 1.0 if o.side == "buy" else -1.0
+        pending[o.symbol] = pending.get(o.symbol, 0.0) + sign * remaining
+    return pending

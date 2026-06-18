@@ -14,6 +14,7 @@ from typing import Any
 import requests
 
 from firm.rag.chunker import DocumentChunker
+from firm.rag.dates import normalize_date
 from firm.rag.ingestors.base_ingestor import BaseIngestor
 from firm.rag.models import Document
 from firm.rag.store import VectorStore
@@ -129,7 +130,7 @@ class SECIngestor(BaseIngestor):
                 "source": "sec_edgar",
                 "symbol": symbol,
                 "doc_type": form_type,
-                "date": filed_date,
+                "date": normalize_date(filed_date),
                 "url": filing_url,
             }
 

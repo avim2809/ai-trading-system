@@ -53,11 +53,20 @@ class LLMAgentMixin:
         query: str,
         collections: list[str] | None = None,
         n: int = 3,
+        asof: Any = None,
     ) -> str:
-        """Retrieve and format RAG context for *symbol*."""
+        """Retrieve and format RAG context for *symbol*.
+
+        *asof* (the decision timestamp, e.g. ``ctx.now``) must be passed so
+        that only documents available at-or-before that time are retrieved;
+        omitting it would allow future-dated filings/news to leak into the
+        decision (look-ahead).
+        """
         try:
             retriever = self._get_retriever()
-            docs = retriever.retrieve_for_symbol(symbol, query, n_results=n)
+            docs = retriever.retrieve_for_symbol(
+                symbol, query, n_results=n, collections=collections, asof=asof
+            )
             return "\n\n".join(
                 f"[{d.metadata.get('source', '?')}] {d.text}" for d in docs
             )

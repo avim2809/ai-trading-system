@@ -38,6 +38,7 @@ class LLMRiskAgent(RiskAgent, LLMAgentMixin):
                 sym,
                 f"regulatory litigation macro event risk for {sym}",
                 collections=["news", "sec_filings"],
+                asof=ctx.now,
             )
             if part:
                 all_context_parts.append(part)

@@ -153,6 +153,7 @@ class AlpacaBroker(Broker):
                     side=OrderSide.BUY if order.side == "buy" else OrderSide.SELL,
                     time_in_force=tif,
                     limit_price=order.limit_price,
+                    client_order_id=order.client_order_id,
                 )
             else:
                 req = MarketOrderRequest(
@@ -160,6 +161,7 @@ class AlpacaBroker(Broker):
                     qty=order.quantity,
                     side=OrderSide.BUY if order.side == "buy" else OrderSide.SELL,
                     time_in_force=tif,
+                    client_order_id=order.client_order_id,
                 )
 
             result = client.submit_order(req)

@@ -36,6 +36,7 @@ class LLMDebateAgent(DebateAgent, LLMAgentMixin):
                 dr.symbol,
                 f"investment debate analysis for {dr.symbol}",
                 collections=["research", "system_docs"],
+                asof=ctx.now,
             )
             context = self._compress(rag_context) if rag_context else ""
             prompt = (

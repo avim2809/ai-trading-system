@@ -104,6 +104,20 @@ class TestRuns:
         assert detail["metrics"]
         return run_id
 
+    def test_invalid_run_request_returns_422(self, client):
+        """Regression: bad input is rejected up front, not run as a failed job."""
+        # Inverted date range.
+        r = client.post("/api/runs", json={
+            "start_date": "2023-12-31", "end_date": "2020-01-01",
+        })
+        assert r.status_code == 422
+        # Negative capital.
+        r = client.post("/api/runs", json={"initial_capital": -5})
+        assert r.status_code == 422
+        # Malformed date.
+        r = client.post("/api/runs", json={"start_date": "not-a-date"})
+        assert r.status_code == 422
+
     def test_launch_and_poll(self, client):
         self._launch_and_wait(client)
 

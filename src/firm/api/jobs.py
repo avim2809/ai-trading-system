@@ -24,13 +24,27 @@ class JobManager:
     def __init__(self, registry: RunRegistry) -> None:
         self.registry = registry
         self._lock = threading.Lock()
-        self._active_thread: threading.Thread | None = None
+        self._threads_lock = threading.Lock()
+        self._threads: list[threading.Thread] = []
 
     def launch(self, run_id: str, config: dict) -> None:
-        """Start a backtest in a background daemon thread."""
+        """Start a backtest in a background daemon thread.
+
+        Backtests are serialised by ``self._lock`` (Cerebro is single-threaded
+        and CPU-heavy), so a launch while another run is in progress will wait.
+        We mark such runs ``queued`` up front so they are not invisibly stuck
+        in ``pending`` with no indication they are waiting.
+        """
+        if self._lock.locked():
+            try:
+                self.registry.update_run(run_id, status="queued")
+            except Exception:
+                log.debug("Could not mark run %s queued", run_id, exc_info=True)
         t = threading.Thread(target=self._run, args=(run_id, config), daemon=True)
+        with self._threads_lock:
+            self._threads = [x for x in self._threads if x.is_alive()]
+            self._threads.append(t)
         t.start()
-        self._active_thread = t
 
     def _run(self, run_id: str, config: dict) -> None:
         with self._lock:

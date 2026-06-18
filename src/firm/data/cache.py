@@ -23,8 +23,23 @@ class ParquetCache:
         self._dir.mkdir(parents=True, exist_ok=True)
 
     def _path_for(self, key: str) -> Path:
-        safe = hashlib.sha256(key.encode()).hexdigest()[:16]
+        # Full 256-bit digest: a truncated 64-bit name risks collisions across
+        # distinct datasets (one would silently overwrite/serve another).
+        safe = hashlib.sha256(key.encode()).hexdigest()
         return self._dir / f"{safe}.parquet"
+
+    @staticmethod
+    def make_key(
+        kind: str,
+        *,
+        provider: str = "",
+        symbols: list[str] | None = None,
+        start: str = "",
+        end: str = "",
+    ) -> str:
+        """Build a canonical cache key for a fetched panel."""
+        syms = ",".join(sorted(symbols or []))
+        return f"{kind}/{provider}/{syms}/{start}_{end}"
 
     def has(self, key: str) -> bool:
         return self._path_for(key).exists()
@@ -48,3 +63,10 @@ class ParquetCache:
         if path.exists():
             path.unlink()
             log.debug("Invalidated cache key: %s", key)
+
+    # Aliases for callers that use read/write naming.
+    def write(self, key: str, df: pd.DataFrame) -> None:
+        self.put(key, df)
+
+    def read(self, key: str) -> pd.DataFrame | None:
+        return self.get(key)

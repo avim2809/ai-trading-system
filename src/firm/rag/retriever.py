@@ -29,42 +29,54 @@ class RAGRetriever:
         symbols: list[str] | None = None,
         doc_types: list[str] | None = None,
         n_results: int = 5,
+        collections: list[str] | None = None,
+        asof: Any = None,
     ) -> list[RetrievedDoc]:
-        """Retrieve relevant documents, optionally filtering by symbol/doc_type."""
-        where_filters: dict[str, Any] | None = None
-        if symbols and len(symbols) == 1:
-            where_filters = {"symbol": symbols[0]}
-        elif symbols and len(symbols) > 1:
-            where_filters = {"symbol": {"$in": symbols}}
+        """Retrieve relevant documents, optionally filtering by symbol/doc_type.
 
-        if doc_types and not where_filters:
-            if len(doc_types) == 1:
-                where_filters = {"doc_type": doc_types[0]}
-            else:
-                where_filters = {"doc_type": {"$in": doc_types}}
-        elif doc_types and where_filters:
-            # Combine with $and
+        When *asof* is supplied, only documents available at-or-before that
+        timestamp are returned (point-in-time safety; see
+        :meth:`VectorStore.query`).  *collections* restricts the search to a
+        specific set of collection names.
+        """
+        symbol_filter: dict[str, Any] | None = None
+        if symbols and len(symbols) == 1:
+            symbol_filter = {"symbol": symbols[0]}
+        elif symbols and len(symbols) > 1:
+            symbol_filter = {"symbol": {"$in": symbols}}
+
+        type_filter: dict[str, Any] | None = None
+        if doc_types:
             type_filter = (
                 {"doc_type": doc_types[0]} if len(doc_types) == 1
                 else {"doc_type": {"$in": doc_types}}
             )
-            where_filters = {"$and": [where_filters, type_filter]}
 
-        # Query multiple collections or a specific one
-        if collection == "all":
+        where_filters = self._and(symbol_filter, type_filter)
+
+        # Determine which collections to search.
+        if collections:
+            search_collections = [
+                c for c in collections if c in set(self._store.list_collections())
+            ]
+        elif collection == "all":
+            search_collections = self._store.list_collections()
+        else:
+            search_collections = [collection]
+
+        if len(search_collections) == 1:
+            docs_to_rerank = self._store.query(
+                search_collections[0], query, n_results=n_results * 2,
+                where_filters=where_filters, asof=asof,
+            )
+        else:
             all_docs: list[RetrievedDoc] = []
-            for coll_name in self._store.list_collections():
+            for coll_name in search_collections:
                 docs = self._store.query(coll_name, query, n_results=n_results,
-                                         where_filters=where_filters)
+                                         where_filters=where_filters, asof=asof)
                 all_docs.extend(docs)
-            # Sort by score, keep top n
             all_docs.sort(key=lambda d: d.score, reverse=True)
             docs_to_rerank = all_docs[:n_results * 2]
-        else:
-            docs_to_rerank = self._store.query(
-                collection, query, n_results=n_results * 2,
-                where_filters=where_filters,
-            )
 
         if self._reranker and docs_to_rerank:
             return self._rerank(query, docs_to_rerank, n_results)
@@ -82,8 +94,29 @@ class RAGRetriever:
         docs.sort(key=lambda d: d.score, reverse=True)
         return docs[:n_results]
 
+    @staticmethod
+    def _and(
+        a: dict[str, Any] | None, b: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
+        """Combine two where-clauses with ``$and`` (single clause unwrapped)."""
+        if a and b:
+            return {"$and": [a, b]}
+        return a or b
+
     def retrieve_for_symbol(
-        self, symbol: str, query: str, n_results: int = 3
+        self,
+        symbol: str,
+        query: str,
+        n_results: int = 3,
+        collections: list[str] | None = None,
+        asof: Any = None,
     ) -> list[RetrievedDoc]:
         """Convenience method to retrieve docs filtered to a single symbol."""
-        return self.retrieve(query, collection="all", symbols=[symbol], n_results=n_results)
+        return self.retrieve(
+            query,
+            collection="all",
+            symbols=[symbol],
+            n_results=n_results,
+            collections=collections,
+            asof=asof,
+        )

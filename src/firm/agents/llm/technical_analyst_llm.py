@@ -34,6 +34,7 @@ class LLMTechnicalAnalyst(TechnicalAnalyst, LLMAgentMixin):
                 sig.symbol,
                 f"academic research on {sig.strategy} strategy patterns for {sig.symbol}",
                 collections=["research", "system_docs"],
+                asof=ctx.now,
             )
             if not rag_context:
                 enhanced_signals.append(sig)

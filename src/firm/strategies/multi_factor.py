@@ -51,6 +51,19 @@ def _zscore(s: pd.Series) -> pd.Series:
     return ((s - s.mean()) / std).clip(-5, 5)
 
 
+def _mean_available(parts: list[pd.Series]) -> pd.Series:
+    """Per-symbol mean across sub-metric series, skipping missing values.
+
+    A symbol present in only one part gets that value unchanged (not divided
+    by the number of potential sub-metrics), so missing data doesn't silently
+    dampen a factor.
+    """
+    parts = [p for p in parts if not p.empty]
+    if not parts:
+        return pd.Series(dtype=float)
+    return pd.concat(parts, axis=1).mean(axis=1, skipna=True)
+
+
 @register("multi_factor")
 class MultiFactorStrategy(BaseStrategy):
     def __init__(self, params: dict | None = None):
@@ -88,10 +101,12 @@ class MultiFactorStrategy(BaseStrategy):
             inv_pb = pd.Series(dtype=float)
             if "pb_ratio" in latest.columns:
                 inv_pb = (1.0 / latest["pb_ratio"].replace(0, np.nan)).dropna()
-            value_raw = _zscore(inv_pe)
+            # Average only the sub-metrics each symbol actually has: a symbol
+            # with PE but no PB gets its pure PE z-score, not a halved one.
+            value_parts = [_zscore(inv_pe)]
             if not inv_pb.empty:
-                value_raw = (value_raw.add(_zscore(inv_pb), fill_value=0)) / 2.0
-            scores["value"] = value_raw
+                value_parts.append(_zscore(inv_pb))
+            scores["value"] = _mean_available(value_parts)
 
         # --- Quality factor ---
         if not fund_df.empty and "roe" in fund_df.columns:
@@ -103,10 +118,10 @@ class MultiFactorStrategy(BaseStrategy):
                     1.0 / latest["debt_to_equity"].replace(0, np.nan)
                 ).dropna()
                 inv_de = _zscore(inv_de)
-            quality_raw = roe_z
+            quality_parts = [roe_z]
             if not inv_de.empty:
-                quality_raw = (quality_raw.add(inv_de, fill_value=0)) / 2.0
-            scores["quality"] = quality_raw
+                quality_parts.append(inv_de)
+            scores["quality"] = _mean_available(quality_parts)
 
         # --- Momentum factor ---
         if not prices_df.empty:

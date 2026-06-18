@@ -400,6 +400,141 @@ class TestLiveTradingEngine:
         assert broker.get_position("AAPL") is not None
 
 
+class TestLiveEngineHardening:
+    """Regression tests for the live-execution audit fixes."""
+
+    @pytest.fixture()
+    def engine_components(self):
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000}
+        return broker, feed, queue, config
+
+    def _make_engine(self, broker, feed, queue, config, **kwargs):
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, **kwargs,
+        )
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_orders_carry_idempotency_token(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+
+        class RecordingBroker(MockBroker):
+            def __init__(self):
+                super().__init__()
+                self.client_ids = []
+
+            def submit_order(self, order):
+                self.client_ids.append(order.client_order_id)
+                return super().submit_order(order)
+
+        broker = RecordingBroker()
+        queue = ApprovalQueue(broker=broker)
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config, approval_mode="full_auto")
+        engine.start()
+        engine.run_cycle()
+
+        assert len(broker.client_ids) == 2
+        assert all(cid for cid in broker.client_ids), "client_order_id must be set"
+        assert len(set(broker.client_ids)) == 2, "ids must be distinct per order"
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_concurrent_cycle_is_skipped(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config, approval_mode="full_auto")
+        engine.start()
+
+        # Simulate a cycle already in progress by holding the lock.
+        engine._cycle_lock.acquire()
+        try:
+            result = engine.run_cycle()
+        finally:
+            engine._cycle_lock.release()
+
+        assert result.skipped is True
+        assert result.orders_submitted == 0
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_manual_orders_grouped_by_strategy(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        orders = _make_orders()  # momentum + trend
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (orders, _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        # semi_auto with nothing auto-approved -> both queued, but separately.
+        engine = self._make_engine(
+            broker, feed, queue, config,
+            approval_mode="semi_auto", auto_approve_strategies=[],
+        )
+        engine.start()
+        result = engine.run_cycle()
+
+        assert result.orders_queued == 2
+        assert len(result.approval_ids) == 2  # one approval per strategy
+        strategies = {a.strategy for a in queue.get_pending()}
+        assert strategies == {"momentum", "trend"}
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_broker_failures_are_surfaced(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+
+        class FlakyBroker(MockBroker):
+            def submit_order(self, order):
+                if order.symbol == "MSFT":
+                    raise BrokerError("insufficient buying power")
+                return super().submit_order(order)
+
+        broker = FlakyBroker()
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config, approval_mode="full_auto")
+        engine.start()
+        result = engine.run_cycle()
+
+        assert result.orders_submitted == 1  # AAPL went through
+        assert result.orders_failed == 1     # MSFT failed and is visible
+        assert result.failed_orders[0]["symbol"] == "MSFT"
+
+    def test_reconcile_respects_in_flight_orders(self):
+        """An unsettled open order must not cause internal holdings to be
+        wiped (which would re-submit the order next cycle)."""
+
+        class InFlightBroker(MockBroker):
+            def get_positions(self):
+                return []  # broker hasn't booked the fill yet
+
+            def get_open_orders(self):
+                return [OrderStatus(
+                    order_id="x", symbol="AAPL", side="buy",
+                    quantity=10, filled_quantity=0.0, status="pending",
+                )]
+
+        broker = InFlightBroker()
+        broker.connect()
+        portfolio = PortfolioState(initial_capital=100_000)
+        portfolio.holdings = {"AAPL": 10}  # we already booked the intended buy
+
+        discrepancies = sync_portfolio_from_broker(
+            broker, portfolio, prices={"AAPL": 150.0}
+        )
+        # No spurious position_mismatch, and holdings preserved.
+        assert portfolio.holdings.get("AAPL") == 10
+        assert not any(d["type"] == "position_mismatch" for d in discrepancies)
+
+
 # ---------------------------------------------------------------------------
 # CycleResult tests
 # ---------------------------------------------------------------------------

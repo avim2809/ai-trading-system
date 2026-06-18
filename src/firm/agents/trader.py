@@ -39,7 +39,7 @@ class TraderAgent(Agent):
         if self.allocation_method == "equal_weight":
             targets = self._equal_weight(selected)
         elif self.allocation_method == "risk_parity":
-            targets = self._risk_parity(selected)
+            targets = self._risk_parity(selected, ctx)
         else:
             targets = self._conviction_weighted(selected)
 
@@ -73,17 +73,56 @@ class TraderAgent(Agent):
         w = 1.0 / len(results)
         return {r.symbol: w if r.net_conviction >= 0 else -w for r in results}
 
-    @staticmethod
-    def _risk_parity(results: list[DebateResult]) -> dict[str, float]:
-        """Simplified risk-parity: equal weight with conviction sign.
+    def _risk_parity(
+        self, results: list[DebateResult], ctx: AgentContext
+    ) -> dict[str, float]:
+        """Inverse-volatility weighting (signed by conviction).
 
-        A full implementation would use per-asset vol estimates from
-        PitView; fall back to equal-weight when those are unavailable.
+        Each name is weighted ∝ 1/vol using a realized-vol estimate from the
+        PitView, so high-vol names get smaller allocations.  Falls back to
+        equal weight only when no vol estimates are available.
         """
         if not results:
             return {}
-        w = 1.0 / len(results)
-        return {r.symbol: w if r.net_conviction >= 0 else -w for r in results}
+        pit_view = getattr(ctx, "pit_view", None)
+        inv_vol: dict[str, float] = {}
+        for r in results:
+            vol = self._estimate_vol(pit_view, r.symbol)
+            if vol and vol > 0:
+                inv_vol[r.symbol] = 1.0 / vol
+
+        total = sum(inv_vol.values())
+        if total <= 0:
+            # No usable vol data – degrade to equal weight.
+            w = 1.0 / len(results)
+            return {r.symbol: w if r.net_conviction >= 0 else -w for r in results}
+
+        targets: dict[str, float] = {}
+        for r in results:
+            mag = inv_vol.get(r.symbol, 0.0) / total
+            targets[r.symbol] = mag if r.net_conviction >= 0 else -mag
+        return targets
+
+    @staticmethod
+    def _estimate_vol(pit_view: Any, symbol: str, lookback: int = 63) -> float | None:
+        """Annualized realized vol for *symbol* from PitView prices, or None."""
+        if pit_view is None:
+            return None
+        try:
+            df = pit_view.prices(symbols=[symbol], lookback_days=lookback)
+        except Exception:
+            return None
+        if df is None or df.empty:
+            return None
+        col = "adj_close" if "adj_close" in df.columns else "close"
+        if col not in df.columns:
+            return None
+        prices = df.sort_values("date")[col]
+        returns = prices.pct_change().dropna()
+        if len(returns) < 2:
+            return None
+        vol = float(returns.std() * (252 ** 0.5))
+        return vol if vol > 0 else None
 
     def _attribute_to_strategies(
         self,
@@ -108,13 +147,9 @@ class TraderAgent(Agent):
                 bucket = per_strategy.setdefault(sig.strategy, {})
                 bucket[sym] = bucket.get(sym, 0.0) + weight * frac
 
-        budget_total = sum(self.strategy_budgets.values()) if self.strategy_budgets else 0.0
-        if budget_total > 0:
-            for strat, budget_pct in self.strategy_budgets.items():
-                if strat in per_strategy:
-                    strat_gross = sum(abs(v) for v in per_strategy[strat].values())
-                    if strat_gross > budget_pct:
-                        scale = budget_pct / strat_gross
-                        per_strategy[strat] = {s: w * scale for s, w in per_strategy[strat].items()}
-
+        # NOTE: per_strategy is an *attribution* of the final ``targets`` and
+        # must sum (per symbol) back to them.  Strategy budget caps are a
+        # portfolio-construction concern and are intentionally NOT applied here
+        # — scaling one bucket in isolation would break that invariant and
+        # leave per_strategy inconsistent with the weights actually traded.
         return per_strategy

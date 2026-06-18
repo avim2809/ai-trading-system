@@ -41,8 +41,27 @@ class ResponseCache:
         self._misses = 0
 
     @staticmethod
-    def _hash(model: str, messages: list[dict[str, Any]]) -> str:
-        payload = json.dumps({"model": model, "messages": messages}, sort_keys=True)
+    def _hash(
+        model: str,
+        messages: list[dict[str, Any]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        json_mode: bool = False,
+    ) -> str:
+        # Every parameter that changes the completion must be part of the key,
+        # otherwise a request can receive a response generated under different
+        # settings (e.g. a json_mode call served a cached free-text answer, or
+        # a temperature=0 call served a temperature=0.9 result).
+        payload = json.dumps(
+            {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "json_mode": json_mode,
+            },
+            sort_keys=True,
+        )
         return hashlib.sha256(payload.encode()).hexdigest()
 
     def get(self, key: str) -> str | None:

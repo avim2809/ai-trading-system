@@ -11,6 +11,8 @@ Replaces BacktestEngine for real-time operation.  Each cycle:
 from __future__ import annotations
 
 import logging
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -34,9 +36,12 @@ class CycleResult:
     orders_generated: int = 0
     orders_submitted: int = 0
     orders_queued: int = 0
+    orders_failed: int = 0
     approval_ids: list[str] = field(default_factory=list)
     order_statuses: list[dict[str, Any]] = field(default_factory=list)
+    failed_orders: list[dict[str, Any]] = field(default_factory=list)
     discrepancies: list[dict[str, Any]] = field(default_factory=list)
+    skipped: bool = False
     error: str | None = None
 
 
@@ -66,6 +71,10 @@ class LiveTradingEngine:
         self._cycle_count = 0
         self._cycle_history: list[CycleResult] = []
         self._running = False
+        # Serialises cycles so a manual/API trigger cannot run concurrently
+        # with a scheduled one (which, combined with no broker idempotency,
+        # would double-submit real orders).
+        self._cycle_lock = threading.Lock()
 
     @property
     def is_running(self) -> bool:
@@ -99,65 +108,101 @@ class LiveTradingEngine:
     def run_cycle(self) -> CycleResult:
         """Execute one full cycle of the agent pipeline.
 
+        Cycles are serialised: if one is already running (e.g. a scheduled
+        tick while a manual trigger is in flight) this call returns
+        immediately with ``skipped=True`` rather than racing and
+        double-submitting orders.
+
         Returns a :class:`CycleResult` summarizing what happened.
         """
-        self._cycle_count += 1
-        now = datetime.utcnow()
-        result = CycleResult(cycle_id=self._cycle_count, timestamp=now)
-
+        if not self._cycle_lock.acquire(blocking=False):
+            log.warning("run_cycle skipped: a cycle is already in progress")
+            return CycleResult(
+                cycle_id=self._cycle_count,
+                timestamp=datetime.utcnow(),
+                skipped=True,
+                error="cycle already in progress",
+            )
         try:
-            pit_view = self._data_feed.refresh(asof=now)
+            self._cycle_count += 1
+            now = datetime.utcnow()
+            result = CycleResult(cycle_id=self._cycle_count, timestamp=now)
 
-            prices = self._broker.get_current_prices(self._data_feed._universe)
+            try:
+                pit_view = self._data_feed.refresh(asof=now)
 
-            discrepancies = sync_portfolio_from_broker(
-                self._broker, self._portfolio, prices
-            )
-            result.discrepancies = discrepancies
+                prices = self._broker.get_current_prices(self._data_feed._universe)
 
-            context = {
-                "pit_view": pit_view,
-                "portfolio": self._portfolio,
-                "prices": prices,
-            }
-            orders, blackboard = self._orchestrator.step(context)
-            result.orders_generated = len(orders)
-
-            if not orders:
-                log.info("Cycle %d: no orders generated", self._cycle_count)
-                self._cycle_history.append(result)
-                return result
-
-            auto_orders, manual_orders = self._split_by_approval(orders)
-
-            if auto_orders:
-                statuses = self._execute_orders(auto_orders)
-                result.orders_submitted = len(statuses)
-                result.order_statuses = [self._status_to_dict(s) for s in statuses]
-
-            if manual_orders:
-                aid = self._approval_queue.add(
-                    orders=manual_orders,
-                    blackboard=blackboard,
-                    strategy=manual_orders[0].get("strategy", ""),
+                discrepancies = sync_portfolio_from_broker(
+                    self._broker, self._portfolio, prices
                 )
-                result.orders_queued = len(manual_orders)
-                result.approval_ids.append(aid)
+                result.discrepancies = discrepancies
 
-            log.info(
-                "Cycle %d: %d orders generated, %d submitted, %d queued",
-                self._cycle_count,
-                result.orders_generated,
-                result.orders_submitted,
-                result.orders_queued,
-            )
+                context = {
+                    "pit_view": pit_view,
+                    "portfolio": self._portfolio,
+                    "prices": prices,
+                }
+                orders, blackboard = self._orchestrator.step(context)
+                result.orders_generated = len(orders)
 
-        except Exception as exc:
-            result.error = str(exc)
-            log.error("Cycle %d failed: %s", self._cycle_count, exc, exc_info=True)
+                if not orders:
+                    log.info("Cycle %d: no orders generated", self._cycle_count)
+                    self._cycle_history.append(result)
+                    return result
 
-        self._cycle_history.append(result)
-        return result
+                auto_orders, manual_orders = self._split_by_approval(orders)
+
+                if auto_orders:
+                    statuses, failed = self._execute_orders(
+                        auto_orders, cycle_id=self._cycle_count
+                    )
+                    result.orders_submitted = len(statuses)
+                    result.order_statuses = [self._status_to_dict(s) for s in statuses]
+                    result.failed_orders = failed
+                    result.orders_failed = len(failed)
+
+                if manual_orders:
+                    for strategy, group in self._group_by_strategy(manual_orders).items():
+                        aid = self._approval_queue.add(
+                            orders=group,
+                            blackboard=blackboard,
+                            strategy=strategy,
+                        )
+                        result.orders_queued += len(group)
+                        result.approval_ids.append(aid)
+
+                log.info(
+                    "Cycle %d: %d generated, %d submitted, %d queued, %d failed",
+                    self._cycle_count,
+                    result.orders_generated,
+                    result.orders_submitted,
+                    result.orders_queued,
+                    result.orders_failed,
+                )
+
+            except Exception as exc:
+                result.error = str(exc)
+                log.error("Cycle %d failed: %s", self._cycle_count, exc, exc_info=True)
+
+            self._cycle_history.append(result)
+            return result
+        finally:
+            self._cycle_lock.release()
+
+    @staticmethod
+    def _group_by_strategy(
+        orders: list[dict[str, Any]]
+    ) -> "OrderedDict[str, list[dict[str, Any]]]":
+        """Group orders by their originating strategy (preserving order).
+
+        Each group becomes a separate approval entry so an operator can
+        approve/reject per strategy instead of one mixed basket.
+        """
+        grouped: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+        for o in orders:
+            grouped.setdefault(o.get("strategy", ""), []).append(o)
+        return grouped
 
     def _split_by_approval(
         self, orders: list[dict[str, Any]]
@@ -178,26 +223,38 @@ class LiveTradingEngine:
         # Default: everything needs approval
         return [], orders
 
-    def _execute_orders(self, orders: list[dict[str, Any]]) -> list[OrderStatus]:
-        """Submit orders to the broker and return statuses."""
+    def _execute_orders(
+        self, orders: list[dict[str, Any]], cycle_id: int = 0
+    ) -> tuple[list[OrderStatus], list[dict[str, Any]]]:
+        """Submit orders to the broker.
+
+        Returns ``(statuses, failed)`` where *failed* lists the orders whose
+        submission raised, so a partially-executed basket is visible to the
+        caller/operator rather than silently dropped.  Each order carries a
+        deterministic ``client_order_id`` so the broker can deduplicate a
+        re-submission of the same cycle's order.
+        """
         statuses: list[OrderStatus] = []
+        failed: list[dict[str, Any]] = []
         for o in orders:
             req = OrderRequest(
                 symbol=o["symbol"],
                 side=o["side"],
-                quantity=o.get("quantity", o.get("shares", 0)),
+                quantity=o.get("quantity", abs(o.get("shares", 0))),
                 order_type=o.get("order_type", "market"),
                 limit_price=o.get("limit_price"),
                 strategy=o.get("strategy", "composite"),
+                client_order_id=f"c{cycle_id}-{o['symbol']}-{o['side']}",
             )
             try:
                 status = self._broker.submit_order(req)
                 statuses.append(status)
                 log.info("Submitted: %s %s %.2f %s → %s",
                          req.side, req.symbol, req.quantity, req.order_type, status.status)
-            except BrokerError:
+            except BrokerError as exc:
                 log.error("Failed to submit order for %s", req.symbol, exc_info=True)
-        return statuses
+                failed.append({**o, "error": str(exc)})
+        return statuses, failed
 
     @staticmethod
     def _status_to_dict(s: OrderStatus) -> dict[str, Any]:

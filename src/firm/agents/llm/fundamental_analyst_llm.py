@@ -34,6 +34,7 @@ class LLMFundamentalAnalyst(FundamentalAnalyst, LLMAgentMixin):
                 sig.symbol,
                 f"SEC filings earnings financial analysis for {sig.symbol}",
                 collections=["sec_filings", "earnings"],
+                asof=ctx.now,
             )
             if not rag_context:
                 enhanced_signals.append(sig)

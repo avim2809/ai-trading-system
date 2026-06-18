@@ -51,6 +51,44 @@ class TestGetPrices:
         result = store.get_prices(["AAPL"], asof, lookback_days=2)
         assert result["date"].min() >= pd.Timestamp("2020-01-03")
 
+    def test_lookback_is_trading_days_not_calendar(self) -> None:
+        """Regression: lookback_days counts trading rows, so a continuous
+        business-day feed delivers the full requested window (a calendar-day
+        filter would silently truncate ~252 days to ~174)."""
+        dates = pd.bdate_range("2020-01-01", periods=300)
+        prices = pd.DataFrame({
+            "date": dates,
+            "symbol": ["AAPL"] * 300,
+            "close": range(300),
+        })
+        s = PointInTimeDataStore()
+        s.load(prices)
+        result = s.get_prices(["AAPL"], dates[-1], lookback_days=252)
+        # Must return exactly 252 trading rows, not ~174 calendar-bounded ones.
+        assert len(result) == 252
+
+    def test_universe_resolver_hook(self) -> None:
+        """A survivorship-aware resolver, when installed, is authoritative."""
+        from firm.data.universe import UniverseResolver
+
+        prices = pd.DataFrame({
+            "date": pd.to_datetime(["2020-01-01", "2020-01-01"]),
+            "symbol": ["AAPL", "DELISTED"],
+            "close": [1.0, 2.0],
+        })
+        s = PointInTimeDataStore()
+        s.load(prices)
+        # Without a resolver: every loaded symbol is returned.
+        assert set(s.get_universe(datetime(2020, 1, 2))) == {"AAPL", "DELISTED"}
+        # With a resolver excluding DELISTED after removal:
+        constituents = pd.DataFrame({
+            "symbol": ["AAPL", "DELISTED"],
+            "added_date": [pd.NaT, pd.NaT],
+            "removed_date": [pd.NaT, pd.Timestamp("2019-06-01")],
+        })
+        s.set_universe_resolver(UniverseResolver(constituents))
+        assert s.get_universe(datetime(2020, 1, 2)) == ["AAPL"]
+
 
 class TestGetFundamentals:
     def test_latest_as_of(self, store: PointInTimeDataStore) -> None:

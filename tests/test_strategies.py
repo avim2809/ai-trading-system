@@ -27,6 +27,18 @@ import firm.strategies  # noqa: F401
 from firm.strategies.registry import _REGISTRY, get, list_strategies
 
 
+def test_multi_factor_mean_available_no_dampening():
+    """Regression: a symbol with only one sub-metric keeps its full z-score
+    rather than being halved by a fixed /2 divisor."""
+    from firm.strategies.multi_factor import _mean_available
+
+    pe = pd.Series({"A": 1.0, "B": 2.0})       # both symbols have PE
+    pb = pd.Series({"A": 0.5})                  # only A also has PB
+    result = _mean_available([pe, pb])
+    assert result["A"] == pytest.approx((1.0 + 0.5) / 2)  # averaged
+    assert result["B"] == pytest.approx(2.0)              # NOT 2.0 / 2
+
+
 # ---------------------------------------------------------------------------
 # Mock PitView
 # ---------------------------------------------------------------------------

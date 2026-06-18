@@ -147,8 +147,17 @@ class MLPredictionStrategy(BaseStrategy):
         ]
 
         asof_ts = pd.Timestamp(pit_view.asof)
-        cutoff = asof_ts - pd.Timedelta(days=buffer_days + predict_horizon)
-        train_start = cutoff - pd.Timedelta(days=train_lookback_days)
+        # Size the train window in TRADING days (rows), consistent with how the
+        # forward-return label is built (pct_change/shift by trading rows).  A
+        # calendar-day Timedelta would shrink the gap below the intended
+        # no-look-ahead buffer and shorten the training set.
+        trading_dates = pd.Index(sorted(merged["date"].unique()))
+        gap = buffer_days + predict_horizon  # trading days to leave before asof
+        cutoff_pos = len(trading_dates) - 1 - gap
+        if cutoff_pos < 0:
+            return []
+        cutoff = trading_dates[cutoff_pos]
+        train_start = trading_dates[max(0, cutoff_pos - train_lookback_days)]
 
         train_mask = (merged["date"] >= train_start) & (merged["date"] <= cutoff)
         train_data = merged.loc[train_mask].dropna(subset=feature_cols + ["fwd_return"])

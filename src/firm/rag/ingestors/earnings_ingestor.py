@@ -8,6 +8,7 @@ from typing import Any
 import requests
 
 from firm.rag.chunker import DocumentChunker
+from firm.rag.dates import normalize_date
 from firm.rag.ingestors.base_ingestor import BaseIngestor
 from firm.rag.models import Document
 from firm.rag.store import VectorStore
@@ -56,7 +57,11 @@ class EarningsIngestor(BaseIngestor):
                     "source": "fmp_earnings",
                     "symbol": symbol,
                     "doc_type": "earnings_transcript",
-                    "date": f"{year}-Q{quarter}",
+                    # Fiscal-period label normalized to a conservative
+                    # availability date (quarter end + reporting lag) so it
+                    # cannot be retrieved before results were public.
+                    "date": normalize_date(f"{year}-Q{quarter}"),
+                    "fiscal_period": f"{year}-Q{quarter}",
                     "year": year,
                     "quarter": quarter,
                 }

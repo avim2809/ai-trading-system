@@ -43,6 +43,9 @@ class Orchestrator(Agent):
         self.risk = risk
         self.execution = execution
         self._max_risk_retries: int = (config or {}).get("max_risk_retries", 3)
+        # If set, abort the bar when any analyst/strategy failed rather than
+        # trading on a silently-truncated signal set.
+        self._abort_on_degraded: bool = (config or {}).get("abort_on_degraded", False)
 
     def run(self, ctx: AgentContext, **inputs: Any) -> tuple[list[dict], Blackboard]:
         """ABC-compliant entry point – delegates to :meth:`step`."""
@@ -76,14 +79,25 @@ class Orchestrator(Agent):
         with ThreadPoolExecutor() as pool:
             futures = {pool.submit(analyst.run, ctx): analyst for analyst in self.analysts}
             for future in futures:
+                analyst = futures[future]
                 try:
                     signal_set = future.result()
                     bb.signal_sets.append(signal_set)
-                except Exception:
-                    analyst = futures[future]
+                    # Surface per-strategy failures the analyst swallowed.
+                    for err in getattr(analyst, "_last_errors", []) or []:
+                        bb.errors.append({"agent": analyst.name, **err})
+                except Exception as exc:
                     log.error("Analyst %s failed", analyst.name, exc_info=True)
+                    bb.errors.append({"agent": analyst.name, "error": str(exc)})
 
         bb.signal_sets.sort(key=lambda ss: ss.domain)
+
+        if bb.errors:
+            bb.degraded = True
+            log.warning("Pipeline degraded: %d signal-source failure(s)", len(bb.errors))
+            if self._abort_on_degraded:
+                log.warning("Aborting bar (abort_on_degraded=True) – returning empty orders")
+                return [], bb
 
         if not any(ss.signals for ss in bb.signal_sets):
             log.warning("No signals produced – returning empty orders")
@@ -135,7 +149,13 @@ class Orchestrator(Agent):
             return [], bb
 
         # 6. Execution
-        report = self.execution.run(ctx, decision=decision, portfolio=portfolio, prices=prices)
+        report = self.execution.run(
+            ctx,
+            decision=decision,
+            portfolio=portfolio,
+            prices=prices,
+            per_strategy=proposal.per_strategy,
+        )
         bb.execution_report = report
 
         self._collect_llm_usage(bb)

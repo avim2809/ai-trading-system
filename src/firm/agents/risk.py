@@ -39,6 +39,8 @@ class RiskAgent(Agent):
         self.vol_target: float = cfg.get("vol_target", 0.15)
         self.max_drawdown_pct: float = cfg.get("max_drawdown_pct", 0.20)
         self.veto_threshold: float = cfg.get("veto_threshold", 0.5)
+        # Optional static sector map used when none is supplied per-call.
+        self.sector_map: dict[str, str] = cfg.get("sector_map", {})
 
     def run(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
         proposal: TradeProposal = inputs["proposal"]
@@ -61,11 +63,16 @@ class RiskAgent(Agent):
         violations.extend(v)
         actions.extend(a)
 
-        sector_map = inputs.get("sector_map")
+        sector_map = inputs.get("sector_map") or self.sector_map
         if sector_map:
             targets, v, a = self._cap_sector_concentration(targets, sector_map)
             violations.extend(v)
             actions.extend(a)
+        else:
+            # Fail loud, not silent: a documented hard control is not being
+            # enforced because no sector data was supplied.
+            log.warning("Sector concentration cap NOT enforced (no sector_map provided)")
+            actions.append("Sector concentration cap skipped (no sector_map)")
 
         vol_estimates = inputs.get("vol_estimates")
         if vol_estimates:
@@ -77,9 +84,22 @@ class RiskAgent(Agent):
         violations.extend(v)
         actions.extend(a)
 
-        adjusted_gross = sum(abs(w) for w in targets.values())
+        # Final enforcement pass: non-uniform stages (sector) and de-risking
+        # can perturb exposures set earlier, so re-assert the hard caps once
+        # more.  On an already-compliant book this is a no-op.
+        targets, v, a = self._enforce_hard_caps(targets)
+        violations.extend(v)
+        actions.extend(a)
+
+        # Veto severity is the L1 distance between the final and proposed
+        # weights (normalized by original gross), so heavy restructuring or
+        # sign flips are captured – not just a change in total gross.
         if original_gross > 1e-10:
-            clipping_severity = abs(original_gross - adjusted_gross) / original_gross
+            l1_distance = sum(
+                abs(targets.get(s, 0.0) - proposal.targets.get(s, 0.0))
+                for s in set(targets) | set(proposal.targets)
+            )
+            clipping_severity = l1_distance / original_gross
         else:
             clipping_severity = 0.0
 
@@ -207,7 +227,9 @@ class RiskAgent(Agent):
         port_vol = port_var**0.5
         if port_vol < 1e-10:
             return targets, [], []
-        scale = self.vol_target / port_vol
+        # Only ever de-risk.  Scaling weights UP to hit a vol target would
+        # re-breach the per-name / gross / net / sector caps applied earlier.
+        scale = min(self.vol_target / port_vol, 1.0)
         if abs(scale - 1.0) < 0.01:
             return targets, [], []
         scaled = {s: w * scale for s, w in targets.items()}
@@ -216,6 +238,19 @@ class RiskAgent(Agent):
             [f"Portfolio vol {port_vol:.3f} vs target {self.vol_target}"],
             [f"Scaled weights by {scale:.4f} for vol targeting"],
         )
+
+    def _enforce_hard_caps(
+        self, targets: dict[str, float]
+    ) -> tuple[dict[str, float], list[str], list[str]]:
+        """Re-apply per-name, gross, and net caps as a final pass.
+
+        Returns only the *new* violations/actions a re-breach produced, so a
+        compliant book reports nothing.
+        """
+        t, v1, a1 = self._clip_position_sizes(targets)
+        t, v2, a2 = self._cap_gross_exposure(t)
+        t, v3, a3 = self._cap_net_exposure(t)
+        return t, v1 + v2 + v3, a1 + a2 + a3
 
     def _drawdown_breaker(
         self,

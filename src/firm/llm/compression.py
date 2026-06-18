@@ -62,13 +62,25 @@ class TokenCompressor:
         return self._simple_truncate(text, ratio)
 
     def _simple_truncate(self, text: str, ratio: float) -> str:
-        """Sentence-level truncation keeping the first `ratio` fraction."""
+        """Sentence-level downsampling spread across the whole document.
+
+        Selects ``ratio`` of the sentences sampled at a uniform stride (in
+        original order) rather than only the leading fraction, so material in
+        the body/tail of a document (e.g. a filing's risk factors) is not
+        silently discarded.
+        """
         import re
         sentences = re.split(r'(?<=[.!?])\s+', text)
-        if not sentences:
+        n = len(sentences)
+        if n <= 1:
             return text
-        target_count = max(1, int(len(sentences) * ratio))
-        return " ".join(sentences[:target_count])
+        target_count = max(1, int(n * ratio))
+        if target_count >= n:
+            return text
+        # Evenly-spaced indices across [0, n) preserving original order.
+        step = n / target_count
+        idx = sorted({min(n - 1, int(i * step)) for i in range(target_count)})
+        return " ".join(sentences[i] for i in idx)
 
     def estimate_tokens(self, text: str) -> int:
         """Estimate token count using tiktoken if available, else heuristic."""

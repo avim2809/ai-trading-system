@@ -301,6 +301,24 @@ class TestResearchers:
         # Sorted by net_conviction descending
         assert results[0].net_conviction >= results[1].net_conviction
 
+    def test_bull_conviction_uses_net_signal_mass(self):
+        """Regression: a lone loud positive signal with a quiet opposing one
+        must not produce a saturated bull conviction; it reflects the net."""
+        from firm.agents.research.bull import BullResearcher
+
+        bb = Blackboard(asof=NOW)
+        # One +3 and one -1 (equal confidence): net mean = +1.0 -> /3 ~= 0.33,
+        # NOT 1.0 (which the positive-only average would have given).
+        bb.signal_sets.append(
+            _make_signal_set("technical", [_sig("XYZ", "momentum", 3.0)])
+        )
+        bb.signal_sets.append(
+            _make_signal_set("fundamental", [_sig("XYZ", "multi_factor", -1.0)])
+        )
+        theses = BullResearcher().run(AgentContext(now=NOW), blackboard=bb)
+        xyz = next(t for t in theses if t.symbol == "XYZ")
+        assert xyz.conviction == pytest.approx(1.0 / 3.0, abs=0.05)
+
     def test_debate_one_sided(self):
         from firm.agents.research.debate import DebateAgent
 
@@ -364,6 +382,40 @@ class TestTrader:
         ctx = AgentContext(now=NOW)
         proposal = trader.run(ctx, debate_results=results)
         assert len(proposal.targets) == 0
+
+    def test_risk_parity_uses_inverse_vol(self):
+        """Regression: risk_parity must inverse-vol weight, not equal-weight."""
+        import pandas as pd
+
+        from firm.agents.trader import TraderAgent
+
+        # LO is low-vol (small moves), HI is high-vol (large moves).
+        dates = pd.bdate_range("2020-01-01", periods=70)
+        lo = 100 + pd.Series(range(70)) * 0.01
+        hi = 100 + pd.Series(range(70)) * 0.01
+        hi.iloc[::2] += 8.0  # inject large swings
+        frames = []
+        for sym, series in (("LO", lo), ("HI", hi)):
+            frames.append(pd.DataFrame({
+                "date": dates, "symbol": sym,
+                "close": series.values, "adj_close": series.values,
+            }))
+        price_df = pd.concat(frames, ignore_index=True)
+
+        class _PV:
+            asof = NOW
+            def prices(self, symbols=None, lookback_days=252):
+                return price_df[price_df["symbol"].isin(symbols)]
+
+        trader = TraderAgent(config={"allocation_method": "risk_parity"})
+        ctx = AgentContext(now=NOW, pit_view=_PV())
+        results = [
+            DebateResult(symbol="LO", net_conviction=0.5),
+            DebateResult(symbol="HI", net_conviction=0.5),
+        ]
+        proposal = trader.run(ctx, debate_results=results)
+        # Low-vol name must receive a strictly larger allocation.
+        assert abs(proposal.targets["LO"]) > abs(proposal.targets["HI"])
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -490,6 +542,59 @@ class TestRiskManager:
         )
         assert tech_total <= 0.10 + 1e-9
 
+    def test_vol_targeting_never_levers_up_past_caps(self):
+        """Regression: a low-vol book must not be scaled UP through the caps."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={
+            "max_position_pct": 0.05,
+            "max_gross_exposure": 0.20,
+            "vol_target": 0.15,
+        })
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.05, "MSFT": 0.05})
+        # Very low per-name vols => naive vol-targeting scale would be >> 1.
+        vol_estimates = {"AAPL": 0.02, "MSFT": 0.02}
+        decision = risk.run(
+            AgentContext(now=NOW), proposal=proposal, vol_estimates=vol_estimates
+        )
+        gross = sum(abs(w) for w in decision.adjusted_targets.values())
+        assert gross <= 0.20 + 1e-9
+        assert all(abs(w) <= 0.05 + 1e-9 for w in decision.adjusted_targets.values())
+
+    def test_sector_scaling_does_not_leave_net_breach(self):
+        """Regression: non-uniform sector scaling must not leave net > cap."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "max_gross_exposure": 10.0,
+            "max_net_exposure": 0.5,
+            "max_sector_pct": 0.25,
+        })
+        # Long side spread thin across sectors; a concentrated short sector
+        # gets scaled down, which would otherwise push net above 0.5.
+        targets = {
+            "T1": -0.20, "T2": -0.20,           # tech shorts, sector 0.40 > 0.25
+            "L1": 0.20, "L2": 0.20, "L3": 0.20, "L4": 0.10,  # longs, distinct sectors
+        }
+        sector_map = {
+            "T1": "tech", "T2": "tech",
+            "L1": "a", "L2": "b", "L3": "c", "L4": "d",
+        }
+        proposal = TradeProposal(asof=NOW, targets=targets)
+        decision = risk.run(AgentContext(now=NOW), proposal=proposal, sector_map=sector_map)
+        net = sum(decision.adjusted_targets.values())
+        assert abs(net) <= 0.5 + 1e-6
+
+    def test_missing_sector_map_is_surfaced_not_silent(self):
+        """Regression: skipping the sector cap must be recorded, not silent."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={"max_position_pct": 0.10})
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.05})
+        decision = risk.run(AgentContext(now=NOW), proposal=proposal)
+        assert any("sector" in a.lower() for a in decision.actions)
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Execution Agent
@@ -558,6 +663,90 @@ class TestExecution:
         report = execution.run(ctx, decision=decision, portfolio=portfolio, prices=prices)
         assert len(report.fills) == 0
         assert report.turnover == pytest.approx(0.0)
+
+    def test_fills_carry_signed_shares(self):
+        """Regression: orders must expose a signed ``shares`` field matching
+        ``side`` so downstream consumers route sells correctly."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent()
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 1000}  # ~0.23 weight, target 0.10 -> sell
+        prices = {"AAPL": 150.0, "GOOG": 100.0}
+        decision = RiskDecision(
+            approved=True, adjusted_targets={"AAPL": 0.10, "GOOG": 0.20}
+        )
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices
+        )
+        by_sym = {o["symbol"]: o for o in report.fills}
+        # AAPL is a sell -> negative shares, positive quantity
+        assert by_sym["AAPL"]["side"] == "sell"
+        assert by_sym["AAPL"]["shares"] < 0
+        assert by_sym["AAPL"]["quantity"] == pytest.approx(abs(by_sym["AAPL"]["shares"]))
+        # GOOG is a buy -> positive shares
+        assert by_sym["GOOG"]["side"] == "buy"
+        assert by_sym["GOOG"]["shares"] > 0
+
+    def test_fills_tagged_with_originating_strategy(self):
+        """Regression: orders carry the dominant contributing strategy, not a
+        hardcoded 'composite', so per-strategy approval routing works."""
+        from firm.agents.execution import ExecutionAgent
+
+        execution = ExecutionAgent()
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.5, "MSFT": 0.5})
+        per_strategy = {
+            "momentum": {"AAPL": 0.4, "MSFT": 0.1},
+            "trend": {"AAPL": 0.1, "MSFT": 0.4},
+        }
+        report = execution.run(
+            AgentContext(now=NOW),
+            decision=decision,
+            prices={"AAPL": 100.0, "MSFT": 100.0},
+            per_strategy=per_strategy,
+        )
+        by_sym = {o["symbol"]: o for o in report.fills}
+        assert by_sym["AAPL"]["strategy"] == "momentum"
+        assert by_sym["MSFT"]["strategy"] == "trend"
+
+    def test_portfolio_nav_marks_to_market(self):
+        """Regression: nav must value holdings at price, not sum share counts."""
+        from firm.portfolio.state import PortfolioState
+
+        p = PortfolioState(initial_capital=0)
+        p.cash = 1000.0
+        p.holdings = {"AAPL": 10}  # 10 shares
+        # Before any prices seen: holdings contribute 0 (cash only), never 10.
+        assert p.nav == pytest.approx(1000.0)
+        # After marking at $150, nav reflects market value (1000 + 1500).
+        p.get_weights({"AAPL": 150.0})
+        assert p.nav == pytest.approx(2500.0)
+
+    def test_fills_consumed_by_portfolio_and_attribution(self):
+        """Regression: execution fills feed PortfolioState.update and
+        PerformanceAttribution.record_trades without KeyError, and a sell
+        actually reduces holdings (it used to route as a buy)."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.attribution import PerformanceAttribution
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent()
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 1000}
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.10})
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices
+        )
+
+        before = portfolio.holdings["AAPL"]
+        portfolio.update(report.fills, prices)  # must not raise KeyError
+        attribution = PerformanceAttribution()
+        attribution.record_trades(report.fills, prices)  # must not raise KeyError
+
+        # A sell reduces the position rather than increasing it.
+        assert portfolio.holdings.get("AAPL", 0.0) < before
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -699,3 +888,33 @@ class TestOrchestrator:
 
         assert len(bb.signal_sets) == 1
         assert bb.signal_sets[0].domain == "technical"
+        # Regression: the failure is no longer silent.
+        assert bb.degraded is True
+        assert any(e.get("agent") == "failing_analyst" for e in bb.errors)
+
+    def test_abort_on_degraded_returns_empty(self):
+        from firm.agents.orchestrator import Orchestrator
+
+        failing = MagicMock(spec=Agent)
+        failing.name = "failing_analyst"
+        failing.run.side_effect = RuntimeError("boom")
+        good = MagicMock(spec=Agent)
+        good.name = "good_analyst"
+        good.run.return_value = SignalSet(
+            domain="technical", asof=NOW, signals=[_sig("AAPL", "momentum", 1.0)],
+        )
+        orch = Orchestrator(
+            analysts=[failing, good],
+            bull=MagicMock(spec=Agent, **{"name": "bull", "run.return_value": []}),
+            bear=MagicMock(spec=Agent, **{"name": "bear", "run.return_value": []}),
+            debate=MagicMock(spec=Agent, **{"name": "debate", "run.return_value": []}),
+            trader=MagicMock(spec=Agent, **{"name": "trader", "run.return_value": TradeProposal(asof=NOW)}),
+            risk=MagicMock(spec=Agent, **{"name": "risk", "run.return_value": RiskDecision(approved=True)}),
+            execution=MagicMock(spec=Agent, **{"name": "exec", "run.return_value": ExecutionReport()}),
+            config={"abort_on_degraded": True},
+        )
+        pit_view = MagicMock()
+        pit_view.asof = NOW
+        orders, bb = orch.step({"pit_view": pit_view, "portfolio": None, "prices": {}})
+        assert orders == []
+        assert bb.degraded is True

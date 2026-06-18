@@ -33,6 +33,7 @@ class LLMBullResearcher(BullResearcher, LLMAgentMixin):
                 thesis.symbol,
                 f"bullish investment thesis news filings for {thesis.symbol}",
                 collections=["news", "sec_filings", "earnings"],
+                asof=ctx.now,
             )
             if not rag_context:
                 enhanced.append(thesis)

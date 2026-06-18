@@ -34,6 +34,7 @@ class LLMSentimentAnalyst(SentimentAnalyst, LLMAgentMixin):
                 sig.symbol,
                 f"recent news sentiment for {sig.symbol}",
                 collections=["news"],
+                asof=ctx.now,
             )
             if not rag_context:
                 enhanced_signals.append(sig)

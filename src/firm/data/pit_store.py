@@ -26,6 +26,13 @@ class PointInTimeDataStore:
         self._fundamentals: pd.DataFrame = pd.DataFrame()
         self._sentiment: pd.DataFrame = pd.DataFrame()
         self._corporate_actions: pd.DataFrame = pd.DataFrame()
+        # Optional callable(asof) -> list[str] giving survivorship-aware
+        # index membership (e.g. firm.data.universe.UniverseResolver).
+        self._universe_resolver = None
+
+    def set_universe_resolver(self, resolver) -> None:
+        """Install a survivorship-aware membership resolver for get_universe."""
+        self._universe_resolver = resolver
 
     def load(
         self,
@@ -62,17 +69,25 @@ class PointInTimeDataStore:
         asof: datetime,
         lookback_days: int = 252,
     ) -> pd.DataFrame:
-        """Return price data for symbols where date <= asof, up to lookback_days back."""
+        """Return price data for *symbols* where date <= asof.
+
+        ``lookback_days`` is interpreted as a count of **trading days** (rows),
+        not calendar days: the most recent ``lookback_days`` bars per symbol on
+        or before *asof* are returned.  Strategies size their windows in
+        trading days (e.g. a 200-day moving average), so a calendar-day filter
+        would silently under-deliver history (~252 trading days span ~365
+        calendar days) and could disable long-lookback strategies entirely.
+        """
         if self._prices.empty:
             return pd.DataFrame()
         asof_ts = pd.Timestamp(asof)
-        earliest = asof_ts - timedelta(days=lookback_days)
-        mask = (
-            self._prices["symbol"].isin(symbols)
-            & (self._prices["date"] <= asof_ts)
-            & (self._prices["date"] >= earliest)
-        )
-        return self._prices.loc[mask].copy()
+        mask = self._prices["symbol"].isin(symbols) & (self._prices["date"] <= asof_ts)
+        filtered = self._prices.loc[mask]
+        if filtered.empty:
+            return filtered.copy()
+        # Keep the most recent ``lookback_days`` trading rows per symbol.
+        filtered = filtered.sort_values("date")
+        return filtered.groupby("symbol", group_keys=False).tail(lookback_days).copy()
 
     def get_fundamentals(
         self,
@@ -108,10 +123,16 @@ class PointInTimeDataStore:
         return self._sentiment.loc[mask].copy()
 
     def get_universe(self, asof: datetime) -> list[str]:
-        """Return universe as of date (survivorship-aware).
+        """Return the tradable universe as of *asof*.
 
-        Falls back to all symbols present in price data up to *asof*.
+        When a survivorship-aware ``universe_resolver`` is installed (via
+        :meth:`set_universe_resolver`) it is authoritative and resolves
+        point-in-time index membership.  Otherwise this falls back to every
+        symbol with price data on or before *asof* — which is **not**
+        survivorship-aware (it reflects whatever names happen to be loaded).
         """
+        if self._universe_resolver is not None:
+            return list(self._universe_resolver(asof))
         if self._prices.empty:
             return []
         asof_ts = pd.Timestamp(asof)

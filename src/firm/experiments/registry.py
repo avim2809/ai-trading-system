@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import threading
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -54,22 +56,26 @@ class RunRegistry:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         self._registry_file = self.base_dir / "registry.json"
         self._runs: list[ExperimentRun] = []
+        # Guards _runs and registry.json: the daemon job thread and HTTP
+        # request threads mutate/read the registry concurrently.
+        self._lock = threading.RLock()
         self._load()
 
     def _load(self) -> None:
         """Load registry from disk."""
-        if self._registry_file.exists():
-            raw = json.loads(self._registry_file.read_text(encoding="utf-8"))
-            self._runs = [ExperimentRun.from_dict(r) for r in raw]
-        else:
-            self._runs = []
+        with self._lock:
+            if self._registry_file.exists():
+                raw = json.loads(self._registry_file.read_text(encoding="utf-8"))
+                self._runs = [ExperimentRun.from_dict(r) for r in raw]
+            else:
+                self._runs = []
 
     def _save(self) -> None:
-        """Persist registry to disk."""
+        """Persist registry to disk atomically (temp file + os.replace)."""
         data = [run.to_dict() for run in self._runs]
-        self._registry_file.write_text(
-            json.dumps(data, indent=2, default=str), encoding="utf-8"
-        )
+        tmp = self._registry_file.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+        os.replace(tmp, self._registry_file)
 
     def create_run(
         self, config: dict, seed: int = 42, notes: str = ""
@@ -98,39 +104,44 @@ class RunRegistry:
             notes=notes,
             seed=seed,
         )
-        self._runs.append(run)
-        self._save()
+        with self._lock:
+            self._runs.append(run)
+            self._save()
         return run
 
     def update_run(self, run_id: str, **kwargs: Any) -> None:
         """Update run fields (status, metrics, end_time, etc.)."""
-        run = self.get_run(run_id)
-        if run is None:
-            raise KeyError(f"Run {run_id!r} not found in registry")
-        for key, value in kwargs.items():
-            if not hasattr(run, key):
-                raise AttributeError(
-                    f"ExperimentRun has no attribute {key!r}"
-                )
-            setattr(run, key, value)
-        self._save()
+        with self._lock:
+            run = self.get_run(run_id)
+            if run is None:
+                raise KeyError(f"Run {run_id!r} not found in registry")
+            for key, value in kwargs.items():
+                if not hasattr(run, key):
+                    raise AttributeError(
+                        f"ExperimentRun has no attribute {key!r}"
+                    )
+                setattr(run, key, value)
+            self._save()
 
     def get_run(self, run_id: str) -> ExperimentRun | None:
         """Retrieve a run by ID."""
-        for run in self._runs:
-            if run.run_id == run_id:
-                return run
-        return None
+        with self._lock:
+            for run in self._runs:
+                if run.run_id == run_id:
+                    return run
+            return None
 
     def list_runs(self, status: str | None = None) -> list[ExperimentRun]:
         """List runs, optionally filtered by status."""
-        if status is None:
-            return list(self._runs)
-        return [r for r in self._runs if r.status == status]
+        with self._lock:
+            if status is None:
+                return list(self._runs)
+            return [r for r in self._runs if r.status == status]
 
     def compare_runs(self, run_ids: list[str]) -> dict:
         """Compare metrics across runs. Returns {metric: {run_id: value}}."""
-        runs = [self.get_run(rid) for rid in run_ids]
+        with self._lock:
+            runs = [self.get_run(rid) for rid in run_ids]
         runs = [r for r in runs if r is not None]
 
         all_metrics: set[str] = set()

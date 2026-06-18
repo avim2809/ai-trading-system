@@ -34,6 +34,7 @@ class LLMTraderAgent(TraderAgent, LLMAgentMixin):
             "PORTFOLIO",
             "portfolio allocation concentration correlation risk",
             collections=["research", "system_docs"],
+            asof=ctx.now,
         )
         context = self._compress(rag_context) if rag_context else ""
         prompt = (

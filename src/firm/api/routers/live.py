@@ -8,6 +8,7 @@ on ``request.app.state`` and initialised lazily on the first ``/start``.
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime
 from typing import Any
 
@@ -17,6 +18,11 @@ from pydantic import BaseModel
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/live", tags=["live"])
+
+# Serialises engine lifecycle mutations (start/stop/config) so concurrent
+# requests can't create two engines or race start against stop on the shared
+# app.state singletons.
+_engine_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -116,61 +122,63 @@ def live_status(request: Request) -> dict[str, Any]:
 
 @router.post("/start")
 def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
-    if getattr(request.app.state, "live_engine", None) is not None:
-        engine = request.app.state.live_engine
-        if engine.is_running:
-            raise HTTPException(status_code=409, detail="Engine already running")
-
     from firm.live.approval import ApprovalQueue
     from firm.live.data_feed import LiveDataFeed
     from firm.live.engine import LiveTradingEngine
     from firm.live.scheduler import TradingScheduler
 
-    broker = _create_broker(body.broker)
-    universe = body.symbols or ["AAPL", "MSFT", "GOOG", "AMZN", "META"]
+    with _engine_lock:
+        if getattr(request.app.state, "live_engine", None) is not None:
+            engine = request.app.state.live_engine
+            if engine.is_running:
+                raise HTTPException(status_code=409, detail="Engine already running")
 
-    data_feed = LiveDataFeed(providers={}, universe=universe)
+        broker = _create_broker(body.broker)
+        universe = body.symbols or ["AAPL", "MSFT", "GOOG", "AMZN", "META"]
 
-    approval_queue = ApprovalQueue(broker=broker, persist_path="data/approvals.json")
-    request.app.state.approval_queue = approval_queue
+        data_feed = LiveDataFeed(providers={}, universe=universe)
 
-    config = {
-        "initial_capital": body.initial_capital,
-        "symbols": universe,
-    }
-    engine = LiveTradingEngine(
-        config=config,
-        broker=broker,
-        data_feed=data_feed,
-        approval_queue=approval_queue,
-        approval_mode=body.approval_mode,
-        auto_approve_strategies=body.auto_approve_strategies,
-    )
-    engine.start()
-    request.app.state.live_engine = engine
+        approval_queue = ApprovalQueue(broker=broker, persist_path="data/approvals.json")
+        request.app.state.approval_queue = approval_queue
 
-    try:
-        scheduler = TradingScheduler(engine=engine, schedule=body.schedule)
-        scheduler.start()
-        request.app.state.live_scheduler = scheduler
-    except ImportError:
-        log.warning("APScheduler not installed; scheduling disabled")
-        request.app.state.live_scheduler = None
+        config = {
+            "initial_capital": body.initial_capital,
+            "symbols": universe,
+        }
+        engine = LiveTradingEngine(
+            config=config,
+            broker=broker,
+            data_feed=data_feed,
+            approval_queue=approval_queue,
+            approval_mode=body.approval_mode,
+            auto_approve_strategies=body.auto_approve_strategies,
+        )
+        engine.start()
+        request.app.state.live_engine = engine
+
+        try:
+            scheduler = TradingScheduler(engine=engine, schedule=body.schedule)
+            scheduler.start()
+            request.app.state.live_scheduler = scheduler
+        except ImportError:
+            log.warning("APScheduler not installed; scheduling disabled")
+            request.app.state.live_scheduler = None
 
     return {"status": "started", "broker": body.broker, "schedule": body.schedule}
 
 
 @router.post("/stop")
 def live_stop(request: Request) -> dict[str, Any]:
-    scheduler = getattr(request.app.state, "live_scheduler", None)
-    if scheduler is not None:
-        scheduler.stop()
-        request.app.state.live_scheduler = None
+    with _engine_lock:
+        scheduler = getattr(request.app.state, "live_scheduler", None)
+        if scheduler is not None:
+            scheduler.stop()
+            request.app.state.live_scheduler = None
 
-    engine = getattr(request.app.state, "live_engine", None)
-    if engine is not None:
-        engine.stop()
-        request.app.state.live_engine = None
+        engine = getattr(request.app.state, "live_engine", None)
+        if engine is not None:
+            engine.stop()
+            request.app.state.live_engine = None
 
     return {"status": "stopped"}
 
@@ -187,6 +195,8 @@ def live_trigger(request: Request) -> dict[str, Any]:
         "orders_generated": result.orders_generated,
         "orders_submitted": result.orders_submitted,
         "orders_queued": result.orders_queued,
+        "orders_failed": result.orders_failed,
+        "skipped": result.skipped,
         "error": result.error,
     }
 

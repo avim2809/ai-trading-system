@@ -73,10 +73,15 @@ class LiveDataFeed:
         providers: dict[str, DataProvider],
         universe: list[str],
         lookback_days: int = 252,
+        exclude_forming_bar: bool = True,
     ) -> None:
         self._providers = providers
         self._universe = list(universe)
         self._lookback_days = lookback_days
+        # Drop the current (asof-day) daily bar, which is typically still
+        # forming intraday; using it would be a mild look-ahead and a source
+        # of live-vs-backtest skew.  Completed bars are picked up next session.
+        self._exclude_forming_bar = exclude_forming_bar
         self._pit_store = PointInTimeDataStore()
 
     def refresh(self, asof: datetime | None = None) -> LivePitViewAdapter:
@@ -100,6 +105,9 @@ class LiveDataFeed:
         if price_prov:
             try:
                 prices = price_prov.get_prices(self._universe, start, end)
+                if self._exclude_forming_bar and not prices.empty and "date" in prices.columns:
+                    today = pd.Timestamp(asof).normalize()
+                    prices = prices[pd.to_datetime(prices["date"]).dt.normalize() < today]
                 log.info("Fetched %d price rows for %d symbols", len(prices), len(self._universe))
             except Exception:
                 log.error("Price fetch failed", exc_info=True)

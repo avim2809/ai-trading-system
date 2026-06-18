@@ -61,6 +61,11 @@ class TradingScheduler:
             trigger=trigger,
             id=self._job_id,
             replace_existing=True,
+            # Never let a scheduled cycle overlap itself or pile up missed
+            # runs into a burst; the engine also guards against overlap with
+            # manual/API triggers via its own re-entrancy lock.
+            max_instances=1,
+            coalesce=True,
         )
         self._scheduler.start()
         log.info("Scheduler started: schedule=%s, tz=%s", self._schedule_spec, self._timezone)

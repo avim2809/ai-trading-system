@@ -23,6 +23,11 @@ class OrderRequest:
     limit_price: float | None = None
     strategy: str = "composite"
     time_in_force: str = "day"
+    # Client-side idempotency token.  When set, it is forwarded to the broker
+    # (Alpaca ``client_order_id`` / IBKR ``orderRef``) so a retried or
+    # overlapping cycle that re-submits the same order is deduplicated by the
+    # broker instead of double-filling.
+    client_order_id: str | None = None
 
 
 @dataclass

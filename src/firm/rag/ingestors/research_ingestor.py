@@ -8,6 +8,7 @@ from typing import Any
 import requests
 
 from firm.rag.chunker import DocumentChunker
+from firm.rag.dates import normalize_date
 from firm.rag.ingestors.base_ingestor import BaseIngestor
 from firm.rag.models import Document
 from firm.rag.store import VectorStore
@@ -81,7 +82,7 @@ class ResearchIngestor(BaseIngestor):
                 metadata = {
                     "source": "arxiv",
                     "doc_type": "research_paper",
-                    "date": published[:10] if published else "",
+                    "date": normalize_date(published),
                     "url": arxiv_id,
                     "title": title,
                     "authors": ", ".join(authors[:5]),

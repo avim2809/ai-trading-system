@@ -46,3 +46,17 @@ CORPORATE_ACTION_COLS: list[str] = [
     "value",
     "description",
 ]
+
+# Universe membership window columns (used by UniverseResolver for
+# survivorship-aware point-in-time index membership).
+COL_INDEX = "index"
+COL_SYMBOL = "symbol"
+COL_ADDED_DATE = "added_date"
+COL_REMOVED_DATE = "removed_date"
+
+UNIVERSE_COLUMNS: list[str] = [
+    COL_INDEX,
+    COL_SYMBOL,
+    COL_ADDED_DATE,
+    COL_REMOVED_DATE,
+]

@@ -32,6 +32,10 @@ class Blackboard:
         self.proposal: TradeProposal | None = None
         self.risk_decision: RiskDecision | None = None
         self.execution_report: ExecutionReport | None = None
+        # Audit trail of swallowed failures (a failed analyst/strategy is no
+        # longer silent) and a flag that the bar ran on a degraded signal set.
+        self.errors: list[dict] = []
+        self.degraded: bool = False
 
     def get_signals_by_symbol(self, symbol: str) -> list[Signal]:
         """Return all signals across every domain for *symbol*."""

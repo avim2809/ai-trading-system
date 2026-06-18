@@ -112,10 +112,11 @@ class ApprovalQueue:
             req = OrderRequest(
                 symbol=order_dict["symbol"],
                 side=order_dict["side"],
-                quantity=order_dict.get("quantity", order_dict.get("shares", 0)),
+                quantity=order_dict.get("quantity", abs(order_dict.get("shares", 0))),
                 order_type=order_dict.get("order_type", "market"),
                 limit_price=order_dict.get("limit_price"),
                 strategy=order_dict.get("strategy", ""),
+                client_order_id=f"appr-{approval_id}-{order_dict['symbol']}-{order_dict['side']}",
             )
             try:
                 status = self._broker.submit_order(req)

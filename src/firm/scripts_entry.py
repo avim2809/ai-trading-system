@@ -115,7 +115,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--no-fundamentals", action="store_true")
     parser.add_argument("--no-sentiment", action="store_true")
     parser.add_argument(
-        "--cache-dir", default=str(settings.cache_dir), help="Override cache directory"
+        "--cache-dir", default=str(settings.data.cache_dir), help="Override cache directory"
     )
     return parser.parse_args(argv)
 

@@ -123,5 +123,7 @@ def serialize_blackboard(bb: Blackboard) -> dict:
     result["execution_report"] = (
         serialize_execution_report(bb.execution_report) if bb.execution_report else None
     )
+    result["degraded"] = getattr(bb, "degraded", False)
+    result["errors"] = [serialize_dict(e) for e in getattr(bb, "errors", [])]
 
     return result

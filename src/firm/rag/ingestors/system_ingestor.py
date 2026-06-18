@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from firm.rag.chunker import DocumentChunker
+from firm.rag.dates import ALWAYS_AVAILABLE_DATE
 from firm.rag.ingestors.base_ingestor import BaseIngestor
 from firm.rag.models import Document
 from firm.rag.store import VectorStore
@@ -60,6 +61,7 @@ class SystemIngestor(BaseIngestor):
                     "doc_type": "strategy_doc",
                     "module": module_name,
                     "file": str(py_file.relative_to(_PROJECT_ROOT)),
+                    "date": ALWAYS_AVAILABLE_DATE,
                 }
                 chunks = self.chunker.chunk(docstring.strip(), metadata)
                 docs.extend(chunks)
@@ -78,6 +80,7 @@ class SystemIngestor(BaseIngestor):
                                     "source": "system",
                                     "doc_type": "strategy_doc",
                                     "file": str(py_file.relative_to(_PROJECT_ROOT)),
+                                    "date": ALWAYS_AVAILABLE_DATE,
                                 }
                                 chunks = self.chunker.chunk(docstring, metadata)
                                 docs.extend(chunks)
@@ -103,6 +106,7 @@ class SystemIngestor(BaseIngestor):
                     "source": "system",
                     "doc_type": "config",
                     "file": str(yaml_file.relative_to(_PROJECT_ROOT)),
+                    "date": ALWAYS_AVAILABLE_DATE,
                 }
                 chunks = self.chunker.chunk(
                     f"Configuration file: {yaml_file.name}\n\n{content}", metadata
@@ -129,6 +133,7 @@ class SystemIngestor(BaseIngestor):
                 "source": "system",
                 "doc_type": "readme",
                 "file": "README.md",
+                "date": ALWAYS_AVAILABLE_DATE,
             }
             chunks = self.chunker.chunk(content, metadata)
             docs.extend(chunks)

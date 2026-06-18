@@ -29,7 +29,10 @@ def zscore_signals(signals: list[Signal]) -> list[Signal]:
             result.extend(strat_signals)
             continue
         mean = sum(scores) / n
-        var = sum((x - mean) ** 2 for x in scores) / n
+        # Sample std (ddof=1) to match the pandas convention strategies use
+        # for their own z-scoring, so the two normalization stages are
+        # consistent rather than mixing population and sample variance.
+        var = sum((x - mean) ** 2 for x in scores) / (n - 1)
         std = var**0.5
         if std < 1e-10:
             result.extend(strat_signals)

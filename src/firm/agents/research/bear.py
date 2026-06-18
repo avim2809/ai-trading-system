@@ -34,18 +34,24 @@ class BearResearcher(Agent):
 
         for symbol in sorted(blackboard.get_all_symbols()):
             signals = blackboard.get_signals_by_symbol(symbol)
-            negative = [s for s in signals if s.score < 0]
-            if not negative:
+            if not signals:
                 continue
 
-            total_conf = sum(s.confidence for s in negative)
+            # Symmetric with the bull side: conviction is the NET (signed)
+            # confidence-weighted mean over ALL signals; a bear thesis is built
+            # only when that net is negative.
+            total_conf = sum(s.confidence for s in signals)
             if total_conf > 0:
-                raw = sum(abs(s.score) * s.confidence for s in negative) / total_conf
+                net = sum(s.score * s.confidence for s in signals) / total_conf
             else:
-                raw = sum(abs(s.score) for s in negative) / len(negative)
+                net = sum(s.score for s in signals) / len(signals)
 
-            conviction = min(1.0, max(0.0, raw / _ZSCORE_CAP))
+            if net >= 0:  # not net-bearish – leave to the bull researcher
+                continue
 
+            conviction = min(1.0, -net / _ZSCORE_CAP)
+
+            negative = [s for s in signals if s.score < 0]
             supporting_strategies = sorted({s.strategy for s in negative})
             supporting_domains = sorted(
                 {ss.domain for ss in blackboard.signal_sets for sig in ss.signals if sig.symbol == symbol and sig.score < 0}
@@ -54,7 +60,7 @@ class BearResearcher(Agent):
             rationale = (
                 f"Bearish on {symbol}: {len(negative)} negative signal(s) "
                 f"from {', '.join(supporting_domains) or 'unknown'} domain(s), "
-                f"avg |z-score| {raw:.2f}"
+                f"net z-score {net:.2f}"
             )
 
             theses.append(

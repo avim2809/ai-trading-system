@@ -31,8 +31,10 @@ class ExecutionAgent(Agent):
         decision: RiskDecision = inputs["decision"]
         portfolio = inputs.get("portfolio")
         prices: dict[str, float] = inputs.get("prices", {})
+        per_strategy: dict[str, dict[str, float]] = inputs.get("per_strategy", {})
 
         target_weights = decision.adjusted_targets
+        symbol_strategy = self._dominant_strategy_by_symbol(per_strategy)
 
         if portfolio is not None and prices:
             current_weights = portfolio.get_weights(prices)
@@ -69,10 +71,14 @@ class ExecutionAgent(Agent):
                 {
                     "symbol": sym,
                     "side": side,
+                    # Signed share count: the canonical field consumed by
+                    # PortfolioState.update and PerformanceAttribution.
+                    # ``quantity`` stays absolute for broker order requests.
+                    "shares": quantity if side == "buy" else -quantity,
                     "quantity": quantity,
                     "notional": abs(dollar_amount),
                     "price": price,
-                    "strategy": "composite",
+                    "strategy": symbol_strategy.get(sym, "composite"),
                 }
             )
             turnover += abs(diff_w)
@@ -81,3 +87,21 @@ class ExecutionAgent(Agent):
         costs = total_notional * (self.commission_pct + self.slippage_pct)
 
         return ExecutionReport(fills=orders, turnover=turnover, costs=costs)
+
+    @staticmethod
+    def _dominant_strategy_by_symbol(
+        per_strategy: dict[str, dict[str, float]],
+    ) -> dict[str, str]:
+        """Map each symbol to the strategy that contributed the most weight.
+
+        Used to tag each order with a real originating strategy so the live
+        engine's per-strategy approval routing is meaningful.  Symbols absent
+        from the attribution fall back to ``"composite"`` at the call site.
+        """
+        best: dict[str, tuple[float, str]] = {}
+        for strat, weights in (per_strategy or {}).items():
+            for sym, weight in weights.items():
+                contribution = abs(weight)
+                if sym not in best or contribution > best[sym][0]:
+                    best[sym] = (contribution, strat)
+        return {sym: strat for sym, (_, strat) in best.items()}

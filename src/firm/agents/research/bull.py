@@ -34,18 +34,25 @@ class BullResearcher(Agent):
 
         for symbol in sorted(blackboard.get_all_symbols()):
             signals = blackboard.get_signals_by_symbol(symbol)
-            positive = [s for s in signals if s.score > 0]
-            if not positive:
+            if not signals:
                 continue
 
-            total_conf = sum(s.confidence for s in positive)
+            # Conviction reflects the NET (signed) confidence-weighted mean of
+            # ALL signals for the symbol, not just the positive subset.  This
+            # is symmetric with the bear side and consistent with the debate
+            # netting, so a lone loud signal can't dominate a quiet opposing one.
+            total_conf = sum(s.confidence for s in signals)
             if total_conf > 0:
-                raw = sum(s.score * s.confidence for s in positive) / total_conf
+                net = sum(s.score * s.confidence for s in signals) / total_conf
             else:
-                raw = sum(s.score for s in positive) / len(positive)
+                net = sum(s.score for s in signals) / len(signals)
 
-            conviction = min(1.0, max(0.0, raw / _ZSCORE_CAP))
+            if net <= 0:  # not net-bullish – leave to the bear researcher
+                continue
 
+            conviction = min(1.0, net / _ZSCORE_CAP)
+
+            positive = [s for s in signals if s.score > 0]
             supporting_strategies = sorted({s.strategy for s in positive})
             supporting_domains = sorted(
                 {ss.domain for ss in blackboard.signal_sets for sig in ss.signals if sig.symbol == symbol and sig.score > 0}
@@ -54,7 +61,7 @@ class BullResearcher(Agent):
             rationale = (
                 f"Bullish on {symbol}: {len(positive)} positive signal(s) "
                 f"from {', '.join(supporting_domains) or 'unknown'} domain(s), "
-                f"avg z-score {raw:.2f}"
+                f"net z-score {net:.2f}"
             )
 
             theses.append(

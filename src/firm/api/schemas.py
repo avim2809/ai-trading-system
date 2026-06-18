@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from datetime import date
+
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class RunRequest(BaseModel):
@@ -11,14 +13,37 @@ class RunRequest(BaseModel):
     universe_symbols: list[str] | None = None
     start_date: str = "2020-01-01"
     end_date: str = "2023-12-31"
-    initial_capital: float = 10_000_000
-    commission_pct: float = 0.001
-    slippage_pct: float = 0.0005
+    initial_capital: float = Field(default=10_000_000, gt=0)
+    commission_pct: float = Field(default=0.001, ge=0, lt=1)
+    slippage_pct: float = Field(default=0.0005, ge=0, lt=1)
     rebalance_frequency: str = "weekly"
     risk_overrides: dict[str, float] = {}
     data_source: str = "synthetic"
     seed: int = 42
     notes: str = ""
+
+    @field_validator("start_date", "end_date")
+    @classmethod
+    def _valid_iso_date(cls, v: str) -> str:
+        try:
+            date.fromisoformat(v)
+        except ValueError as exc:
+            raise ValueError(f"invalid date {v!r}; expected YYYY-MM-DD") from exc
+        return v
+
+    @field_validator("rebalance_frequency")
+    @classmethod
+    def _valid_frequency(cls, v: str) -> str:
+        allowed = {"daily", "weekly", "monthly"}
+        if v not in allowed:
+            raise ValueError(f"rebalance_frequency must be one of {sorted(allowed)}")
+        return v
+
+    @model_validator(mode="after")
+    def _end_after_start(self) -> "RunRequest":
+        if date.fromisoformat(self.end_date) < date.fromisoformat(self.start_date):
+            raise ValueError("end_date must be on or after start_date")
+        return self
 
 
 class RunSummary(BaseModel):

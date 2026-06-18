@@ -9,6 +9,22 @@ from firm.rag.embeddings import get_model_info
 from firm.rag.models import Document, RetrievedDoc
 
 
+def _asof_str(asof: Any) -> str:
+    """Coerce a datetime/date/ISO-string *asof* to an ISO ``YYYY-MM-DD``."""
+    if hasattr(asof, "strftime"):
+        return asof.strftime("%Y-%m-%d")
+    return str(asof)[:10]
+
+
+def _and_filters(
+    a: dict[str, Any] | None, b: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Combine two ChromaDB where-clauses with ``$and`` (single clause unwrapped)."""
+    if a and b:
+        return {"$and": [a, b]}
+    return a or b
+
+
 class VectorStore:
     """Persistent vector store wrapping ChromaDB with sentence-transformer embeddings."""
 
@@ -81,8 +97,17 @@ class VectorStore:
         query_text: str,
         n_results: int = 5,
         where_filters: dict[str, Any] | None = None,
+        asof: Any = None,
     ) -> list[RetrievedDoc]:
-        """Query a collection for similar documents."""
+        """Query a collection for similar documents.
+
+        When *asof* (a ``datetime``/date or ISO string) is given, only
+        documents whose ``date`` metadata is ``<= asof`` are returned, so
+        future-dated filings/news can never leak into a point-in-time
+        decision.
+        """
+        if asof is not None:
+            where_filters = _and_filters(where_filters, {"date": {"$lte": _asof_str(asof)}})
         collection = self.get_or_create_collection(collection_name)
 
         kwargs: dict[str, Any] = {

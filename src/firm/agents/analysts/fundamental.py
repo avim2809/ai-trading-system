@@ -38,12 +38,14 @@ class FundamentalAnalyst(Agent):
             return SignalSet(domain="fundamental", asof=ctx.now, signals=[])
 
         all_signals = []
+        self._last_errors: list[dict] = []
         for strat in strategies:
             try:
                 signals = strat.generate(pit_view)
                 all_signals.extend(signals)
-            except Exception:
+            except Exception as exc:
                 log.warning("Strategy %s failed in fundamental analyst", strat.name, exc_info=True)
+                self._last_errors.append({"strategy": strat.name, "error": str(exc)})
 
         zscored = zscore_signals(all_signals)
         return SignalSet(domain="fundamental", asof=ctx.now, signals=zscored)

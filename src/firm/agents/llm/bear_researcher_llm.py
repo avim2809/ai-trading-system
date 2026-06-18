@@ -33,6 +33,7 @@ class LLMBearResearcher(BearResearcher, LLMAgentMixin):
                 thesis.symbol,
                 f"bearish risk factors regulatory litigation for {thesis.symbol}",
                 collections=["news", "sec_filings", "earnings"],
+                asof=ctx.now,
             )
             if not rag_context:
                 enhanced.append(thesis)

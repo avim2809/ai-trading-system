@@ -10,6 +10,7 @@ from typing import Any
 import requests
 
 from firm.rag.chunker import DocumentChunker
+from firm.rag.dates import normalize_date
 from firm.rag.ingestors.base_ingestor import BaseIngestor
 from firm.rag.models import Document
 from firm.rag.store import VectorStore
@@ -88,7 +89,7 @@ class NewsIngestor(BaseIngestor):
                     "source": source,
                     "symbol": symbol,
                     "doc_type": "news",
-                    "date": pub_date,
+                    "date": normalize_date(pub_date),
                     "url": link,
                 }
                 chunks = self.chunker.chunk(text, metadata)
@@ -122,7 +123,7 @@ class NewsIngestor(BaseIngestor):
                     "source": "tiingo",
                     "symbol": symbol,
                     "doc_type": "news",
-                    "date": article.get("publishedDate", ""),
+                    "date": normalize_date(article.get("publishedDate", "")),
                     "url": article.get("url", ""),
                 }
                 chunks = self.chunker.chunk(text, metadata)
@@ -159,7 +160,7 @@ class NewsIngestor(BaseIngestor):
                     "source": "alphavantage",
                     "symbol": symbol,
                     "doc_type": "news",
-                    "date": article.get("time_published", ""),
+                    "date": normalize_date(article.get("time_published", "")),
                     "url": article.get("url", ""),
                 }
                 chunks = self.chunker.chunk(text, metadata)

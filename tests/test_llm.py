@@ -114,7 +114,7 @@ def _build_fake_rag_module():
     class FakeRetriever:
         def __init__(self, store, **kw):
             pass
-        def retrieve_for_symbol(self, symbol, query, n_results=3):
+        def retrieve_for_symbol(self, symbol, query, n_results=3, collections=None, asof=None):
             return [FakeDoc(f"News about {symbol}: record earnings", {"source": "reuters"})]
 
     store_mod.VectorStore = FakeVectorStore  # type: ignore[attr-defined]

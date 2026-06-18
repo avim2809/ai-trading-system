@@ -49,7 +49,10 @@ class LLMService:
         temperature = temperature if temperature is not None else self.temperature
 
         if self._cache is not None:
-            cache_key = ResponseCache._hash(model, messages)
+            cache_key = ResponseCache._hash(
+                model, messages,
+                temperature=temperature, max_tokens=max_tokens, json_mode=json_mode,
+            )
             cached = self._cache.get(cache_key)
             if cached is not None:
                 self._cache_hits += 1
@@ -88,13 +91,21 @@ class LLMService:
     ) -> dict[str, Any]:
         """Chat with json_mode enabled, returning parsed JSON dict."""
         raw = self.chat(messages, model=model, json_mode=True, **kwargs)
+
+        def _as_dict(parsed: Any) -> dict[str, Any]:
+            if not isinstance(parsed, dict):
+                raise json.JSONDecodeError("expected a JSON object", raw, 0)
+            return parsed
+
         try:
-            return json.loads(raw)
+            return _as_dict(json.loads(raw))
         except json.JSONDecodeError:
+            # Best-effort recovery of an embedded object; never return a
+            # partial/non-object value silently – raise so callers fall back.
             start = raw.find("{")
             end = raw.rfind("}") + 1
             if start >= 0 and end > start:
-                return json.loads(raw[start:end])
+                return _as_dict(json.loads(raw[start:end]))
             raise
 
     @property
