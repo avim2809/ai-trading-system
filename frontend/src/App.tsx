@@ -1,14 +1,18 @@
+import { lazy } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
-import Dashboard from './pages/Dashboard'
-import NewBacktest from './pages/NewBacktest'
-import RunDetail from './pages/RunDetail'
-import Compare from './pages/Compare'
-import AgentInspector from './pages/AgentInspector'
-import LiveDashboard from './pages/LiveDashboard'
-import LiveConfig from './pages/LiveConfig'
-import Approvals from './pages/Approvals'
-import OrderHistory from './pages/OrderHistory'
+
+// Lazy-loaded route pages so each becomes its own chunk, keeping the initial
+// bundle small (the shell/Layout loads eagerly).
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const NewBacktest = lazy(() => import('./pages/NewBacktest'))
+const RunDetail = lazy(() => import('./pages/RunDetail'))
+const Compare = lazy(() => import('./pages/Compare'))
+const AgentInspector = lazy(() => import('./pages/AgentInspector'))
+const LiveDashboard = lazy(() => import('./pages/LiveDashboard'))
+const LiveConfig = lazy(() => import('./pages/LiveConfig'))
+const Approvals = lazy(() => import('./pages/Approvals'))
+const OrderHistory = lazy(() => import('./pages/OrderHistory'))
 
 export default function App() {
   return (

@@ -122,6 +122,12 @@ def launch_run(req: RunRequest):
         "seed": req.seed,
         **req.risk_overrides,
     }
+    if req.regime_overlay is not None:
+        # Merge over the settings default so partial overrides work.
+        config["regime_overlay"] = {
+            **config.get("regime_overlay", {}),
+            **req.regime_overlay,
+        }
     if req.universe_symbols:
         config["universe_symbols"] = req.universe_symbols
 

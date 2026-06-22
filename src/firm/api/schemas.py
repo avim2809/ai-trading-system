@@ -18,6 +18,10 @@ class RunRequest(BaseModel):
     slippage_pct: float = Field(default=0.0005, ge=0, lt=1)
     rebalance_frequency: str = "weekly"
     risk_overrides: dict[str, float] = {}
+    # Optional HMM market-regime exposure overlay; merged over the settings
+    # default. Nested (enable flag + exposure_map), so it cannot ride in the
+    # number-only ``risk_overrides`` map.
+    regime_overlay: dict | None = None
     data_source: str = "synthetic"
     seed: int = 42
     notes: str = ""

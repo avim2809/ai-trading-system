@@ -21,6 +21,14 @@ export interface RunDetail extends RunSummary {
   artifacts_dir: string
 }
 
+export interface RegimeOverlayConfig {
+  enabled: boolean
+  benchmark_symbol: string | null
+  n_states: number
+  retrain_frequency: number
+  exposure_map: { Bull: number; Bear: number; Chop: number }
+}
+
 export interface RunRequest {
   strategies: string[]
   strategy_params: Record<string, Record<string, unknown>>
@@ -32,6 +40,7 @@ export interface RunRequest {
   slippage_pct: number
   rebalance_frequency: string
   risk_overrides: Record<string, number>
+  regime_overlay?: RegimeOverlayConfig
   data_source: string
   seed: number
   notes: string

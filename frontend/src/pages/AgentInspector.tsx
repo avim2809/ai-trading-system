@@ -13,6 +13,39 @@ function AIBadge() {
   )
 }
 
+const REGIME_STYLES: Record<string, string> = {
+  Bull: 'bg-emerald-900/50 text-emerald-300 border-emerald-700/50',
+  Bear: 'bg-red-900/50 text-red-300 border-red-700/50',
+  Chop: 'bg-amber-900/50 text-amber-300 border-amber-700/50',
+}
+
+function RegimeBadge({ label, confidence }: { label: string; confidence?: number }) {
+  const style = REGIME_STYLES[label] ?? 'bg-slate-700/50 text-slate-300 border-slate-600/50'
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ml-2 ${style}`}>
+      {label}
+      {confidence != null && <span className="ml-1 font-mono opacity-80">{confidence.toFixed(2)}</span>}
+    </span>
+  )
+}
+
+/** Most common regime across regime_hmm signals, with average confidence. */
+function marketRegime(view: BlackboardView): { label: string; confidence: number; n: number } | null {
+  const regimeSigs = view.signal_sets
+    .flatMap((ss) => ss.signals)
+    .filter((s) => s.strategy === 'regime_hmm' && typeof s.meta?.regime === 'string')
+  if (regimeSigs.length === 0) return null
+  const counts: Record<string, { n: number; conf: number }> = {}
+  for (const s of regimeSigs) {
+    const label = s.meta.regime as string
+    const bucket = counts[label] ?? (counts[label] = { n: 0, conf: 0 })
+    bucket.n += 1
+    bucket.conf += s.confidence
+  }
+  const [label, agg] = Object.entries(counts).sort((a, b) => b[1].n - a[1].n)[0]!
+  return { label, confidence: agg.conf / agg.n, n: regimeSigs.length }
+}
+
 function AIReasoning({ rationale }: { rationale: string }) {
   const [expanded, setExpanded] = useState(false)
   return (
@@ -64,12 +97,14 @@ function LLMUsageSummary({ usage }: { usage: { total_tokens?: number; total_cost
 function SignalRow({ sig }: { sig: Signal }) {
   const isLLMEnhanced = sig.meta?.llm_enhanced === true
   const rationale = sig.meta?.llm_rationale as string | undefined
+  const regime = typeof sig.meta?.regime === 'string' ? (sig.meta.regime as string) : undefined
   return (
     <>
       <tr className="text-slate-300">
         <td className="pr-4 py-0.5 font-mono">
           {sig.symbol}
           {isLLMEnhanced && <AIBadge />}
+          {regime && <RegimeBadge label={regime} />}
         </td>
         <td className="pr-4 py-0.5">{sig.strategy}</td>
         <td className={`pr-4 py-0.5 text-right font-mono ${sig.score > 0 ? 'text-emerald-400' : sig.score < 0 ? 'text-red-400' : ''}`}>
@@ -219,9 +254,21 @@ export default function AgentInspector() {
       {/* Pipeline Visualization */}
       {result && (
         <div className="space-y-4">
-          <p className="text-xs text-slate-400">
-            Pipeline snapshot as of <span className="text-slate-200 font-mono">{result.asof}</span>
-          </p>
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <p className="text-xs text-slate-400">
+              Pipeline snapshot as of <span className="text-slate-200 font-mono">{result.asof}</span>
+            </p>
+            {(() => {
+              const mr = marketRegime(result)
+              return mr ? (
+                <span className="text-xs text-slate-400 flex items-center">
+                  Market regime:
+                  <RegimeBadge label={mr.label} confidence={mr.confidence} />
+                  <span className="ml-2 text-slate-500">({mr.n} symbols)</span>
+                </span>
+              ) : null
+            })()}
+          </div>
 
           {/* Analysts */}
           <PipelineStage title="Analysts" status="complete">

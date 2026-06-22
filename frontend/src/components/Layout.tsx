@@ -1,4 +1,6 @@
+import { Suspense } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
+import Spinner from './Spinner'
 
 const backtestLinks = [
   { to: '/', label: 'Dashboard', icon: '📊' },
@@ -64,7 +66,15 @@ export default function Layout() {
 
       <main className="flex-1 overflow-auto">
         <div className="p-6 max-w-[1600px] mx-auto">
-          <Outlet />
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-64">
+                <Spinner className="h-8 w-8" />
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </div>
       </main>
     </div>

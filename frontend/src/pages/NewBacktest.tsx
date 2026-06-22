@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { RunRequest } from '../api/types'
+import type { RunRequest, RegimeOverlayConfig } from '../api/types'
 import StrategyConfigForm from '../components/StrategyConfigForm'
 import Spinner from '../components/Spinner'
 
@@ -33,6 +33,13 @@ export default function NewBacktest() {
   const [notes, setNotes] = useState('')
   const [showRisk, setShowRisk] = useState(false)
   const [riskOverrides, setRiskOverrides] = useState<Record<string, number>>({})
+  const [regime, setRegime] = useState<RegimeOverlayConfig>({
+    enabled: false,
+    benchmark_symbol: null,
+    n_states: 3,
+    retrain_frequency: 21,
+    exposure_map: { Bull: 1.5, Bear: 0.5, Chop: 0.25 },
+  })
 
   const launch = useMutation({
     mutationFn: (req: RunRequest) => api.launchRun(req),
@@ -60,6 +67,7 @@ export default function NewBacktest() {
       slippage_pct: slippage,
       rebalance_frequency: rebalance,
       risk_overrides: riskOverrides,
+      regime_overlay: regime,
       data_source: dataSource,
       seed,
       notes,
@@ -210,6 +218,88 @@ export default function NewBacktest() {
                   />
                 </div>
               ))}
+            </div>
+          )}
+        </section>
+
+        {/* Market Regime Overlay */}
+        <section>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={regime.enabled}
+              onChange={(e) => setRegime((r) => ({ ...r, enabled: e.target.checked }))}
+              className="text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+            />
+            Market Regime Overlay (HMM)
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            Scales gross exposure by the detected market regime (Bull → lever up, Bear/Chop →
+            de-risk), blended by HMM posterior confidence.
+          </p>
+          {regime.enabled && (
+            <div className="mt-3 space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Benchmark symbol</label>
+                  <input
+                    type="text"
+                    value={regime.benchmark_symbol ?? ''}
+                    onChange={(e) =>
+                      setRegime((r) => ({ ...r, benchmark_symbol: e.target.value.trim() || null }))
+                    }
+                    placeholder="e.g. SPY (blank = universe avg)"
+                    className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Num states</label>
+                  <input
+                    type="number"
+                    min={2}
+                    value={regime.n_states}
+                    onChange={(e) => setRegime((r) => ({ ...r, n_states: Number(e.target.value) }))}
+                    className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Retrain freq (bars)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={regime.retrain_frequency}
+                    onChange={(e) =>
+                      setRegime((r) => ({ ...r, retrain_frequency: Number(e.target.value) }))
+                    }
+                    className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  Gross-exposure factor per regime (at full confidence)
+                </label>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['Bull', 'Bear', 'Chop'] as const).map((label) => (
+                    <div key={label}>
+                      <label className="block text-xs text-slate-500 mb-1">{label}</label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min={0}
+                        value={regime.exposure_map[label]}
+                        onChange={(e) =>
+                          setRegime((r) => ({
+                            ...r,
+                            exposure_map: { ...r.exposure_map, [label]: Number(e.target.value) },
+                          }))
+                        }
+                        className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
         </section>
