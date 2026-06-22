@@ -32,7 +32,7 @@ Every step can run in pure quant mode, AI-enhanced mode (quant + LLM reasoning),
 
 | Category | Details |
 |----------|---------|
-| **Strategies** | Cross-sectional momentum, trend following, mean reversion, statistical arbitrage, multi-factor, sentiment, PEAD event-driven, ML prediction, volatility breakout, seasonality, W.D. Gann composite |
+| **Strategies** | Cross-sectional momentum, trend following, mean reversion, statistical arbitrage, multi-factor, sentiment, PEAD event-driven, ML prediction, volatility breakout, seasonality, W.D. Gann composite, HMM regime detection |
 | **Agent Pipeline** | 3 domain analysts, bull/bear researchers, debate synthesis, portfolio manager, risk manager (6-constraint pipeline + veto), execution agent |
 | **Backtesting** | Backtrader engine, strict no-look-ahead PIT data store, configurable rebalancing, transaction costs, slippage, per-strategy attribution |
 | **Live Trading** | Alpaca (paper + live), Interactive Brokers (paper + live), configurable approval workflow (full-auto / semi-auto per strategy), APScheduler |
@@ -70,7 +70,7 @@ flowchart LR
   subgraph DataFlow [Data Flow]
     direction LR
     Providers["Data Providers (Polygon, Tiingo, AV, FMP)"] --> PIT["PIT DataStore (date <= asof)"]
-    PIT --> Strategies["11 Strategies"]
+    PIT --> Strategies["12 Strategies"]
     Strategies --> Signals["Standardized Signals"]
     Signals --> Pipeline["Agent Pipeline"]
     Pipeline --> Orders["Orders"]
@@ -193,6 +193,30 @@ pip install -e ".[llm]"
 | 9 | `volatility_breakout` | Technical | ATR breakout from low-vol compression |
 | 10 | `seasonality` | Technical | Turn-of-month + day-of-week calendar effects |
 | 11 | `gann` | Technical | W.D. Gann composite: angles, Square of Nine, time cycles, swing, retracement |
+| 12 | `regime_hmm` | Technical | Per-symbol Gaussian HMM regime detection (Bull/Chop/Bear) with directional, confidence-weighted signals |
+
+### HMM Market-Regime Detection
+
+`regime_hmm` treats markets as non-stationary processes that cycle between hidden
+regimes. A per-symbol Gaussian Hidden Markov Model is fit (Baum-Welch) on
+stationarised features — daily log return, 5-day cumulative log return, 14-period
+ATR, and a 20-day volume-spike ratio — using only data up to `asof` (walk-forward,
+no look-ahead). The forward posterior decodes the current regime; states are
+labelled Bull / Chop / Bear by mean return, and the transition matrix is
+Laplace-smoothed to avoid zero-probability collapse. Signals are long in Bull,
+short in Bear, and damped in Chop, weighted by the regime posterior confidence.
+
+A complementary **market-regime exposure overlay** in the `RiskAgent`
+(`risk.regime_overlay.enabled: true`) detects the broad-market regime from a proxy
+series and scales gross exposure per the playbooks — lever up in Bull, de-risk in
+Bear/Chop — blended by posterior confidence so partial regime updates feed through
+to sizing gradually (mitigating regime lag). The HMM logic lives in
+[`firm/regime/`](src/firm/regime/) and is shared by both the strategy and the overlay.
+
+> Validated by the literature: a 3-state Gaussian HMM outperforms double moving
+> average strategies in total return and drawdown control (Chen, Yi & Zhao, 2020),
+> and HMM-enhanced agents improve Sharpe/Sortino over non-regime-aware baselines
+> (Ndoutoumou, Yin & Cheng, IDS 2025).
 
 ## Agent Pipeline
 

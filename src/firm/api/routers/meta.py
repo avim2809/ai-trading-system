@@ -51,6 +51,10 @@ STRATEGY_INFO: dict[str, dict[str, str]] = {
         "summary": "W.D. Gann composite",
         "description": "Quantifies five Gann techniques — geometric angles from pivot points, Square of Nine support/resistance, time cycle convergence, swing charting, and retracement levels — into a composite signal with a trend-strength filter.",
     },
+    "regime_hmm": {
+        "summary": "HMM market-regime detection",
+        "description": "Fits a per-symbol Gaussian Hidden Markov Model on stationarised features (log returns, 5-day cumulative log return, ATR, volume-spike ratio), decodes the hidden regime via the forward posterior, and labels states Bull/Chop/Bear by mean return. Emits directional signals (long in Bull, short in Bear, damped in Chop) weighted by regime confidence. Pairs with the RiskAgent market-regime exposure overlay (Chen, Yi & Zhao, 2020).",
+    },
 }
 
 

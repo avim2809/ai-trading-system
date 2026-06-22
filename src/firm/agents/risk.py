@@ -42,6 +42,22 @@ class RiskAgent(Agent):
         # Optional static sector map used when none is supplied per-call.
         self.sector_map: dict[str, str] = cfg.get("sector_map", {})
 
+        # Optional HMM market-regime overlay (off by default).  When enabled,
+        # gross exposure is scaled by the prevailing market regime per the
+        # playbooks in the regime design doc (Bull → lever up, Bear/Chop →
+        # de-risk).  The detector reads the point-in-time view on ctx, so no
+        # orchestrator/contract changes are required.
+        overlay_cfg = cfg.get("regime_overlay", {}) or {}
+        self.regime_overlay_enabled: bool = bool(overlay_cfg.get("enabled", False))
+        self._regime_overlay_cfg: dict[str, Any] = overlay_cfg
+        # exposure_map: regime label -> target gross-scale at full confidence.
+        # The effective scale is blended by posterior confidence so a partial
+        # regime update produces a partial sizing change (regime-lag, §6.1).
+        self.regime_exposure_map: dict[str, float] = overlay_cfg.get(
+            "exposure_map", {"Bull": 1.5, "Bear": 0.5, "Chop": 0.25}
+        )
+        self._regime_detector = None
+
     def run(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
         proposal: TradeProposal = inputs["proposal"]
         portfolio = inputs.get("portfolio")
@@ -115,6 +131,16 @@ class RiskAgent(Agent):
                 violations=violations,
                 actions=actions,
             )
+
+        # Regime overlay is an *intentional* portfolio-sizing policy, not a
+        # constraint breach, so it is applied to the already-approved book
+        # (after the veto decision) and re-capped by the hard caps — it must
+        # never by itself trigger a veto/abort.
+        if self.regime_overlay_enabled:
+            regime_state = inputs.get("regime_state") or self._detect_regime(ctx)
+            targets, _v, a = self._regime_exposure_overlay(targets, regime_state)
+            actions.extend(a)
+            targets, _v2, _a2 = self._enforce_hard_caps(targets)
 
         return RiskDecision(
             approved=True,
@@ -276,4 +302,62 @@ class RiskAgent(Agent):
             scaled,
             [f"Drawdown {drawdown:.1%} exceeds threshold {self.max_drawdown_pct:.1%}"],
             [f"Reduced exposure by {1 - scale:.0%} (drawdown circuit breaker)"],
+        )
+
+    # ------------------------------------------------------------------
+    # HMM market-regime overlay (opt-in)
+    # ------------------------------------------------------------------
+
+    def _detect_regime(self, ctx: AgentContext):
+        """Detect the prevailing market regime from ``ctx.pit_view``.
+
+        Returns a :class:`~firm.regime.model.RegimeState` or ``None`` when the
+        regime cannot be determined (no data / ``hmmlearn`` missing), in which
+        case the overlay is a no-op.
+        """
+        pit_view = getattr(ctx, "pit_view", None)
+        if pit_view is None:
+            return None
+        if self._regime_detector is None:
+            from firm.regime.detector import MarketRegimeDetector
+
+            cfg = self._regime_overlay_cfg
+            self._regime_detector = MarketRegimeDetector(
+                n_states=cfg.get("n_states", 3),
+                lookback_days=cfg.get("lookback_days", 504),
+                retrain_frequency=cfg.get("retrain_frequency", 21),
+                benchmark_symbol=cfg.get("benchmark_symbol"),
+            )
+        return self._regime_detector.detect(pit_view)
+
+    def _regime_exposure_overlay(
+        self, targets: dict[str, float], regime_state
+    ) -> tuple[dict[str, float], list[str], list[str]]:
+        """Scale gross exposure by the prevailing market regime.
+
+        The full-confidence scale comes from :attr:`regime_exposure_map`; the
+        effective scale is blended by the posterior confidence so an uncertain
+        regime read barely moves sizing while a confident one applies the full
+        playbook factor::
+
+            effective = 1 + (factor - 1) * confidence
+        """
+        if regime_state is None:
+            return targets, [], ["Regime overlay: no regime detected (no-op)"]
+
+        label = regime_state.label
+        confidence = float(regime_state.confidence)
+        factor = self.regime_exposure_map.get(label, 1.0)
+        effective = 1.0 + (factor - 1.0) * confidence
+        if abs(effective - 1.0) < 1e-9:
+            return targets, [], [f"Regime overlay: {label} (conf {confidence:.2f}) — no change"]
+
+        scaled = {s: w * effective for s, w in targets.items()}
+        return (
+            scaled,
+            [],
+            [
+                f"Regime overlay: {label} (conf {confidence:.2f}) "
+                f"scaled gross exposure by {effective:.3f}"
+            ],
         )

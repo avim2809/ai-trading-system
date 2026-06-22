@@ -38,12 +38,46 @@ def _maybe_wrap(agent, role_key: str, llm_cls_path: str, agent_modes: dict, conf
         return agent
 
 
+# Analyst category → strategy names (mirrors the wiring in tests/test_e2e.py).
+# Any registered strategy not listed here (e.g. ml_prediction, gann, stat_arb,
+# regime_hmm) falls through to the technical analyst.
+_FUND_STRATEGIES = {"multi_factor"}
+_SENT_STRATEGIES = {"sentiment", "event_driven"}
+
+
+def _build_categorized_strategies(config: dict) -> dict[str, list]:
+    """Instantiate strategies from *config* and bucket them by analyst.
+
+    ``config["strategies"]`` is a list of registered strategy names; when it is
+    absent or empty we default to **all** registered strategies (matching the
+    intent of the API/UI strategy selector and the test wiring).  Optional
+    per-strategy params come from ``config["strategy_params"]``.
+    """
+    from firm.strategies import get, list_strategies
+
+    names = config.get("strategies") or list_strategies()
+    params_map: dict = config.get("strategy_params", {}) or {}
+
+    instances = []
+    for name in names:
+        try:
+            instances.append(get(name)(params_map.get(name)))
+        except Exception:
+            log.warning("Could not instantiate strategy %r — skipping", name, exc_info=True)
+
+    fund = [s for s in instances if s.name in _FUND_STRATEGIES]
+    sent = [s for s in instances if s.name in _SENT_STRATEGIES]
+    tech = [s for s in instances if s not in fund and s not in sent]
+    return {"technical": tech, "fundamental": fund, "sentiment": sent}
+
+
 def build_orchestrator(config: dict):
     """Construct the full agent pipeline from *config*.
 
     Imports are deferred so the module loads even in minimal environments.
     Reads ``agent_modes`` and ``llm_config`` from *config* to optionally
-    wrap quant agents with their LLM-enhanced variants.
+    wrap quant agents with their LLM-enhanced variants, and ``strategies``
+    to wire alpha strategies into the analysts.
     """
     from firm.agents.orchestrator import Orchestrator
 
@@ -60,9 +94,11 @@ def build_orchestrator(config: dict):
     agent_modes: dict = config.get("agent_modes", {})
     llm_config: dict = config.get("llm_config", {})
 
-    tech = TechnicalAnalyst(config=config)
-    fund = FundamentalAnalyst(config=config)
-    sent = SentimentAnalyst(config=config)
+    strats = _build_categorized_strategies(config)
+
+    tech = TechnicalAnalyst(strategies=strats["technical"], config=config)
+    fund = FundamentalAnalyst(strategies=strats["fundamental"], config=config)
+    sent = SentimentAnalyst(strategies=strats["sentiment"], config=config)
     bull = BullResearcher(config=config)
     bear = BearResearcher(config=config)
     debate = DebateAgent(config=config)
@@ -100,6 +136,12 @@ def build_orchestrator(config: dict):
             trader = wrapped
         elif role_key == "risk":
             risk = wrapped
+
+    # _maybe_wrap may have swapped in LLM-enhanced analysts constructed without
+    # strategies; re-attach the categorized lists so the wrap path keeps them.
+    tech.strategies = strats["technical"]
+    fund.strategies = strats["fundamental"]
+    sent.strategies = strats["sentiment"]
 
     analysts = [tech, fund, sent]
 

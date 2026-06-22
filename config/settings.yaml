@@ -11,6 +11,11 @@ backtest:
   slippage_pct: 0.0005
   rebalance_frequency: "weekly"
 
+# Alpha strategies wired into the analysts. Leave empty/omit to enable ALL
+# registered strategies. Example explicit selection including HMM regime:
+#   strategies: ["momentum", "trend", "regime_hmm"]
+strategies: []
+
 risk:
   max_position_pct: 0.05
   max_gross_exposure: 2.0
@@ -18,6 +23,21 @@ risk:
   max_sector_pct: 0.25
   vol_target: 0.15
   max_drawdown_pct: 0.20
+
+  # HMM market-regime exposure overlay (off by default). When enabled, the
+  # RiskAgent detects the broad market regime from a proxy series and scales
+  # gross exposure by the per-regime factor (blended by posterior confidence):
+  # Bull → lever up, Bear/Chop → de-risk (Chen, Yi & Zhao, 2020, §5).
+  regime_overlay:
+    enabled: false
+    benchmark_symbol: null   # e.g. "SPY"; falls back to equal-weight universe
+    n_states: 3
+    retrain_frequency: 21    # bars between HMM refits
+    lookback_days: 504
+    exposure_map:
+      Bull: 1.5
+      Bear: 0.5
+      Chop: 0.25
 
 data:
   cache_dir: "data/cache"

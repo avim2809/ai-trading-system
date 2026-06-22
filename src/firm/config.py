@@ -40,6 +40,9 @@ class RiskConfig(BaseModel):
     max_sector_pct: float = 0.25
     vol_target: float = 0.15
     max_drawdown_pct: float = 0.20
+    # Optional HMM market-regime exposure overlay (off unless ``enabled: true``).
+    # See firm.agents.risk.RiskAgent and firm.regime.detector.MarketRegimeDetector.
+    regime_overlay: dict[str, Any] = {}
 
 
 class DataConfig(BaseModel):
@@ -61,6 +64,8 @@ class Settings(BaseSettings):
     backtest: BacktestConfig = BacktestConfig()
     risk: RiskConfig = RiskConfig()
     data: DataConfig = DataConfig()
+    # Alpha strategies to wire into the analysts. Empty → all registered.
+    strategies: list[str] = []
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

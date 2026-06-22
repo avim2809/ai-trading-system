@@ -11,6 +11,7 @@ from firm.strategies import (  # noqa: F401
     ml_prediction,
     momentum,
     multi_factor,
+    regime_hmm,
     seasonality,
     sentiment,
     stat_arb,
