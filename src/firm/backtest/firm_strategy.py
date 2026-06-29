@@ -9,19 +9,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
 import backtrader as bt
 
 from firm.data.pit_store import PointInTimeDataStore
-
-if TYPE_CHECKING:
-    from firm.agents.orchestrator import Orchestrator
-    from firm.portfolio.attribution import PerformanceAttribution
-    from firm.portfolio.state import PortfolioState
-    from firm.strategies.base import PitView
 
 log = logging.getLogger(__name__)
 
@@ -90,6 +83,8 @@ class FirmStrategy(bt.Strategy):
         ("rebalance_frequency", "weekly"),  # 'daily', 'weekly', 'monthly'
         ("universe", None),  # list of symbols
         ("attribution", None),  # PerformanceAttribution instance (optional)
+        ("commission_pct", 0.001),  # per-trade commission rate
+        ("slippage_pct", 0.0005),  # per-trade slippage rate
     )
 
     def __init__(self):
@@ -139,7 +134,11 @@ class FirmStrategy(bt.Strategy):
                 self.sell(data=data, size=abs(qty))
 
         if self.p.portfolio_state is not None and orders:
-            self.p.portfolio_state.update(orders, prices)
+            # Mirror the broker's transaction costs in the secondary book so
+            # attribution/NAV snapshots stay consistent with headline metrics.
+            cost_rate = self.p.commission_pct + self.p.slippage_pct
+            cost = sum(o.get("notional", 0.0) for o in orders) * cost_rate
+            self.p.portfolio_state.update(orders, prices, cost=cost)
 
         if self.p.attribution is not None and orders:
             self.p.attribution.record_trades(orders, prices)

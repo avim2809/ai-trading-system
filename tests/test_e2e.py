@@ -7,12 +7,11 @@ strategies, agents, Backtrader engine, eval, and experiments.
 from __future__ import annotations
 
 import random
-from datetime import datetime, timedelta
+from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from firm.agents.analysts.fundamental import FundamentalAnalyst
 from firm.agents.analysts.sentiment import SentimentAnalyst
@@ -29,12 +28,8 @@ from firm.agents.trader import TraderAgent
 from firm.backtest.engine import BacktestEngine
 from firm.backtest.firm_strategy import PitViewAdapter
 from firm.contracts.models import (
-    DebateResult,
-    ExecutionReport,
     RiskDecision,
     Signal,
-    SignalSet,
-    Thesis,
     TradeProposal,
 )
 from firm.data.pit_store import PointInTimeDataStore

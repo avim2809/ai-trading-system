@@ -49,14 +49,26 @@ class PortfolioState:
             for sym, shares in self.holdings.items()
         }
 
-    def update(self, fills: list[dict], prices: dict[str, float]) -> None:
+    def update(
+        self,
+        fills: list[dict],
+        prices: dict[str, float],
+        cost: float = 0.0,
+    ) -> None:
         """Apply a list of fills and reprice the book.
 
         Each fill dict should contain ``{"symbol": str, "shares": float,
         "price": float, "strategy": str}``.
+
+        ``cost`` is the total transaction cost (commission + slippage) for this
+        batch of fills. It is deducted from cash and charged back to each
+        strategy's ledger in proportion to its share of the gross notional, so
+        per-strategy P&L nets costs.
         """
         if prices:
             self._last_prices.update(prices)
+
+        gross_notional = sum(abs(f["shares"] * f["price"]) for f in fills)
         for fill in fills:
             sym = fill["symbol"]
             shares = fill["shares"]
@@ -70,6 +82,14 @@ class PortfolioState:
                 self._strategy_ledger[strategy] = {}
             ledger = self._strategy_ledger[strategy]
             ledger[sym] = ledger.get(sym, 0.0) - shares * price
+
+            # Charge transaction cost back to the strategy ledger, weighted by
+            # this fill's share of the gross traded notional.
+            if cost and gross_notional > 0:
+                fill_cost = cost * (abs(shares * price) / gross_notional)
+                ledger[sym] = ledger.get(sym, 0.0) - fill_cost
+
+        self.cash -= cost
 
         self.holdings = {s: q for s, q in self.holdings.items() if q != 0}
 

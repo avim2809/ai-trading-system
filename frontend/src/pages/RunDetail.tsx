@@ -129,9 +129,24 @@ export default function RunDetail() {
             <MetricCard label="Sharpe Ratio" value={report.portfolio['sharpe_ratio'] ?? 0} format="ratio" />
             <MetricCard label="Sortino Ratio" value={report.portfolio['sortino_ratio'] ?? 0} format="ratio" />
             <MetricCard label="Max Drawdown" value={report.portfolio['max_drawdown'] ?? 0} format="pct" />
-            <MetricCard label="Volatility" value={report.portfolio['volatility'] ?? 0} format="pct" />
+            <MetricCard label="Volatility" value={report.portfolio['annualized_volatility'] ?? 0} format="pct" />
             <MetricCard label="Final NAV" value={report.final_nav ?? 0} format="currency" />
           </div>
+
+          {report.benchmark && Object.keys(report.benchmark).length > 0 && (
+            <div className="mb-6">
+              <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">
+                Benchmark-Relative (vs equal-weight buy &amp; hold)
+              </h2>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                <MetricCard label="Alpha (ann.)" value={report.benchmark['alpha'] ?? 0} format="pct" />
+                <MetricCard label="Beta" value={report.benchmark['beta'] ?? 0} format="ratio" />
+                <MetricCard label="Information Ratio" value={report.benchmark['information_ratio'] ?? 0} format="ratio" />
+                <MetricCard label="Excess Return" value={report.benchmark['excess_return'] ?? 0} format="pct" />
+                <MetricCard label="Benchmark Return" value={report.benchmark['benchmark_total_return'] ?? 0} format="pct" />
+              </div>
+            </div>
+          )}
 
           {equity && (
             <div className="space-y-6 mb-6">

@@ -13,7 +13,10 @@ class LLMService:
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         config = config or {}
-        self.default_model: str = config.get("default_model", "gpt-4o")
+        # Free-by-default: Groq's free tier. Override in config/llm.yaml.
+        self.default_model: str = config.get(
+            "default_model", "groq/llama-3.3-70b-versatile"
+        )
         self.temperature: float = config.get("temperature", 0.3)
         self.max_tokens: int = config.get("max_tokens", 2000)
 

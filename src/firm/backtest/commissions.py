@@ -1,7 +1,9 @@
-"""Custom commission and slippage schemes for realistic cost modelling.
+"""Custom commission scheme for realistic cost modelling.
 
-Both models are configured from ``config/settings.yaml`` backtest section
-(``commission_pct`` and ``slippage_pct``).
+Commission is configured from ``config/settings.yaml`` backtest section
+(``commission_pct``). Slippage (``slippage_pct``) is applied separately at
+the broker via backtrader's native ``broker.set_slippage_perc`` in
+``BacktestEngine.setup`` rather than folded into the commission scheme.
 """
 
 from __future__ import annotations
@@ -20,23 +22,3 @@ class PercentageCommission(bt.CommInfoBase):
 
     def _getcommission(self, size, price, pseudoexec):
         return abs(size) * price * self.p.commission
-
-
-class FixedSlippage(bt.CommInfoBase):
-    """Fixed percentage slippage applied as additional transaction cost.
-
-    Backtrader doesn't expose a first-class ``SlippagePerc`` base in all
-    versions.  This piggy-backs on the commission infrastructure: the
-    slippage cost is added to the commission so the broker deducts it
-    automatically.
-    """
-
-    params = (
-        ("slippage", 0.0005),  # 5 bps default
-        ("commission", 0.0),
-        ("stocklike", True),
-        ("commtype", bt.CommInfoBase.COMM_PERC),
-    )
-
-    def _getcommission(self, size, price, pseudoexec):
-        return abs(size) * price * (self.p.commission + self.p.slippage)

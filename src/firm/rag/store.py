@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from firm.rag.embeddings import get_model_info
 from firm.rag.models import Document, RetrievedDoc
+
+log = logging.getLogger(__name__)
 
 
 def _asof_str(asof: Any) -> str:
@@ -134,11 +137,15 @@ class VectorStore:
         return docs
 
     def delete_collection(self, name: str) -> None:
-        """Delete an entire collection."""
+        """Delete an entire collection.
+
+        A missing collection is benign (idempotent delete); any other failure
+        is logged with a traceback rather than silently swallowed.
+        """
         try:
             self._client.delete_collection(name)
         except Exception:
-            pass
+            log.warning("Failed to delete collection %r", name, exc_info=True)
 
     def list_collections(self) -> list[str]:
         """List all collection names."""

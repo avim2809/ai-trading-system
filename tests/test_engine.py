@@ -6,26 +6,19 @@ rebalancing logic, and BacktestEngine setup with synthetic data.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
 import pytest
 
-import backtrader as bt
 
-from firm.backtest.commissions import PercentageCommission, FixedSlippage
+from firm.backtest.commissions import PercentageCommission
 from firm.backtest.datafeeds import AdjustedPandasData, dataframe_to_feed, load_feeds
-from firm.backtest.firm_strategy import FirmStrategy, PitViewAdapter
-from firm.backtest.analyzers import (
-    DetailedReturnsAnalyzer,
-    TurnoverAnalyzer,
-    StrategyAttributionAnalyzer,
-)
+from firm.backtest.firm_strategy import PitViewAdapter
 from firm.backtest.engine import BacktestEngine
 from firm.data.pit_store import PointInTimeDataStore
-from firm.portfolio.state import PortfolioState
 from firm.strategies.base import PitView
 
 
@@ -50,13 +43,13 @@ def _synthetic_prices(
             base *= 1 + ret
             o = base * (1 + rng.normal(0, 0.003))
             h = max(o, base) * (1 + abs(rng.normal(0, 0.005)))
-            l = min(o, base) * (1 - abs(rng.normal(0, 0.005)))
+            lo = min(o, base) * (1 - abs(rng.normal(0, 0.005)))
             rows.append({
                 "date": dt,
                 "symbol": sym,
                 "open": round(o, 2),
                 "high": round(h, 2),
-                "low": round(l, 2),
+                "low": round(lo, 2),
                 "close": round(base, 2),
                 "volume": int(rng.uniform(100_000, 5_000_000)),
                 "adj_close": round(base, 2),
@@ -148,19 +141,55 @@ class TestPercentageCommission:
         assert comm.getcommission(0, 100.0) == 0.0
 
 
-class TestFixedSlippage:
-    def test_slippage_greater_than_commission_alone(self):
-        comm_only = PercentageCommission(commission=0.001)
-        with_slip = FixedSlippage(slippage=0.0005, commission=0.001)
-        r_comm = comm_only.getcommission(size=100, price=50.0)
-        r_slip = with_slip.getcommission(size=100, price=50.0)
-        assert r_slip > r_comm
+def _buy_once_orchestrator(symbol: str, shares: int, price: float):
+    """Mock orchestrator that emits a single buy order on the first step.
 
-    def test_slippage_proportional_to_size(self):
-        slip = FixedSlippage(slippage=0.0005, commission=0.0)
-        r1 = slip.getcommission(size=100, price=25.0)
-        r2 = slip.getcommission(size=200, price=25.0)
-        assert r2 == pytest.approx(r1 * 2)
+    Used to generate turnover so transaction-cost behaviour is observable.
+    """
+    order = {
+        "symbol": symbol,
+        "side": "buy",
+        "shares": shares,
+        "quantity": shares,
+        "notional": shares * price,
+        "price": price,
+        "strategy": "composite",
+    }
+    orch = MagicMock()
+    orch.step.side_effect = [([order], MagicMock())] + [([], MagicMock())] * 500
+    return orch
+
+
+class TestSlippageWiring:
+    """Slippage is applied at the broker (``set_slippage_perc``) and the
+    ``slippage_pct`` config knob is consumed, not silently inert."""
+
+    def _run(self, slippage_pct: float) -> float:
+        config = {
+            "initial_capital": 1_000_000,
+            "commission_pct": 0.001,
+            "slippage_pct": slippage_pct,
+            "rebalance_frequency": "daily",
+        }
+        df = _synthetic_prices(["AAPL"], days=30, seed=7)
+        store = _make_pit_store(df)
+        # Buy 1000 shares near the opening price so the fill incurs slippage.
+        orch = _buy_once_orchestrator("AAPL", 1000, float(df.iloc[0]["close"]))
+        engine = BacktestEngine(config)
+        engine.setup(df, store, orch, ["AAPL"])
+        engine.run()
+        return engine.get_results()["final_value"]
+
+    def test_slippage_lowers_final_value(self):
+        no_slip = self._run(0.0)
+        with_slip = self._run(0.05)
+        # Same data, same orders — the only difference is broker slippage, so a
+        # buy fills at a worse price and ending value is strictly lower.
+        assert with_slip < no_slip
+
+    def test_zero_slippage_skips_broker_call(self):
+        # slippage_pct=0 must not raise and must leave a deterministic result.
+        assert self._run(0.0) > 0
 
 
 # ======================================================================

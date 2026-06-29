@@ -206,7 +206,7 @@ class RiskAgent(Agent):
         return (
             adjusted,
             [f"Net exposure {net:.3f} exceeds cap {self.max_net_exposure}"],
-            [f"Reduced same-side weights to bring net within bounds"],
+            ["Reduced same-side weights to bring net within bounds"],
         )
 
     def _cap_sector_concentration(

@@ -12,7 +12,6 @@ sentiment data so tests run without any external dependencies.
 
 from __future__ import annotations
 
-import calendar
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -20,11 +19,11 @@ import pandas as pd
 import pytest
 
 from firm.contracts.models import Signal
-from firm.strategies.base import BaseStrategy, PitView
+from firm.strategies.base import BaseStrategy
 
 # Force all strategy modules to register themselves
 import firm.strategies  # noqa: F401
-from firm.strategies.registry import _REGISTRY, get, list_strategies
+from firm.strategies.registry import get, list_strategies
 
 
 def test_multi_factor_mean_available_no_dampening():

@@ -93,3 +93,42 @@ class DetailedReturnsAnalyzer(bt.Analyzer):
             "dates": list(self._dates),
             "values": list(self._daily_values),
         }
+
+
+class BenchmarkAnalyzer(bt.Analyzer):
+    """Track an equal-weight buy-and-hold benchmark of the traded universe.
+
+    Records a normalized index value per bar: the mean across all data feeds
+    of ``close[t] / close[first_valid]``. This is a self-contained benchmark
+    (no external SPY feed required) representing "what equal-weight passive
+    holding of the same universe would have returned" over the same dates,
+    so the strategy can be measured for alpha/beta/information ratio against
+    it via :mod:`firm.eval.metrics`.
+    """
+
+    def start(self):
+        self._dates: list = []
+        self._values: list[float] = []
+        self._bases: dict[str, float] = {}  # first valid close per symbol
+
+    def next(self):
+        dt = self.strategy.datas[0].datetime.datetime(0)
+        ratios: list[float] = []
+        for data in self.strategy.datas:
+            price = data.close[0]
+            if price is None or price <= 0:
+                continue
+            base = self._bases.get(data._name)
+            if base is None:
+                self._bases[data._name] = price
+                base = price
+            ratios.append(price / base)
+        if ratios:
+            self._dates.append(dt)
+            self._values.append(sum(ratios) / len(ratios))
+
+    def get_analysis(self) -> dict:
+        return {
+            "dates": list(self._dates),
+            "values": list(self._values),
+        }

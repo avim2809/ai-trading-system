@@ -14,6 +14,7 @@ import pandas as pd
 import backtrader as bt
 
 from firm.backtest.analyzers import (
+    BenchmarkAnalyzer,
     DetailedReturnsAnalyzer,
     StrategyAttributionAnalyzer,
     TurnoverAnalyzer,
@@ -27,7 +28,6 @@ if TYPE_CHECKING:
     from firm.agents.orchestrator import Orchestrator
     from firm.data.pit_store import PointInTimeDataStore
     from firm.eval.reports import BacktestReport
-    from firm.portfolio.attribution import PerformanceAttribution
 
 log = logging.getLogger(__name__)
 
@@ -66,6 +66,16 @@ class BacktestEngine:
         commission = PercentageCommission(commission=commission_pct)
         self.cerebro.broker.addcommissioninfo(commission)
 
+        # Slippage is applied at the broker via backtrader's native API rather
+        # than folded into the commission scheme. Orders are submitted in
+        # next() and fill at the following bar's open, so slip_open is the
+        # relevant knob.
+        slippage_pct = self.config.get("slippage_pct", 0.0005)
+        if slippage_pct > 0:
+            self.cerebro.broker.set_slippage_perc(
+                perc=slippage_pct, slip_open=True, slip_match=True, slip_out=False
+            )
+
         feeds = load_feeds(prices_df, universe)
         for symbol, feed in feeds.items():
             self.cerebro.adddata(feed, name=symbol)
@@ -83,6 +93,8 @@ class BacktestEngine:
             rebalance_frequency=self.config.get("rebalance_frequency", "weekly"),
             universe=universe,
             attribution=attribution,
+            commission_pct=commission_pct,
+            slippage_pct=slippage_pct,
         )
 
         self.cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe")
@@ -92,6 +104,7 @@ class BacktestEngine:
         self.cerebro.addanalyzer(DetailedReturnsAnalyzer, _name="detailed_returns")
         self.cerebro.addanalyzer(TurnoverAnalyzer, _name="turnover")
         self.cerebro.addanalyzer(StrategyAttributionAnalyzer, _name="strategy_attr")
+        self.cerebro.addanalyzer(BenchmarkAnalyzer, _name="benchmark")
 
         self._portfolio_state = portfolio_state
         self._attribution = attribution
@@ -156,6 +169,11 @@ class BacktestEngine:
         except Exception:
             analysis["detailed_returns"] = {}
 
+        try:
+            analysis["benchmark"] = strat.analyzers.benchmark.get_analysis()
+        except Exception:
+            analysis["benchmark"] = {}
+
         return analysis
 
     def generate_report(self) -> BacktestReport:
@@ -174,6 +192,16 @@ class BacktestEngine:
         else:
             daily_returns = pd.Series(dtype=float)
 
+        bench = results.get("benchmark", {})
+        bench_values = bench.get("values", [])
+        bench_dates = bench.get("dates", [])
+        if len(bench_values) >= 2:
+            benchmark_returns = pd.Series(
+                bench_values, index=pd.DatetimeIndex(bench_dates)
+            ).pct_change().dropna()
+        else:
+            benchmark_returns = pd.Series(dtype=float)
+
         snapshots = []
         if self._portfolio_state is not None:
             snapshots = self._portfolio_state.history
@@ -182,4 +210,5 @@ class BacktestEngine:
             returns=daily_returns,
             attribution=self._attribution or PerformanceAttribution(),
             snapshots=snapshots,
+            benchmark_returns=benchmark_returns,
         )

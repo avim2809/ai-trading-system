@@ -2,7 +2,7 @@
   <h1 align="center">AI Multi-Agent Stock Investment Firm</h1>
   <p align="center">
     A production-grade, multi-agent AI system that operates like a professional investment firm.<br/>
-    11 quant strategies &bull; 8 AI-augmented agents &bull; Live & paper trading &bull; RAG-powered research
+    12 quant strategies &bull; 8 AI-augmented agents &bull; Live & paper trading &bull; RAG-powered research
   </p>
 </p>
 
@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/python-%3E%3D3.10-blue?style=flat-square&logo=python" alt="Python 3.10+"/>
   <img src="https://img.shields.io/badge/react-19-61dafb?style=flat-square&logo=react" alt="React 19"/>
   <img src="https://img.shields.io/badge/fastapi-latest-009688?style=flat-square&logo=fastapi" alt="FastAPI"/>
-  <img src="https://img.shields.io/badge/tests-344%20passing-brightgreen?style=flat-square" alt="344 tests passing"/>
+  <a href="https://github.com/avim2809/ai-trading-system/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/avim2809/ai-trading-system/ci.yml?branch=main&style=flat-square&label=CI" alt="CI status"/></a>
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License"/>
 </p>
 
@@ -20,7 +20,7 @@
 
 This system simulates (and can execute) the full workflow of a quantitative investment firm:
 
-1. **Signal Generation** &mdash; 11 pluggable alpha strategies analyze market data
+1. **Signal Generation** &mdash; 12 pluggable alpha strategies analyze market data
 2. **Research Debate** &mdash; Bull and bear AI researchers build competing investment theses
 3. **Portfolio Construction** &mdash; A portfolio manager synthesizes research into target weights
 4. **Risk Management** &mdash; A risk manager enforces constraints with veto power
@@ -34,13 +34,13 @@ Every step can run in pure quant mode, AI-enhanced mode (quant + LLM reasoning),
 |----------|---------|
 | **Strategies** | Cross-sectional momentum, trend following, mean reversion, statistical arbitrage, multi-factor, sentiment, PEAD event-driven, ML prediction, volatility breakout, seasonality, W.D. Gann composite, HMM regime detection |
 | **Agent Pipeline** | 3 domain analysts, bull/bear researchers, debate synthesis, portfolio manager, risk manager (6-constraint pipeline + veto), execution agent |
-| **Backtesting** | Backtrader engine, strict no-look-ahead PIT data store, configurable rebalancing, transaction costs, slippage, per-strategy attribution |
-| **Live Trading** | Alpaca (paper + live), Interactive Brokers (paper + live), configurable approval workflow (full-auto / semi-auto per strategy), APScheduler |
-| **AI / LLM** | LiteLLM (OpenAI, Anthropic, Ollama, Groq, any OpenAI-compatible), per-agent mode switching, SQLite response cache, token compression |
+| **Backtesting** | Backtrader engine, strict no-look-ahead PIT data store, configurable rebalancing, broker-level transaction costs + slippage, per-strategy attribution, benchmark-relative metrics (alpha/beta/info ratio), walk-forward validation |
+| **Live Trading** | Alpaca (paper + live), Interactive Brokers (paper + live), configurable approval workflow (full-auto / semi-auto per strategy), APScheduler, drawdown kill-switch + operational alerts |
+| **AI / LLM** | LiteLLM (Groq, Ollama, OpenAI, Anthropic, any OpenAI-compatible), free model by default, per-agent mode switching, SQLite response cache, token compression |
 | **RAG Pipeline** | ChromaDB vector store, 8 embedding models (MiniLM, Nomic, Qwen2, BGE, E5), SEC EDGAR / earnings / news / research paper ingestors |
 | **Frontend** | React + TypeScript + Tailwind dark theme, 9 pages: Dashboard, New Backtest, Run Detail, Compare, Agent Inspector, Live Dashboard, Config, Approvals, Order History |
 | **Data Providers** | Polygon, Tiingo, Alpha Vantage, FMP + synthetic data for zero-config backtesting |
-| **Testing** | 344 tests: unit, integration, E2E, no-look-ahead verification, reproducibility golden-run |
+| **Testing & CI** | 425 tests (unit, integration, E2E, no-look-ahead, reproducibility golden-run); GitHub Actions CI runs ruff + pytest + frontend build |
 
 ## Architecture
 
@@ -146,8 +146,8 @@ The web UI provides:
 | Page | Route | Description |
 |------|-------|-------------|
 | **Dashboard** | `/` | View all backtest runs, compare metrics side-by-side |
-| **New Backtest** | `/new` | Configure strategies, universe, dates, capital; launch with synthetic or real data |
-| **Run Detail** | `/runs/:id` | Equity curve, drawdown chart, monthly returns heatmap, per-strategy attribution |
+| **New Backtest** | `/new` | Configure strategies, universe, dates, capital; launch a single run or a walk-forward analysis (synthetic or real data) |
+| **Run Detail** | `/runs/:id` | Equity curve, drawdown chart, monthly returns heatmap, per-strategy attribution, benchmark-relative metrics |
 | **Agent Inspector** | `/inspector` | Step through the full agent pipeline; see signals, theses, debate, risk decisions |
 | **Live Dashboard** | `/live` | Start/stop live engine, view positions, account, recent cycles |
 | **Configuration** | `/live/config` | Broker, schedule, per-strategy approval mode, AI model config, RAG management |
@@ -166,13 +166,18 @@ pip install -e ".[live]"
 4. Select broker (Alpaca Paper, Alpaca Live, IBKR Paper, IBKR Live)
 5. Configure approval mode per strategy (Auto / Manual)
 
+The engine emits operational alerts (`GET /api/live/alerts`): a drawdown kill-switch
+(`kill_switch_drawdown` in `config/live.yaml`) halts new orders once peak-to-trough
+drawdown is breached, plus broker-outage and degraded-reconciliation alerts. An
+optional `alert_callback` can forward these to Slack/email/Sentry.
+
 ### AI-Enhanced Agents
 
 ```bash
 pip install -e ".[llm]"
 ```
 
-1. Add LLM API key to `.env` (OpenAI, Anthropic, Groq, or run Ollama locally)
+1. The default model is free (`groq/llama-3.3-70b-versatile`, needs a free `GROQ_API_KEY`; or run Ollama locally for fully offline). Add the relevant key to `.env`, or switch to a paid model (OpenAI/Anthropic) in `config/llm.yaml`.
 2. Navigate to `/live/config` > **AI / LLM Configuration**
 3. Select provider and model
 4. Set per-agent mode: **Quant** (default), **AI-Enhanced**, or **AI-Only**
@@ -287,6 +292,7 @@ All endpoints are under `/api`:
 | GET | `/api/runs/{id}/report` | Performance report (metrics + attribution) |
 | GET | `/api/runs/{id}/equity` | Equity curve + drawdown arrays |
 | POST | `/api/runs` | Launch a new backtest |
+| POST | `/api/runs/walk_forward` | Run a walk-forward analysis (folds + aggregated OOS metrics) |
 | POST | `/api/runs/compare` | Compare multiple runs |
 | POST | `/api/agents/step` | Run one pipeline step (Agent Inspector) |
 
@@ -301,6 +307,7 @@ All endpoints are under `/api`:
 | GET | `/api/live/account` | Account summary |
 | GET | `/api/live/orders` | Order history |
 | GET | `/api/live/cycles` | Recent cycle results |
+| GET | `/api/live/alerts` | Operational alerts + kill-switch state |
 | GET | `/api/live/approvals` | Pending approvals |
 | POST | `/api/live/approvals/{id}/approve` | Approve trade |
 | POST | `/api/live/approvals/{id}/reject` | Reject trade |
@@ -326,7 +333,7 @@ All endpoints are under `/api`:
 ```
 ai-trading-system/
 ├── src/firm/
-│   ├── strategies/          # 11 alpha strategies + registry
+│   ├── strategies/          # 12 alpha strategies + registry
 │   ├── agents/              # 8 quant agents + orchestrator
 │   │   └── llm/             # 8 LLM-enhanced agent variants
 │   ├── backtest/            # Backtrader engine bridge
@@ -343,7 +350,8 @@ ai-trading-system/
 ├── frontend/                # React + TypeScript + Tailwind (9 pages)
 ├── config/                  # YAML configs (settings, live, llm, experiments)
 ├── scripts/                 # CLI tools (fetch_data, run_backtest, ingest_docs)
-├── tests/                   # 344 tests (unit + integration + E2E)
+├── tests/                   # 425 tests (unit + integration + E2E)
+├── .github/workflows/       # CI: ruff + pytest + frontend build
 ├── setup.ps1 / setup.sh     # One-command setup scripts
 └── pyproject.toml            # Package config with 4 optional extras
 ```
@@ -361,11 +369,14 @@ ai-trading-system/
 ## Testing
 
 ```bash
-pytest                    # run all 344 tests
+pytest                    # run all 425 tests
 pytest tests/test_strategies.py  # strategy tests only
 pytest tests/test_e2e.py  # end-to-end integration
 pytest -k "no_look_ahead" # verify PIT safety
+ruff check src tests      # lint (also enforced in CI)
 ```
+
+CI (`.github/workflows/ci.yml`) runs ruff, the full pytest suite, and the frontend build on every push and PR to `main`.
 
 ## Engineering Standards
 
@@ -374,7 +385,7 @@ pytest -k "no_look_ahead" # verify PIT safety
 - **Deterministic runs** &mdash; Seeded randomness, versioned experiment configs
 - **Structured logging** &mdash; JSON logs for every signal, decision, trade, and risk action
 - **Graceful degradation** &mdash; All optional dependencies (LLM, brokers, RAG) use try/except imports
-- **344 tests** &mdash; Unit, integration, E2E, reproducibility, and no-look-ahead verification
+- **425 tests + CI** &mdash; Unit, integration, E2E, reproducibility, and no-look-ahead verification, gated by GitHub Actions (ruff + pytest + frontend build)
 
 ## License
 

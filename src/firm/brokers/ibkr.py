@@ -17,7 +17,7 @@ from firm.brokers.base import (
 log = logging.getLogger(__name__)
 
 try:
-    from ib_insync import IB, Stock, LimitOrder, MarketOrder, util
+    from ib_insync import IB, Stock, LimitOrder, MarketOrder
 
     _HAS_IB = True
 except ImportError:

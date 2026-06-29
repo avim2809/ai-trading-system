@@ -41,22 +41,14 @@ export default function NewBacktest() {
     exposure_map: { Bull: 1.5, Bear: 0.5, Chop: 0.25 },
   })
 
-  const launch = useMutation({
-    mutationFn: (req: RunRequest) => api.launchRun(req),
-    onSuccess: (data) => {
-      navigate(`/runs/${data.run_id}`)
-    },
-  })
+  const [nSplits, setNSplits] = useState(4)
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (selected.length === 0) return
-
+  const buildRequest = (): RunRequest => {
     const universeSymbols = symbols.trim()
       ? symbols.split(',').map((s) => s.trim()).filter(Boolean)
       : null
 
-    launch.mutate({
+    return {
       strategies: selected,
       strategy_params: params as Record<string, Record<string, unknown>>,
       universe_symbols: universeSymbols,
@@ -71,7 +63,24 @@ export default function NewBacktest() {
       data_source: dataSource,
       seed,
       notes,
-    })
+    }
+  }
+
+  const launch = useMutation({
+    mutationFn: (req: RunRequest) => api.launchRun(req),
+    onSuccess: (data) => {
+      navigate(`/runs/${data.run_id}`)
+    },
+  })
+
+  const walkForward = useMutation({
+    mutationFn: () => api.launchWalkForward({ ...buildRequest(), n_splits: nSplits }),
+  })
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (selected.length === 0) return
+    launch.mutate(buildRequest())
   }
 
   if (stratLoading) {
@@ -354,14 +363,88 @@ export default function NewBacktest() {
           </div>
         )}
 
-        <button
-          type="submit"
-          disabled={selected.length === 0 || launch.isPending}
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-        >
-          {launch.isPending && <Spinner className="h-4 w-4" />}
-          Launch Backtest
-        </button>
+        <div className="flex items-end gap-4 flex-wrap">
+          <button
+            type="submit"
+            disabled={selected.length === 0 || launch.isPending}
+            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+          >
+            {launch.isPending && <Spinner className="h-4 w-4" />}
+            Launch Backtest
+          </button>
+
+          <div className="flex items-end gap-2">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Folds</label>
+              <input
+                type="number"
+                min={2}
+                max={20}
+                value={nSplits}
+                onChange={(e) => setNSplits(Number(e.target.value))}
+                className="w-20 px-3 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => walkForward.mutate()}
+              disabled={selected.length === 0 || walkForward.isPending}
+              title="Run a walk-forward analysis: each fold trains on an earlier window and is scored out-of-sample"
+              className="px-6 py-3 bg-slate-700 text-white rounded-lg font-medium hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            >
+              {walkForward.isPending && <Spinner className="h-4 w-4" />}
+              Run Walk-Forward
+            </button>
+          </div>
+        </div>
+
+        {walkForward.error && (
+          <div className="bg-red-900/20 border border-red-700 rounded-lg p-4 text-red-400 text-sm">
+            {(walkForward.error as Error).message}
+          </div>
+        )}
+
+        {walkForward.data && (
+          <section className="bg-slate-800 border border-slate-700 rounded-xl p-5">
+            <h3 className="text-sm font-medium text-slate-300 mb-1">
+              Walk-Forward — out-of-sample across {walkForward.data.aggregate.n_folds} folds
+            </h3>
+            <p className="text-xs text-slate-500 mb-4">
+              Mean ± std of each fold's OOS metrics. Stable means with small std suggest the
+              edge generalizes rather than overfitting a single window. Each fold is saved as a
+              run on the Dashboard.
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {['sharpe_ratio', 'total_return', 'max_drawdown', 'alpha', 'information_ratio', 'excess_return']
+                .filter((k) => walkForward.data!.aggregate.metrics[k])
+                .map((k) => {
+                  const m = walkForward.data!.aggregate.metrics[k]
+                  if (!m) return null
+                  return (
+                    <div key={k} className="bg-slate-900/50 rounded-lg px-4 py-3">
+                      <p className="text-xs text-slate-400">{k}</p>
+                      <p className="text-lg font-semibold text-white">
+                        {m.mean.toFixed(3)}
+                        <span className="text-sm text-slate-500"> ± {m.std.toFixed(3)}</span>
+                      </p>
+                    </div>
+                  )
+                })}
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {walkForward.data.fold_ids.map((id, i) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => navigate(`/runs/${id}`)}
+                  className="text-xs px-2 py-1 rounded bg-slate-700 text-slate-200 hover:bg-slate-600"
+                >
+                  Fold {i + 1}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
       </form>
     </div>
   )

@@ -78,19 +78,68 @@ class ExperimentRunner:
 
         return self.registry.get_run(run.run_id)
 
-    def _execute_backtest(self, config: dict, run: ExperimentRun) -> dict:
-        """Internal: configure and run the backtest engine.
+    @staticmethod
+    def _flatten_config(config: dict) -> dict:
+        """Translate a nested experiment config to the flat config that
+        :func:`firm.backtest.run.execute_backtest` consumes.
 
-        Once BacktestEngine is fully wired (Phase 3 engine task),
-        this method will instantiate and run it. For now it saves
-        the config and returns an empty metrics dict so the runner
-        interface is exercisable end-to-end.
+        Experiment configs nest backtest params under ``backtest`` and the
+        strategy list under ``strategies.enabled``; the engine path expects
+        those at the top level.
         """
-        artifacts = Path(run.artifacts_dir)
-        results: dict[str, Any] = {"metrics": {}}
+        flat: dict[str, Any] = {}
+        bt = config.get("backtest", {}) or {}
+        flat.update(bt)
 
-        results_path = artifacts / "results.json"
-        results_path.write_text(
+        strategies = config.get("strategies")
+        if isinstance(strategies, dict):
+            flat["strategies"] = strategies.get("enabled")
+        elif isinstance(strategies, list):
+            flat["strategies"] = strategies
+
+        flat["seed"] = config.get("seed", 42)
+        flat["data_source"] = config.get("data_source", "synthetic")
+
+        # Apply the risk block first so explicit top-level keys (e.g. an
+        # overridden regime_overlay) take precedence over risk defaults.
+        risk = config.get("risk")
+        if isinstance(risk, dict):
+            flat.update(risk)
+
+        for key in (
+            "strategy_params", "regime_overlay", "agent_modes",
+            "llm_config", "universe_symbols",
+        ):
+            if key in config:
+                flat[key] = config[key]
+        return flat
+
+    def _execute_backtest(self, config: dict, run: ExperimentRun) -> dict:
+        """Run the backtest engine for *run* and persist its artifacts.
+
+        Writes ``report.json``, ``equity.json`` and ``results.json`` into the
+        run's artifacts dir (matching a normal API-launched run, so folds show
+        up in the dashboard) and returns a ``{"metrics": {...}}`` dict combining
+        portfolio and benchmark-relative metrics.
+        """
+        from firm.backtest.run import build_equity_data, execute_backtest
+
+        artifacts = Path(run.artifacts_dir)
+        artifacts.mkdir(parents=True, exist_ok=True)
+
+        report = execute_backtest(self._flatten_config(config))
+        report.save(str(artifacts / "report.json"))
+        (artifacts / "equity.json").write_text(
+            json.dumps(build_equity_data(report), indent=2, default=str),
+            encoding="utf-8",
+        )
+
+        report_dict = report.to_dict()
+        metrics: dict[str, Any] = dict(report_dict.get("portfolio", {}))
+        metrics.update(report_dict.get("benchmark", {}))
+
+        results: dict[str, Any] = {"metrics": metrics}
+        (artifacts / "results.json").write_text(
             json.dumps(results, indent=2, default=str), encoding="utf-8"
         )
         return results
@@ -164,6 +213,44 @@ class ExperimentRunner:
         oos_run = self.run(oos_config, seed=seed, notes="out-of-sample")
 
         return is_run, oos_run
+
+    @staticmethod
+    def aggregate_walk_forward(runs: list[ExperimentRun]) -> dict[str, Any]:
+        """Summarize out-of-sample metrics across walk-forward folds.
+
+        Returns ``{"n_folds", "fold_ids", "metrics": {name: {mean, std,
+        min, max, values}}}`` over the completed folds. Aggregating the
+        per-fold OOS metrics (not a single full-window fit) is what makes
+        walk-forward an honest overfitting check.
+        """
+        completed = [r for r in runs if r.status == "completed" and r.metrics]
+        fold_ids = [r.run_id for r in runs]
+        if not completed:
+            return {"n_folds": 0, "fold_ids": fold_ids, "metrics": {}}
+
+        metric_names: set[str] = set()
+        for r in completed:
+            metric_names.update(r.metrics.keys())
+
+        agg: dict[str, Any] = {}
+        for name in sorted(metric_names):
+            vals = [
+                float(r.metrics[name])
+                for r in completed
+                if isinstance(r.metrics.get(name), (int, float))
+            ]
+            if not vals:
+                continue
+            mean = sum(vals) / len(vals)
+            var = sum((v - mean) ** 2 for v in vals) / len(vals)
+            agg[name] = {
+                "mean": mean,
+                "std": var ** 0.5,
+                "min": min(vals),
+                "max": max(vals),
+                "values": vals,
+            }
+        return {"n_folds": len(completed), "fold_ids": fold_ids, "metrics": agg}
 
     @staticmethod
     def _compute_walk_forward_splits(

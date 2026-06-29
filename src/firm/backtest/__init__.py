@@ -9,7 +9,7 @@ from firm.backtest.analyzers import (
     StrategyAttributionAnalyzer,
     TurnoverAnalyzer,
 )
-from firm.backtest.commissions import FixedSlippage, PercentageCommission
+from firm.backtest.commissions import PercentageCommission
 from firm.backtest.datafeeds import AdjustedPandasData, dataframe_to_feed, load_feeds
 from firm.backtest.sizers import TargetWeightSizer
 
@@ -32,7 +32,6 @@ __all__ = [
     "BacktestEngine",
     "DetailedReturnsAnalyzer",
     "FirmStrategy",
-    "FixedSlippage",
     "PercentageCommission",
     "PitViewAdapter",
     "StrategyAttributionAnalyzer",

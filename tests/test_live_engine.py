@@ -7,7 +7,6 @@ avoid real agent pipeline execution.
 from __future__ import annotations
 
 import json
-import uuid
 from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -16,9 +15,7 @@ import pytest
 
 from firm.agents.blackboard import Blackboard
 from firm.brokers.base import (
-    Broker,
     BrokerError,
-    BrokerPosition,
     OrderRequest,
     OrderStatus,
 )
@@ -208,6 +205,21 @@ class TestPortfolioSync:
         discreps = sync_portfolio_from_broker(broker, portfolio)
         assert len(discreps) == 0
 
+    def test_sync_flags_unavailable_open_orders(self):
+        """When open orders can't be fetched, reconciliation is flagged
+        degraded rather than silently trusting an empty in-flight view."""
+        broker = MockBroker()
+        broker.connect()
+
+        def _boom():
+            raise RuntimeError("broker API down")
+
+        broker.get_open_orders = _boom  # type: ignore[method-assign]
+        portfolio = PortfolioState(initial_capital=100_000)
+
+        discreps = sync_portfolio_from_broker(broker, portfolio)
+        assert any(d["type"] == "open_orders_unavailable" for d in discreps)
+
 
 # ---------------------------------------------------------------------------
 # LiveDataFeed tests
@@ -348,6 +360,77 @@ class TestLiveTradingEngine:
         result = engine.run_cycle()
         assert result.error is not None
         assert "pipeline boom" in result.error
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_drawdown_kill_switch_trips_and_halts(self, mock_build):
+        # Broker cash (50k) is far below the 100k starting equity, so the
+        # peak-to-trough drawdown (50%) breaches the 10% kill switch.
+        broker = MockBroker(initial_cash=50_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1}
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+        )
+        engine.start()
+
+        result = engine.run_cycle()
+        assert result.halted is True
+        assert engine.halted is True
+        assert result.orders_submitted == 0  # no new orders once halted
+        assert any(a["kind"] == "drawdown_breach" for a in result.alerts)
+        assert any(a["kind"] == "drawdown_breach" for a in engine.alerts)
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_alert_callback_invoked(self, mock_build):
+        received: list[dict] = []
+        broker = MockBroker(initial_cash=50_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1}
+
+        mock_build.return_value = MagicMock()
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, alert_callback=received.append,
+        )
+        engine.start()
+        engine.run_cycle()
+        assert any(a["kind"] == "drawdown_breach" for a in received)
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_broker_unavailable_alert(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+
+        def _down(*_a, **_k):
+            raise BrokerError("connection lost")
+
+        broker.get_current_prices = _down  # type: ignore[method-assign]
+        result = engine.run_cycle()
+        assert result.error is not None
+        assert any(a["kind"] == "broker_unavailable" for a in result.alerts)
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_healthy_cycle_emits_no_alerts(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+        result = engine.run_cycle()
+        assert result.alerts == []
+        assert engine.halted is False
 
     @patch("firm.live.engine.build_orchestrator")
     def test_cycle_history_tracking(self, mock_build, engine_components):

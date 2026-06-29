@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from textwrap import dedent
 
 import pandas as pd
 
 from firm.contracts.models import PortfolioSnapshot
-from firm.eval.metrics import compute_all_metrics
+from firm.eval.metrics import compute_all_metrics, compute_benchmark_metrics
 from firm.portfolio.attribution import PerformanceAttribution
 
 
@@ -26,10 +25,25 @@ class BacktestReport:
         returns: pd.Series,
         attribution: PerformanceAttribution,
         snapshots: list[PortfolioSnapshot],
+        benchmark_returns: pd.Series | None = None,
     ) -> None:
         self.returns = returns
         self.attribution = attribution
         self.snapshots = snapshots
+        self.benchmark_returns = (
+            benchmark_returns if benchmark_returns is not None else pd.Series(dtype=float)
+        )
+
+    # ------------------------------------------------------------------
+    # Benchmark-relative
+    # ------------------------------------------------------------------
+
+    def benchmark_summary(self) -> dict[str, float]:
+        """Alpha/beta/information-ratio/excess vs an equal-weight buy-and-hold
+        of the traded universe. Empty dict when no benchmark is available."""
+        if self.returns.empty or self.benchmark_returns.empty:
+            return {}
+        return compute_benchmark_metrics(self.returns, self.benchmark_returns)
 
     # ------------------------------------------------------------------
     # Portfolio-level
@@ -73,6 +87,13 @@ class BacktestReport:
             lines.append(f"  {k:30s}: {v:>12.6f}")
         lines.append("")
 
+        bench = self.benchmark_summary()
+        if bench:
+            lines.append("--- Benchmark-Relative (vs equal-weight buy & hold) ---")
+            for k, v in bench.items():
+                lines.append(f"  {k:30s}: {v:>12.6f}")
+            lines.append("")
+
         strat = self.strategy_summary()
         if not strat.empty:
             lines.append("--- Strategy Attribution ---")
@@ -88,6 +109,10 @@ class BacktestReport:
             "portfolio": self.portfolio_summary(),
             "data_points": len(self.returns),
         }
+
+        bench = self.benchmark_summary()
+        if bench:
+            result["benchmark"] = bench
 
         if self.snapshots:
             result["period"] = {

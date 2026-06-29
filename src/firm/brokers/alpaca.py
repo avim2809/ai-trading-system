@@ -19,13 +19,12 @@ log = logging.getLogger(__name__)
 try:
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import (
-        GetAssetsRequest,
         LimitOrderRequest,
         MarketOrderRequest,
     )
-    from alpaca.trading.enums import OrderSide, OrderType, TimeInForce, QueryOrderStatus
+    from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
     from alpaca.data.historical import StockHistoricalDataClient
-    from alpaca.data.requests import StockLatestQuoteRequest, StockSnapshotRequest
+    from alpaca.data.requests import StockLatestQuoteRequest
 
     _HAS_ALPACA = True
 except ImportError:
@@ -188,7 +187,6 @@ class AlpacaBroker(Broker):
 
     def get_open_orders(self) -> list[OrderStatus]:
         client = self._ensure_connected()
-        request = GetAssetsRequest() if not hasattr(QueryOrderStatus, "OPEN") else None
         try:
             orders = client.get_orders(filter=QueryOrderStatus.OPEN)
         except Exception:

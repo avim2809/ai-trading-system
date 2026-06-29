@@ -187,6 +187,45 @@ class TestComputeAllMetrics:
             assert isinstance(v, float)
 
 
+class TestBenchmarkMetrics:
+    def test_beta_of_self_is_one(self):
+        r = _daily_returns(120, seed=1)
+        assert metrics.beta(r, r) == pytest.approx(1.0, abs=1e-9)
+
+    def test_alpha_of_self_is_zero(self):
+        r = _daily_returns(120, seed=1)
+        assert metrics.alpha(r, r) == pytest.approx(0.0, abs=1e-9)
+
+    def test_information_ratio_zero_when_identical(self):
+        r = _daily_returns(120, seed=1)
+        # Zero active return -> zero tracking error -> IR defined as 0.
+        assert metrics.information_ratio(r, r) == 0.0
+
+    def test_excess_return_positive_when_outperforming(self):
+        bench = _daily_returns(120, mean=0.0, seed=2)
+        strat = bench + 0.001  # uniformly outperform each day
+        assert metrics.excess_return(strat, bench) > 0
+
+    def test_beta_scales_with_leverage(self):
+        bench = _daily_returns(120, seed=3)
+        assert metrics.beta(2 * bench, bench) == pytest.approx(2.0, abs=1e-9)
+
+    def test_misaligned_or_empty_returns_zero(self):
+        r = _daily_returns(50, seed=4)
+        assert metrics.beta(r, pd.Series(dtype=float)) == 0.0
+        assert metrics.alpha(r, pd.Series(dtype=float)) == 0.0
+
+    def test_rollup_keys_and_floats(self):
+        r = _daily_returns(120, seed=5)
+        b = _daily_returns(120, seed=6)
+        m = metrics.compute_benchmark_metrics(r, b)
+        assert set(m) == {
+            "benchmark_total_return", "alpha", "beta",
+            "information_ratio", "excess_return",
+        }
+        assert all(isinstance(v, float) for v in m.values())
+
+
 # ======================================================================
 # 2. portfolio/attribution.py
 # ======================================================================
@@ -290,6 +329,20 @@ class TestBacktestReport:
         assert out.exists()
         data = json.loads(out.read_text())
         assert "portfolio" in data
+
+    def test_benchmark_summary_empty_without_benchmark(self, report):
+        # No benchmark supplied -> benchmark section is omitted, not invented.
+        assert report.benchmark_summary() == {}
+        assert "benchmark" not in report.to_dict()
+
+    def test_benchmark_summary_present_with_benchmark(self):
+        r = _daily_returns(100, seed=11)
+        bench = _daily_returns(100, seed=12)
+        rep = BacktestReport(r, PerformanceAttribution(), [], benchmark_returns=bench)
+        bm = rep.benchmark_summary()
+        assert "alpha" in bm and "beta" in bm and "information_ratio" in bm
+        assert "benchmark" in rep.to_dict()
+        assert "Benchmark-Relative" in rep.to_text()
 
 
 # ======================================================================

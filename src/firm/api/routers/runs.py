@@ -8,7 +8,13 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from firm.api.jobs import JobManager
-from firm.api.schemas import CompareRequest, RunDetail, RunRequest, RunSummary
+from firm.api.schemas import (
+    CompareRequest,
+    RunDetail,
+    RunRequest,
+    RunSummary,
+    WalkForwardRequest,
+)
 from firm.config import get_settings
 from firm.experiments.registry import RunRegistry
 
@@ -140,3 +146,36 @@ def launch_run(req: RunRequest):
 def compare_runs(req: CompareRequest):
     registry = _get_registry()
     return registry.compare_runs(req.run_ids)
+
+
+@router.post("/runs/walk_forward")
+def launch_walk_forward(req: WalkForwardRequest):
+    """Run a walk-forward analysis: each fold is a normal run (visible in the
+    dashboard); returns the fold ids plus aggregated out-of-sample metrics."""
+    jm = _get_job_manager()
+    settings = get_settings()
+
+    config = {
+        "name": "walk_forward",
+        "backtest": {
+            "start_date": req.start_date,
+            "end_date": req.end_date,
+            "initial_capital": req.initial_capital,
+            "commission_pct": req.commission_pct,
+            "slippage_pct": req.slippage_pct,
+            "rebalance_frequency": req.rebalance_frequency,
+        },
+        "strategies": {"enabled": req.strategies},
+        "strategy_params": req.strategy_params,
+        "data_source": req.data_source,
+        "seed": req.seed,
+        "risk": {**settings.risk.model_dump(), **req.risk_overrides},
+    }
+    if req.regime_overlay is not None:
+        config["regime_overlay"] = req.regime_overlay
+    if req.universe_symbols:
+        config["universe_symbols"] = req.universe_symbols
+
+    return jm.run_walk_forward_sync(
+        config, n_splits=req.n_splits, train_pct=req.train_pct, seed=req.seed
+    )

@@ -48,10 +48,28 @@ export interface RunRequest {
 
 export interface ReportData {
   portfolio: Record<string, number>
+  benchmark?: Record<string, number>
   strategies?: Record<string, Record<string, number>>
   period?: { start: string; end: string }
   final_nav?: number
   data_points: number
+}
+
+export interface WalkForwardAggMetric {
+  mean: number
+  std: number
+  min: number
+  max: number
+  values: number[]
+}
+
+export interface WalkForwardResult {
+  fold_ids: string[]
+  aggregate: {
+    n_folds: number
+    fold_ids: string[]
+    metrics: Record<string, WalkForwardAggMetric>
+  }
 }
 
 export interface EquityData {

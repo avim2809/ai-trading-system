@@ -186,7 +186,6 @@ def live_stop(request: Request) -> dict[str, Any]:
 @router.post("/trigger")
 def live_trigger(request: Request) -> dict[str, Any]:
     engine = _get_engine(request)
-    from firm.live.engine import CycleResult
 
     result = engine.run_cycle()
     return {
@@ -259,6 +258,19 @@ def live_cycles(request: Request) -> list[dict[str, Any]]:
         }
         for c in reversed(engine.cycle_history[-50:])
     ]
+
+
+@router.get("/alerts")
+def live_alerts(request: Request) -> dict[str, Any]:
+    """Operational alerts (drawdown breach, broker outage, degraded recon)
+    plus the current kill-switch state."""
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        return {"halted": False, "alerts": []}
+    return {
+        "halted": engine.halted,
+        "alerts": list(reversed(engine.alerts[-100:])),
+    }
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,9 @@
+# Default to a FREE model. Options that cost nothing to run:
+#   groq/llama-3.3-70b-versatile  – free Groq tier, needs a free GROQ_API_KEY
+#   ollama/llama3                 – fully local/offline, needs Ollama running
+# Switch to a paid model (e.g. claude-opus-4-8, gpt-4o) here when desired.
 provider:
-  default_model: "gpt-4o"
+  default_model: "groq/llama-3.3-70b-versatile"
   temperature: 0.3
   max_tokens: 2000
 

@@ -23,6 +23,7 @@ import type {
   RAGStats,
   LLMTestResult,
   EmbeddingModelInfo,
+  WalkForwardResult,
 } from './types'
 
 const BASE = '/api'
@@ -65,6 +66,12 @@ export const api = {
     fetchJson<Record<string, Record<string, number>>>('/runs/compare', {
       method: 'POST',
       body: JSON.stringify({ run_ids: ids }),
+    }),
+
+  launchWalkForward: (req: Partial<RunRequest> & { n_splits?: number; train_pct?: number }) =>
+    fetchJson<WalkForwardResult>('/runs/walk_forward', {
+      method: 'POST',
+      body: JSON.stringify(req),
     }),
 
   agentStep: (req: StepRequest) =>
