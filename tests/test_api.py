@@ -141,6 +141,29 @@ class TestRuns:
         r = client.get("/api/runs/nonexistent")
         assert r.status_code == 404
 
+    def test_walk_forward(self, client):
+        r = client.post("/api/runs/walk_forward", json={
+            "strategies": ["momentum"],
+            "data_source": "synthetic",
+            "start_date": "2022-01-01",
+            "end_date": "2023-12-31",
+            "seed": 42,
+            "n_splits": 3,
+            "train_pct": 0.7,
+        })
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert len(data["fold_ids"]) == 3
+        assert data["aggregate"]["n_folds"] == 3
+        assert "sharpe_ratio" in data["aggregate"]["metrics"]
+        # Folds are surfaced as normal runs in the dashboard.
+        listed = {run["run_id"] for run in client.get("/api/runs").json()}
+        assert set(data["fold_ids"]) <= listed
+
+    def test_walk_forward_rejects_bad_splits(self, client):
+        r = client.post("/api/runs/walk_forward", json={"n_splits": 1})
+        assert r.status_code == 422
+
     def test_compare(self, client):
         r1 = client.post("/api/runs", json={
             "strategies": ["momentum"],

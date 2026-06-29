@@ -46,60 +46,37 @@ class JobManager:
             self._threads.append(t)
         t.start()
 
+    def run_walk_forward_sync(
+        self,
+        config: dict,
+        n_splits: int = 5,
+        train_pct: float = 0.7,
+        seed: int = 42,
+    ) -> dict:
+        """Run a walk-forward analysis to completion and return its summary.
+
+        Each fold is registered as a normal run (so it appears in the
+        dashboard) and executed under ``self._lock`` to serialise Cerebro.
+        Returns ``{"fold_ids", "aggregate"}``.
+        """
+        from firm.experiments.runner import ExperimentRunner
+
+        with self._lock:
+            runner = ExperimentRunner(registry=self.registry)
+            runs = runner.run_walk_forward(
+                config, n_splits=n_splits, train_pct=train_pct, seed=seed
+            )
+            aggregate = runner.aggregate_walk_forward(runs)
+        return {"fold_ids": [r.run_id for r in runs], "aggregate": aggregate}
+
     def _run(self, run_id: str, config: dict) -> None:
         with self._lock:
             try:
                 self.registry.update_run(run_id, status="running")
 
-                from firm.data.synthetic import make_synthetic_prices, DEFAULT_SYMBOLS
-                from firm.runtime import build_orchestrator
+                from firm.backtest.run import execute_backtest
 
-                data_source = config.get("data_source", "synthetic")
-                start_date = config.get("start_date", "2020-01-01")
-                end_date = config.get("end_date", "2023-12-31")
-
-                if data_source == "synthetic":
-                    symbols = config.get("universe_symbols") or list(DEFAULT_SYMBOLS)
-                    start_dt = datetime.fromisoformat(start_date)
-                    end_dt = datetime.fromisoformat(end_date)
-                    span_days = (end_dt - start_dt).days
-                    n_days = int(span_days * 5 / 7) + 252
-                    prices_df = make_synthetic_prices(
-                        symbols=symbols,
-                        n_days=n_days,
-                        end_date=end_date,
-                        seed=config.get("seed", 42),
-                    )
-                else:
-                    from firm.runtime import load_prices
-                    from firm.config import get_settings
-                    settings = get_settings()
-                    prices_df = load_prices(settings)
-                    symbols = config.get("universe_symbols") or []
-
-                from firm.data.pit_store import PointInTimeDataStore
-                pit_store = PointInTimeDataStore()
-                pit_store.load(prices=prices_df)
-
-                universe = symbols or pit_store.get_universe(
-                    datetime.fromisoformat(start_date)
-                )
-
-                orchestrator = build_orchestrator(config)
-
-                from firm.backtest.engine import BacktestEngine
-
-                bt_fields = {
-                    "start_date", "end_date", "initial_capital",
-                    "commission_pct", "slippage_pct", "rebalance_frequency",
-                }
-                bt_config = {k: v for k, v in config.items() if k in bt_fields}
-
-                engine = BacktestEngine(bt_config)
-                engine.setup(prices_df, pit_store, orchestrator, universe)
-                engine.run()
-
-                report = engine.generate_report()
+                report = execute_backtest(config)
 
                 artifacts_dir = self.registry.get_run(run_id).artifacts_dir
                 art = Path(artifacts_dir)
@@ -110,7 +87,9 @@ class JobManager:
                 report_dict = report.to_dict()
                 metrics = report_dict.get("portfolio", {})
 
-                equity_data = self._build_equity_data(report)
+                from firm.backtest.run import build_equity_data
+
+                equity_data = build_equity_data(report)
                 (art / "equity.json").write_text(
                     json.dumps(equity_data, indent=2, default=str),
                     encoding="utf-8",
@@ -132,18 +111,3 @@ class JobManager:
                     end_time=datetime.now(),
                     notes=str(e),
                 )
-
-    @staticmethod
-    def _build_equity_data(report) -> dict:
-        """Extract equity curve and drawdown from a BacktestReport."""
-        data: dict = {"dates": [], "values": [], "drawdown": []}
-        if not report.snapshots:
-            return data
-        data["dates"] = [s.asof.isoformat() for s in report.snapshots]
-        data["values"] = [s.nav for s in report.snapshots]
-        peak = 0.0
-        for nav in data["values"]:
-            peak = max(peak, nav)
-            dd = (nav - peak) / peak if peak > 0 else 0.0
-            data["drawdown"].append(round(dd, 6))
-        return data

@@ -57,7 +57,7 @@ def _load_llm_config() -> dict[str, Any]:
     except Exception:
         pass
     return {
-        "provider": {"default_model": "gpt-4o", "temperature": 0.3},
+        "provider": {"default_model": "groq/llama-3.3-70b-versatile", "temperature": 0.3},
         "agent_modes": {},
         "optimization": {"cache_enabled": True, "compression_enabled": True},
     }

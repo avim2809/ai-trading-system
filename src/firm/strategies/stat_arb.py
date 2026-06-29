@@ -34,7 +34,6 @@ Risk notes:
 from __future__ import annotations
 
 import logging
-from itertools import combinations
 
 import numpy as np
 import pandas as pd

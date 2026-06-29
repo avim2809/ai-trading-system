@@ -50,6 +50,13 @@ class RunRequest(BaseModel):
         return self
 
 
+class WalkForwardRequest(RunRequest):
+    """A backtest request plus walk-forward split controls."""
+
+    n_splits: int = Field(default=5, ge=2, le=20)
+    train_pct: float = Field(default=0.7, gt=0.0, lt=1.0)
+
+
 class RunSummary(BaseModel):
     run_id: str
     status: str

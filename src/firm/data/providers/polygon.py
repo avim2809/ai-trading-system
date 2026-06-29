@@ -107,7 +107,7 @@ class PolygonProvider(DataProvider):
             try:
                 # Dividends
                 div_data = self._get(
-                    f"/v3/reference/dividends",
+                    "/v3/reference/dividends",
                     params={"ticker": sym, "ex_dividend_date.gte": start, "ex_dividend_date.lte": end, "limit": 1000},
                 )
                 for rec in div_data.get("results", []):
@@ -127,7 +127,7 @@ class PolygonProvider(DataProvider):
 
                 # Splits
                 split_data = self._get(
-                    f"/v3/reference/splits",
+                    "/v3/reference/splits",
                     params={"ticker": sym, "execution_date.gte": start, "execution_date.lte": end, "limit": 1000},
                 )
                 for rec in split_data.get("results", []):

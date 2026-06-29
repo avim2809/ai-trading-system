@@ -277,6 +277,28 @@ class TestExperimentRunner:
         for run in runs:
             assert run.status == "completed"
             assert "walk-forward fold" in run.notes
+            # Real engine execution now produces metrics (no longer a stub).
+            assert run.metrics
+            assert "sharpe_ratio" in run.metrics
+            assert (Path(run.artifacts_dir) / "report.json").exists()
+
+    def test_aggregate_walk_forward(self, tmp_runs_dir, sample_config):
+        runner = ExperimentRunner(registry=RunRegistry(base_dir=tmp_runs_dir))
+        runs = runner.run_walk_forward(sample_config, n_splits=3, train_pct=0.7)
+
+        agg = runner.aggregate_walk_forward(runs)
+        assert agg["n_folds"] == 3
+        assert len(agg["fold_ids"]) == 3
+        assert "sharpe_ratio" in agg["metrics"]
+        sharpe = agg["metrics"]["sharpe_ratio"]
+        assert {"mean", "std", "min", "max", "values"} <= set(sharpe)
+        assert len(sharpe["values"]) == 3
+        assert sharpe["min"] <= sharpe["mean"] <= sharpe["max"]
+
+    def test_aggregate_walk_forward_empty(self):
+        agg = ExperimentRunner.aggregate_walk_forward([])
+        assert agg["n_folds"] == 0
+        assert agg["metrics"] == {}
 
     def test_in_sample_oos_config_splitting(self, tmp_runs_dir, sample_config):
         runner = ExperimentRunner(registry=RunRegistry(base_dir=tmp_runs_dir))

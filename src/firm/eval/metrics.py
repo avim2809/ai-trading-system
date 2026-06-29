@@ -130,6 +130,87 @@ def hit_rate(returns: pd.Series) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Benchmark-relative metrics
+# ---------------------------------------------------------------------------
+
+def _align(returns: pd.Series, benchmark: pd.Series) -> tuple[pd.Series, pd.Series]:
+    """Inner-join two return series on their (date) index, dropping NaNs."""
+    df = pd.concat([returns, benchmark], axis=1, join="inner").dropna()
+    if df.empty:
+        empty = pd.Series(dtype=float)
+        return empty, empty
+    return df.iloc[:, 0], df.iloc[:, 1]
+
+
+def beta(returns: pd.Series, benchmark: pd.Series) -> float:
+    """Sensitivity of strategy returns to the benchmark: cov / var(benchmark)."""
+    r, b = _align(returns, benchmark)
+    if len(r) < 2:
+        return 0.0
+    var_b = b.var(ddof=1)
+    if var_b < 1e-14:
+        return 0.0
+    cov = r.cov(b)
+    return float(cov / var_b)
+
+
+def alpha(
+    returns: pd.Series,
+    benchmark: pd.Series,
+    risk_free_rate: float = 0.0,
+    periods_per_year: int = TRADING_DAYS_PER_YEAR,
+) -> float:
+    """Annualized Jensen's alpha (CAPM intercept), arithmetic annualization."""
+    r, b = _align(returns, benchmark)
+    if len(r) < 2:
+        return 0.0
+    daily_rf = (1 + risk_free_rate) ** (1 / periods_per_year) - 1
+    bta = beta(r, b)
+    daily_alpha = (r.mean() - daily_rf) - bta * (b.mean() - daily_rf)
+    return float(daily_alpha * periods_per_year)
+
+
+def information_ratio(
+    returns: pd.Series,
+    benchmark: pd.Series,
+    periods_per_year: int = TRADING_DAYS_PER_YEAR,
+) -> float:
+    """Annualized active return divided by tracking error."""
+    r, b = _align(returns, benchmark)
+    if len(r) < 2:
+        return 0.0
+    active = r - b
+    te = active.std(ddof=1)
+    if te < 1e-14:
+        return 0.0
+    return float(active.mean() / te * np.sqrt(periods_per_year))
+
+
+def excess_return(returns: pd.Series, benchmark: pd.Series) -> float:
+    """Total strategy return minus total benchmark return over the period."""
+    r, b = _align(returns, benchmark)
+    if r.empty:
+        return 0.0
+    return float(total_return(r) - total_return(b))
+
+
+def compute_benchmark_metrics(
+    returns: pd.Series,
+    benchmark: pd.Series,
+    risk_free_rate: float = 0.0,
+) -> dict[str, float]:
+    """Benchmark-relative metrics: alpha, beta, information ratio, excess return."""
+    _, b_aligned = _align(returns, benchmark)
+    return {
+        "benchmark_total_return": total_return(b_aligned),
+        "alpha": alpha(returns, benchmark, risk_free_rate),
+        "beta": beta(returns, benchmark),
+        "information_ratio": information_ratio(returns, benchmark),
+        "excess_return": excess_return(returns, benchmark),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Convenience roll-up
 # ---------------------------------------------------------------------------
 

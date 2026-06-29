@@ -56,7 +56,6 @@ Risk notes:
 from __future__ import annotations
 
 import math
-from datetime import timedelta
 
 import numpy as np
 import pandas as pd

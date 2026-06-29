@@ -748,6 +748,26 @@ class TestExecution:
         # A sell reduces the position rather than increasing it.
         assert portfolio.holdings.get("AAPL", 0.0) < before
 
+    def test_update_deducts_transaction_cost(self):
+        """Transaction cost is charged to cash on top of the traded notional,
+        and the default (cost=0) leaves the pre-cost behaviour unchanged."""
+        from firm.portfolio.state import PortfolioState
+
+        fills = [{"symbol": "AAPL", "shares": 100, "price": 50.0, "strategy": "m"}]
+        prices = {"AAPL": 50.0}
+
+        # Without cost: cash drops by exactly shares*price.
+        p0 = PortfolioState(initial_capital=100_000)
+        p0.update(fills, prices)
+        assert p0.cash == pytest.approx(100_000 - 100 * 50.0)
+
+        # With cost: cash drops by shares*price + cost.
+        p1 = PortfolioState(initial_capital=100_000)
+        p1.update(fills, prices, cost=25.0)
+        assert p1.cash == pytest.approx(100_000 - 100 * 50.0 - 25.0)
+        # The cost is charged back to the originating strategy's ledger.
+        assert p1.get_strategy_pnl("m") == pytest.approx(-(100 * 50.0) - 25.0)
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Orchestrator (end-to-end with mocks)

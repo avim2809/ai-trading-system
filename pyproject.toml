@@ -61,3 +61,10 @@ target-version = "py310"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Silence third-party deprecation warnings we can't fix from here, so CI logs
+# stay readable. Matched by message prefix, so our own warnings still surface.
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+    "ignore:SelectableGroups dict interface is deprecated",
+    "ignore:hf_xet.download_files",
+]

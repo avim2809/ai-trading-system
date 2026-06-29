@@ -41,7 +41,9 @@ class CycleResult:
     order_statuses: list[dict[str, Any]] = field(default_factory=list)
     failed_orders: list[dict[str, Any]] = field(default_factory=list)
     discrepancies: list[dict[str, Any]] = field(default_factory=list)
+    alerts: list[dict[str, Any]] = field(default_factory=list)
     skipped: bool = False
+    halted: bool = False
     error: str | None = None
 
 
@@ -56,6 +58,7 @@ class LiveTradingEngine:
         approval_queue: ApprovalQueue,
         approval_mode: str = "semi_auto",
         auto_approve_strategies: list[str] | None = None,
+        alert_callback: Any = None,
     ) -> None:
         self._config = config
         self._broker = broker
@@ -65,12 +68,23 @@ class LiveTradingEngine:
         self._auto_approve: set[str] = set(auto_approve_strategies or [])
 
         self._orchestrator = build_orchestrator(config)
-        self._portfolio = PortfolioState(
-            initial_capital=config.get("initial_capital", 100_000)
-        )
+        initial_capital = config.get("initial_capital", 100_000)
+        self._portfolio = PortfolioState(initial_capital=initial_capital)
         self._cycle_count = 0
         self._cycle_history: list[CycleResult] = []
         self._running = False
+
+        # Observability/alerting. The kill switch trips when peak-to-trough
+        # drawdown breaches ``kill_switch_drawdown`` (falls back to the risk
+        # ``max_drawdown_pct``; 1.0 ≈ disabled). ``alert_callback`` is an
+        # optional sink (e.g. Slack/email) invoked with each alert dict.
+        self._alerts: list[dict[str, Any]] = []
+        self._alert_callback = alert_callback
+        self._peak_equity = float(initial_capital)
+        self._kill_switch_drawdown = float(
+            config.get("kill_switch_drawdown", config.get("max_drawdown_pct", 1.0))
+        )
+        self._halted = False
         # Serialises cycles so a manual/API trigger cannot run concurrently
         # with a scheduled one (which, combined with no broker idempotency,
         # would double-submit real orders).
@@ -87,6 +101,67 @@ class LiveTradingEngine:
     @property
     def cycle_history(self) -> list[CycleResult]:
         return list(self._cycle_history)
+
+    @property
+    def alerts(self) -> list[dict[str, Any]]:
+        """All alerts emitted this session (most recent last)."""
+        return list(self._alerts)
+
+    @property
+    def halted(self) -> bool:
+        """True once the drawdown kill switch has tripped."""
+        return self._halted
+
+    def _emit_alert(
+        self, kind: str, severity: str, message: str, **context: Any
+    ) -> dict[str, Any]:
+        """Record an operational alert, log it, and forward to the callback.
+
+        A failing callback must never break the trading loop, so it is
+        guarded. Alerts are also attached to the current cycle result.
+        """
+        alert = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "kind": kind,
+            "severity": severity,
+            "message": message,
+            "cycle_id": self._cycle_count,
+            **context,
+        }
+        self._alerts.append(alert)
+        # Keep memory bounded for long-running sessions.
+        if len(self._alerts) > 500:
+            self._alerts = self._alerts[-500:]
+        log_fn = log.critical if severity == "critical" else log.warning
+        log_fn("ALERT [%s/%s] %s %s", severity, kind, message, context or "")
+        if self._alert_callback is not None:
+            try:
+                self._alert_callback(alert)
+            except Exception:
+                log.warning("Alert callback failed", exc_info=True)
+        return alert
+
+    def _check_drawdown(self, result: CycleResult) -> None:
+        """Update peak equity and trip the kill switch on a drawdown breach."""
+        nav = self._portfolio.nav
+        if nav <= 0:
+            return
+        self._peak_equity = max(self._peak_equity, nav)
+        if self._peak_equity <= 0:
+            return
+        drawdown = (self._peak_equity - nav) / self._peak_equity
+        if drawdown >= self._kill_switch_drawdown and not self._halted:
+            self._halted = True
+            alert = self._emit_alert(
+                "drawdown_breach",
+                "critical",
+                f"Drawdown {drawdown:.1%} breached kill switch "
+                f"{self._kill_switch_drawdown:.1%}; halting new orders.",
+                drawdown=round(drawdown, 6),
+                nav=round(nav, 2),
+                peak_equity=round(self._peak_equity, 2),
+            )
+            result.alerts.append(alert)
 
     def start(self) -> None:
         """Connect to the broker and validate the account."""
@@ -138,6 +213,22 @@ class LiveTradingEngine:
                 )
                 result.discrepancies = discrepancies
 
+                # Surface a reconciliation that ran with an incomplete
+                # in-flight view as an operational alert.
+                if any(d.get("type") == "open_orders_unavailable" for d in discrepancies):
+                    result.alerts.append(self._emit_alert(
+                        "reconciliation_degraded", "warning",
+                        "Open orders unavailable; reconciliation may be incomplete.",
+                    ))
+
+                # Drawdown kill switch: once tripped, stop submitting new orders.
+                self._check_drawdown(result)
+                if self._halted:
+                    result.halted = True
+                    result.error = "halted: drawdown kill switch tripped"
+                    self._cycle_history.append(result)
+                    return result
+
                 context = {
                     "pit_view": pit_view,
                     "portfolio": self._portfolio,
@@ -184,6 +275,13 @@ class LiveTradingEngine:
             except Exception as exc:
                 result.error = str(exc)
                 log.error("Cycle %d failed: %s", self._cycle_count, exc, exc_info=True)
+                # A broker/connectivity failure is operationally distinct from a
+                # logic error — surface it as an alert so an operator is notified.
+                if isinstance(exc, BrokerError):
+                    result.alerts.append(self._emit_alert(
+                        "broker_unavailable", "critical",
+                        f"Broker call failed during cycle: {exc}",
+                    ))
 
             self._cycle_history.append(result)
             return result

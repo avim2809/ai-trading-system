@@ -63,12 +63,6 @@ def _build_features(pivot: pd.DataFrame) -> pd.DataFrame:
     vol_21d = ret_1d.rolling(21).std()
     vol_63d = ret_1d.rolling(63).std()
 
-    vol_raw = pivot.diff(0)
-    if "volume" not in str(pivot.columns):
-        vol_chg = ret_1d * 0.0
-    else:
-        vol_chg = ret_1d * 0.0
-
     ma50 = pivot.rolling(50).mean()
     ma200 = pivot.rolling(200).mean()
     price_vs_ma50 = (pivot / ma50) - 1.0
