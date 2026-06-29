@@ -18,11 +18,35 @@ jobs:
         with:
           python-version: "3.10"
           cache: pip
+          cache-dependency-path: pyproject.toml
+
+      # Cache the whole virtualenv keyed on the dependency spec, so the heavy
+      # installs (torch, sentence-transformers, chromadb, ...) are skipped
+      # entirely on a hit rather than just avoiding the wheel download.
+      - name: Cache venv
+        id: cache-venv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.10-${{ hashFiles('pyproject.toml') }}
+
+      # Embedding models pulled by the RAG/LLM tests live here; caching avoids
+      # re-downloading them on every run.
+      - name: Cache HuggingFace models
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-${{ runner.os }}-${{ hashFiles('config/llm.yaml') }}
+          restore-keys: |
+            hf-${{ runner.os }}-
 
       - name: Install
         run: |
+          python -m venv .venv
+          . .venv/bin/activate
           python -m pip install --upgrade pip
           pip install -e ".[dev,api,llm,live]"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Lint (ruff)
         run: ruff check src tests
@@ -46,7 +70,16 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      # Cache the installed modules so a clean install is skipped on a hit.
+      - name: Cache node_modules
+        id: cache-node-modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: node-${{ runner.os }}-node20-${{ hashFiles('frontend/package-lock.json') }}
+
       - name: Install
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci
 
       - name: Build (tsc + vite)
