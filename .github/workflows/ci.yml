@@ -6,15 +6,20 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel any in-progress run for the same branch/PR when a new one starts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend:
     name: Backend (ruff + pytest)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.10"
           cache: pip
@@ -25,7 +30,7 @@ jobs:
       # entirely on a hit rather than just avoiding the wheel download.
       - name: Cache venv
         id: cache-venv
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .venv
           key: venv-${{ runner.os }}-py3.10-${{ hashFiles('pyproject.toml') }}
@@ -33,7 +38,7 @@ jobs:
       # Embedding models pulled by the RAG/LLM tests live here; caching avoids
       # re-downloading them on every run.
       - name: Cache HuggingFace models
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface
           key: hf-${{ runner.os }}-${{ hashFiles('config/llm.yaml') }}
@@ -61,10 +66,10 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -73,7 +78,7 @@ jobs:
       # Cache the installed modules so a clean install is skipped on a hit.
       - name: Cache node_modules
         id: cache-node-modules
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: frontend/node_modules
           key: node-${{ runner.os }}-node20-${{ hashFiles('frontend/package-lock.json') }}
