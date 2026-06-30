@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,14 @@ class ResponseCache:
     def __init__(self, db_path: str = "data/llm_cache.db") -> None:
         self._db_path = Path(db_path)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        # A single connection is shared across threads (check_same_thread=False),
+        # so all access is serialised by ``self._lock``; WAL mode + a busy
+        # timeout let concurrent agents read/write without "database is locked"
+        # errors under live trading, where all agents may query the LLM at once.
+        self._lock = threading.Lock()
         self._conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.execute(self._DDL)
         self._conn.commit()
         self._hits = 0
@@ -65,14 +73,15 @@ class ResponseCache:
         return hashlib.sha256(payload.encode()).hexdigest()
 
     def get(self, key: str) -> str | None:
-        row = self._conn.execute(
-            "SELECT response FROM llm_cache WHERE key = ?", (key,)
-        ).fetchone()
-        if row:
-            self._hits += 1
-            return row[0]
-        self._misses += 1
-        return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT response FROM llm_cache WHERE key = ?", (key,)
+            ).fetchone()
+            if row:
+                self._hits += 1
+                return row[0]
+            self._misses += 1
+            return None
 
     def put(
         self,
@@ -83,19 +92,21 @@ class ResponseCache:
         tokens_out: int = 0,
         cost: float = 0.0,
     ) -> None:
-        self._conn.execute(
-            """INSERT OR REPLACE INTO llm_cache
-               (key, response, model, tokens_in, tokens_out, cost, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (key, response, model, tokens_in, tokens_out, cost,
-             datetime.now(timezone.utc).isoformat()),
-        )
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO llm_cache
+                   (key, response, model, tokens_in, tokens_out, cost, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (key, response, model, tokens_in, tokens_out, cost,
+                 datetime.now(timezone.utc).isoformat()),
+            )
+            self._conn.commit()
 
     def stats(self) -> dict[str, Any]:
-        row = self._conn.execute(
-            "SELECT COUNT(*), COALESCE(SUM(cost), 0) FROM llm_cache"
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COUNT(*), COALESCE(SUM(cost), 0) FROM llm_cache"
+            ).fetchone()
         entries = row[0] if row else 0
         total_cost_saved = row[1] if row else 0.0
         db_size_mb = os.path.getsize(self._db_path) / (1024 * 1024) if self._db_path.exists() else 0
@@ -108,10 +119,12 @@ class ResponseCache:
         }
 
     def clear(self) -> None:
-        self._conn.execute("DELETE FROM llm_cache")
-        self._conn.commit()
+        with self._lock:
+            self._conn.execute("DELETE FROM llm_cache")
+            self._conn.commit()
         self._hits = 0
         self._misses = 0
 
     def close(self) -> None:
-        self._conn.close()
+        with self._lock:
+            self._conn.close()

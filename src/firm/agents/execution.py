@@ -67,6 +67,14 @@ class ExecutionAgent(Agent):
             quantity = abs(dollar_amount / price)
             side = "buy" if dollar_amount > 0 else "sell"
 
+            # Pre-trade transaction-cost estimate per order, using the same
+            # commission + slippage model as the backtest. Surfacing it per
+            # order (not just in aggregate) lets the live approval/routing
+            # layer weigh expected cost before sending each order.
+            notional = abs(dollar_amount)
+            est_commission = notional * self.commission_pct
+            est_slippage = notional * self.slippage_pct
+
             orders.append(
                 {
                     "symbol": sym,
@@ -76,15 +84,19 @@ class ExecutionAgent(Agent):
                     # ``quantity`` stays absolute for broker order requests.
                     "shares": quantity if side == "buy" else -quantity,
                     "quantity": quantity,
-                    "notional": abs(dollar_amount),
+                    "notional": notional,
                     "price": price,
                     "strategy": symbol_strategy.get(sym, "composite"),
+                    "est_commission": est_commission,
+                    "est_slippage": est_slippage,
+                    "est_cost": est_commission + est_slippage,
                 }
             )
             turnover += abs(diff_w)
 
-        total_notional = sum(o["notional"] for o in orders)
-        costs = total_notional * (self.commission_pct + self.slippage_pct)
+        # Aggregate cost is the sum of the per-order estimates (identical to the
+        # previous total_notional * (commission + slippage) formulation).
+        costs = sum(o["est_cost"] for o in orders)
 
         return ExecutionReport(fills=orders, turnover=turnover, costs=costs)
 

@@ -50,6 +50,8 @@ def create_app() -> FastAPI:
     except Exception:
         pass  # llm router not available
 
+    _instrument_metrics(application)
+
     dist = Path(__file__).resolve().parents[3] / "frontend" / "dist"
     if dist.is_dir():
         application.mount(
@@ -59,6 +61,26 @@ def create_app() -> FastAPI:
         )
 
     return application
+
+
+def _instrument_metrics(application: FastAPI) -> None:
+    """Expose Prometheus metrics at ``/metrics`` when the optional dep is present.
+
+    Provides per-endpoint latency/throughput for a local Prometheus+Grafana
+    stack (cycle latency, error rates, etc.). Degrades silently when
+    ``prometheus-fastapi-instrumentator`` is not installed, so the API runs
+    without the ``api`` extra.
+    """
+    try:
+        from prometheus_fastapi_instrumentator import Instrumentator
+    except Exception:
+        return  # metrics are optional; API works without them
+    try:
+        Instrumentator().instrument(application).expose(
+            application, endpoint="/metrics", include_in_schema=False
+        )
+    except Exception:  # never let metrics wiring break app startup
+        pass
 
 
 def run() -> None:

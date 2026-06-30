@@ -190,6 +190,23 @@ class TestRuns:
 
 
 # ------------------------------------------------------------------
+# Observability: Prometheus /metrics endpoint (Tier A)
+# ------------------------------------------------------------------
+
+class TestMetrics:
+    def test_metrics_endpoint_exposes_prometheus(self, client):
+        pytest.importorskip("prometheus_fastapi_instrumentator")
+        # Generate some traffic so request metrics are populated.
+        client.get("/api/meta/strategies")
+        r = client.get("/metrics")
+        assert r.status_code == 200
+        body = r.text
+        # Prometheus exposition format + the instrumentator's HTTP metric.
+        assert "# HELP" in body
+        assert "http_request" in body
+
+
+# ------------------------------------------------------------------
 # Agent step endpoint
 # ------------------------------------------------------------------
 
