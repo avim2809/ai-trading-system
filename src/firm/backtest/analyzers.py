@@ -71,6 +71,63 @@ class StrategyAttributionAnalyzer(bt.Analyzer):
         return dict(self._strategy_pnl)
 
 
+class TradeLogAnalyzer(bt.Analyzer):
+    """Record each closed trade as a structured row for persistence.
+
+    Captures the opening size/price when a trade is first opened (Backtrader
+    zeroes ``trade.size`` once a trade closes, so the entry size must be
+    grabbed on the opening event) and emits one row per closed trade. The
+    rows feed ``trades.parquet`` per run, which the structured-query layer
+    (:class:`firm.rag.structured.RunStore`) reads via SQL — numeric trade
+    facts are queried, never re-derived by an LLM.
+    """
+
+    def start(self):
+        self._open: dict[int, dict] = {}
+        self._trades: list[dict] = []
+
+    def notify_trade(self, trade):
+        if trade.justopened:
+            # Grab entry size/price now; both are reset after the trade closes.
+            self._open[trade.ref] = {"size": trade.size, "price": trade.price}
+            return
+
+        if not trade.isclosed:
+            return
+
+        opened = self._open.pop(trade.ref, {})
+        size = float(opened.get("size", 0.0))
+        entry_price = float(opened.get("price", trade.price))
+        strategy = (
+            trade.data.info.get("strategy", "_default")
+            if hasattr(trade.data, "info") else "_default"
+        )
+        gross = float(trade.pnl)
+        net = float(trade.pnlcomm)
+        cost_basis = abs(entry_price * size)
+        # Net P&L over entry notional; gross is used to back out the exit price.
+        return_pct = (net / cost_basis) if cost_basis > 0 else 0.0
+        exit_price = entry_price + (gross / size) if size else entry_price
+
+        self._trades.append({
+            "entry_dt": bt.num2date(trade.dtopen).isoformat(),
+            "exit_dt": bt.num2date(trade.dtclose).isoformat(),
+            "symbol": trade.data._name,
+            "strategy": strategy,
+            "size": size,
+            "entry_price": entry_price,
+            "exit_price": float(exit_price),
+            "pnl": gross,
+            "pnl_net": net,
+            "commission": gross - net,
+            "return_pct": return_pct,
+            "bars_held": int(trade.barlen),
+        })
+
+    def get_analysis(self) -> dict:
+        return {"trades": list(self._trades)}
+
+
 class DetailedReturnsAnalyzer(bt.Analyzer):
     """Record daily portfolio values for post-hoc return computation.
 

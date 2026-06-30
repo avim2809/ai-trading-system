@@ -129,6 +129,7 @@ class ExperimentRunner:
 
         report = execute_backtest(self._flatten_config(config))
         report.save(str(artifacts / "report.json"))
+        report.save_trades(str(artifacts / "trades.parquet"))
         (artifacts / "equity.json").write_text(
             json.dumps(build_equity_data(report), indent=2, default=str),
             encoding="utf-8",

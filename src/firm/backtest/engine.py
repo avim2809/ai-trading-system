@@ -17,6 +17,7 @@ from firm.backtest.analyzers import (
     BenchmarkAnalyzer,
     DetailedReturnsAnalyzer,
     StrategyAttributionAnalyzer,
+    TradeLogAnalyzer,
     TurnoverAnalyzer,
 )
 from firm.backtest.commissions import PercentageCommission
@@ -104,6 +105,7 @@ class BacktestEngine:
         self.cerebro.addanalyzer(DetailedReturnsAnalyzer, _name="detailed_returns")
         self.cerebro.addanalyzer(TurnoverAnalyzer, _name="turnover")
         self.cerebro.addanalyzer(StrategyAttributionAnalyzer, _name="strategy_attr")
+        self.cerebro.addanalyzer(TradeLogAnalyzer, _name="trade_log")
         self.cerebro.addanalyzer(BenchmarkAnalyzer, _name="benchmark")
 
         self._portfolio_state = portfolio_state
@@ -165,6 +167,11 @@ class BacktestEngine:
             analysis["strategy_attribution"] = {}
 
         try:
+            analysis["trade_log"] = strat.analyzers.trade_log.get_analysis().get("trades", [])
+        except Exception:
+            analysis["trade_log"] = []
+
+        try:
             analysis["detailed_returns"] = strat.analyzers.detailed_returns.get_analysis()
         except Exception:
             analysis["detailed_returns"] = {}
@@ -211,4 +218,5 @@ class BacktestEngine:
             attribution=self._attribution or PerformanceAttribution(),
             snapshots=snapshots,
             benchmark_returns=benchmark_returns,
+            trades=results.get("trade_log", []),
         )

@@ -21,6 +21,24 @@ rag:
   chunk_overlap: 50
   reranking: true
   default_n_results: 5
+  # Prepend a metadata header into embedded text (contextual retrieval).
+  # Opt-in: toggling it changes chunk ids, so a re-index is required.
+  contextual: false
+  # Fuse an in-memory BM25 lexical channel with dense recall (RRF) before
+  # reranking. Recovers exact-token matches (tickers, run-ids).
+  hybrid: false
+  # Source directory for the structured (DuckDB) run-query layer.
+  runs_dir: "runs"
+
+# Grounded QA assistant over backtest runs (firm.rag.assistant.TradingAssistant).
+assistant:
+  enabled: false
+  # When the provider is Anthropic Claude, send the large static context with
+  # cache_control so repeated questions over the same runs hit cached input.
+  prompt_caching: true
+  # Use the Claude Citations API to return verifiable source spans.
+  citations: false
+  n_results: 5
 
 agent_modes:
   technical_analyst: "quant"
