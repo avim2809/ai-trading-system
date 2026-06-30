@@ -33,6 +33,7 @@ dev = [
 api = [
     "fastapi",
     "uvicorn[standard]",
+    "prometheus-fastapi-instrumentator>=7.0",
 ]
 live = [
     "alpaca-py",

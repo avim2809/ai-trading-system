@@ -71,6 +71,48 @@ class TestTokenCompressor:
         assert "S0." in out
 
 
+class TestResponseCacheConcurrency:
+    """Tier A: WAL mode + lock let concurrent agents share the cache safely."""
+
+    def test_wal_mode_enabled(self, tmp_path):
+        from firm.llm.cache import ResponseCache
+
+        cache = ResponseCache(str(tmp_path / "c.db"))
+        try:
+            mode = cache._conn.execute("PRAGMA journal_mode").fetchone()[0]
+            assert mode.lower() == "wal"
+        finally:
+            cache.close()
+
+    def test_concurrent_writes_do_not_error(self, tmp_path):
+        import threading
+
+        from firm.llm.cache import ResponseCache
+
+        cache = ResponseCache(str(tmp_path / "c.db"))
+        errors: list[Exception] = []
+
+        def writer(n: int) -> None:
+            try:
+                for i in range(25):
+                    cache.put(f"k{n}-{i}", "resp", "model")
+            except Exception as exc:  # pragma: no cover - failure path
+                errors.append(exc)
+
+        threads = [threading.Thread(target=writer, args=(n,)) for n in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        try:
+            assert not errors, f"concurrent writes raised: {errors}"
+            assert cache.stats()["entries"] == 8 * 25
+            assert cache.get("k0-0") == "resp"
+        finally:
+            cache.close()
+
+
 class TestResponseCacheKey:
     """Regression: the LLM cache key must include every output-affecting param."""
 
