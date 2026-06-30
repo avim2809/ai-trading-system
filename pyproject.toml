@@ -45,6 +45,8 @@ llm = [
     "chromadb>=0.5",
     "sentence-transformers",
     "feedparser",
+    "duckdb>=0.10",
+    "rank-bm25",
 ]
 
 [project.scripts]

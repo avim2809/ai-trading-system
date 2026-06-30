@@ -16,6 +16,15 @@ from firm.contracts.models import PortfolioSnapshot
 from firm.eval.metrics import compute_all_metrics, compute_benchmark_metrics
 from firm.portfolio.attribution import PerformanceAttribution
 
+# Stable column order for the per-trade log written to ``trades.parquet``.
+# Kept explicit so an empty run still produces a schema-valid parquet file
+# (and so the DuckDB ``trades`` view always has the same columns).
+TRADE_COLUMNS = [
+    "entry_dt", "exit_dt", "symbol", "strategy", "size",
+    "entry_price", "exit_price", "pnl", "pnl_net", "commission",
+    "return_pct", "bars_held",
+]
+
 
 class BacktestReport:
     """Generate comprehensive backtest reports."""
@@ -26,6 +35,7 @@ class BacktestReport:
         attribution: PerformanceAttribution,
         snapshots: list[PortfolioSnapshot],
         benchmark_returns: pd.Series | None = None,
+        trades: list[dict] | None = None,
     ) -> None:
         self.returns = returns
         self.attribution = attribution
@@ -33,6 +43,7 @@ class BacktestReport:
         self.benchmark_returns = (
             benchmark_returns if benchmark_returns is not None else pd.Series(dtype=float)
         )
+        self.trades = trades or []
 
     # ------------------------------------------------------------------
     # Benchmark-relative
@@ -132,3 +143,16 @@ class BacktestReport:
         out = Path(path)
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(json.dumps(self.to_dict(), indent=2, default=str))
+
+    def save_trades(self, path: str) -> int:
+        """Write the per-trade log to a Parquet file. Returns the row count.
+
+        An empty trade list still produces a schema-valid (zero-row) Parquet
+        file with :data:`TRADE_COLUMNS`, so the structured-query layer can
+        always register a consistent ``trades`` view.
+        """
+        out = Path(path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        df = pd.DataFrame(self.trades, columns=TRADE_COLUMNS)
+        df.to_parquet(out, index=False)
+        return len(df)

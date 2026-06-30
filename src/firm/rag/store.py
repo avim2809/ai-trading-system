@@ -136,6 +136,30 @@ class VectorStore:
                 ))
         return docs
 
+    def get_all(self, collection_name: str) -> list[RetrievedDoc]:
+        """Return every document in a collection (id, text, metadata).
+
+        Used to build an in-memory BM25 lexical index for hybrid retrieval.
+        Suitable at the thousands–low-millions scale this system targets;
+        callers should not invoke it on collections beyond that.
+        """
+        collection = self.get_or_create_collection(collection_name)
+        if collection.count() == 0:
+            return []
+        res = collection.get()
+        docs: list[RetrievedDoc] = []
+        ids = res.get("ids") or []
+        documents = res.get("documents") or []
+        metadatas = res.get("metadatas") or []
+        for i, doc_id in enumerate(ids):
+            docs.append(RetrievedDoc(
+                doc_id=doc_id,
+                text=documents[i] if i < len(documents) else "",
+                metadata=metadatas[i] if i < len(metadatas) else {},
+                score=0.0,
+            ))
+        return docs
+
     def delete_collection(self, name: str) -> None:
         """Delete an entire collection.
 

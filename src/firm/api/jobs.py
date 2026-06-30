@@ -83,6 +83,7 @@ class JobManager:
                 art.mkdir(parents=True, exist_ok=True)
 
                 report.save(str(art / "report.json"))
+                report.save_trades(str(art / "trades.parquet"))
 
                 report_dict = report.to_dict()
                 metrics = report_dict.get("portfolio", {})
