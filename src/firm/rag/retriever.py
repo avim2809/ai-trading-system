@@ -39,7 +39,12 @@ class RAGRetriever:
     """Retrieves, optionally hybrid-fuses, and reranks documents."""
 
     def __init__(
-        self, store: VectorStore, reranker: bool = True, hybrid: bool = False
+        self,
+        store: VectorStore,
+        reranker: bool = True,
+        hybrid: bool = False,
+        reranker_provider: str | None = None,
+        reranker_model: str | None = None,
     ) -> None:
         self._store = store
         self._hybrid = hybrid
@@ -48,11 +53,36 @@ class RAGRetriever:
         self._bm25_cache: dict[str, tuple[int, Any, list[RetrievedDoc]]] = {}
 
         if reranker:
+            self._reranker = self._build_reranker(reranker_provider, reranker_model)
+
+    @staticmethod
+    def _build_reranker(provider: str | None = None, model: str | None = None):
+        """Pick the reranker: hosted Voyage (default), local cross-encoder, or none."""
+        from firm.llm.config import rag_config
+
+        cfg = rag_config()
+        provider = provider or cfg.get("reranker_provider", "voyage")
+        model = model or cfg.get("reranker_model")
+        if provider == "none":
+            return None
+        if provider == "voyage":
             try:
-                from sentence_transformers import CrossEncoder
-                self._reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
-            except (ImportError, Exception):
-                self._reranker = None
+                from firm.rag.voyage import VoyageReranker
+
+                return VoyageReranker(model=model or "rerank-2.5")
+            except Exception:
+                log.warning("Voyage reranker unavailable; continuing without rerank",
+                            exc_info=True)
+                return None
+        # Local fallback — requires the optional ``firm[local]`` extra (torch).
+        try:
+            from sentence_transformers import CrossEncoder
+
+            return CrossEncoder(model or "cross-encoder/ms-marco-MiniLM-L-6-v2")
+        except Exception:
+            log.warning("Local reranker unavailable; continuing without rerank",
+                        exc_info=True)
+            return None
 
     def retrieve(
         self,

@@ -1,0 +1,54 @@
+# Runs the app + IB Gateway together so the app can reach IBKR's API.
+#
+# Why this shape:
+#   - The app talks to IB Gateway over the private `firmnet` network using the
+#     service name `ib-gateway` — NOT 127.0.0.1 (which, inside the app container,
+#     means the app container itself).
+#   - The gnzsnz/ib-gateway image runs Gateway headless (IBC auto-login + Xvfb)
+#     and proxies its localhost-only API to 0.0.0.0 via socat, so sibling
+#     containers on the same network can connect. IB Gateway ports are
+#     4001 (live) / 4002 (paper) — different from TWS (7496/7497).
+#   - The API ports are NOT published to the host: only the app, on the shared
+#     network, can reach them. VNC is bound to localhost for debugging only.
+#
+# Usage:  docker compose up -d --build
+# Secrets live in .env (see DEPLOY.md).
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "80:8000"            # use "8000:8000" if you front it with Caddy/HTTPS
+    env_file: .env
+    environment:
+      IBKR_HOST: ib-gateway        # reach Gateway by service name, not 127.0.0.1
+      IBKR_PORT: "4001"            # IB Gateway LIVE  (TWS default would be 7496)
+      IBKR_PAPER_PORT: "4002"      # IB Gateway PAPER (TWS default would be 7497)
+      IBKR_CLIENT_ID: "1"
+    volumes:
+      - ./data:/app/data
+      - ./runs:/app/runs
+    depends_on:
+      - ib-gateway
+    networks:
+      - firmnet
+
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    restart: unless-stopped
+    environment:
+      TWS_USERID: ${IBKR_USERID}
+      TWS_PASSWORD: ${IBKR_PASSWORD}
+      TRADING_MODE: ${IBKR_TRADING_MODE:-paper}   # paper | live
+      READ_ONLY_API: "no"
+      # Optional VNC for watching/auth-troubleshooting the Gateway GUI:
+      VNC_SERVER_PASSWORD: ${IBKR_VNC_PASSWORD:-}
+    ports:
+      - "127.0.0.1:5900:5900"      # VNC, localhost-only (SSH-tunnel to reach it)
+    networks:
+      - firmnet
+
+networks:
+  firmnet:
+    driver: bridge

@@ -29,30 +29,57 @@ def _and_filters(
 
 
 class VectorStore:
-    """Persistent vector store wrapping ChromaDB with sentence-transformer embeddings."""
+    """Persistent ChromaDB vector store with pluggable embeddings (Voyage / local ST)."""
 
     def __init__(
         self,
-        persist_dir: str = "data/vectordb",
-        embedding_model: str = "all-MiniLM-L6-v2",
+        persist_dir: str | None = None,
+        embedding_model: str | None = None,
+        embedding_provider: str | None = None,
     ) -> None:
+        # Resolve unset args from config/llm.yaml so bare ``VectorStore()`` calls
+        # pick up the configured (external by default) embedding provider.
+        from firm.llm.config import rag_config
+
+        cfg = rag_config()
+        persist_dir = persist_dir or cfg.get("persist_dir", "data/vectordb")
+        embedding_provider = embedding_provider or cfg.get("embedding_provider", "voyage")
+        embedding_model = embedding_model or cfg.get("embedding_model")
+
         try:
             import chromadb
-            from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
         except ImportError:
             raise ImportError(
-                "chromadb and sentence-transformers are required for VectorStore. "
+                "chromadb is required for VectorStore. "
                 "Install with: pip install 'firm[llm]'"
             )
 
         self._persist_dir = Path(persist_dir)
         self._persist_dir.mkdir(parents=True, exist_ok=True)
+        self._embedding_provider = embedding_provider
         self._embedding_model = embedding_model
 
         self._client = chromadb.PersistentClient(path=str(self._persist_dir))
-        self._embedding_fn = SentenceTransformerEmbeddingFunction(
-            model_name=embedding_model
-        )
+        self._embedding_fn = self._build_embedding_fn(embedding_provider, embedding_model)
+
+    @staticmethod
+    def _build_embedding_fn(provider: str, model: str | None):
+        """Pick the embedding function: hosted Voyage (default) or local ST."""
+        if provider == "voyage":
+            from firm.rag.voyage import VoyageEmbeddingFunction
+
+            return VoyageEmbeddingFunction(model=model or "voyage-finance-2")
+        # Local fallback — requires the optional ``firm[local]`` extra (torch).
+        try:
+            from chromadb.utils.embedding_functions import (
+                SentenceTransformerEmbeddingFunction,
+            )
+        except ImportError:
+            raise ImportError(
+                "Local embeddings need sentence-transformers. Install 'firm[local]', "
+                "or set rag.embedding_provider to 'voyage' in config/llm.yaml."
+            )
+        return SentenceTransformerEmbeddingFunction(model_name=model or "all-MiniLM-L6-v2")
 
     @property
     def current_model(self) -> str:
