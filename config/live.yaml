@@ -1,4 +1,4 @@
-broker: "alpaca_paper"
+broker: "ibkr_paper"
 schedule: "market_open"
 approval_mode: "semi_auto"
 strategies:
