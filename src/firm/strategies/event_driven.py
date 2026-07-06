@@ -164,11 +164,14 @@ class EventDrivenStrategy(BaseStrategy):
         signals: list[Signal] = []
         for col in daily_ret.columns:
             rets = daily_ret[col].dropna()
-            vols = vol[col].dropna()
-            if rets.empty or vols.empty:
+            # Align volatility to the returns index; dropping NaNs on each
+            # series separately yields mismatched labels and a pandas
+            # "identically-labeled" comparison error.
+            vols = vol[col].reindex(rets.index)
+            if rets.empty or vols.dropna().empty:
                 continue
 
-            big_moves = rets[rets.abs() > vols * 3.0]
+            big_moves = rets[(rets.abs() > vols * 3.0).fillna(False)]
             if big_moves.empty:
                 continue
 

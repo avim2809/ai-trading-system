@@ -49,15 +49,17 @@ def _build_providers(host: str, port: int) -> dict:
     """
     from firm.data.providers.ibkr import IBKRProvider
 
+    # Single IBKR connection (client_id=2, separate from the trading
+    # connection on 1) serves both price history and news sentiment.
+    ibkr = IBKRProvider(host=host, port=port, client_id=2)
     providers: dict = {
-        # Separate client_id from the trading connection (which uses 1).
-        "prices": IBKRProvider(host=host, port=port, client_id=2),
+        "prices": ibkr,
+        "sentiment": ibkr,
     }
 
-    # Optional extras – only added when a real API key is present.
+    # Optional fundamentals – only added when a real API key is present.
     optional = (
         ("fundamentals", "firm.data.providers.fmp", "FMPProvider"),
-        ("sentiment", "firm.data.providers.tiingo", "TiingoProvider"),
     )
     for role, module_path, cls_name in optional:
         try:
