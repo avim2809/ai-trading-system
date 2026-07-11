@@ -73,27 +73,23 @@ def _save_llm_config(cfg: dict[str, Any]) -> None:
 
 
 def _detect_providers() -> list[dict[str, Any]]:
-    """Auto-detect available LLM providers from installed packages + env."""
-    import os
-    providers: list[dict[str, Any]] = []
+    """List the known LLM providers and whether each is configured (key present).
 
-    if os.environ.get("OPENAI_API_KEY"):
-        providers.append({"name": "openai", "configured": True, "models": ["gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo"]})
-    else:
-        providers.append({"name": "openai", "configured": False, "models": ["gpt-4o", "gpt-4o-mini"]})
+    Backed by the central provider registry (``firm.llm.providers``) so model IDs
+    and supported providers stay in one place instead of being hardcoded here.
+    """
+    from firm.llm.providers import list_providers
 
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        providers.append({"name": "anthropic", "configured": True, "models": ["claude-sonnet-4-20250514", "claude-3-haiku-20240307"]})
-    else:
-        providers.append({"name": "anthropic", "configured": False, "models": []})
-
-    if os.environ.get("GROQ_API_KEY"):
-        providers.append({"name": "groq", "configured": True, "models": ["groq/llama-3.3-70b-versatile"]})
-
-    ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
-    providers.append({"name": "ollama", "configured": bool(ollama_host), "host": ollama_host, "models": ["ollama/llama3"]})
-
-    return providers
+    return [
+        {
+            "name": p.key,
+            "label": p.label,
+            "configured": p.is_configured(),
+            "models": list(p.example_models),
+            "default_model": p.default_model,
+        }
+        for p in list_providers()
+    ]
 
 
 # ── endpoints ───────────────────────────────────────────────────────

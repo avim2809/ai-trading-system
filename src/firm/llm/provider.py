@@ -46,11 +46,21 @@ class LLMService:
         temperature: float | None = None,
         max_tokens: int = 2000,
         json_mode: bool = False,
+        prompt_cache: bool = False,
     ) -> str:
-        """Send a chat completion request, using cache if available."""
+        """Send a chat completion request, using cache if available.
+
+        When *prompt_cache* is set and the active model is an Anthropic Claude
+        model, the first system message is marked with ``cache_control`` so its
+        (large, static) content is served from Anthropic's prompt cache on
+        repeat calls — ~90% cheaper on the cached prefix. No-op for providers
+        that don't honour explicit cache breakpoints.
+        """
         model = model or self.default_model
         temperature = temperature if temperature is not None else self.temperature
 
+        # Response-cache key is computed from the original messages so it stays
+        # stable regardless of any prompt-cache wrapping applied below.
         if self._cache is not None:
             cache_key = ResponseCache._hash(
                 model, messages,
@@ -62,9 +72,11 @@ class LLMService:
                 return cached
             self._cache_misses += 1
 
+        send_messages = self._apply_prompt_cache(messages, model) if prompt_cache else messages
+
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "messages": send_messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
@@ -85,6 +97,41 @@ class LLMService:
             self._cache.put(cache_key, content, model, tokens_in, tokens_out, cost)
 
         return content
+
+    @staticmethod
+    def _apply_prompt_cache(
+        messages: list[dict[str, Any]], model: str
+    ) -> list[dict[str, Any]]:
+        """Mark the first system message with Anthropic ``cache_control``.
+
+        Only applies to Anthropic Claude models (the providers that honour
+        explicit cache breakpoints); returns *messages* unchanged otherwise.
+        """
+        from firm.llm.config import is_anthropic
+
+        if not is_anthropic(model):
+            return messages
+
+        out: list[dict[str, Any]] = []
+        cached = False
+        for m in messages:
+            if (
+                not cached
+                and m.get("role") == "system"
+                and isinstance(m.get("content"), str)
+            ):
+                out.append({
+                    "role": "system",
+                    "content": [{
+                        "type": "text",
+                        "text": m["content"],
+                        "cache_control": {"type": "ephemeral"},
+                    }],
+                })
+                cached = True
+            else:
+                out.append(m)
+        return out
 
     def chat_json(
         self,

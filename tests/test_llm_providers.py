@@ -1,0 +1,90 @@
+"""Provider registry/factory + opt-in Anthropic prompt-cache wrapping."""
+
+from __future__ import annotations
+
+import pytest
+
+from firm.llm.provider import LLMService
+from firm.llm.providers import (
+    PROVIDERS,
+    build_llm_service,
+    get_provider,
+    list_providers,
+    resolve_provider,
+)
+
+
+class TestRegistry:
+    def test_common_providers_present(self):
+        keys = {p.key for p in list_providers()}
+        assert {"groq", "anthropic", "openai", "google", "mistral", "ollama"} <= keys
+
+    def test_get_provider_unknown_raises(self):
+        with pytest.raises(ValueError):
+            get_provider("not-a-provider")
+
+    def test_resolve_provider_by_prefix(self):
+        assert resolve_provider("groq/llama-3.3-70b-versatile").key == "groq"
+        assert resolve_provider("gpt-4o").key == "openai"
+        assert resolve_provider("anthropic/claude-opus-4-8").key == "anthropic"
+        assert resolve_provider("gemini/gemini-1.5-pro").key == "google"
+
+    def test_resolve_bare_claude_id(self):
+        # No "anthropic/" prefix, still routes to Anthropic.
+        assert resolve_provider("claude-opus-4-8").key == "anthropic"
+
+    def test_resolve_unknown_is_none(self):
+        assert resolve_provider("totally-made-up-model") is None
+
+    def test_ollama_needs_no_key(self):
+        assert PROVIDERS["ollama"].is_configured() is True
+
+
+class TestBuildLLMService:
+    def test_missing_key_raises(self, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
+            build_llm_service(provider="anthropic")
+
+    def test_key_present_builds_with_default_model(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+        svc = build_llm_service(provider="anthropic")
+        assert isinstance(svc, LLMService)
+        assert svc.default_model == "anthropic/claude-opus-4-8"
+
+    def test_model_override_infers_provider(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        svc = build_llm_service(model="gpt-4o-mini")
+        assert svc.default_model == "gpt-4o-mini"
+
+    def test_require_key_false_skips_validation(self, monkeypatch):
+        monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
+        svc = build_llm_service(provider="mistral", require_key=False)
+        assert svc.default_model == "mistral/mistral-large-latest"
+
+
+class TestPromptCache:
+    def test_anthropic_system_gets_cache_control(self):
+        messages = [
+            {"role": "system", "content": "big static context"},
+            {"role": "user", "content": "hi"},
+        ]
+        out = LLMService._apply_prompt_cache(messages, "anthropic/claude-opus-4-8")
+        sys_block = out[0]["content"][0]
+        assert sys_block["cache_control"] == {"type": "ephemeral"}
+        assert sys_block["text"] == "big static context"
+        assert out[1] == {"role": "user", "content": "hi"}  # untouched
+
+    def test_non_anthropic_unchanged(self):
+        messages = [{"role": "system", "content": "ctx"}]
+        out = LLMService._apply_prompt_cache(messages, "groq/llama-3.3-70b-versatile")
+        assert out == messages
+
+    def test_only_first_system_wrapped(self):
+        messages = [
+            {"role": "system", "content": "a"},
+            {"role": "system", "content": "b"},
+        ]
+        out = LLMService._apply_prompt_cache(messages, "claude-opus-4-8")
+        assert isinstance(out[0]["content"], list)   # wrapped
+        assert out[1]["content"] == "b"              # plain string, untouched

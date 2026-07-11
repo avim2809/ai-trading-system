@@ -1,0 +1,28 @@
+# Keep the build context small & reproducible.
+.git
+.gitignore
+**/__pycache__/
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.venv
+venv/
+env/
+
+# Frontend: ship source only, build inside the image.
+frontend/node_modules
+frontend/dist
+
+# Local state — must NOT bake into the image (lives on volumes instead).
+data/
+runs/
+
+# Dev-only / docs / secrets.
+tests/
+docs/
+memory/
+*.md
+.env
+.env.*
+setup.ps1
+setup.sh

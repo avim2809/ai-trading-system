@@ -15,7 +15,11 @@ _CONFIG_PATH = Path("config/llm.yaml")
 
 _RAG_DEFAULTS: dict[str, Any] = {
     "persist_dir": "data/vectordb",
-    "embedding_model": "all-MiniLM-L6-v2",
+    # External (hosted) RAG models by default — no local torch needed.
+    "embedding_provider": "voyage",        # "voyage" | "local"
+    "embedding_model": "voyage-finance-2",  # local example: all-MiniLM-L6-v2
+    "reranker_provider": "voyage",         # "voyage" | "local" | "none"
+    "reranker_model": "rerank-2.5",        # local: cross-encoder/ms-marco-MiniLM-L-6-v2
     "chunk_size": 500,
     "chunk_overlap": 50,
     "reranking": True,
