@@ -29,9 +29,9 @@ class AlphaVantageProvider(DataProvider):
 
     name = "alphavantage"
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, api_key: str = "", settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-        self._api_key = self.settings.require("alphavantage_api_key")
+        self._api_key = api_key or self.settings.require("alphavantage_api_key")
         self._client = RestClient(_BASE_URL, self.settings)
 
     def get_prices(
@@ -152,7 +152,7 @@ class AlphaVantageProvider(DataProvider):
         self, symbols: Sequence[str], start: datetime, end: datetime
     ) -> pd.DataFrame:
         raise NotImplementedError(
-            "AlphaVantageProvider does not expose discrete corporate actions; use PolygonProvider."
+            "AlphaVantageProvider does not expose discrete corporate actions; use MassiveProvider."
         )
 
     def get_universe_constituents(
