@@ -93,6 +93,38 @@ def _build_features(pivot: pd.DataFrame) -> pd.DataFrame:
     return result.reset_index()
 
 
+def _build_macro_features(pit_view) -> pd.DataFrame:
+    """Build date-indexed macro feature columns from FRED data in the PIT store.
+
+    Returns a DataFrame with a DatetimeIndex and columns:
+      yield_curve_slope — daily T10Y2Y spread (level, in %)
+      cpi_mom_3m        — 3-month CPI momentum (forward-filled to daily)
+
+    Returns an empty DataFrame when the PIT store has no macro data, so the
+    strategy degrades gracefully when FRED_API_KEY is absent.
+    """
+    if not hasattr(pit_view, "macro"):
+        return pd.DataFrame()
+
+    frames: dict[str, pd.Series] = {}
+
+    yc = pit_view.macro("T10Y2Y", lookback_days=400)
+    if not yc.empty:
+        frames["yield_curve_slope"] = yc
+
+    cpi = pit_view.macro("CPIAUCSL", lookback_days=400)
+    if not cpi.empty:
+        # 3-month (63 calendar-day) momentum: pct change over 91 days
+        frames["cpi_mom_3m"] = cpi.pct_change(91)
+
+    if not frames:
+        return pd.DataFrame()
+
+    macro_df = pd.DataFrame(frames)
+    macro_df.index = pd.to_datetime(macro_df.index)
+    return macro_df
+
+
 @register("ml_prediction")
 class MLPredictionStrategy(BaseStrategy):
     def __init__(self, params: dict | None = None):
@@ -128,6 +160,20 @@ class MLPredictionStrategy(BaseStrategy):
             return []
 
         feature_df["date"] = pd.to_datetime(feature_df["date"])
+
+        # Merge macro features (yield curve, CPI momentum) when available.
+        macro_df = _build_macro_features(pit_view)
+        macro_cols: list[str] = []
+        if not macro_df.empty:
+            macro_df = macro_df.reset_index().rename(columns={"index": "date"})
+            macro_df["date"] = pd.to_datetime(macro_df["date"])
+            macro_cols = [c for c in macro_df.columns if c != "date"]
+            feature_df = feature_df.merge(macro_df, on="date", how="left")
+            # Forward-fill so monthly CPI is available on every trading day,
+            # then zero-fill any remaining NaNs at the start of the series.
+            for col in macro_cols:
+                feature_df[col] = feature_df[col].ffill().fillna(0.0)
+
         fwd_ret = pivot.pct_change(predict_horizon).shift(-predict_horizon)
         fwd_ret_stacked = fwd_ret.stack().reset_index()
         fwd_ret_stacked.columns = ["date", "symbol", "fwd_return"]
@@ -138,6 +184,7 @@ class MLPredictionStrategy(BaseStrategy):
         feature_cols = [
             "ret_1d", "ret_5d", "ret_21d", "ret_63d",
             "vol_21d", "vol_63d", "price_vs_ma50", "price_vs_ma200",
+            *macro_cols,
         ]
 
         asof_ts = pd.Timestamp(pit_view.asof)

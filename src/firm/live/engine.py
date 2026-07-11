@@ -74,6 +74,14 @@ class LiveTradingEngine:
         self._cycle_history: list[CycleResult] = []
         self._running = False
 
+        # Decision memory — optional; enabled when memory_log_path is configured.
+        from firm.agents.memory import TradingMemoryLog
+        self._memory = TradingMemoryLog(config)
+        # Track the last cycle's date and NAV for deferred reflection.
+        self._prev_cycle_date: str | None = None
+        self._prev_cycle_nav: float | None = None
+        self._llm_service: Any = None
+
         # Observability/alerting. The kill switch trips when peak-to-trough
         # drawdown breaches ``kill_switch_drawdown`` (falls back to the risk
         # ``max_drawdown_pct``; 1.0 ≈ disabled). ``alert_callback`` is an
@@ -229,13 +237,32 @@ class LiveTradingEngine:
                     self._cycle_history.append(result)
                     return result
 
+                # Phase B: reflect on the previous cycle now that its P&L is known.
+                self._maybe_reflect(now)
+
                 context = {
                     "pit_view": pit_view,
                     "portfolio": self._portfolio,
                     "prices": prices,
+                    "memory": self._memory,
                 }
                 orders, blackboard = self._orchestrator.step(context)
                 result.orders_generated = len(orders)
+
+                # Phase A: store this cycle's decision for deferred reflection.
+                proposal = getattr(blackboard, "proposal", None)
+                if proposal is not None:
+                    date_str = now.strftime("%Y-%m-%d")
+                    regime = ""
+                    if hasattr(blackboard, "risk_decision") and blackboard.risk_decision:
+                        regime = "; ".join(getattr(blackboard.risk_decision, "actions", []))
+                    self._memory.store_decision(
+                        date=date_str,
+                        proposal_weights=dict(proposal.targets),
+                        notes=f"cycle={self._cycle_count}; {regime}".strip("; "),
+                    )
+                    self._prev_cycle_date = date_str
+                    self._prev_cycle_nav = self._portfolio.nav
 
                 if not orders:
                     log.info("Cycle %d: no orders generated", self._cycle_count)
@@ -287,6 +314,54 @@ class LiveTradingEngine:
             return result
         finally:
             self._cycle_lock.release()
+
+    def _maybe_reflect(self, now: datetime) -> None:
+        """Trigger deferred LLM reflection on the previous cycle if P&L is known.
+
+        Called at the start of each cycle so the outcome (NAV change since the
+        last decision) is available before the new decision is made.  Skips
+        silently when there is no pending decision or the LLM is unavailable.
+        """
+        if self._prev_cycle_date is None or self._prev_cycle_nav is None:
+            return
+        prev_nav = self._prev_cycle_nav
+        if prev_nav <= 0:
+            return
+        current_nav = self._portfolio.nav
+        raw_return = (current_nav / prev_nav) - 1.0
+
+        # Use a flat 0.0 benchmark when SPY price is unavailable — the
+        # reflection is still useful even without alpha decomposition.
+        benchmark_return = 0.0
+
+        llm = self._get_llm_service()
+        if llm is None:
+            return
+        try:
+            self._memory.reflect(
+                date=self._prev_cycle_date,
+                raw_return=raw_return,
+                benchmark_return=benchmark_return,
+                llm_service=llm,
+            )
+        except Exception:
+            log.warning("Memory reflection failed for %s", self._prev_cycle_date, exc_info=True)
+        finally:
+            # Clear so we don't double-reflect if the next cycle errors early.
+            self._prev_cycle_date = None
+            self._prev_cycle_nav = None
+
+    def _get_llm_service(self) -> Any:
+        """Lazy-initialise the LLM service for reflection calls."""
+        if self._llm_service is not None:
+            return self._llm_service
+        try:
+            from firm.llm.provider import LLMService
+            llm_config = self._config.get("llm_config", {})
+            self._llm_service = LLMService(llm_config)
+        except Exception:
+            log.debug("LLM service unavailable — memory reflection disabled")
+        return self._llm_service
 
     @staticmethod
     def _group_by_strategy(

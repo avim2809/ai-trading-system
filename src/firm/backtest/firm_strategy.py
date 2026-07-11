@@ -67,6 +67,9 @@ class PitViewAdapter:
         syms = symbols or self._universe
         return self._pit_store.get_sentiment(syms, self._asof, lookback_days)
 
+    def macro(self, series_id: str, lookback_days: int = 365) -> pd.Series:
+        return self._pit_store.get_macro(series_id, self._asof, lookback_days)
+
 
 class FirmStrategy(bt.Strategy):
     """Bridge between Backtrader and the multi-agent orchestrator.
@@ -85,6 +88,8 @@ class FirmStrategy(bt.Strategy):
         ("attribution", None),  # PerformanceAttribution instance (optional)
         ("commission_pct", 0.001),  # per-trade commission rate
         ("slippage_pct", 0.0005),  # per-trade slippage rate
+        ("memory", None),   # TradingMemoryLog instance (optional)
+        ("llm_config", None),  # LLM config dict for reflection calls (optional)
     )
 
     def __init__(self):
@@ -92,6 +97,10 @@ class FirmStrategy(bt.Strategy):
         self._data_map: dict[str, bt.AbstractDataBase] = {}
         for d in self.datas:
             self._data_map[d._name] = d
+        # Track previous bar's NAV and date for deferred reflection.
+        self._prev_rebalance_date: str | None = None
+        self._prev_rebalance_nav: float | None = None
+        self._llm_service = None
 
     def next(self):
         current_dt: datetime = self.datas[0].datetime.datetime(0)
@@ -109,10 +118,14 @@ class FirmStrategy(bt.Strategy):
             if data is not None and len(data) > 0:
                 prices[sym] = data.close[0]
 
+        # Reflect on the previous decision now that its P&L is known.
+        self._maybe_reflect(current_dt)
+
         context = {
             "pit_view": pit_view,
             "portfolio": self.p.portfolio_state,
             "prices": prices,
+            "memory": self.p.memory,
         }
 
         try:
@@ -143,6 +156,20 @@ class FirmStrategy(bt.Strategy):
         if self.p.attribution is not None and orders:
             self.p.attribution.record_trades(orders, prices)
 
+        # Phase A: store this decision for deferred reflection.
+        if self.p.memory is not None:
+            proposal = getattr(blackboard, "proposal", None)
+            if proposal is not None:
+                date_str = current_dt.strftime("%Y-%m-%d")
+                nav = self.broker.getvalue()
+                self.p.memory.store_decision(
+                    date=date_str,
+                    proposal_weights=dict(proposal.targets),
+                    notes=getattr(proposal, "notes", "") or "",
+                )
+                self._prev_rebalance_date = date_str
+                self._prev_rebalance_nav = nav
+
         self._last_rebalance = current_dt
 
     def _should_rebalance(self, dt: datetime) -> bool:
@@ -157,6 +184,52 @@ class FirmStrategy(bt.Strategy):
         elif freq == "monthly":
             return dt.month != self._last_rebalance.month
         return True
+
+    def _maybe_reflect(self, current_dt: datetime) -> None:
+        """Trigger LLM reflection on the previous rebalance decision.
+
+        Called at the start of each rebalance bar.  Uses the change in broker
+        NAV between the two bars as the realized return; benchmark is omitted
+        in the backtest path to keep reflection cheap (SPY prices are available
+        in the price data if the user wants to compute it themselves).
+        """
+        if self.p.memory is None:
+            return
+        if self._prev_rebalance_date is None or self._prev_rebalance_nav is None:
+            return
+        prev_nav = self._prev_rebalance_nav
+        if prev_nav <= 0:
+            return
+        current_nav = self.broker.getvalue()
+        raw_return = (current_nav / prev_nav) - 1.0
+        llm = self._get_llm_service()
+        if llm is None:
+            return
+        try:
+            self.p.memory.reflect(
+                date=self._prev_rebalance_date,
+                raw_return=raw_return,
+                benchmark_return=0.0,
+                llm_service=llm,
+            )
+        except Exception:
+            log.debug("Memory reflection failed for %s", self._prev_rebalance_date, exc_info=True)
+        finally:
+            self._prev_rebalance_date = None
+            self._prev_rebalance_nav = None
+
+    def _get_llm_service(self):
+        if self._llm_service is not None:
+            return self._llm_service
+        llm_config = self.p.llm_config or {}
+        if not llm_config:
+            return None
+        try:
+            from firm.llm.provider import LLMService
+            self._llm_service = LLMService(llm_config)
+        except Exception:
+            log.debug("LLM service unavailable — reflection disabled")
+        return self._llm_service
 
     def notify_order(self, order):
         if order.status in [order.Completed]:

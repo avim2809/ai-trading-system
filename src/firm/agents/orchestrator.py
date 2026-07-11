@@ -62,7 +62,9 @@ class Orchestrator(Agent):
         Args:
             context: Must contain ``pit_view`` (:class:`PitView`),
                 ``portfolio`` (:class:`PortfolioState`), and ``prices``
-                (``dict[str, float]``).
+                (``dict[str, float]``).  Optional ``memory``
+                (:class:`firm.agents.memory.TradingMemoryLog`) is forwarded
+                to LLM-enhanced trader and risk agents for past-context injection.
 
         Returns:
             ``(orders_list, blackboard)`` where *orders_list* feeds the
@@ -71,6 +73,7 @@ class Orchestrator(Agent):
         pit_view = context["pit_view"]
         portfolio = context.get("portfolio")
         prices: dict[str, float] = context.get("prices", {})
+        memory = context.get("memory")
 
         bb = Blackboard(asof=pit_view.asof)
         ctx = AgentContext(now=pit_view.asof, pit_view=pit_view, portfolio=portfolio)
@@ -118,13 +121,13 @@ class Orchestrator(Agent):
             return [], bb
 
         # 4. Trade proposal
-        proposal = self.trader.run(ctx, debate_results=debate_results, blackboard=bb)
+        proposal = self.trader.run(ctx, debate_results=debate_results, blackboard=bb, memory=memory)
         bb.proposal = proposal
 
         # 5. Risk approval loop
         decision = None
         for attempt in range(self._max_risk_retries):
-            decision = self.risk.run(ctx, proposal=proposal, portfolio=portfolio)
+            decision = self.risk.run(ctx, proposal=proposal, portfolio=portfolio, memory=memory)
             bb.risk_decision = decision
             if decision.approved:
                 break

@@ -47,18 +47,22 @@ class RiskConfig(BaseModel):
 
 class DataConfig(BaseModel):
     cache_dir: str = "data/cache"
-    price_provider: str = "polygon"
-    fundamental_provider: str = "fmp"
-    sentiment_provider: str = "tiingo"
+    price_provider: str = "fallback"
+    fundamental_provider: str = "fallback"
+    sentiment_provider: str = "fallback"
 
 
 class Settings(BaseSettings):
     """Root settings – merges .env keys with settings.yaml sections."""
 
-    polygon_api_key: str = ""
     tiingo_api_key: str = ""
     alphavantage_api_key: str = ""
     fmp_api_key: str = ""
+    massive_api_key: str = ""
+    fred_api_key: str = ""
+
+    request_timeout_seconds: int = 30
+    max_retries: int = 3
 
     universe: UniverseConfig = UniverseConfig()
     backtest: BacktestConfig = BacktestConfig()
@@ -68,6 +72,16 @@ class Settings(BaseSettings):
     strategies: list[str] = []
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+
+    def require(self, key: str) -> str:
+        """Return the value of a settings field, raising if empty."""
+        value = getattr(self, key, "")
+        if not value:
+            raise ValueError(
+                f"Settings field '{key}' is required but not set. "
+                f"Add {key.upper()} to your .env file."
+            )
+        return value
 
     @classmethod
     def from_yaml(cls, path: Path | str | None = None, **overrides: Any) -> "Settings":

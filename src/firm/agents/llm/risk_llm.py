@@ -43,16 +43,25 @@ class LLMRiskAgent(RiskAgent, LLMAgentMixin):
             if part:
                 all_context_parts.append(part)
 
-        if not all_context_parts:
+        # Inject past decision outcomes so the agent considers historical risk events.
+        memory = inputs.get("memory")
+        past_context = memory.get_context() if memory is not None else ""
+
+        if not all_context_parts and not past_context:
             return quant_decision
 
-        context = self._compress("\n\n".join(all_context_parts))
+        context = self._compress("\n\n".join(all_context_parts)) if all_context_parts else ""
         violations_str = "; ".join(quant_decision.violations) if quant_decision.violations else "None"
         prompt = (
             f"Symbols: {', '.join(symbols)}\n"
             f"Quant violations: {violations_str}\n"
             f"Quant approved: {quant_decision.approved}\n"
-            f"Context:\n{context}\n\n"
+        )
+        if past_context:
+            prompt += f"\n{past_context}\n"
+        if context:
+            prompt += f"Context:\n{context}\n\n"
+        prompt += (
             "Identify non-quantitative risks (regulatory, litigation, macro events). "
             "Return JSON: "
             '{"additional_violations": ["..."], "additional_actions": ["..."], "override_approval": null or bool}'

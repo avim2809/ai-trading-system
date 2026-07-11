@@ -37,10 +37,17 @@ class LLMTraderAgent(TraderAgent, LLMAgentMixin):
             asof=ctx.now,
         )
         context = self._compress(rag_context) if rag_context else ""
+
+        # Inject past decision outcomes so the agent learns from history.
+        memory = inputs.get("memory")
+        past_context = memory.get_context() if memory is not None else ""
+
         prompt = (
             f"Proposed portfolio weights: {targets_str}\n"
             f"Method: {self.allocation_method}\n"
         )
+        if past_context:
+            prompt += f"\n{past_context}\n"
         if context:
             prompt += f"Research context:\n{context}\n\n"
         prompt += (

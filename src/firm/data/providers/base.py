@@ -6,6 +6,14 @@ from abc import ABC, abstractmethod
 
 import pandas as pd
 
+from firm.data.schemas import (
+    CORPORATE_ACTION_COLS,
+    FUNDAMENTAL_COLS,
+    PRICE_COLS,
+    SENTIMENT_COLS,
+    UNIVERSE_COLUMNS,
+)
+
 
 class ProviderError(Exception):
     """Raised when a data-provider operation fails."""
@@ -16,6 +24,30 @@ class DataProvider(ABC):
 
     def __init__(self, api_key: str):
         self.api_key = api_key
+
+    # ------------------------------------------------------------------
+    # Empty-frame helpers – return typed empty DataFrames for each domain.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def empty_prices() -> pd.DataFrame:
+        return pd.DataFrame(columns=PRICE_COLS)
+
+    @staticmethod
+    def empty_fundamentals() -> pd.DataFrame:
+        return pd.DataFrame(columns=FUNDAMENTAL_COLS)
+
+    @staticmethod
+    def empty_news() -> pd.DataFrame:
+        return pd.DataFrame(columns=SENTIMENT_COLS)
+
+    @staticmethod
+    def empty_corporate_actions() -> pd.DataFrame:
+        return pd.DataFrame(columns=CORPORATE_ACTION_COLS)
+
+    @staticmethod
+    def empty_universe() -> pd.DataFrame:
+        return pd.DataFrame(columns=UNIVERSE_COLUMNS)
 
     @abstractmethod
     def get_prices(

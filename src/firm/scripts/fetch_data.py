@@ -16,27 +16,13 @@ import pandas as pd
 
 from firm.config import get_settings
 from firm.data.cache import ParquetCache
-from firm.data.providers.alphavantage import AlphaVantageProvider
-from firm.data.providers.fmp import FMPProvider
-from firm.data.providers.polygon import PolygonProvider
-from firm.data.providers.tiingo import TiingoProvider
+from firm.data.providers import get_provider
 from firm.logging_setup import setup_logging
 
 log = logging.getLogger("firm.scripts.fetch_data")
 
-_PROVIDER_MAP = {
-    "polygon": lambda key: PolygonProvider(key),
-    "tiingo": lambda key: TiingoProvider(key),
-    "alphavantage": lambda key: AlphaVantageProvider(key),
-    "fmp": lambda key: FMPProvider(key),
-}
-
-_KEY_MAP = {
-    "polygon": "polygon_api_key",
-    "tiingo": "tiingo_api_key",
-    "alphavantage": "alphavantage_api_key",
-    "fmp": "fmp_api_key",
-}
+# Provider names understood by the CLI; "fallback" is the default.
+_KNOWN_PROVIDERS = {"fallback", "massive", "tiingo", "alphavantage", "fmp"}
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -73,9 +59,7 @@ def main(argv: list[str] | None = None) -> None:
         symbols = [s.strip().upper() for s in args.symbols.split(",")]
     else:
         log.info("Resolving universe for %s ...", args.index)
-        p_name = cfg.data.price_provider
-        key = getattr(cfg, _KEY_MAP[p_name], "")
-        prov = _PROVIDER_MAP[p_name](key)
+        prov = get_provider(cfg.data.price_provider, settings=cfg)
         symbols = prov.get_universe_constituents(args.index, args.end)
         if not symbols:
             log.error("Could not resolve universe; exiting.")
@@ -87,15 +71,16 @@ def main(argv: list[str] | None = None) -> None:
     all_sentiment: list[pd.DataFrame] = []
 
     for name in providers_requested:
-        if name not in _PROVIDER_MAP:
+        if name not in _KNOWN_PROVIDERS:
             log.warning("Unknown provider '%s'; skipping.", name)
             continue
-        api_key = getattr(cfg, _KEY_MAP[name], "")
-        if not api_key:
-            log.warning("No API key for %s; skipping.", name)
+
+        try:
+            prov = get_provider(name, settings=cfg)
+        except Exception as exc:
+            log.warning("Could not init provider '%s': %s; skipping.", name, exc)
             continue
 
-        prov = _PROVIDER_MAP[name](api_key)
         log.info("Fetching from %s …", name)
 
         # Prices

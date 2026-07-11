@@ -28,9 +28,9 @@ def build_pit_panel(
     start: datetime,
     end: datetime,
     *,
-    prices_provider: str = "polygon",
-    fundamentals_provider: str | None = "fmp",
-    sentiment_provider: str | None = "alphavantage",
+    prices_provider: str = "fallback",
+    fundamentals_provider: str | None = "fallback",
+    sentiment_provider: str | None = "fallback",
     cache: ParquetCache | None = None,
 ) -> dict[str, pd.DataFrame]:
     """Fetch and cache a point-in-time panel keyed by ``(date, symbol)``.
@@ -109,9 +109,9 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--symbols", required=True, help="Comma-separated tickers, e.g. AAPL,MSFT")
     parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end", required=True, help="End date YYYY-MM-DD")
-    parser.add_argument("--prices-provider", default="polygon")
-    parser.add_argument("--fundamentals-provider", default="fmp")
-    parser.add_argument("--sentiment-provider", default="alphavantage")
+    parser.add_argument("--prices-provider", default="fallback")
+    parser.add_argument("--fundamentals-provider", default="fallback")
+    parser.add_argument("--sentiment-provider", default="fallback")
     parser.add_argument("--no-fundamentals", action="store_true")
     parser.add_argument("--no-sentiment", action="store_true")
     parser.add_argument(

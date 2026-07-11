@@ -41,6 +41,6 @@ risk:
 
 data:
   cache_dir: "data/cache"
-  price_provider: "polygon"
-  fundamental_provider: "fmp"
-  sentiment_provider: "tiingo"
+  price_provider: "fallback"
+  fundamental_provider: "fallback"
+  sentiment_provider: "fallback"

@@ -1,15 +1,13 @@
-"""Financial Modeling Prep (FMP) adapter - fundamentals, earnings, constituents.
+"""Financial Modeling Prep (FMP) adapter – prices, fundamentals, constituents.
 
-Docs: https://site.financialmodelingprep.com/developer/docs. Endpoints used:
+Docs: https://financialmodelingprep.com/developer/docs
 
-* Income statement:  ``/api/v3/income-statement/{symbol}``
-* Key metrics:       ``/api/v3/key-metrics/{symbol}``
-* Earnings calendar: ``/api/v3/historical/earning_calendar/{symbol}``
-* Splits/dividends:  ``/api/v3/historical-price-full/stock_split/{symbol}`` etc.
-* Constituents:      ``/api/v3/sp500_constituent`` and ``.../historical/...``
-
-Fundamentals use the SEC **filing/accepted date** as the point-in-time ``asof``
-column where available (falling back to the period end date) to avoid look-ahead.
+Uses the ``/stable`` endpoint family (post-Aug 2025). Endpoints:
+* Prices:         GET /stable/historical-price-eod/full
+* Income stmt:    GET /stable/income-statement
+* Key metrics:    GET /stable/key-metrics
+* Ratios:         GET /stable/ratios
+* SP500 members:  GET /stable/sp500-constituent  (premium plan required)
 """
 
 from __future__ import annotations
@@ -20,35 +18,38 @@ from typing import Sequence
 import pandas as pd
 
 from firm.config import Settings, get_settings
-from firm.data import schemas
 from firm.data.providers._rest import RestClient
-from firm.data.providers.base import DataProvider
+from firm.data.providers.base import DataProvider, ProviderError
+from firm.data.schemas import FUNDAMENTAL_COLS, PRICE_COLS
 from firm.logging_setup import get_logger
 
 log = get_logger(__name__)
 
 _BASE_URL = "https://financialmodelingprep.com"
 
-# Tidy/long fundamental metrics pulled from income-statement + key-metrics.
-_INCOME_METRICS = ("revenue", "netIncome", "eps", "operatingIncome", "grossProfit")
-_KEY_METRICS = ("peRatio", "pbRatio", "roe", "debtToEquity", "freeCashFlowPerShare")
-
 
 class FMPProvider(DataProvider):
-    """Adapter for the FMP REST API (fundamentals, earnings, constituents)."""
+    """Adapter for the FMP REST API (fundamentals, prices, constituents)."""
 
     name = "fmp"
 
-    def __init__(self, settings: Settings | None = None) -> None:
+    def __init__(self, api_key: str = "", settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
-        self._api_key = self.settings.require("fmp_api_key")
+        self._api_key = api_key or self.settings.require("fmp_api_key")
         self._client = RestClient(_BASE_URL, self.settings)
+
+    def _params(self, **extra) -> dict:
+        return {"apikey": self._api_key, **extra}
+
+    # ------------------------------------------------------------------
+    # prices
+    # ------------------------------------------------------------------
 
     def get_prices(
         self,
         symbols: Sequence[str],
-        start: datetime,
-        end: datetime,
+        start: datetime | str,
+        end: datetime | str,
         *,
         adjusted: bool = True,
     ) -> pd.DataFrame:
@@ -56,218 +57,155 @@ class FMPProvider(DataProvider):
         start_str = pd.Timestamp(start).strftime("%Y-%m-%d")
         end_str = pd.Timestamp(end).strftime("%Y-%m-%d")
         for symbol in symbols:
-            payload = self._client.get_json(
-                f"/api/v3/historical-price-full/{symbol}",
-                params={"from": start_str, "to": end_str, "apikey": self._api_key},
-            )
-            hist = payload.get("historical") if isinstance(payload, dict) else None
-            if not hist:
-                continue
-            df = pd.DataFrame(hist)
-            out = pd.DataFrame(
-                {
-                    schemas.COL_DATE: pd.to_datetime(df["date"]).dt.normalize(),
-                    schemas.COL_SYMBOL: symbol,
-                    schemas.COL_OPEN: df["open"].astype(float),
-                    schemas.COL_HIGH: df["high"].astype(float),
-                    schemas.COL_LOW: df["low"].astype(float),
-                    schemas.COL_CLOSE: df["close"].astype(float),
-                    schemas.COL_ADJ_CLOSE: (
-                        df["adjClose"] if "adjClose" in df else df["close"]
-                    ).astype(float),
-                    schemas.COL_VOLUME: df["volume"].astype(float),
-                }
-            )
-            frames.append(out)
+            try:
+                data = self._client.get_json(
+                    "/stable/historical-price-eod/full",
+                    params=self._params(symbol=symbol, **{"from": start_str, "to": end_str}),
+                )
+                records = data if isinstance(data, list) else (data.get("historical") or [])
+                if not records:
+                    continue
+                df = pd.DataFrame(records)
+                adj_col = "adjClose" if "adjClose" in df.columns else "close"
+                frames.append(
+                    pd.DataFrame(
+                        {
+                            "date": pd.to_datetime(df["date"]).dt.normalize(),
+                            "symbol": symbol,
+                            "open": df["open"].astype(float),
+                            "high": df["high"].astype(float),
+                            "low": df["low"].astype(float),
+                            "close": df["close"].astype(float),
+                            "volume": df["volume"].astype(float),
+                            "adj_close": df[adj_col].astype(float),
+                        }
+                    )[PRICE_COLS]
+                )
+            except Exception:
+                log.exception("fmp_prices_failed symbol=%s", symbol)
         if not frames:
             return self.empty_prices()
         return (
             pd.concat(frames, ignore_index=True)
-            .sort_values([schemas.COL_SYMBOL, schemas.COL_DATE])
+            .sort_values(["symbol", "date"])
             .reset_index(drop=True)
         )
 
-    # --- fundamentals --------------------------------------------------------
+    # ------------------------------------------------------------------
+    # fundamentals
+    # ------------------------------------------------------------------
+
     def get_fundamentals(
-        self, symbols: Sequence[str], start: datetime, end: datetime
+        self,
+        symbols: Sequence[str],
+        start: datetime | str,
+        end: datetime | str,
     ) -> pd.DataFrame:
-        rows: list[dict] = []
+        """Return fundamentals in FUNDAMENTAL_COLS wide format.
+
+        Merges income statement (revenue, net_income, eps) with key metrics
+        (market_cap, roe, debt_to_equity) and ratios (pe_ratio, pb_ratio,
+        dividend_yield) by symbol + fiscal year.
+        """
         start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
+        frames: list[pd.DataFrame] = []
         for symbol in symbols:
-            income = self._client.get_json(
-                f"/api/v3/income-statement/{symbol}",
-                params={"period": "quarter", "limit": 80, "apikey": self._api_key},
-            )
-            rows.extend(self._tidy_statement(symbol, income, _INCOME_METRICS, start_ts, end_ts))
-            metrics = self._client.get_json(
-                f"/api/v3/key-metrics/{symbol}",
-                params={"period": "quarter", "limit": 80, "apikey": self._api_key},
-            )
-            rows.extend(self._tidy_statement(symbol, metrics, _KEY_METRICS, start_ts, end_ts))
-        if not rows:
+            try:
+                income = self._client.get_json(
+                    "/stable/income-statement",
+                    params=self._params(symbol=symbol, limit=5),
+                )
+                metrics = self._client.get_json(
+                    "/stable/key-metrics",
+                    params=self._params(symbol=symbol, limit=5),
+                )
+                ratios = self._client.get_json(
+                    "/stable/ratios",
+                    params=self._params(symbol=symbol, limit=5),
+                )
+                # Index by (fiscalYear, period) for merging
+                income_map = {
+                    (r.get("fiscalYear"), r.get("period")): r
+                    for r in (income if isinstance(income, list) else [])
+                }
+                metrics_map = {
+                    (r.get("fiscalYear"), r.get("period")): r
+                    for r in (metrics if isinstance(metrics, list) else [])
+                }
+                for rec in ratios if isinstance(ratios, list) else []:
+                    date_raw = rec.get("date")
+                    if not date_raw:
+                        continue
+                    ts = pd.Timestamp(date_raw).normalize()
+                    if not (start_ts <= ts <= end_ts):
+                        continue
+                    key = (rec.get("fiscalYear"), rec.get("period"))
+                    inc = income_map.get(key, {})
+                    met = metrics_map.get(key, {})
+                    frames.append(
+                        pd.DataFrame(
+                            [
+                                {
+                                    "date": ts,
+                                    "symbol": symbol,
+                                    "market_cap": met.get("marketCap"),
+                                    "pe_ratio": rec.get("priceToEarningsRatio"),
+                                    "pb_ratio": rec.get("priceToBookRatio"),
+                                    "roe": rec.get("returnOnEquity"),
+                                    "debt_to_equity": rec.get("debtToEquityRatio"),
+                                    "revenue": inc.get("revenue"),
+                                    "net_income": inc.get("netIncome"),
+                                    "eps": inc.get("eps"),
+                                    "dividend_yield": rec.get("dividendYield"),
+                                }
+                            ],
+                            columns=FUNDAMENTAL_COLS,
+                        )
+                    )
+            except Exception:
+                log.exception("fmp_fundamentals_failed symbol=%s", symbol)
+        if not frames:
             return self.empty_fundamentals()
         return (
-            pd.DataFrame(rows)
-            .sort_values([schemas.COL_SYMBOL, schemas.COL_ASOF, schemas.COL_METRIC])
+            pd.concat(frames, ignore_index=True)
+            .sort_values(["symbol", "date"])
             .reset_index(drop=True)
         )
-
-    @staticmethod
-    def _tidy_statement(
-        symbol: str,
-        payload: object,
-        metrics: tuple[str, ...],
-        start_ts: pd.Timestamp,
-        end_ts: pd.Timestamp,
-    ) -> list[dict]:
-        if not isinstance(payload, list):
-            return []
-        out: list[dict] = []
-        for rec in payload:
-            period_end = pd.Timestamp(rec.get("date"))
-            # Prefer the SEC accepted/filing date as point-in-time availability.
-            asof_raw = rec.get("acceptedDate") or rec.get("fillingDate") or rec.get("date")
-            asof = pd.Timestamp(asof_raw)
-            if pd.isna(asof) or not (start_ts <= asof <= end_ts):
-                continue
-            period_label = rec.get("period")
-            period = (
-                f"{period_end.year}-{period_label}"
-                if period_label
-                else (period_end.strftime("%Y-%m-%d") if not pd.isna(period_end) else "")
-            )
-            for metric in metrics:
-                if metric not in rec or rec[metric] is None:
-                    continue
-                try:
-                    value = float(rec[metric])
-                except (TypeError, ValueError):
-                    continue
-                out.append(
-                    {
-                        schemas.COL_SYMBOL: symbol,
-                        schemas.COL_PERIOD: period,
-                        schemas.COL_ASOF: asof.normalize(),
-                        schemas.COL_METRIC: metric,
-                        schemas.COL_VALUE: value,
-                    }
-                )
-        return out
 
     def get_news_sentiment(
-        self, symbols: Sequence[str], start: datetime, end: datetime
+        self, symbols: Sequence[str], start: datetime | str, end: datetime | str
+    ) -> pd.DataFrame:
+        raise NotImplementedError("FMPProvider does not provide news sentiment; use MassiveProvider.")
+
+    # ------------------------------------------------------------------
+    # corporate actions
+    # ------------------------------------------------------------------
+
+    def get_corporate_actions(
+        self, symbols: Sequence[str], start: datetime | str, end: datetime | str
     ) -> pd.DataFrame:
         raise NotImplementedError(
-            "FMPProvider news scoring is not wired; use AlphaVantageProvider."
+            "FMPProvider corporate actions require a premium plan; use MassiveProvider."
         )
 
-    # --- corporate actions ---------------------------------------------------
-    def get_corporate_actions(
-        self, symbols: Sequence[str], start: datetime, end: datetime
-    ) -> pd.DataFrame:
-        frames: list[pd.DataFrame] = []
-        start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
-        for symbol in symbols:
-            splits = self._client.get_json(
-                f"/api/v3/historical-price-full/stock_split/{symbol}",
-                params={"apikey": self._api_key},
-            )
-            for s in (splits.get("historical", []) if isinstance(splits, dict) else []):
-                ex = pd.Timestamp(s.get("date"))
-                if pd.isna(ex) or not (start_ts <= ex <= end_ts):
-                    continue
-                num = float(s.get("numerator", 1) or 1)
-                den = float(s.get("denominator", 1) or 1)
-                frames.append(
-                    pd.DataFrame(
-                        [
-                            {
-                                schemas.COL_SYMBOL: symbol,
-                                schemas.COL_EX_DATE: ex.normalize(),
-                                schemas.COL_ACTION_TYPE: "split",
-                                schemas.COL_RATIO: num / den if den else float("nan"),
-                                schemas.COL_CASH_AMOUNT: float("nan"),
-                            }
-                        ]
-                    )
-                )
-            divs = self._client.get_json(
-                f"/api/v3/historical-price-full/stock_dividend/{symbol}",
-                params={"apikey": self._api_key},
-            )
-            for d in (divs.get("historical", []) if isinstance(divs, dict) else []):
-                ex = pd.Timestamp(d.get("date"))
-                if pd.isna(ex) or not (start_ts <= ex <= end_ts):
-                    continue
-                frames.append(
-                    pd.DataFrame(
-                        [
-                            {
-                                schemas.COL_SYMBOL: symbol,
-                                schemas.COL_EX_DATE: ex.normalize(),
-                                schemas.COL_ACTION_TYPE: "dividend",
-                                schemas.COL_RATIO: float("nan"),
-                                schemas.COL_CASH_AMOUNT: float(d.get("dividend", 0.0) or 0.0),
-                            }
-                        ]
-                    )
-                )
-        if not frames:
-            return self.empty_corporate_actions()
-        return (
-            pd.concat(frames, ignore_index=True)
-            .sort_values([schemas.COL_SYMBOL, schemas.COL_EX_DATE])
-            .reset_index(drop=True)
-        )
+    # ------------------------------------------------------------------
+    # universe
+    # ------------------------------------------------------------------
 
-    # --- universe ------------------------------------------------------------
     def get_universe_constituents(
-        self, index: str, asof: datetime | None = None
-    ) -> pd.DataFrame:
+        self, index: str, date: str | None = None
+    ) -> list[str]:
         endpoint = {
-            "sp500": "/api/v3/sp500_constituent",
-            "nasdaq": "/api/v3/nasdaq_constituent",
-            "dowjones": "/api/v3/dowjones_constituent",
+            "sp500": "/stable/sp500-constituent",
+            "nasdaq": "/stable/nasdaq-constituent",
+            "dowjones": "/stable/dowjones-constituent",
         }.get(index.lower())
         if endpoint is None:
             raise NotImplementedError(f"FMPProvider has no constituent endpoint for '{index}'.")
-
-        current = self._client.get_json(endpoint, params={"apikey": self._api_key})
-        rows: list[dict] = []
-        for c in current if isinstance(current, list) else []:
-            rows.append(
-                {
-                    schemas.COL_INDEX: index,
-                    schemas.COL_SYMBOL: c.get("symbol"),
-                    schemas.COL_ADDED_DATE: pd.Timestamp(c.get("dateFirstAdded"))
-                    if c.get("dateFirstAdded")
-                    else pd.NaT,
-                    schemas.COL_REMOVED_DATE: pd.NaT,
-                }
-            )
-        # Historical add/remove events restore survivorship history.
-        historical = self._client.get_json(
-            f"{endpoint}/historical", params={"apikey": self._api_key}
-        )
-        for h in historical if isinstance(historical, list) else []:
-            symbol = h.get("symbol")
-            change_date = pd.Timestamp(h.get("date")) if h.get("date") else pd.NaT
-            if str(h.get("removedTicker")):
-                rows.append(
-                    {
-                        schemas.COL_INDEX: index,
-                        schemas.COL_SYMBOL: h.get("removedTicker") or symbol,
-                        schemas.COL_ADDED_DATE: pd.NaT,
-                        schemas.COL_REMOVED_DATE: change_date,
-                    }
-                )
-        if not rows:
-            return self.empty_universe()
-        df = pd.DataFrame(rows)
-        if asof is not None:
-            asof_ts = pd.Timestamp(asof)
-            df = df[
-                (df[schemas.COL_ADDED_DATE].isna() | (df[schemas.COL_ADDED_DATE] <= asof_ts))
-                & (df[schemas.COL_REMOVED_DATE].isna() | (df[schemas.COL_REMOVED_DATE] > asof_ts))
-            ]
-        return df.reset_index(drop=True)
+        try:
+            data = self._client.get_json(endpoint, params=self._params())
+            return [r["symbol"] for r in (data if isinstance(data, list) else []) if r.get("symbol")]
+        except ProviderError as exc:
+            raise NotImplementedError(
+                f"FMP constituent endpoint returned an error (may require premium plan): {exc}"
+            ) from exc
