@@ -59,6 +59,7 @@ class Settings(BaseSettings):
     alphavantage_api_key: str = ""
     fmp_api_key: str = ""
     massive_api_key: str = ""
+    fred_api_key: str = ""
 
     request_timeout_seconds: int = 30
     max_retries: int = 3

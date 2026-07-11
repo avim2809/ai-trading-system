@@ -58,6 +58,8 @@ class BacktestEngine:
         pit_store: PointInTimeDataStore,
         orchestrator: Orchestrator,
         universe: list[str],
+        memory=None,
+        llm_config: dict | None = None,
     ) -> None:
         """Wire everything together: feeds, broker, strategy, analyzers."""
         initial_capital = self.config.get("initial_capital", 10_000_000)
@@ -96,6 +98,8 @@ class BacktestEngine:
             attribution=attribution,
             commission_pct=commission_pct,
             slippage_pct=slippage_pct,
+            memory=memory,
+            llm_config=llm_config,
         )
 
         self.cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe")

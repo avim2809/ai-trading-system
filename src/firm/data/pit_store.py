@@ -26,6 +26,8 @@ class PointInTimeDataStore:
         self._fundamentals: pd.DataFrame = pd.DataFrame()
         self._sentiment: pd.DataFrame = pd.DataFrame()
         self._corporate_actions: pd.DataFrame = pd.DataFrame()
+        # Macro series keyed by FRED series ID → DataFrame[date, <series_id>]
+        self._macro: dict[str, pd.DataFrame] = {}
         # Optional callable(asof) -> list[str] giving survivorship-aware
         # index membership (e.g. firm.data.universe.UniverseResolver).
         self._universe_resolver = None
@@ -121,6 +123,47 @@ class PointInTimeDataStore:
             & (self._sentiment["date"] >= earliest)
         )
         return self._sentiment.loc[mask].copy()
+
+    def load_macro(self, bundle: dict[str, pd.DataFrame]) -> None:
+        """Load a dict of FRED macro series into the store.
+
+        Each value must be a DataFrame with columns [date, <series_id>] as
+        returned by :func:`firm.data.providers.fred.fetch_macro_bundle`.
+        """
+        for series_id, df in bundle.items():
+            if df.empty:
+                continue
+            df = df.copy()
+            df["date"] = pd.to_datetime(df["date"])
+            self._macro[series_id] = df.sort_values("date").reset_index(drop=True)
+        log.info("PIT store: loaded %d macro series: %s", len(self._macro), list(self._macro))
+
+    def get_macro(
+        self,
+        series_id: str,
+        asof: datetime,
+        lookback_days: int = 365,
+    ) -> pd.Series:
+        """Return a macro indicator series where date <= asof.
+
+        Returns a pandas Series indexed by date with the indicator values,
+        covering at most *lookback_days* calendar days before *asof*.
+        Returns an empty Series if the series was not loaded.
+
+        Args:
+            series_id:     FRED series ID (e.g. "T10Y2Y", "CPIAUCSL").
+            asof:          Point-in-time ceiling — no future data.
+            lookback_days: How many calendar days of history to return.
+        """
+        df = self._macro.get(series_id)
+        if df is None or df.empty:
+            return pd.Series(dtype=float, name=series_id)
+        asof_ts = pd.Timestamp(asof)
+        earliest = asof_ts - timedelta(days=lookback_days)
+        value_col = series_id if series_id in df.columns else df.columns[-1]
+        mask = (df["date"] <= asof_ts) & (df["date"] >= earliest)
+        subset = df.loc[mask].set_index("date")[value_col]
+        return subset
 
     def get_universe(self, asof: datetime) -> list[str]:
         """Return the tradable universe as of *asof*.

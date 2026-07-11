@@ -181,7 +181,37 @@ def run_backtest_from_config(
     pit_store = PointInTimeDataStore()
     pit_store.load(prices=prices_df)
 
+    # Optionally load FRED macro data — gracefully skipped when key is absent.
+    fred_api_key = config.get("fred_api_key", "")
+    if not fred_api_key:
+        try:
+            from firm.config import get_settings
+            fred_api_key = get_settings().fred_api_key
+        except Exception:
+            pass
+    if fred_api_key:
+        try:
+            from firm.data.providers.fred import fetch_macro_bundle
+            start = config.get("start_date", "2010-01-01")
+            end = config.get("end_date", "2030-12-31")
+            macro_bundle = fetch_macro_bundle(fred_api_key, start, end)
+            if macro_bundle:
+                pit_store.load_macro(macro_bundle)
+        except Exception:
+            log.warning("FRED macro load failed — no macro features", exc_info=True)
+
     orchestrator = build_orchestrator(config)
+
+    # Build a memory log when llm_config is present so backtest reflections
+    # are stored — agents learn from backtest outcomes just like live ones.
+    memory = None
+    llm_config = config.get("llm_config", {})
+    if llm_config:
+        try:
+            from firm.agents.memory import TradingMemoryLog
+            memory = TradingMemoryLog(config)
+        except Exception:
+            log.debug("Memory log init failed — skipping", exc_info=True)
 
     bt_fields = {
         "start_date", "end_date", "initial_capital",
@@ -190,7 +220,8 @@ def run_backtest_from_config(
     bt_config = {k: v for k, v in config.items() if k in bt_fields}
 
     engine = BacktestEngine(bt_config)
-    engine.setup(prices_df, pit_store, orchestrator, universe)
+    engine.setup(prices_df, pit_store, orchestrator, universe,
+                 memory=memory, llm_config=llm_config or None)
     engine.run()
     report = engine.generate_report()
     return engine, report

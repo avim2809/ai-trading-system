@@ -96,7 +96,7 @@ def main():
     store = VectorStore(persist_dir=persist_dir)
     chunker = DocumentChunker(chunk_size=chunk_size, overlap=chunk_overlap)
 
-    print(f"RAG Ingestion")
+    print("RAG Ingestion")
     print(f"  Vector DB: {persist_dir}")
     print(f"  Symbols: {', '.join(symbols[:10])}{'...' if len(symbols) > 10 else ''}")
     print(f"  Years: {start_year}-{end_year}")

@@ -23,7 +23,6 @@ from firm.data.schemas import (
     FUNDAMENTAL_COLS,
     PRICE_COLS,
     SENTIMENT_COLS,
-    UNIVERSE_COLUMNS,
 )
 
 log = logging.getLogger("firm.data.providers.fallback")

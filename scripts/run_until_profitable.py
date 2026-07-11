@@ -5,7 +5,6 @@ import logging
 import os
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 # Add src to path
@@ -86,7 +85,7 @@ def run_until_profitable(
                         pnl = (pos.market_value - pos.quantity * pos.avg_cost)
                         log.info(f"  {pos.symbol}: {pos.quantity:.0f}x @ ${pos.avg_cost:.2f} (${pnl:,.0f} P&L)")
                 else:
-                    log.info(f"📊 Open positions: 0")
+                    log.info("📊 Open positions: 0")
                 
                 # NOTE: For full strategy execution, use the API server instead:
                 #   firm-api
@@ -116,7 +115,7 @@ def run_until_profitable(
             log.error(f"Error disconnecting: {e}")
     
     # Final summary
-    log.info(f"\n=== Final Summary ===")
+    log.info("\n=== Final Summary ===")
     log.info(f"Cycles executed: {cycle_count}/{max_cycles}")
     log.info(f"Initial equity: ${initial_equity:,.2f}")
     log.info(f"Final equity: ${final_equity:,.2f}")
