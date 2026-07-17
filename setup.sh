@@ -183,6 +183,7 @@ if [ "$SKIP_SYSTEM" = false ] && command -v apt-get &>/dev/null; then
         tk-dev \
         liblzma-dev \
         pkg-config \
+        unzip \
         xvfb                  # virtual display — required for headless IB Gateway
     ok "Build dependencies installed"
 
