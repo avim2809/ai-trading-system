@@ -32,6 +32,26 @@ IBKR_INSTALL_DIR="${IBKR_INSTALL_DIR:-/opt/ibgateway}"
 IBC_INSTALL_DIR="${IBC_INSTALL_DIR:-/opt/ibc}"
 IBKR_INSTALLER_URL="https://download2.interactivebrokers.com/installers/ibgateway/stable-standalone/ibgateway-stable-standalone-linux-x64.sh"
 
+usage() {
+    echo "Usage: ./setup.sh [OPTIONS]"
+    echo ""
+    echo "Options:"
+    echo "  --components <list>   Comma-separated extras to install (default: api)"
+    echo "                        Values: api, live, llm, dev, all"
+    echo "  --install-services    Write + enable systemd service files (bare-metal VPS)"
+    echo "  --skip-ibkr           Skip IB Gateway installation"
+    echo "  --skip-ibc            Skip IBC download (manual gateway login)"
+    echo "  --skip-frontend       Skip Node.js / frontend build"
+    echo "  --skip-venv           Skip virtual environment creation"
+    echo "  --skip-system         Skip apt system package installation"
+    echo "  --uninstall           Remove everything this script installed"
+    echo "  --help                Show this help message"
+    echo ""
+    echo "Environment:"
+    echo "  IBKR_INSTALL_DIR      IB Gateway install path (default: /opt/ibgateway)"
+    echo "  IBC_INSTALL_DIR       IBC install path        (default: /opt/ibc)"
+}
+
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --components)      COMPONENTS="$2"; shift 2 ;;
@@ -42,7 +62,8 @@ while [[ $# -gt 0 ]]; do
         --skip-ibc)        SKIP_IBC=true; shift ;;
         --install-services) INSTALL_SERVICES=true; shift ;;
         --uninstall)       UNINSTALL=true; shift ;;
-        *)                 echo "Unknown option: $1"; exit 1 ;;
+        --help|-h)         usage; exit 0 ;;
+        *)                 echo "Unknown option: $1"; echo ""; usage; exit 1 ;;
     esac
 done
 
@@ -154,14 +175,12 @@ if [ "$SKIP_SYSTEM" = false ] && command -v apt-get &>/dev/null; then
         liblzma-dev \
         libreadline-dev \
         libsqlite3-dev \
-        libncursesw5-dev \
+        libncurses-dev \
         libgdbm-dev \
-        libdb5.3-dev \
+        libdb-dev \
         uuid-dev \
         zlib1g-dev \
         tk-dev \
-        lzma \
-        lzma-dev \
         liblzma-dev \
         pkg-config \
         xvfb                  # virtual display — required for headless IB Gateway
