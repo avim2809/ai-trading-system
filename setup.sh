@@ -213,14 +213,6 @@ if [ "$SKIP_SYSTEM" = false ] && command -v apt-get &>/dev/null; then
         python3.14-dev
     ok "Python 3.14 installed"
 
-    # pip for Python 3.14
-    if ! python3.14 -m pip --version &>/dev/null 2>&1; then
-        curl -sS https://bootstrap.pypa.io/get-pip.py | python3.14
-        ok "pip bootstrapped for Python 3.14"
-    else
-        ok "pip already available"
-    fi
-
     # Node.js — required for frontend build
     if ! command -v node &>/dev/null; then
         curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - 2>/dev/null
