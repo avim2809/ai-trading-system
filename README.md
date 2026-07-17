@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/python-%3E%3D3.10-blue?style=flat-square&logo=python" alt="Python 3.10+"/>
+  <img src="https://img.shields.io/badge/python-%3E%3D3.14-blue?style=flat-square&logo=python" alt="Python 3.14+"/>
   <img src="https://img.shields.io/badge/react-19-61dafb?style=flat-square&logo=react" alt="React 19"/>
   <img src="https://img.shields.io/badge/fastapi-latest-009688?style=flat-square&logo=fastapi" alt="FastAPI"/>
   <a href="https://github.com/avim2809/ai-trading-system/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/avim2809/ai-trading-system/ci.yml?branch=main&style=flat-square&label=CI" alt="CI status"/></a>
@@ -86,9 +86,21 @@ All data flows through `PointInTimeDataStore`, which physically filters every qu
 
 ## Quick Install
 
-**Requirements:** Python >= 3.10 &bull; Node.js >= 18 (optional, for web UI)
+**Requirements:** Python >= 3.14 &bull; Node.js >= 18 (optional, for web UI) &bull; Ubuntu 26 / Debian or macOS
 
 ### One-Command Setup
+
+**Ubuntu 26 / Linux** (installs system packages, Python 3.14, Java 17, Node.js, and optionally IB Gateway automatically):
+```bash
+chmod +x setup.sh
+./setup.sh                               # core + API
+./setup.sh --components all              # everything: API, live trading, LLM/RAG + IB Gateway
+./setup.sh --components live             # live stack + IB Gateway
+./setup.sh --components live --skip-ibkr # live stack without IB Gateway
+```
+
+> `--skip-system` skips `apt-get` (useful if you manage system deps yourself).
+> `IBKR_INSTALL_DIR=/custom/path ./setup.sh --components live` overrides the IB Gateway install path (default `/opt/ibgateway`).
 
 **Windows (PowerShell):**
 ```powershell
@@ -97,18 +109,10 @@ All data flows through `PointInTimeDataStore`, which physically filters every qu
 .\setup.ps1 -Components api,live  # pick specific extras
 ```
 
-**macOS / Linux:**
-```bash
-chmod +x setup.sh
-./setup.sh                          # core + web UI
-./setup.sh --components all         # everything
-./setup.sh --components api,live    # pick specific extras
-```
-
 ### Manual Setup
 
 ```bash
-python -m venv .venv && source .venv/bin/activate  # or .\.venv\Scripts\Activate.ps1
+python3.14 -m venv .venv && source .venv/bin/activate  # or .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev,api,live,llm]"
 cp .env.example .env               # edit with your API keys
 cd frontend && npm install && npm run build && cd ..
@@ -122,6 +126,18 @@ cd frontend && npm install && npm run build && cd ..
 | `live` | Alpaca + IBKR broker adapters, APScheduler | Live/paper trading |
 | `llm` | LiteLLM, ChromaDB, sentence-transformers | AI-enhanced agents, RAG |
 | `dev` | pytest, ruff, httpx | Development & testing |
+
+### IB Gateway
+
+When `--components live` (or `all`) is passed to `setup.sh`, IB Gateway is downloaded and installed automatically (requires Java 17, installed by the script on Ubuntu).
+
+```bash
+# Start gateway manually after setup:
+./scripts/start_ibgateway.sh paper   # paper trading (port 4002)
+./scripts/start_ibgateway.sh live    # live trading  (port 4001)
+```
+
+For **headless / auto-login** (no GUI dialog on each start), install [IBC (IB Controller)](https://github.com/IbcAlpha/IBC/releases) alongside the gateway. IBC handles credentials via a config file and is the recommended approach for server deployments.
 
 ## Usage
 

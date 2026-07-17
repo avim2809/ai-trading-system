@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "firm"
 version = "0.1.0"
 description = "Multi-agent AI stock investment firm – backtested alpha strategies with point-in-time data integrity"
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 dependencies = [
     "pandas",
     "numpy",
@@ -65,7 +65,7 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py314"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

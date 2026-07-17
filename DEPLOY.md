@@ -184,7 +184,192 @@ on, "Read-Only API" off) and that the trusted-IP / connection prompts are handle
 
 ---
 
-## 6. Running AI models locally (fallback)
+## 6. Bare-metal VPS (no Docker)
+
+Use this path if you want lower overhead, easier debugging, or direct access to
+`python` / `pytest` without a container shell. The `setup.sh` script installs
+every system dependency (Python 3.14, Java 17, Node.js, IB Gateway) in one shot.
+
+### 6a. Install everything
+
+```bash
+ssh user@YOUR_VPS_IP
+git clone https://github.com/avim2809/ai-trading-system.git
+cd ai-trading-system
+chmod +x setup.sh
+./setup.sh --components all        # installs Python 3.14, IB Gateway, Node.js, all extras
+cp .env.example .env
+nano .env                          # fill in API keys (see §1)
+```
+
+### 6b. Headless IB Gateway with IBC
+
+`./setup.sh` installs IB Gateway at `/opt/ibgateway`. To make it run headlessly
+(no GUI, auto-login, survives daily re-auth), install **IBC** on top:
+
+```bash
+# Download the latest IBC release
+IBC_VERSION=$(curl -s https://api.github.com/repos/IbcAlpha/IBC/releases/latest \
+  | grep tag_name | cut -d'"' -f4)
+wget -q "https://github.com/IbcAlpha/IBC/releases/download/${IBC_VERSION}/IBCLinux-${IBC_VERSION}.zip" \
+  -O /tmp/ibc.zip
+sudo mkdir -p /opt/ibc
+sudo unzip -q /tmp/ibc.zip -d /opt/ibc
+sudo chmod +x /opt/ibc/*.sh /opt/ibc/scripts/*.sh
+
+# Create the IBC config with your credentials
+mkdir -p ~/.ibc
+cat > ~/.ibc/config.ini << 'EOF'
+FIX=no
+IbLoginId=YOUR_IBKR_USERNAME
+IbPassword=YOUR_IBKR_PASSWORD
+TradingMode=paper                  # paper | live
+ReadOnlyLogin=no
+AcceptIncomingConnectionAction=accept
+HandshakeTimeout=10
+EOF
+chmod 600 ~/.ibc/config.ini        # credentials — keep private
+```
+
+Test it once interactively (you should see "API connection established"):
+
+```bash
+/opt/ibc/scripts/ibgateway.sh \
+  /opt/ibgateway \
+  ~/.ibc/config.ini \
+  /opt/ibc
+```
+
+Press Ctrl-C when satisfied; systemd will manage it going forward.
+
+### 6c. systemd services
+
+Create the two service files:
+
+**`/etc/systemd/system/ib-gateway.service`**
+```bash
+sudo tee /etc/systemd/system/ib-gateway.service > /dev/null << EOF
+[Unit]
+Description=IB Gateway (headless via IBC)
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=$USER
+Environment=DISPLAY=:99
+ExecStartPre=/usr/bin/Xvfb :99 -screen 0 1024x768x24 -ac
+ExecStart=/opt/ibc/scripts/ibgateway.sh /opt/ibgateway /home/$USER/.ibc/config.ini /opt/ibc
+Restart=always
+RestartSec=30
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+**`/etc/systemd/system/firm-api.service`**
+```bash
+sudo tee /etc/systemd/system/firm-api.service > /dev/null << EOF
+[Unit]
+Description=AI Trading System API
+After=network.target ib-gateway.service
+Wants=ib-gateway.service
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$(pwd)
+EnvironmentFile=$(pwd)/.env
+ExecStart=$(pwd)/.venv/bin/uvicorn firm.api.app:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+```
+
+Xvfb (virtual framebuffer) is needed by IB Gateway's Java UI even in headless mode.
+Install it if not present: `sudo apt-get install -y xvfb`.
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable ib-gateway firm-api
+sudo systemctl start ib-gateway
+
+# Wait ~60s for Gateway to complete login, then:
+sudo systemctl start firm-api
+sudo systemctl status firm-api      # should show "active (running)"
+```
+
+### 6d. Firewall
+
+```bash
+sudo ufw allow 22/tcp               # SSH
+sudo ufw allow 8000/tcp             # API + frontend (or 80 if behind nginx)
+sudo ufw enable
+```
+
+The frontend is now at **`http://YOUR_VPS_IP:8000`**.
+
+### 6e. Optional: nginx on port 80 / 443
+
+```bash
+sudo apt-get install -y nginx certbot python3-certbot-nginx
+
+sudo tee /etc/nginx/sites-available/firm << 'EOF'
+server {
+    listen 80;
+    server_name trading.yourdomain.com;
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+}
+EOF
+
+sudo ln -sf /etc/nginx/sites-available/firm /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# Free TLS cert (auto-renews):
+sudo certbot --nginx -d trading.yourdomain.com
+```
+
+### 6f. Useful maintenance commands
+
+```bash
+# Logs
+sudo journalctl -u firm-api -f
+sudo journalctl -u ib-gateway -f
+
+# Restart after config change
+sudo systemctl restart firm-api
+
+# Pull latest + restart
+git pull
+sudo systemctl restart firm-api
+
+# Check Gateway connectivity
+nc -zv 127.0.0.1 4002 && echo "Gateway reachable" || echo "Gateway not up"
+
+# Start trading
+curl -X POST http://localhost:8000/api/live/start \
+  -H "Content-Type: application/json" \
+  -d '{"broker":"ibkr_paper","approval_mode":"auto"}'
+```
+
+---
+
+## 7. Running AI models locally (fallback)
 
 The default is hosted (Voyage) so you don't pay the RAM/size cost of local models. If
 you ever want to run RAG fully local (offline, no per-call API):

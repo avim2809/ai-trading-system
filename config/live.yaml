@@ -1,13 +1,121 @@
+# ──────────────────────────────────────────────────────────────
+#  1-Week All-Strategy Paper Comparison Experiment
+#  Risk limits mirror realistic live-account constraints so
+#  paper results are a valid proxy for live profitability.
+#  Monitor live at: http://localhost:8000/live
+#  Start: 2026-07-17    End: 2026-07-24
+# ──────────────────────────────────────────────────────────────
+
+experiment:
+  name: "1_week_all_strategies_paper"
+  description: "All 12 strategies in parallel — realistic live-equivalent risk"
+  start_date: "2026-07-17"
+  end_date: "2026-07-24"
+
 broker: "ibkr_paper"
 schedule: "market_open"
-approval_mode: "semi_auto"
+approval_mode: "auto"
+
 strategies:
-  enabled: [momentum, trend, mean_reversion]
-  auto_approve: [trend]
-  require_approval: [momentum, mean_reversion]
-risk:
-  kill_switch_drawdown: 0.10
-  max_daily_trades: 50
-  max_daily_turnover: 0.5
+  enabled:
+    - momentum
+    - trend
+    - mean_reversion
+    - stat_arb
+    - multi_factor
+    - sentiment
+    - event_driven
+    - ml_prediction
+    - volatility_breakout
+    - seasonality
+    - gann
+    - regime_hmm
+  auto_approve:
+    - momentum
+    - trend
+    - mean_reversion
+    - stat_arb
+    - multi_factor
+    - sentiment
+    - event_driven
+    - ml_prediction
+    - volatility_breakout
+    - seasonality
+    - gann
+    - regime_hmm
+
 universe:
-  symbols: [AAPL, MSFT, GOOG, AMZN, META, TSLA, NVDA, JPM, V, JNJ]
+  symbols:
+    # Mega-cap tech
+    - AAPL
+    - MSFT
+    - NVDA
+    - GOOG
+    - AMZN
+    - META
+    # Growth / momentum
+    - TSLA
+    - AVGO
+    - AMD
+    - CRM
+    - NFLX
+    - ADBE
+    # Financials
+    - JPM
+    - GS
+    - BAC
+    - V
+    - MA
+    # Healthcare / defensives
+    - JNJ
+    - UNH
+    - LLY
+    # Energy
+    - XOM
+    - CVX
+    # ETFs — stat-arb anchors + regime proxy
+    - SPY
+    - QQQ
+    - IWM
+
+rebalance_frequency: "daily"
+initial_capital: 1_000_000
+
+# ──────────────────────────────────────────────────────────────
+# Risk — realistic live-account constraints
+# These are the numbers you would actually enforce on a live
+# account, so paper P&L is a valid predictor of live results.
+# ──────────────────────────────────────────────────────────────
+risk:
+  # Live-engine circuit breakers
+  kill_switch_drawdown: 0.08    # halt at 8% portfolio drawdown — standard retail hard stop
+  max_daily_trades: 40          # realistic order count before costs eat alpha
+  max_daily_turnover: 0.25      # 25% of NAV/day — high-frequency edge is rare at this scale
+
+  # Risk-agent position and exposure limits
+  max_position_pct: 0.05        # 5% single-stock cap — institutional standard
+  max_gross_exposure: 1.5       # 1.5× gross — modest leverage, survives gap risk
+  max_net_exposure: 0.50        # 50% net long — mild long bias, not market-neutral
+  max_sector_pct: 0.25          # 25% sector cap — diversification guardrail
+  vol_target: 0.12              # 12% annualised vol target — conservative live baseline
+  max_drawdown_pct: 0.15        # 15% per-strategy drawdown before it is sized down
+
+  # HMM regime overlay — live-equivalent exposure scaling
+  regime_overlay:
+    enabled: true
+    benchmark_symbol: "SPY"
+    n_states: 3
+    retrain_frequency: 5        # refit weekly
+    lookback_days: 252
+    exposure_map:
+      Bull: 1.3                 # modest lever in confirmed bull (not aggressive)
+      Bear: 0.4                 # meaningful de-risk in bear
+      Chop: 0.7                 # slightly reduced in indeterminate regime
+
+# ──────────────────────────────────────────────────────────────
+# Transaction costs — must match your actual broker schedule
+# IBKR Tiered: ~$0.005/share; modelled here as pct of notional
+# ──────────────────────────────────────────────────────────────
+costs:
+  commission_pct: 0.0005        # 0.05% — realistic IBKR tiered rate
+  slippage_pct: 0.0005          # 0.05% — conservative market-impact estimate
