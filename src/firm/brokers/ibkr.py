@@ -17,7 +17,7 @@ from firm.brokers.base import (
 log = logging.getLogger(__name__)
 
 try:
-    from ib_insync import IB, Stock, LimitOrder, MarketOrder
+    from ib_async import IB, Stock, LimitOrder, MarketOrder
 
     _HAS_IB = True
 except ImportError:
@@ -27,8 +27,8 @@ except ImportError:
 def _require_ib() -> None:
     if not _HAS_IB:
         raise ImportError(
-            "ib_insync is not installed. Install the live extra: "
-            "pip install 'firm[live]' or pip install ib_insync"
+            "ib_async is not installed. Install the live extra: "
+            "pip install 'firm[live]' or pip install ib_async"
         )
 
 
@@ -40,11 +40,17 @@ class IBKRBroker(Broker):
         host: str = "127.0.0.1",
         port: int = 7497,
         client_id: int = 1,
+        market_data_type: int = 3,
     ) -> None:
         _require_ib()
         self._host = host
         self._port = port
         self._client_id = client_id
+        # 1=live, 2=frozen, 3=delayed, 4=delayed-frozen. Defaults to delayed
+        # since most accounts (paper included) have no live-data subscription
+        # — without setting this, reqTickers silently returns NaN for every
+        # field instead of an error, which looks like "no price available".
+        self._market_data_type = market_data_type
         self._ib: IB | None = None
 
     def connect(self) -> None:
@@ -52,11 +58,13 @@ class IBKRBroker(Broker):
         self._ib = IB()
         try:
             self._ib.connect(self._host, self._port, clientId=self._client_id)
+            self._ib.reqMarketDataType(self._market_data_type)
             log.info(
-                "Connected to IBKR at %s:%d (client %d)",
+                "Connected to IBKR at %s:%d (client %d, market_data_type=%d)",
                 self._host,
                 self._port,
                 self._client_id,
+                self._market_data_type,
             )
         except Exception as exc:
             self._ib = None
@@ -212,7 +220,13 @@ class IBKRBroker(Broker):
             "PendingCancel": "pending",
             "Filled": "filled",
             "Cancelled": "cancelled",
+            "ApiCancelled": "cancelled",
             "Inactive": "rejected",
+            # Not a native IBKR orderStatus value — ib_async sets this when the
+            # API rejects the order outright (e.g. "Read-Only mode", bad
+            # contract). Must not fall into the unknown-status default below,
+            # or a rejected order gets reported as merely "pending" forever.
+            "ValidationError": "rejected",
         }
         order = trade.order
         fill_qty = sum(f.execution.shares for f in trade.fills) if trade.fills else 0.0
@@ -225,7 +239,10 @@ class IBKRBroker(Broker):
         if fill_qty > 0 and fill_qty < float(order.totalQuantity):
             mapped = "partial"
         else:
-            mapped = status_map.get(raw_status, "pending")
+            # Fail safe: an unrecognised status must never default to
+            # "pending" — that would mask a real (if unanticipated) rejection
+            # as an order still quietly in flight.
+            mapped = status_map.get(raw_status, "rejected")
 
         return OrderStatus(
             order_id=str(order.orderId),

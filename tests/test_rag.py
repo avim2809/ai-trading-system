@@ -89,22 +89,75 @@ class TestRetrieverAsOf:
         assert store.calls[0]["asof"] == asof
 
 
-class TestStoreDateFilter:
-    def test_asof_adds_lte_date_clause(self):
-        from firm.rag.store import _and_filters, _asof_str
+class _FakeChromaCollection:
+    """Mimics the subset of Chroma's Collection API that VectorStore.query uses."""
 
-        asof = datetime(2023, 6, 1, 15, 0)
-        assert _asof_str(asof) == "2023-06-01"
-        combined = _and_filters({"symbol": "AAPL"}, {"date": {"$lte": _asof_str(asof)}})
-        assert combined == {
-            "$and": [{"symbol": "AAPL"}, {"date": {"$lte": "2023-06-01"}}]
+    def __init__(self, ids, documents, metadatas, distances):
+        self._ids = ids
+        self._documents = documents
+        self._metadatas = metadatas
+        self._distances = distances
+
+    def count(self):
+        return len(self._ids)
+
+    def query(self, query_texts, n_results, where=None):
+        n = min(n_results, len(self._ids))
+        return {
+            "ids": [self._ids[:n]],
+            "documents": [self._documents[:n]],
+            "metadatas": [self._metadatas[:n]],
+            "distances": [self._distances[:n]],
         }
 
-    def test_and_filters_unwraps_single_clause(self):
-        from firm.rag.store import _and_filters
 
-        assert _and_filters(None, {"date": {"$lte": "x"}}) == {"date": {"$lte": "x"}}
-        assert _and_filters({"symbol": "AAPL"}, None) == {"symbol": "AAPL"}
+class _FakeChromaStore:
+    """Exposes just enough of VectorStore's API for the real ``query`` method
+    to run unmodified against a fake collection instead of a live Chroma client."""
+
+    def __init__(self, collection):
+        self._collection = collection
+
+    def get_or_create_collection(self, name):
+        return self._collection
+
+
+class TestStoreDateFilter:
+    def test_asof_excludes_future_and_undated_docs(self):
+        # Regression test: Chroma's $lte/$gte only accept numeric operands, so
+        # pushing the ISO date *string* into a `where` clause raises a
+        # ValueError at query time — silently swallowed by the caller's broad
+        # except, which made every point-in-time-filtered retrieval return
+        # nothing. VectorStore.query must filter by date in Python instead.
+        from firm.rag.store import VectorStore
+
+        collection = _FakeChromaCollection(
+            ids=["past", "future", "no-date"],
+            documents=["past doc", "future doc", "undated doc"],
+            metadatas=[{"date": "2023-01-01"}, {"date": "2099-01-01"}, {}],
+            distances=[0.1, 0.1, 0.1],
+        )
+        store = _FakeChromaStore(collection)
+        asof = datetime(2023, 6, 1)
+
+        results = VectorStore.query(store, "news", "q", n_results=5, asof=asof)
+
+        ids = {d.doc_id for d in results}
+        assert ids == {"past"}, "future-dated and undated docs must be excluded"
+
+    def test_no_asof_returns_everything(self):
+        from firm.rag.store import VectorStore
+
+        collection = _FakeChromaCollection(
+            ids=["a", "b"], documents=["x", "y"],
+            metadatas=[{"date": "2023-01-01"}, {"date": "2099-01-01"}],
+            distances=[0.1, 0.2],
+        )
+        store = _FakeChromaStore(collection)
+
+        results = VectorStore.query(store, "news", "q", n_results=5, asof=None)
+
+        assert {d.doc_id for d in results} == {"a", "b"}
 
     def test_system_sentinel_passes_any_asof(self):
         # Timeless system docs use a min-date so a $lte asof always admits them.

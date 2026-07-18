@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from firm.rag.dates import UNKNOWN_DATE
 from firm.rag.embeddings import get_model_info
 from firm.rag.models import Document, RetrievedDoc
 
@@ -17,15 +18,6 @@ def _asof_str(asof: Any) -> str:
     if hasattr(asof, "strftime"):
         return asof.strftime("%Y-%m-%d")
     return str(asof)[:10]
-
-
-def _and_filters(
-    a: dict[str, Any] | None, b: dict[str, Any] | None
-) -> dict[str, Any] | None:
-    """Combine two ChromaDB where-clauses with ``$and`` (single clause unwrapped)."""
-    if a and b:
-        return {"$and": [a, b]}
-    return a or b
 
 
 class VectorStore:
@@ -135,32 +127,47 @@ class VectorStore:
         documents whose ``date`` metadata is ``<= asof`` are returned, so
         future-dated filings/news can never leak into a point-in-time
         decision.
-        """
-        if asof is not None:
-            where_filters = _and_filters(where_filters, {"date": {"$lte": _asof_str(asof)}})
-        collection = self.get_or_create_collection(collection_name)
 
+        Chroma's ``where`` filter only supports ``$lte``/``$gte`` on numeric
+        operands, not the sortable ISO date *strings* this system stores (see
+        ``firm.rag.dates``) — passing a string there raises a ``ValueError``.
+        So the as-of bound is applied as a plain string comparison in Python
+        instead: over-fetch the dense-similarity candidate pool (the whole
+        collection, when *asof* is set, since we don't know in advance how
+        many will be filtered out) and stop once *n_results* pass the cutoff.
+        Fine at this system's targeted thousands-scale collections — the same
+        assumption :meth:`get_all` already makes for hybrid/BM25.
+        """
+        collection = self.get_or_create_collection(collection_name)
+        count = collection.count()
+        if count == 0:
+            return []
+
+        fetch_n = count if asof is not None else n_results
         kwargs: dict[str, Any] = {
             "query_texts": [query_text],
-            "n_results": min(n_results, collection.count() or n_results),
+            "n_results": min(fetch_n, count),
         }
         if where_filters:
             kwargs["where"] = where_filters
 
-        if collection.count() == 0:
-            return []
-
         results = collection.query(**kwargs)
 
+        asof_str = _asof_str(asof) if asof is not None else None
         docs: list[RetrievedDoc] = []
         if results and results["ids"] and results["ids"][0]:
             for i, doc_id in enumerate(results["ids"][0]):
+                metadata = results["metadatas"][0][i] if results["metadatas"] else {}
+                if asof_str is not None and metadata.get("date", UNKNOWN_DATE) > asof_str:
+                    continue
                 docs.append(RetrievedDoc(
                     doc_id=doc_id,
                     text=results["documents"][0][i] if results["documents"] else "",
-                    metadata=results["metadatas"][0][i] if results["metadatas"] else {},
+                    metadata=metadata,
                     score=1.0 - (results["distances"][0][i] if results["distances"] else 0.0),
                 ))
+                if len(docs) >= n_results:
+                    break
         return docs
 
     def get_all(self, collection_name: str) -> list[RetrievedDoc]:

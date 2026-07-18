@@ -63,13 +63,13 @@ curl -X POST http://localhost:8000/live/start \
   -d '{
     "broker": "ibkr_paper",
     "schedule": "market_open",
-    "approval_mode": "auto",
-    "strategies": {
-      "enabled": ["momentum", "trend", "mean_reversion"],
-      "auto_approve": ["trend"],
-      "require_approval": ["momentum", "mean_reversion"]
-    }
+    "approval_mode": "full_auto",
+    "auto_approve_strategies": ["momentum", "trend", "mean_reversion"],
+    "symbols": ["AAPL", "MSFT", "GOOG", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "JNJ"]
   }'
+```
+
+`approval_mode` must be exactly `"full_auto"` or `"semi_auto"` — anything else (including plain `"auto"`) is silently treated as "queue everything for manual approval" by the engine. There's no `strategies` selector in this request: omitting it (as above) runs **every** registered strategy in parallel; `auto_approve_strategies` only matters in `"semi_auto"` mode, where it picks which strategies' orders skip the approval queue.
 ```
 
 ### Step 3: Monitor Trading
@@ -123,12 +123,12 @@ IBKR_PAPER_PORT=4002
 IBKR_CLIENT_ID=1
 ```
 
-And `config/live.yaml`:
+And `config/live.yaml` documents the intended strategies/risk/universe for a run:
 
 ```yaml
 broker: "ibkr_paper"
 schedule: "market_open"
-approval_mode: "auto"
+approval_mode: "full_auto"
 strategies:
   enabled: [momentum, trend, mean_reversion]
   auto_approve: [trend]
@@ -140,6 +140,8 @@ risk:
 universe:
   symbols: [AAPL, MSFT, GOOG, AMZN, META, TSLA, NVDA, JPM, V, JNJ]
 ```
+
+**Note:** `/live/start` does not read this file directly — it only accepts the fields shown in the curl example above, so the `risk`/`universe` sections here take effect only via `scripts/run_live_trading.py --config config/live.yaml`, which does load them (flattening `risk:` into the engine config and passing `universe.symbols`/`strategies.enabled` through).
 
 ---
 
@@ -214,7 +216,7 @@ ps aux | grep ibgateway
 ```bash
 # Verify credentials and paper account is active in IB Gateway
 python3 << 'EOF'
-from ib_insync import IB
+from ib_async import IB
 ib = IB()
 ib.connect('127.0.0.1', 4002, clientId=2)
 print(f"Connected: {ib.isConnected()}")

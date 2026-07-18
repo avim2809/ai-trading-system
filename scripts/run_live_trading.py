@@ -3,7 +3,7 @@
 
 This drives the backend's :class:`LiveTradingEngine` directly from the main
 thread (which owns an asyncio event loop), avoiding the event-loop error that
-ib_insync raises when instantiated inside FastAPI's worker thread pool.
+ib_async raises when instantiated inside FastAPI's worker thread pool.
 
 It mirrors exactly what ``POST /api/live/start`` does, but runs standalone so
 it can execute cycles in a simple loop and be deployed in a screen session.
@@ -25,6 +25,7 @@ from firm.brokers.ibkr import IBKRBroker
 from firm.live.approval import ApprovalQueue
 from firm.live.data_feed import LiveDataFeed
 from firm.live.engine import LiveTradingEngine
+from firm.llm.config import load_llm_config, provider_config
 import firm.strategies  # noqa: F401 — ensure @register decorators fire
 
 logging.basicConfig(
@@ -85,6 +86,11 @@ def main(argv: list[str] | None = None) -> int:
         choices=["auto", "semi_auto", "manual"],
         help="auto submits every proposed order; semi_auto/manual queue them.",
     )
+    # LiveTradingEngine only recognises "full_auto"/"semi_auto" (anything else
+    # falls through to "everything needs approval") — translate the friendlier
+    # CLI names so --approval-mode auto actually auto-submits instead of
+    # silently queueing every order for manual approval.
+    _APPROVAL_MODE_MAP = {"auto": "full_auto", "semi_auto": "semi_auto", "manual": "manual"}
     parser.add_argument(
         "--auto-approve", default="momentum,trend,mean_reversion",
         help="Comma-separated strategy names auto-submitted in semi_auto mode.",
@@ -96,10 +102,31 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--initial-capital", type=float, default=1_000_000.0,
     )
+    parser.add_argument(
+        "--config",
+        help=(
+            "Path to a live experiment YAML (e.g. config/live.yaml) providing "
+            "strategies/universe/risk. Overrides --symbols/--initial-capital/ "
+            "--auto-approve; --interval/--max-cycles/--approval-mode still apply."
+        ),
+    )
     args = parser.parse_args(argv)
 
     universe = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     auto_approve = [s.strip() for s in args.auto_approve.split(",") if s.strip()]
+    initial_capital = args.initial_capital
+    strategies_enabled: list[str] | None = None
+    risk_overrides: dict = {}
+
+    if args.config:
+        import yaml
+        live_yaml = yaml.safe_load(Path(args.config).read_text()) or {}
+        universe = live_yaml.get("universe", {}).get("symbols", universe)
+        strategies_cfg = live_yaml.get("strategies", {}) or {}
+        strategies_enabled = strategies_cfg.get("enabled") or None
+        auto_approve = strategies_cfg.get("auto_approve", auto_approve)
+        initial_capital = live_yaml.get("initial_capital", initial_capital)
+        risk_overrides = live_yaml.get("risk", {}) or {}
 
     host = os.getenv("IBKR_HOST", "127.0.0.1")
     port = int(os.getenv("IBKR_PAPER_PORT", "4002"))
@@ -108,16 +135,29 @@ def main(argv: list[str] | None = None) -> int:
     log.info("Configuring IB Gateway broker at %s:%d (client %d)", host, port, client_id)
     broker = IBKRBroker(host=host, port=port, client_id=client_id)
 
-    config = {"initial_capital": args.initial_capital, "symbols": universe}
+    # RiskAgent/LiveTradingEngine both read risk fields (max_position_pct,
+    # kill_switch_drawdown, ...) as flat top-level config keys, so the
+    # experiment YAML's nested `risk:` section is merged in flattened.
+    config: dict = {"initial_capital": initial_capital, "symbols": universe}
+    config.update(risk_overrides)
+    if strategies_enabled:
+        config["strategies"] = strategies_enabled
+    # Wires config/llm.yaml's agent_modes + provider (default/fallback models,
+    # load-balancing) into the orchestrator — without this every analyst
+    # silently stays in "quant" mode and the LLM layer never activates.
+    config["agent_modes"] = load_llm_config().get("agent_modes", {})
+    config["llm_config"] = provider_config()
+
     data_feed = LiveDataFeed(providers=_build_providers(host, port), universe=universe)
     approval_queue = ApprovalQueue(broker=broker, persist_path="data/approvals.json")
 
+    engine_approval_mode = _APPROVAL_MODE_MAP[args.approval_mode]
     engine = LiveTradingEngine(
         config=config,
         broker=broker,
         data_feed=data_feed,
         approval_queue=approval_queue,
-        approval_mode=args.approval_mode,
+        approval_mode=engine_approval_mode,
         auto_approve_strategies=auto_approve,
     )
     # Engine.start() connects the broker and validates the account.
@@ -126,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     log.info(
         "Engine started | equity=$%s | mode=%s | auto-approve=%s | universe=%s",
         f"{account.get('equity', 0.0):,.2f}",
-        args.approval_mode, auto_approve or "(none)", universe,
+        engine_approval_mode, auto_approve or "(none)", universe,
     )
 
     cycle = 0

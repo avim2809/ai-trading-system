@@ -37,7 +37,7 @@ api = [
 ]
 live = [
     "alpaca-py",
-    "ib_insync",
+    "ib_async",
     "apscheduler>=3.10",
 ]
 llm = [

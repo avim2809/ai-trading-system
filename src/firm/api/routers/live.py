@@ -141,9 +141,16 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
         approval_queue = ApprovalQueue(broker=broker, persist_path="data/approvals.json")
         request.app.state.approval_queue = approval_queue
 
+        from firm.llm.config import load_llm_config, provider_config
+
         config = {
             "initial_capital": body.initial_capital,
             "symbols": universe,
+            # Without these, every analyst silently stays in "quant" mode and
+            # the LLM layer (sentiment enhancement, bull/bear/debate, memory
+            # reflection) never activates for a run started via this endpoint.
+            "agent_modes": load_llm_config().get("agent_modes", {}),
+            "llm_config": provider_config(),
         }
         engine = LiveTradingEngine(
             config=config,

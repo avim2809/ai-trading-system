@@ -31,6 +31,8 @@ _RAG_DEFAULTS: dict[str, Any] = {
 
 _PROVIDER_DEFAULTS: dict[str, Any] = {
     "default_model": "groq/llama-3.3-70b-versatile",
+    "fallback_models": [],
+    "load_balance": False,
     "temperature": 0.3,
     "max_tokens": 2000,
 }

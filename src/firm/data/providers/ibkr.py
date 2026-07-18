@@ -1,4 +1,4 @@
-"""Interactive Brokers data provider – historical prices and news via ib_insync.
+"""Interactive Brokers data provider – historical prices and news via ib_async.
 
 Lets the live pipeline source OHLCV price history and news-based sentiment
 directly from an IB Gateway / TWS connection instead of a third-party REST
@@ -51,7 +51,7 @@ def _score_headline(text: str) -> float:
     return float((pos - neg) / (pos + neg))
 
 try:
-    from ib_insync import IB, Stock, util
+    from ib_async import IB, Stock, util
 
     _HAS_IB = True
 except ImportError:
@@ -62,7 +62,7 @@ class IBKRProvider(DataProvider):
     """Fetch historical daily bars from IB Gateway / TWS.
 
     Args:
-        ib: An already-connected ``ib_insync.IB`` instance to reuse.  If given,
+        ib: An already-connected ``ib_async.IB`` instance to reuse.  If given,
             the connection is *not* owned by this provider (it will not be
             disconnected here).
         host / port / client_id: Connection parameters used to open a private
@@ -85,8 +85,8 @@ class IBKRProvider(DataProvider):
     ) -> None:
         if not _HAS_IB:
             raise ImportError(
-                "ib_insync is not installed. Install the live extra: "
-                "pip install 'firm[live]' or pip install ib_insync"
+                "ib_async is not installed. Install the live extra: "
+                "pip install 'firm[live]' or pip install ib_async"
             )
         # DataProvider.__init__ expects an api_key; IBKR uses none.
         self.api_key = ""
@@ -193,7 +193,7 @@ class IBKRProvider(DataProvider):
                     totalResults=300,
                 )
                 for h in headlines or []:
-                    # ib_insync HistoricalNews.time is a datetime or string.
+                    # ib_async HistoricalNews.time is a datetime or string.
                     ts = pd.to_datetime(getattr(h, "time", None), errors="coerce")
                     headline = getattr(h, "headline", "") or ""
                     rows.append(

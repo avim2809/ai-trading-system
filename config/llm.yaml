@@ -1,9 +1,29 @@
 # Default to a FREE model. Options that cost nothing to run:
-#   groq/llama-3.3-70b-versatile  – free Groq tier, needs a free GROQ_API_KEY
-#   ollama/llama3                 – fully local/offline, needs Ollama running
+#   groq/llama-3.3-70b-versatile               – free Groq tier, needs a free GROQ_API_KEY
+#   openrouter/nvidia/nemotron-3-ultra-550b-a55b:free – free OpenRouter tier, needs OPENROUTER_API_KEY
+#   openrouter/openrouter/free                 – OpenRouter auto-router over whatever :free model fits
+#   ollama/llama3                              – fully local/offline, needs Ollama running
+# OpenRouter's free roster rotates — recheck the id still exists at
+# openrouter.ai/models?max_price=0 if this starts erroring.
 # Switch to a paid model (e.g. claude-opus-4-8, gpt-4o) here when desired.
 provider:
+  # Groq primary: direct inference (not a marketplace), fast, and its free
+  # tier is meaningfully more generous than OpenRouter's zero-balance tier.
+  # OpenRouter's free models absorb overflow once Groq's cap is hit.
   default_model: "groq/llama-3.3-70b-versatile"
+  # Spread requests across two independent free tiers (Groq + OpenRouter) so
+  # one provider's rate cap doesn't stall the whole run. With load_balance
+  # on, every call round-robins across this list (default_model included);
+  # if whichever model gets picked errors (e.g. a 429), LiteLLM automatically
+  # retries the rest of the list in order before giving up.
+  fallback_models:
+    - "groq/llama-3.1-8b-instant"
+    - "openrouter/openai/gpt-oss-20b:free"
+    - "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
+    - "openrouter/google/gemma-4-31b-it:free"
+    - "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
+    - "openrouter/openrouter/free"   # last resort: auto-picks any live :free model
+  load_balance: true
   temperature: 0.3
   max_tokens: 2000
 

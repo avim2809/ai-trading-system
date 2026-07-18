@@ -14,7 +14,9 @@ experiment:
 
 broker: "ibkr_paper"
 schedule: "market_open"
-approval_mode: "auto"
+# LiveTradingEngine only recognises "full_auto" / "semi_auto" — anything else
+# (e.g. plain "auto") silently falls through to "everything needs approval".
+approval_mode: "full_auto"
 
 strategies:
   enabled:

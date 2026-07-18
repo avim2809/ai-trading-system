@@ -71,6 +71,20 @@ PROVIDERS: dict[str, LLMProvider] = {
         "ollama/llama3", "ollama/", False,
         ("ollama/llama3", "ollama/qwen2.5"),
     ),
+    "openrouter": LLMProvider(
+        "openrouter", "OpenRouter (free tier)", "OPENROUTER_API_KEY",
+        "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free", "openrouter/", False,
+        # Pinned free models give reproducible behaviour but do get rotated
+        # out of OpenRouter's free lineup over time — recheck against
+        # openrouter.ai/models?max_price=0 if one starts erroring.
+        # "openrouter/openrouter/free" auto-routes to whichever :free model
+        # fits the request instead, trading reproducibility for durability.
+        (
+            "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+            "openrouter/openai/gpt-oss-20b:free",
+            "openrouter/openrouter/free",
+        ),
+    ),
 }
 
 

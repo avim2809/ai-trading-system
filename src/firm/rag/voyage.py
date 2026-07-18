@@ -52,6 +52,21 @@ class VoyageEmbeddingFunction:
         self._client = None  # lazy — don't require the key until first use
 
     def __call__(self, input: list[str]) -> list[list[float]]:
+        return self._embed(input, input_type="document")
+
+    def embed_query(self, input: list[str]) -> list[list[float]]:
+        """Embed a query, called by Chroma separately from ``__call__``.
+
+        Voyage supports asymmetric embedding via ``input_type`` — "document"
+        for corpus text, "query" for search text — which measurably improves
+        retrieval relevance for short queries against longer documents.
+        Without this method Chroma's newer client (which distinguishes
+        query-time from document-time embedding) raises an ``AttributeError``
+        rather than falling back to ``__call__``.
+        """
+        return self._embed(input, input_type="query")
+
+    def _embed(self, input: list[str], input_type: str) -> list[list[float]]:
         if self._client is None:
             self._client = _client()
         out: list[list[float]] = []
@@ -60,7 +75,9 @@ class VoyageEmbeddingFunction:
             # truncation=True (Voyage's default, made explicit): an over-long text
             # is truncated to the model's context limit rather than erroring.
             out.extend(
-                self._client.embed(batch, model=self._model, truncation=True).embeddings
+                self._client.embed(
+                    batch, model=self._model, input_type=input_type, truncation=True
+                ).embeddings
             )
         return out
 

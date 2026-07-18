@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 from firm.llm.cache import ResponseCache
@@ -19,6 +20,19 @@ class LLMService:
         )
         self.temperature: float = config.get("temperature", 0.3)
         self.max_tokens: int = config.get("max_tokens", 2000)
+
+        # Model pool for load-balancing + fallback: default_model first, then
+        # any configured fallback_models, de-duplicated. A single-entry pool
+        # (the common case) makes _select_model()/chat() behave exactly as
+        # before this was added.
+        self.fallback_models: list[str] = list(config.get("fallback_models", []))
+        self.load_balance: bool = bool(config.get("load_balance", False))
+        self._model_pool: list[str] = []
+        for m in (self.default_model, *self.fallback_models):
+            if m and m not in self._model_pool:
+                self._model_pool.append(m)
+        self._rr_index = 0
+        self._rr_lock = threading.Lock()
 
         cache_enabled = config.get("cache_enabled", True)
         cache_db = config.get("cache_db", "data/llm_cache.db")
@@ -56,7 +70,7 @@ class LLMService:
         repeat calls — ~90% cheaper on the cached prefix. No-op for providers
         that don't honour explicit cache breakpoints.
         """
-        model = model or self.default_model
+        model = model or self._select_model()
         temperature = temperature if temperature is not None else self.temperature
 
         # Response-cache key is computed from the original messages so it stays
@@ -83,8 +97,20 @@ class LLMService:
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
+        # Any other pool member can stand in if *model* errors (rate limit,
+        # timeout, provider outage, ...) — LiteLLM tries them in order and
+        # only raises once every one of them has failed.
+        fallback_chain = [m for m in self._model_pool if m != model]
+        if fallback_chain:
+            kwargs["fallbacks"] = fallback_chain
+
         response = self._litellm.completion(**kwargs)
         content = response.choices[0].message.content or ""
+
+        # The model that actually served the response may differ from
+        # *model* if a fallback kicked in — record that one for cost/cache
+        # bookkeeping so usage stats reflect what really ran.
+        served_model = getattr(response, "model", None) or model
 
         tokens_in = response.usage.prompt_tokens if response.usage else 0
         tokens_out = response.usage.completion_tokens if response.usage else 0
@@ -94,9 +120,23 @@ class LLMService:
         self._total_cost += cost
 
         if self._cache is not None:
-            self._cache.put(cache_key, content, model, tokens_in, tokens_out, cost)
+            self._cache.put(cache_key, content, served_model, tokens_in, tokens_out, cost)
 
         return content
+
+    def _select_model(self) -> str:
+        """Pick the model for a call with no explicit ``model=`` override.
+
+        Round-robins across ``[default_model, *fallback_models]`` when
+        ``load_balance`` is on, spreading requests across providers so no
+        single free-tier cap gets hammered; otherwise always the primary.
+        """
+        if not self.load_balance or len(self._model_pool) <= 1:
+            return self.default_model
+        with self._rr_lock:
+            picked = self._model_pool[self._rr_index % len(self._model_pool)]
+            self._rr_index += 1
+        return picked
 
     @staticmethod
     def _apply_prompt_cache(

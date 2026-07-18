@@ -352,12 +352,23 @@ class LiveTradingEngine:
             self._prev_cycle_nav = None
 
     def _get_llm_service(self) -> Any:
-        """Lazy-initialise the LLM service for reflection calls."""
+        """Lazy-initialise the LLM service for reflection calls.
+
+        Prefers an explicit ``config["llm_config"]``; falls back to
+        ``config/llm.yaml``'s ``provider`` section (default model, fallback
+        models, load-balancing) so a live engine started via the API — which
+        does not currently thread ``llm_config`` through — still picks up
+        the configured fallback/load-balance behaviour instead of silently
+        reverting to the hardcoded Groq-only default.
+        """
         if self._llm_service is not None:
             return self._llm_service
         try:
             from firm.llm.provider import LLMService
-            llm_config = self._config.get("llm_config", {})
+            llm_config = self._config.get("llm_config")
+            if not llm_config:
+                from firm.llm.config import provider_config
+                llm_config = provider_config()
             self._llm_service = LLMService(llm_config)
         except Exception:
             log.debug("LLM service unavailable — memory reflection disabled")
