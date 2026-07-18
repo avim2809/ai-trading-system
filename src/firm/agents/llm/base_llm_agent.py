@@ -74,12 +74,26 @@ class LLMAgentMixin:
             return ""
 
     def _compress(self, text: str) -> str:
-        """Compress *text* using TokenCompressor, falling back to truncation."""
+        """Compress *text* per config/llm.yaml's ``optimization`` section.
+
+        ``compression_enabled: false`` passes *text* through unchanged.
+        Otherwise compresses to ``compression_ratio`` via TokenCompressor,
+        falling back to a hard truncation if compression itself errors.
+        """
+        from firm.llm.config import optimization_config
+
+        opt = optimization_config()
+        if not opt.get("compression_enabled", True):
+            return text
         try:
             if self._compressor is None:
                 from firm.llm.compression import TokenCompressor
-                self._compressor = TokenCompressor()
-            return self._compressor.compress(text)
+                self._compressor = TokenCompressor(
+                    use_llmlingua=opt.get("use_llmlingua", False)
+                )
+            return self._compressor.compress(
+                text, target_ratio=opt.get("compression_ratio", 0.5)
+            )
         except Exception:
             return text[:3000]
 

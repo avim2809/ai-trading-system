@@ -100,18 +100,33 @@ class VectorStore:
         )
 
     def add_documents(self, collection_name: str, docs: list[Document]) -> int:
-        """Add documents to a collection. Returns count of documents added."""
+        """Add documents to a collection. Returns count of *new* documents added.
+
+        Skips documents whose id already exists in the collection first —
+        ``upsert()`` does not skip duplicates, it re-embeds and overwrites
+        them, so re-running ingestion over already-stored content would
+        otherwise re-pay the (Voyage) embedding cost for no change in the
+        stored result. Chunk ids are a content+identity hash (see
+        ``DocumentChunker._make_chunk``), so this only skips genuinely
+        unchanged documents — different content hashes to a different id.
+        """
         if not docs:
             return 0
 
         collection = self.get_or_create_collection(collection_name)
         ids = [d.doc_id for d in docs]
-        texts = [d.text for d in docs]
-        metadatas = [d.metadata for d in docs]
 
-        # ChromaDB silently skips duplicates by ID
-        collection.upsert(ids=ids, documents=texts, metadatas=metadatas)
-        return len(docs)
+        existing_ids = set(collection.get(ids=ids, include=[])["ids"])
+        new_docs = [d for d in docs if d.doc_id not in existing_ids]
+        if not new_docs:
+            return 0
+
+        collection.upsert(
+            ids=[d.doc_id for d in new_docs],
+            documents=[d.text for d in new_docs],
+            metadatas=[d.metadata for d in new_docs],
+        )
+        return len(new_docs)
 
     def query(
         self,

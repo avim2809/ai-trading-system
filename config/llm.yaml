@@ -30,6 +30,13 @@ provider:
 optimization:
   compression_enabled: true
   compression_ratio: 0.5
+  # Real LLMLingua-2 (installed) loads a ~700MB BERT model and costs 1-2s of
+  # CPU-heavy inference per call — real contention with IB Gateway/live
+  # trading on a small host. Only shrinks LLM prompt tokens (helps against
+  # TPM rate caps), doesn't touch Voyage/embedding usage, no $ savings
+  # against already-free-tier LLMs. Leave false for live trading; flip true
+  # for an offline/backtest run where CPU contention doesn't matter.
+  use_llmlingua: false
   cache_enabled: true
   cache_db: "data/llm_cache.db"
   cache_ttl_hours: 168

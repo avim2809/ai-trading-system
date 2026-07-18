@@ -18,7 +18,7 @@ from firm.config import get_settings
 from firm.data import schemas
 from firm.data.cache import ParquetCache
 from firm.data.providers import get_provider
-from firm.logging_setup import configure_logging, get_logger
+from firm.logging_setup import get_logger, setup_logging
 
 log = get_logger(__name__)
 
@@ -122,7 +122,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def fetch_data_main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point: parse args, build the panel, report row counts."""
-    configure_logging()
+    setup_logging()
     args = _parse_args(argv)
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     start = pd.Timestamp(args.start).to_pydatetime()

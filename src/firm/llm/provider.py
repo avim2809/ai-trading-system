@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from typing import Any
@@ -70,7 +71,7 @@ class LLMService:
         repeat calls — ~90% cheaper on the cached prefix. No-op for providers
         that don't honour explicit cache breakpoints.
         """
-        model = model or self._select_model()
+        model = model or self._select_model(messages)
         temperature = temperature if temperature is not None else self.temperature
 
         # Response-cache key is computed from the original messages so it stays
@@ -124,19 +125,32 @@ class LLMService:
 
         return content
 
-    def _select_model(self) -> str:
+    def _select_model(self, messages: list[dict[str, Any]] | None = None) -> str:
         """Pick the model for a call with no explicit ``model=`` override.
 
-        Round-robins across ``[default_model, *fallback_models]`` when
-        ``load_balance`` is on, spreading requests across providers so no
-        single free-tier cap gets hammered; otherwise always the primary.
+        Spreads requests across ``[default_model, *fallback_models]`` when
+        ``load_balance`` is on, so no single free-tier cap gets hammered.
+        Routing is a deterministic hash of *messages*, not a rotating
+        counter: the same prompt always lands on the same model, so
+        identical repeated calls still hit the response cache (whose key
+        includes the model) — a round-robin counter would bounce identical
+        prompts across different models on every call and defeat caching
+        entirely. Distinct prompts still hash to different models across
+        the pool, so load still spreads across the wider corpus of calls.
         """
         if not self.load_balance or len(self._model_pool) <= 1:
             return self.default_model
-        with self._rr_lock:
-            picked = self._model_pool[self._rr_index % len(self._model_pool)]
-            self._rr_index += 1
-        return picked
+        if not messages:
+            # Nothing to hash against (e.g. called speculatively) — fall
+            # back to a rotating counter so load still spreads.
+            with self._rr_lock:
+                picked = self._model_pool[self._rr_index % len(self._model_pool)]
+                self._rr_index += 1
+            return picked
+        digest = hashlib.sha256(
+            json.dumps(messages, sort_keys=True, default=str).encode()
+        ).hexdigest()
+        return self._model_pool[int(digest, 16) % len(self._model_pool)]
 
     @staticmethod
     def _apply_prompt_cache(

@@ -26,12 +26,10 @@ from firm.live.approval import ApprovalQueue
 from firm.live.data_feed import LiveDataFeed
 from firm.live.engine import LiveTradingEngine
 from firm.llm.config import load_llm_config, provider_config
+from firm.logging_setup import setup_logging
 import firm.strategies  # noqa: F401 — ensure @register decorators fire
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+setup_logging(log_file="data/logs/live_trading.log")
 log = logging.getLogger("firm.live.runner")
 
 

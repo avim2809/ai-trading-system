@@ -85,6 +85,9 @@ def _instrument_metrics(application: FastAPI) -> None:
 
 def run() -> None:
     """Entry point for the ``firm-api`` console script."""
+    from firm.logging_setup import setup_logging
+    setup_logging(log_file="data/logs/api.log")
+
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 

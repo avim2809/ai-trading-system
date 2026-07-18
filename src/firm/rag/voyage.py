@@ -17,12 +17,16 @@ import os
 _DEFAULT_EMBED_MODEL = "voyage-finance-2"
 _DEFAULT_RERANK_MODEL = "rerank-2.5"
 # Voyage allows up to 1,000 texts per embed request, but also caps total tokens
-# per request (120K for voyage-finance-2) and per text (32K context). With the
-# corpus chunked to ~500 tokens, a 128-text batch (~64K) stays well under both,
-# so we batch by count rather than pulling in Voyage's tokenizer. If large,
-# un-chunked documents are ever embedded, switch to token-aware batching via
-# voyageai.Client.count_tokens() — see docs.voyageai.com/docs/tokenization.
+# per request (120K for voyage-finance-2) and per text (32K context). Chunk
+# *count* alone isn't a safe batching signal — DocumentChunker's ~500-token
+# target is a soft heuristic (char-count/4, sentence-boundary splitting), and
+# real-world text (SEC filing HTML-to-text extraction especially) can produce
+# chunks several times that size, blowing a 128-text batch well past 120K
+# tokens. So batching is token-aware: accumulate texts until either the count
+# or the token budget would be exceeded, using Voyage's own (local, no extra
+# API call) tokenizer via ``Client.tokenize`` to measure each text.
 _EMBED_BATCH = 128
+_MAX_TOKENS_PER_BATCH = 100_000  # safety margin under the 120K/request cap
 
 
 def _client():
@@ -69,9 +73,32 @@ class VoyageEmbeddingFunction:
     def _embed(self, input: list[str], input_type: str) -> list[list[float]]:
         if self._client is None:
             self._client = _client()
+        if not input:
+            return []
+
+        # One local tokenize call for the whole input, not one per batch —
+        # Client.tokenize doesn't hit the network (no auth needed beyond
+        # client construction), so this is cheap even for large corpora.
+        token_counts = [len(t) for t in self._client.tokenize(input, model=self._model)]
+
         out: list[list[float]] = []
-        for i in range(0, len(input), _EMBED_BATCH):
-            batch = input[i : i + _EMBED_BATCH]
+        batch: list[str] = []
+        batch_tokens = 0
+        for text, n_tokens in zip(input, token_counts):
+            if batch and (
+                len(batch) >= _EMBED_BATCH
+                or batch_tokens + n_tokens > _MAX_TOKENS_PER_BATCH
+            ):
+                out.extend(
+                    self._client.embed(
+                        batch, model=self._model, input_type=input_type, truncation=True
+                    ).embeddings
+                )
+                batch, batch_tokens = [], 0
+            batch.append(text)
+            batch_tokens += n_tokens
+
+        if batch:
             # truncation=True (Voyage's default, made explicit): an over-long text
             # is truncated to the model's context limit rather than erroring.
             out.extend(

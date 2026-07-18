@@ -83,13 +83,26 @@ def _build_fake_llm_module():
     provider_mod = types.ModuleType("firm.llm.provider")
     provider_mod.LLMService = MockLLMService  # type: ignore[attr-defined]
     compression_mod = types.ModuleType("firm.llm.compression")
+    config_mod = types.ModuleType("firm.llm.config")
 
     class FakeCompressor:
-        def compress(self, text):
+        def __init__(self, target_ratio=0.5, use_llmlingua=False):
+            pass
+
+        def compress(self, text, target_ratio=None):
             return text[:500]
 
+    def _fake_optimization_config(cfg=None):
+        return {"compression_enabled": True, "compression_ratio": 0.5}
+
     compression_mod.TokenCompressor = FakeCompressor  # type: ignore[attr-defined]
-    return {"firm.llm": mod, "firm.llm.provider": provider_mod, "firm.llm.compression": compression_mod}
+    config_mod.optimization_config = _fake_optimization_config  # type: ignore[attr-defined]
+    return {
+        "firm.llm": mod,
+        "firm.llm.provider": provider_mod,
+        "firm.llm.compression": compression_mod,
+        "firm.llm.config": config_mod,
+    }
 
 
 def _build_fake_rag_module():
@@ -180,6 +193,26 @@ class TestLLMAgentMixin:
         result = mixin._compress(long_text)
         # Mock compressor truncates to 500
         assert len(result) <= 500
+
+    def test_compress_disabled_passes_through_unchanged(self, mock_llm_modules, monkeypatch):
+        # Target sys.modules directly rather than `import firm.llm.config as
+        # x` — with no fromlist, that statement resolves via attribute-chain
+        # traversal from the real top-level `firm` package, not a sys.modules
+        # dict lookup. If some earlier test already really-imported firm.llm,
+        # that chain reaches the *real* module and silently bypasses this
+        # fixture's monkeypatched sys.modules entry.
+        import sys
+        from firm.agents.llm.base_llm_agent import LLMAgentMixin
+
+        monkeypatch.setattr(
+            sys.modules["firm.llm.config"], "optimization_config",
+            lambda cfg=None: {"compression_enabled": False, "compression_ratio": 0.5},
+        )
+
+        mixin = LLMAgentMixin()
+        long_text = "x" * 5000
+        result = mixin._compress(long_text)
+        assert result == long_text
 
     def test_compress_fallback_no_module(self, monkeypatch):
         import sys

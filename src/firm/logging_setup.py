@@ -45,7 +45,20 @@ def setup_logging(
     max_bytes: int = 10 * 1024 * 1024,
     backup_count: int = 5,
 ) -> None:
-    """Configure the ``firm.*`` logger hierarchy.
+    """Configure logging for the whole process, not just ``firm.*``.
+
+    Attaches to the root logger (rather than just the "firm" logger) so
+    third-party libraries used throughout the live trading path — ib_async,
+    litellm, chromadb — are captured too, not only this package's own code.
+    Losing those would mean losing exactly the kind of diagnostic output
+    they emit (e.g. ib_async's market-data-subscription warnings) that
+    matters for debugging a live run.
+
+    Console gets a plain human-readable line (for watching a live session
+    scroll by); the optional rotating file gets structured JSON (for later
+    grep/jq analysis or feeding into an LLM reflection/self-improvement
+    pass). Rotation defaults (10MB x 5 backups = 50MB ceiling per log
+    stream) keep disk usage bounded regardless of how long a process runs.
 
     Parameters
     ----------
@@ -58,16 +71,16 @@ def setup_logging(
     backup_count:
         Number of rotated files to keep.
     """
-    root = logging.getLogger("firm")
+    root = logging.getLogger()
     root.setLevel(level)
 
     if root.handlers:
         return
 
-    fmt = _JSONFormatter()
-
     console = logging.StreamHandler(sys.stderr)
-    console.setFormatter(fmt)
+    console.setFormatter(logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    ))
     root.addHandler(console)
 
     if log_file is not None:
@@ -76,5 +89,5 @@ def setup_logging(
         fh = RotatingFileHandler(
             str(path), maxBytes=max_bytes, backupCount=backup_count
         )
-        fh.setFormatter(fmt)
+        fh.setFormatter(_JSONFormatter())
         root.addHandler(fh)

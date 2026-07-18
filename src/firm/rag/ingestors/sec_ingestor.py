@@ -27,6 +27,14 @@ _SECTION_HEADERS = [
     "Item 9A", "Item 9B", "Item 10", "Item 11", "Item 12", "Item 13",
     "Item 14", "Item 15",
 ]
+# The analytically valuable narrative sections for sentiment/research
+# grounding: Business overview, Risk Factors, Legal Proceedings, MD&A, and
+# Market Risk. Deliberately excludes Item 8 (raw financial-statement tables —
+# typically the single largest section by far, and structured fundamentals
+# already come from FMP, not text embedding) and the governance/exhibit
+# boilerplate (Items 2, 4-6, 9-15), which carry little sentiment value but
+# would otherwise dominate embedding volume if the whole filing were ingested.
+_HIGH_VALUE_SECTIONS = {"item 1", "item 1a", "item 3", "item 7", "item 7a"}
 _HEADERS = {"User-Agent": "FirmBot/1.0 research@example.com"}
 
 
@@ -115,12 +123,22 @@ class SECIngestor(BaseIngestor):
         all_docs: list[Document] = []
         for hit in hits:
             source = hit.get("_source", {})
-            filing_url = source.get("file_url", "")
-            form_type = source.get("form_type", "")
+            # The full-text-search API's hit has no "file_url"/"form_type"
+            # fields (those don't exist in its response schema — every hit
+            # was previously skipped as a result). The document URL must be
+            # built from the top-level "_id" ("<accession>:<primary-file>")
+            # plus the source's CIK, per SEC EDGAR's standard Archives layout.
+            form_type = source.get("form", "")
             filed_date = source.get("file_date", "")
+            ciks = source.get("ciks") or []
+            hit_id = hit.get("_id", "")
 
-            if not filing_url:
+            if not ciks or ":" not in hit_id:
                 continue
+            accession, _, filename = hit_id.partition(":")
+            cik = str(int(ciks[0]))
+            accession_nodash = accession.replace("-", "")
+            filing_url = f"https://www.sec.gov/Archives/edgar/data/{cik}/{accession_nodash}/{filename}"
 
             text = self._fetch_filing_text(filing_url)
             if not text or len(text) < 100:
@@ -134,10 +152,33 @@ class SECIngestor(BaseIngestor):
                 "url": filing_url,
             }
 
-            chunks = self.chunker.chunk_by_sections(
-                text, _SECTION_HEADERS, metadata
-            )
-            if not chunks:
+            if form_type in ("10-K", "10-Q"):
+                # The classic Item 1-15 numbering only applies to these two
+                # forms. 8-K uses its own "Item 2.02"/"Item 9.01"-style event
+                # codes, which happen to share literal prefixes with several
+                # of _SECTION_HEADERS ("Item 2", "Item 9", ...) — matching
+                # against them here would misdetect an 8-K as having real
+                # Item-N structure and then filter its actual content away.
+                section_chunks = self.chunker.chunk_by_sections(
+                    text, _SECTION_HEADERS, metadata
+                )
+                if section_chunks:
+                    # Keep only the narrative sections with sentiment/
+                    # research value (drops Item 8 financial-statement
+                    # tables and governance/exhibit boilerplate).
+                    chunks = [
+                        c for c in section_chunks
+                        if c.metadata.get("section", "").strip().lower()
+                        in _HIGH_VALUE_SECTIONS
+                    ]
+                else:
+                    chunks = self.chunker.chunk(text, metadata)
+            else:
+                # 8-K (and anything else): no Item-N structure to filter
+                # against, and these are event disclosures (earnings
+                # releases, executive changes) that are typically short and
+                # often *more* sentiment-relevant than 10-K boilerplate —
+                # ingest the whole thing.
                 chunks = self.chunker.chunk(text, metadata)
 
             all_docs.extend(chunks)

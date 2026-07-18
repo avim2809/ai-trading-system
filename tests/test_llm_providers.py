@@ -88,3 +88,52 @@ class TestPromptCache:
         out = LLMService._apply_prompt_cache(messages, "claude-opus-4-8")
         assert isinstance(out[0]["content"], list)   # wrapped
         assert out[1]["content"] == "b"              # plain string, untouched
+
+
+class TestModelRouting:
+    """_select_model must route by prompt content, not a rotating counter —
+    otherwise identical repeated prompts bounce across different models and
+    never hit the response cache (whose key includes the served model)."""
+
+    def _service(self, **overrides):
+        config = {
+            "default_model": "groq/llama-3.3-70b-versatile",
+            "fallback_models": ["openrouter/openai/gpt-oss-20b:free", "groq/llama-3.1-8b-instant"],
+            "load_balance": True,
+            "cache_enabled": False,
+            **overrides,
+        }
+        return LLMService(config)
+
+    def test_same_prompt_always_routes_to_same_model(self):
+        svc = self._service()
+        messages = [{"role": "user", "content": "What's the AAPL sentiment?"}]
+        picks = {svc._select_model(messages) for _ in range(10)}
+        assert len(picks) == 1
+
+    def test_different_prompts_spread_across_the_pool(self):
+        svc = self._service()
+        picks = {
+            svc._select_model([{"role": "user", "content": f"query {i}"}])
+            for i in range(30)
+        }
+        # With 30 distinct prompts hashed over a 3-model pool, expect more
+        # than one model to get used (astronomically unlikely otherwise).
+        assert len(picks) > 1
+        assert picks <= set(svc._model_pool)
+
+    def test_load_balance_off_always_uses_default(self):
+        svc = self._service(load_balance=False)
+        messages = [{"role": "user", "content": "anything"}]
+        assert svc._select_model(messages) == svc.default_model
+
+    def test_single_model_pool_always_uses_default(self):
+        svc = self._service(fallback_models=[])
+        messages = [{"role": "user", "content": "anything"}]
+        assert svc._select_model(messages) == svc.default_model
+
+    def test_no_messages_falls_back_to_rotation(self):
+        svc = self._service()
+        picks = [svc._select_model(None) for _ in range(len(svc._model_pool) * 2)]
+        # Rotates rather than always returning the same model.
+        assert len(set(picks)) > 1

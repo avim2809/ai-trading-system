@@ -44,6 +44,19 @@ _ASSISTANT_DEFAULTS: dict[str, Any] = {
     "n_results": 5,
 }
 
+_OPTIMIZATION_DEFAULTS: dict[str, Any] = {
+    "compression_enabled": True,
+    "compression_ratio": 0.5,
+    # Off by default — real LLMLingua-2 loads a ~700MB BERT model (CPU
+    # inference, 1-2s/call) that competes with live trading for CPU/RAM on
+    # small hosts. Compression falls back to cheap sentence-sampling unless
+    # this is explicitly set true (e.g. for an offline/backtest run).
+    "use_llmlingua": False,
+    "cache_enabled": True,
+    "cache_db": "data/llm_cache.db",
+    "cache_ttl_hours": 168,
+}
+
 
 def load_llm_config(path: str | Path | None = None) -> dict[str, Any]:
     """Load ``config/llm.yaml`` (or *path*), returning ``{}`` on any failure."""
@@ -76,6 +89,11 @@ def provider_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 def assistant_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return the ``assistant`` section merged over defaults."""
     return _section(cfg, "assistant", _ASSISTANT_DEFAULTS)
+
+
+def optimization_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the ``optimization`` section merged over defaults."""
+    return _section(cfg, "optimization", _OPTIMIZATION_DEFAULTS)
 
 
 def is_anthropic(model: str) -> bool:

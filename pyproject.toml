@@ -48,6 +48,11 @@ llm = [
     "feedparser",
     "duckdb>=0.10",
     "rank-bm25",
+    # Real (non-fallback) prompt compression for TokenCompressor. Pulls
+    # torch — on a CPU-only host, install torch from the CPU wheel index
+    # first (pip install torch --index-url https://download.pytorch.org/whl/cpu)
+    # or this pulls the much larger CUDA build.
+    "llmlingua",
 ]
 # Optional: run RAG embeddings/reranking locally (pulls torch — large, ~2GB RAM).
 # Not needed when using the default hosted Voyage provider.

@@ -11,11 +11,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from firm.brokers.ibkr import IBKRBroker
+from firm.logging_setup import setup_logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+setup_logging(log_file="data/logs/run_until_profitable.log")
 log = logging.getLogger(__name__)
 
 
