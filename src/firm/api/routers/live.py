@@ -36,13 +36,39 @@ class StartRequest(BaseModel):
     auto_approve_strategies: list[str] = []
     symbols: list[str] = []
     initial_capital: float = 100_000
+    # Empty = all registered strategies (matches build_orchestrator's default).
+    strategies: list[str] = []
+    kill_switch_drawdown: float = 0.10
+    max_daily_trades: int = 50
+    max_daily_turnover: float = 0.5
+
+
+class ConfigUpdateStrategies(BaseModel):
+    enabled: list[str] | None = None
+    auto_approve: list[str] | None = None
+
+
+class ConfigUpdateRisk(BaseModel):
+    kill_switch_drawdown: float | None = None
+    max_daily_trades: int | None = None
+    max_daily_turnover: float | None = None
+
+
+class ConfigUpdateUniverse(BaseModel):
+    symbols: list[str] | None = None
 
 
 class ConfigUpdateRequest(BaseModel):
+    """Mirrors the shape returned by GET /live/config for round-trip saves.
+
+    ``broker`` is intentionally not settable here — changing the execution
+    broker requires stopping and restarting the engine.
+    """
     schedule: str | None = None
     approval_mode: str | None = None
-    auto_approve_strategies: list[str] | None = None
-    symbols: list[str] | None = None
+    strategies: ConfigUpdateStrategies | None = None
+    risk: ConfigUpdateRisk | None = None
+    universe: ConfigUpdateUniverse | None = None
 
 
 class RejectRequest(BaseModel):
@@ -106,14 +132,12 @@ def live_status(request: Request) -> dict[str, Any]:
             "orders_generated": lc.orders_generated,
         }
 
-    universe = engine._data_feed._universe if hasattr(engine, "_data_feed") else []
-
     return {
         "state": "running" if engine.is_running else "stopped",
         "broker": getattr(engine, "_broker_type", ""),
         "broker_connected": engine._broker.is_connected() if engine._broker else False,
         "next_run": next_run,
-        "active_strategies": list(universe),
+        "active_strategies": engine.enabled_strategies if hasattr(engine, "enabled_strategies") else [],
         "approval_mode": getattr(engine, "_approval_mode", ""),
         "uptime_seconds": uptime,
         "last_cycle": last_cycle,
@@ -160,6 +184,12 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
         config = {
             "initial_capital": body.initial_capital,
             "symbols": universe,
+            # Empty -> build_orchestrator defaults to all registered
+            # strategies; a non-empty list enables only those.
+            "strategies": body.strategies or None,
+            "kill_switch_drawdown": body.kill_switch_drawdown,
+            "max_daily_trades": body.max_daily_trades,
+            "max_daily_turnover": body.max_daily_turnover,
             # Without these, every analyst silently stays in "quant" mode and
             # the LLM layer (sentiment enhancement, bull/bear/debate, memory
             # reflection) never activates for a run started via this endpoint.
@@ -371,22 +401,22 @@ def get_live_config(request: Request) -> dict[str, Any]:
         }
 
     auto = sorted(engine._auto_approve) if hasattr(engine, "_auto_approve") else []
+    enabled = engine.enabled_strategies if hasattr(engine, "enabled_strategies") else []
     universe = engine._data_feed._universe if hasattr(engine, "_data_feed") else []
+    risk = engine.risk_config if hasattr(engine, "risk_config") else {
+        "kill_switch_drawdown": 0.10, "max_daily_trades": 50, "max_daily_turnover": 0.5,
+    }
 
     return {
         "broker": getattr(engine, "_broker_type", "alpaca_paper"),
         "schedule": scheduler._schedule_spec if scheduler else "market_open",
         "approval_mode": getattr(engine, "_approval_mode", "semi_auto"),
         "strategies": {
-            "enabled": list(universe),
+            "enabled": enabled,
             "auto_approve": auto,
-            "require_approval": [s for s in universe if s not in auto],
+            "require_approval": [s for s in enabled if s not in auto],
         },
-        "risk": {
-            "kill_switch_drawdown": 0.10,
-            "max_daily_trades": 50,
-            "max_daily_turnover": 0.5,
-        },
+        "risk": risk,
         "universe": {
             "symbols": list(universe),
         },
@@ -395,16 +425,40 @@ def get_live_config(request: Request) -> dict[str, Any]:
 
 @router.put("/config")
 def update_live_config(body: ConfigUpdateRequest, request: Request) -> dict[str, Any]:
+    from firm.live.scheduler import TradingScheduler
+
     engine = getattr(request.app.state, "live_engine", None)
     if engine is None:
         raise HTTPException(status_code=400, detail="Engine not started")
 
     if body.approval_mode is not None:
         engine._approval_mode = body.approval_mode
-    if body.auto_approve_strategies is not None:
-        engine._auto_approve = set(body.auto_approve_strategies)
-    if body.symbols is not None:
-        engine._data_feed._universe = body.symbols
+    if body.strategies is not None:
+        if body.strategies.auto_approve is not None:
+            engine._auto_approve = set(body.strategies.auto_approve)
+        if body.strategies.enabled is not None:
+            engine.update_strategies(body.strategies.enabled)
+    if body.risk is not None:
+        engine.update_risk(
+            kill_switch_drawdown=body.risk.kill_switch_drawdown,
+            max_daily_trades=body.risk.max_daily_trades,
+            max_daily_turnover=body.risk.max_daily_turnover,
+        )
+    if body.universe is not None and body.universe.symbols is not None:
+        engine._data_feed._universe = body.universe.symbols
+
+    if body.schedule is not None:
+        with _engine_lock:
+            old_scheduler = getattr(request.app.state, "live_scheduler", None)
+            if old_scheduler is not None:
+                old_scheduler.stop()
+            try:
+                new_scheduler = TradingScheduler(engine=engine, schedule=body.schedule)
+                new_scheduler.start()
+                request.app.state.live_scheduler = new_scheduler
+            except ImportError:
+                log.warning("APScheduler not installed; scheduling disabled")
+                request.app.state.live_scheduler = None
 
     return {"status": "updated"}
 

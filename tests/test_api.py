@@ -287,3 +287,114 @@ class TestLogsTail:
         data = r.json()
         assert data["reset"] is True
         assert len(data["lines"]) == 1
+
+
+# ------------------------------------------------------------------
+# Decision memory API (frontend Decisions page)
+# ------------------------------------------------------------------
+
+class TestMemoryDecisionsAPI:
+    @pytest.fixture(autouse=True)
+    def _isolate_memory_path(self, tmp_path, monkeypatch):
+        import firm.agents.memory as memory_mod
+        monkeypatch.setattr(memory_mod, "_DEFAULT_PATH", tmp_path / "decisions.jsonl")
+        self.memory_path = tmp_path / "decisions.jsonl"
+
+    def test_no_decisions_yet(self, client):
+        r = client.get("/api/memory/decisions")
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_lists_decisions_newest_first(self, client):
+        from firm.agents.memory import TradingMemoryLog
+
+        log = TradingMemoryLog()
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.05}, nav_at_decision=100_000)
+        log.store_decision(date="2026-01-02", proposal_weights={"MSFT": 0.05}, nav_at_decision=101_000)
+
+        r = client.get("/api/memory/decisions")
+        data = r.json()
+        assert len(data) == 2
+        assert data[0]["date"] == "2026-01-02"
+        assert data[1]["date"] == "2026-01-01"
+        assert data[0]["nav_at_decision"] == 101_000
+
+    def test_limit_param(self, client):
+        from firm.agents.memory import TradingMemoryLog
+
+        log = TradingMemoryLog()
+        for i in range(5):
+            log.store_decision(date=f"2026-01-0{i+1}", proposal_weights={"AAPL": 0.05})
+
+        r = client.get("/api/memory/decisions?limit=2")
+        assert len(r.json()) == 2
+
+
+# ------------------------------------------------------------------
+# Live config/start round-trip (regression: strategies/risk/schedule
+# used to be silently dropped by PUT /live/config, and /live/start
+# never threaded strategies/risk through at all)
+# ------------------------------------------------------------------
+
+class TestLiveConfigRoundTrip:
+    @pytest.fixture(autouse=True)
+    def _mock_broker(self, monkeypatch):
+        import firm.api.routers.live as live_mod
+        from tests.test_brokers import MockBroker
+
+        monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: MockBroker())
+
+    def test_start_applies_strategies_and_risk(self, client):
+        resp = client.post("/api/live/start", json={
+            "broker": "alpaca_paper",
+            "schedule": "hourly",
+            "symbols": ["AAPL", "MSFT"],
+            "strategies": ["momentum"],
+            "kill_switch_drawdown": 0.2,
+            "max_daily_trades": 10,
+            "max_daily_turnover": 0.3,
+        })
+        assert resp.status_code == 200, resp.text
+
+        cfg = client.get("/api/live/config").json()
+        assert cfg["strategies"]["enabled"] == ["momentum"]
+        assert cfg["risk"]["kill_switch_drawdown"] == 0.2
+        assert cfg["risk"]["max_daily_trades"] == 10
+        assert cfg["risk"]["max_daily_turnover"] == 0.3
+        assert cfg["universe"]["symbols"] == ["AAPL", "MSFT"]
+
+        status = client.get("/api/live/status").json()
+        assert status["active_strategies"] == ["momentum"]
+
+        client.post("/api/live/stop")
+
+    def test_put_config_updates_strategies_autoapprove_risk_universe(self, client):
+        client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+
+        resp = client.put("/api/live/config", json={
+            "approval_mode": "full_auto",
+            "strategies": {"enabled": ["trend", "momentum"], "auto_approve": ["trend"]},
+            "risk": {"kill_switch_drawdown": 0.15, "max_daily_trades": 5, "max_daily_turnover": 0.25},
+            "universe": {"symbols": ["GOOG"]},
+        })
+        assert resp.status_code == 200, resp.text
+
+        cfg = client.get("/api/live/config").json()
+        assert set(cfg["strategies"]["enabled"]) == {"trend", "momentum"}
+        assert cfg["strategies"]["auto_approve"] == ["trend"]
+        assert cfg["risk"]["kill_switch_drawdown"] == 0.15
+        assert cfg["risk"]["max_daily_trades"] == 5
+        assert cfg["risk"]["max_daily_turnover"] == 0.25
+        assert cfg["universe"]["symbols"] == ["GOOG"]
+
+        client.post("/api/live/stop")
+
+    def test_put_config_schedule_restarts_scheduler(self, client):
+        client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+        resp = client.put("/api/live/config", json={"schedule": "market_close"})
+        assert resp.status_code == 200, resp.text
+
+        cfg = client.get("/api/live/config").json()
+        assert cfg["schedule"] == "market_close"
+
+        client.post("/api/live/stop")

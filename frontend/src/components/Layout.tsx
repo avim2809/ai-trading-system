@@ -18,6 +18,7 @@ const liveLinks = [
 
 const monitoringLinks = [
   { to: '/logs', label: 'Live Logs', icon: '📜' },
+  { to: '/decisions', label: 'Decision Log', icon: '🧠' },
 ]
 
 function SidebarLink({ to, label, icon, end }: { to: string; label: string; icon: string; end?: boolean }) {

@@ -209,7 +209,7 @@ export default function NewBacktest() {
           </button>
           {showRisk && (
             <div className="mt-3 grid grid-cols-2 gap-3">
-              {['max_position_pct', 'max_sector_pct', 'max_drawdown_pct'].map((key) => (
+              {['max_position_pct', 'max_gross_exposure', 'max_net_exposure', 'max_sector_pct', 'vol_target', 'max_drawdown_pct'].map((key) => (
                 <div key={key}>
                   <label className="block text-xs text-slate-400 mb-1">{key}</label>
                   <input

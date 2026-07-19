@@ -182,9 +182,40 @@ export interface LiveStatus {
 
 export interface LiveStartRequest {
   broker: string
-  strategies?: string[]
   schedule?: string
   approval_mode?: string
+  auto_approve_strategies?: string[]
+  symbols?: string[]
+  initial_capital?: number
+  strategies?: string[]
+  kill_switch_drawdown?: number
+  max_daily_trades?: number
+  max_daily_turnover?: number
+}
+
+export interface LiveAlert {
+  timestamp: string
+  kind: string
+  severity: 'warning' | 'critical'
+  message: string
+  cycle_id: number
+  [key: string]: unknown
+}
+
+export interface LiveAlertsResponse {
+  halted: boolean
+  alerts: LiveAlert[]
+}
+
+export interface DecisionEntry {
+  date: string
+  status: 'pending' | 'reflected'
+  proposal_weights: Record<string, number>
+  notes: string
+  nav_at_decision: number | null
+  raw_return: number | null
+  benchmark_return: number | null
+  reflection: string | null
 }
 
 export interface BrokerPosition {
@@ -275,8 +306,10 @@ export interface LiveConfig {
 
 export interface LLMProvider {
   name: string
+  label: string
   models: string[]
-  has_key: boolean
+  configured: boolean
+  default_model: string
 }
 
 export interface LLMConfig {

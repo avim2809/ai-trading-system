@@ -160,6 +160,13 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
                         ))}
                       </ul>
                     )}
+                    {detail.blackboard_snapshot.risk_decision.actions.length > 0 && (
+                      <ul className="list-disc list-inside text-amber-400 space-y-0.5 mt-2">
+                        {detail.blackboard_snapshot.risk_decision.actions.map((a, i) => (
+                          <li key={i}>{a}</li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
                 </PipelineStage>
               )}

@@ -666,3 +666,30 @@ class TestLLMRouter:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] in ("ok", "error")
+
+    def test_test_connection_reports_response_time(self, client, monkeypatch):
+        import firm.llm.provider as provider_mod
+
+        class _FakeService:
+            def __init__(self, *_a, **_k):
+                pass
+
+            def chat(self, *_a, **_k):
+                return "hello there"
+
+        monkeypatch.setattr(provider_mod, "LLMService", _FakeService)
+        resp = client.post("/api/llm/test", json={"prompt": "hi"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert isinstance(data["response_time_ms"], (int, float))
+        assert data["response_time_ms"] >= 0
+
+    def test_providers_have_configured_field(self, client):
+        resp = client.get("/api/llm/providers")
+        data = resp.json()
+        for p in data["providers"]:
+            assert "configured" in p
+            assert "label" in p
+            assert "default_model" in p
+            assert isinstance(p["configured"], bool)

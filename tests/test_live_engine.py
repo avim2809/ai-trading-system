@@ -62,6 +62,15 @@ def _make_orders() -> list[dict[str, Any]]:
     ]
 
 
+@pytest.fixture()
+def engine_components():
+    broker = MockBroker()
+    feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+    queue = ApprovalQueue(broker=broker)
+    config = {"initial_capital": 100_000}
+    return broker, feed, queue, config
+
+
 # ---------------------------------------------------------------------------
 # ApprovalQueue tests
 # ---------------------------------------------------------------------------
@@ -481,6 +490,193 @@ class TestLiveTradingEngine:
         assert statuses[0].status == "filled"
 
         assert broker.get_position("AAPL") is not None
+
+
+class TestReflectionPersistence:
+    """Regression tests: reflection must survive an engine process restart.
+
+    Previously the "previous decision" pointer used for deferred reflection
+    was in-memory only (_prev_cycle_date/_prev_cycle_nav), so a restart
+    between the decision and its outcome silently dropped the reflection
+    forever. The fix persists nav_at_decision in the memory log itself and
+    has _maybe_reflect read pending decisions back from disk.
+    """
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_reflection_survives_engine_restart(self, mock_build, tmp_path):
+        memory_path = tmp_path / "decisions.jsonl"
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "memory_log_path": str(memory_path)}
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        # "Process 1": makes a decision, then the process is discarded —
+        # simulated by simply never reusing this engine instance again.
+        engine1 = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine1.start()
+        engine1.run_cycle()
+
+        entries = [json.loads(line) for line in memory_path.read_text().splitlines()]
+        assert len(entries) == 1
+        assert entries[0]["status"] == "pending"
+        assert entries[0]["nav_at_decision"] == pytest.approx(engine1.portfolio.nav)
+
+        # "Process 2": a brand-new engine instance with no in-memory
+        # knowledge of process 1's decision, pointed at the same log file.
+        engine2 = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine2._llm_service = MagicMock()
+        engine2._llm_service.chat.return_value = "Reflection text."
+        engine2.start()
+        engine2.run_cycle()
+
+        entries = [json.loads(line) for line in memory_path.read_text().splitlines()]
+        reflected = [e for e in entries if e["status"] == "reflected"]
+        assert len(reflected) == 1
+        assert reflected[0]["reflection"] == "Reflection text."
+        assert reflected[0]["date"] == entries[0]["date"]
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_missing_llm_service_logs_warning(self, mock_build, tmp_path, caplog):
+        memory_path = tmp_path / "decisions.jsonl"
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "memory_log_path": str(memory_path)}
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine1 = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine1.start()
+        engine1.run_cycle()
+
+        engine2 = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        # Force LLM construction to fail, as it would with no reachable
+        # provider/credentials — reflection must be skipped loudly, not
+        # silently, so an operator can notice via the logs.
+        with patch("firm.llm.provider.LLMService", side_effect=RuntimeError("no creds")):
+            engine2.start()
+            with caplog.at_level("WARNING"):
+                engine2.run_cycle()
+
+        assert any("LLM service unavailable" in r.message for r in caplog.records)
+        assert any("Skipping reflection" in r.message for r in caplog.records)
+
+
+class TestEngineConfigUpdates:
+    """Regression tests: strategies/risk must be genuinely mutable on a
+    running engine, not silently ignored (previously PUT /live/config
+    accepted these fields but the handler never applied them, and
+    /live/start never threaded them into the engine at all).
+    """
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_update_strategies_rebuilds_orchestrator(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+
+        assert mock_build.call_count == 1
+        engine.update_strategies(["momentum", "trend"])
+        assert engine.enabled_strategies == ["momentum", "trend"]
+        assert mock_build.call_count == 2
+        # New config passed to build_orchestrator reflects the update.
+        assert mock_build.call_args[0][0]["strategies"] == ["momentum", "trend"]
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_update_strategies_empty_defaults_to_all(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+
+        engine.update_strategies([])
+        assert len(engine.enabled_strategies) > 1  # falls back to all registered strategies
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_update_risk(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+
+        engine.update_risk(kill_switch_drawdown=0.2, max_daily_trades=5, max_daily_turnover=0.3)
+        assert engine.risk_config == {
+            "kill_switch_drawdown": 0.2, "max_daily_trades": 5, "max_daily_turnover": 0.3,
+        }
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_daily_trade_limit_forces_manual_approval(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        orders = _make_orders()
+        bb = _make_blackboard()
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (orders, bb)
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config={**config, "max_daily_trades": 1}, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+        )
+        engine.start()
+
+        result = engine.run_cycle()
+        # 2 orders this cycle > max_daily_trades=1 -> forced to manual despite full_auto.
+        assert result.orders_submitted == 0
+        assert result.orders_queued == 2
+        assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_daily_turnover_limit_forces_manual_approval(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        orders = _make_orders()  # 10*150 + 5*300 = 3000 notional
+        bb = _make_blackboard()
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (orders, bb)
+        mock_build.return_value = mock_orch
+
+        # NAV is 100_000 (initial_capital) -> turnover_frac ~= 0.03; cap it far below that.
+        engine = LiveTradingEngine(
+            config={**config, "max_daily_turnover": 0.01}, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+        )
+        engine.start()
+
+        result = engine.run_cycle()
+        assert result.orders_submitted == 0
+        assert result.orders_queued == 2
+        assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_within_daily_limits_executes_normally(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        orders = _make_orders()
+        bb = _make_blackboard()
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (orders, bb)
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+        )
+        engine.start()
+
+        result = engine.run_cycle()
+        assert result.orders_submitted == 2
+        assert result.orders_queued == 0
+        assert not any(a["kind"] == "daily_limit_breach" for a in result.alerts)
 
 
 class TestLiveEngineHardening:

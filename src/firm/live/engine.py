@@ -68,18 +68,31 @@ class LiveTradingEngine:
         self._auto_approve: set[str] = set(auto_approve_strategies or [])
 
         self._orchestrator = build_orchestrator(config)
+        self._enabled_strategies: list[str] = list(config.get("strategies") or self._all_strategy_names())
         initial_capital = config.get("initial_capital", 100_000)
         self._portfolio = PortfolioState(initial_capital=initial_capital)
         self._cycle_count = 0
         self._cycle_history: list[CycleResult] = []
         self._running = False
 
+        # Daily risk limits — reset each calendar day. Unlike the drawdown
+        # kill switch (which halts permanently), breaching these forces the
+        # cycle's orders to manual approval rather than blocking them
+        # outright, so an operator stays in control instead of trades
+        # silently vanishing.
+        self._max_daily_trades = int(config.get("max_daily_trades", 50))
+        self._max_daily_turnover = float(config.get("max_daily_turnover", 0.5))
+        self._daily_date: str | None = None
+        self._daily_trade_count = 0
+        self._daily_turnover_value = 0.0
+
         # Decision memory — optional; enabled when memory_log_path is configured.
+        # Pending decisions (and the NAV to diff against) are persisted to
+        # the memory log itself rather than tracked in-memory, so a process
+        # restart between the decision and its outcome doesn't silently drop
+        # the reflection (see _maybe_reflect).
         from firm.agents.memory import TradingMemoryLog
         self._memory = TradingMemoryLog(config)
-        # Track the last cycle's date and NAV for deferred reflection.
-        self._prev_cycle_date: str | None = None
-        self._prev_cycle_nav: float | None = None
         self._llm_service: Any = None
 
         # Observability/alerting. The kill switch trips when peak-to-trough
@@ -119,6 +132,91 @@ class LiveTradingEngine:
     def halted(self) -> bool:
         """True once the drawdown kill switch has tripped."""
         return self._halted
+
+    @property
+    def enabled_strategies(self) -> list[str]:
+        return list(self._enabled_strategies)
+
+    @property
+    def risk_config(self) -> dict[str, float]:
+        return {
+            "kill_switch_drawdown": self._kill_switch_drawdown,
+            "max_daily_trades": self._max_daily_trades,
+            "max_daily_turnover": self._max_daily_turnover,
+        }
+
+    @staticmethod
+    def _all_strategy_names() -> list[str]:
+        from firm.strategies import list_strategies
+        return list_strategies()
+
+    def update_strategies(self, names: list[str]) -> None:
+        """Swap which strategies the orchestrator runs, effective next cycle.
+
+        Rebuilds the orchestrator with the same config plus the new
+        ``strategies`` list — cheap relative to a trading cycle, and the
+        portfolio/broker/memory state is untouched.
+        """
+        self._enabled_strategies = list(names) if names else self._all_strategy_names()
+        new_config = {**self._config, "strategies": self._enabled_strategies}
+        self._orchestrator = build_orchestrator(new_config)
+        self._config = new_config
+        log.info("Live engine strategies updated: %s", self._enabled_strategies)
+
+    def update_risk(
+        self,
+        kill_switch_drawdown: float | None = None,
+        max_daily_trades: int | None = None,
+        max_daily_turnover: float | None = None,
+    ) -> None:
+        """Update risk limits on a running engine, effective immediately."""
+        if kill_switch_drawdown is not None:
+            self._kill_switch_drawdown = float(kill_switch_drawdown)
+        if max_daily_trades is not None:
+            self._max_daily_trades = int(max_daily_trades)
+        if max_daily_turnover is not None:
+            self._max_daily_turnover = float(max_daily_turnover)
+        log.info("Live engine risk limits updated: %s", self.risk_config)
+
+    def _check_daily_limits(
+        self, now: datetime, orders: list[dict[str, Any]], prices: dict[str, float]
+    ) -> bool:
+        """Track today's trade count/turnover; return True if this cycle's
+        orders would breach the daily cap and should be forced to manual
+        approval instead of blocked outright (keeps an operator in the loop
+        rather than silently dropping signals or silently over-trading).
+        """
+        date_str = now.strftime("%Y-%m-%d")
+        if self._daily_date != date_str:
+            self._daily_date = date_str
+            self._daily_trade_count = 0
+            self._daily_turnover_value = 0.0
+
+        turnover_value = sum(
+            abs(o.get("quantity", abs(o.get("shares", 0))) * prices.get(o.get("symbol", ""), 0.0))
+            for o in orders
+        )
+        nav = self._portfolio.nav
+        projected_trades = self._daily_trade_count + len(orders)
+        projected_turnover_frac = (
+            (self._daily_turnover_value + turnover_value) / nav if nav > 0 else 0.0
+        )
+
+        breached = (
+            projected_trades > self._max_daily_trades
+            or projected_turnover_frac > self._max_daily_turnover
+        )
+        if breached:
+            self._emit_alert(
+                "daily_limit_breach", "warning",
+                f"Daily limit would be breached (trades {projected_trades}/"
+                f"{self._max_daily_trades}, turnover {projected_turnover_frac:.1%}/"
+                f"{self._max_daily_turnover:.1%}); routing orders to manual approval.",
+            )
+        else:
+            self._daily_trade_count = projected_trades
+            self._daily_turnover_value += turnover_value
+        return breached
 
     def _emit_alert(
         self, kind: str, severity: str, message: str, **context: Any
@@ -260,16 +358,20 @@ class LiveTradingEngine:
                         date=date_str,
                         proposal_weights=dict(proposal.targets),
                         notes=f"cycle={self._cycle_count}; {regime}".strip("; "),
+                        nav_at_decision=self._portfolio.nav,
                     )
-                    self._prev_cycle_date = date_str
-                    self._prev_cycle_nav = self._portfolio.nav
 
                 if not orders:
                     log.info("Cycle %d: no orders generated", self._cycle_count)
                     self._cycle_history.append(result)
                     return result
 
-                auto_orders, manual_orders = self._split_by_approval(orders)
+                daily_limit_breached = self._check_daily_limits(now, orders, prices)
+                if daily_limit_breached:
+                    result.alerts.append(self._alerts[-1])
+                    auto_orders, manual_orders = [], orders
+                else:
+                    auto_orders, manual_orders = self._split_by_approval(orders)
 
                 if auto_orders:
                     statuses, failed = self._execute_orders(
@@ -316,40 +418,48 @@ class LiveTradingEngine:
             self._cycle_lock.release()
 
     def _maybe_reflect(self, now: datetime) -> None:
-        """Trigger deferred LLM reflection on the previous cycle if P&L is known.
+        """Trigger deferred LLM reflection on any decisions whose P&L is now known.
 
-        Called at the start of each cycle so the outcome (NAV change since the
-        last decision) is available before the new decision is made.  Skips
-        silently when there is no pending decision or the LLM is unavailable.
+        Called at the start of each cycle — before this cycle's own decision
+        is stored — so every entry ``find_all_pending()`` returns is
+        genuinely from a previous cycle. Pending decisions (and the NAV to
+        diff against) are read back from the persisted memory log rather
+        than an in-memory pointer, so a process restart between the decision
+        and this call doesn't silently drop the reflection.
         """
-        if self._prev_cycle_date is None or self._prev_cycle_nav is None:
+        pending = self._memory.find_all_pending()
+        if not pending:
             return
-        prev_nav = self._prev_cycle_nav
-        if prev_nav <= 0:
-            return
-        current_nav = self._portfolio.nav
-        raw_return = (current_nav / prev_nav) - 1.0
-
-        # Use a flat 0.0 benchmark when SPY price is unavailable — the
-        # reflection is still useful even without alpha decomposition.
-        benchmark_return = 0.0
-
         llm = self._get_llm_service()
         if llm is None:
-            return
-        try:
-            self._memory.reflect(
-                date=self._prev_cycle_date,
-                raw_return=raw_return,
-                benchmark_return=benchmark_return,
-                llm_service=llm,
+            log.warning(
+                "Skipping reflection on %d pending decision(s) (dates: %s) — "
+                "no LLM service available",
+                len(pending), [e["date"] for e in pending],
             )
-        except Exception:
-            log.warning("Memory reflection failed for %s", self._prev_cycle_date, exc_info=True)
-        finally:
-            # Clear so we don't double-reflect if the next cycle errors early.
-            self._prev_cycle_date = None
-            self._prev_cycle_nav = None
+            return
+
+        current_nav = self._portfolio.nav
+        for entry in pending:
+            prev_nav = entry.get("nav_at_decision")
+            if not prev_nav or prev_nav <= 0:
+                log.debug(
+                    "Skipping reflection for %s — no nav_at_decision recorded "
+                    "(pre-dates this fix)", entry["date"],
+                )
+                continue
+            raw_return = (current_nav / prev_nav) - 1.0
+            # Use a flat 0.0 benchmark when SPY price is unavailable — the
+            # reflection is still useful even without alpha decomposition.
+            try:
+                self._memory.reflect(
+                    date=entry["date"],
+                    raw_return=raw_return,
+                    benchmark_return=0.0,
+                    llm_service=llm,
+                )
+            except Exception:
+                log.warning("Memory reflection failed for %s", entry["date"], exc_info=True)
 
     def _get_llm_service(self) -> Any:
         """Lazy-initialise the LLM service for reflection calls.
@@ -371,7 +481,7 @@ class LiveTradingEngine:
                 llm_config = provider_config()
             self._llm_service = LLMService(llm_config)
         except Exception:
-            log.debug("LLM service unavailable — memory reflection disabled")
+            log.warning("LLM service unavailable — memory reflection disabled", exc_info=True)
         return self._llm_service
 
     @staticmethod

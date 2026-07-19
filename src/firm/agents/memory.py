@@ -68,6 +68,7 @@ class TradingMemoryLog:
         date: str,
         proposal_weights: dict[str, float],
         notes: str = "",
+        nav_at_decision: float | None = None,
     ) -> None:
         """Record a pending decision immediately after the orchestrator runs.
 
@@ -76,6 +77,10 @@ class TradingMemoryLog:
             proposal_weights: Target weight dict {symbol: weight} from the
                               approved TradeProposal.
             notes:            Optional brief context (regime, top signals, etc.).
+            nav_at_decision:  Portfolio NAV at decision time, persisted so a
+                              later ``reflect()`` call can compute the return
+                              even if the caller (e.g. the live engine)
+                              restarted and lost any in-memory pointer to it.
         """
         if self._idempotency_check(date):
             return
@@ -84,6 +89,7 @@ class TradingMemoryLog:
             "status": "pending",
             "proposal_weights": proposal_weights,
             "notes": notes,
+            "nav_at_decision": nav_at_decision,
             "raw_return": None,
             "benchmark_return": None,
             "reflection": None,
@@ -204,6 +210,28 @@ class TradingMemoryLog:
         if entry and entry.get("status") == "pending":
             return entry
         return None
+
+    def list_decisions(self, n: int | None = None) -> list[dict]:
+        """Return decision entries (pending or reflected), most recent first.
+
+        Used to expose the decision/reflection log to the API for GUI
+        monitoring — the same data ``get_context()`` summarizes for LLM
+        prompt injection, but as structured records instead of markdown.
+        """
+        entries = sorted(self._load_all().values(), key=lambda e: e["date"], reverse=True)
+        return entries[:n] if n else entries
+
+    def find_all_pending(self) -> list[dict]:
+        """Return every decision still awaiting reflection, oldest first.
+
+        Reads from disk rather than in-memory state, so a caller that
+        restarted between the decision and the outcome becoming known (e.g.
+        the live engine after a process restart) can still find and reflect
+        on it — nothing is lost just because the in-process pointer was.
+        """
+        entries = self._load_all()
+        pending = [e for e in entries.values() if e.get("status") == "pending"]
+        return sorted(pending, key=lambda e: e["date"])
 
     def _idempotency_check(self, date: str) -> bool:
         """Return True if a pending or reflected entry already exists for date."""

@@ -25,6 +25,8 @@ import type {
   EmbeddingModelInfo,
   WalkForwardResult,
   LogTailResponse,
+  LiveAlertsResponse,
+  DecisionEntry,
 } from './types'
 
 const BASE = '/api'
@@ -109,6 +111,8 @@ export const api = {
 
   getApprovals: () => fetchJson<PendingApproval[]>('/live/approvals'),
 
+  getAlerts: () => fetchJson<LiveAlertsResponse>('/live/alerts'),
+
   getApprovalDetail: (id: string) =>
     fetchJson<ApprovalDetail>(`/live/approvals/${id}`),
 
@@ -134,7 +138,8 @@ export const api = {
 
   // ── LLM / AI ──
 
-  getLLMProviders: () => fetchJson<LLMProvider[]>('/llm/providers'),
+  getLLMProviders: () =>
+    fetchJson<{ providers: LLMProvider[] }>('/llm/providers').then((r) => r.providers),
 
   getLLMConfig: () => fetchJson<LLMConfig>('/llm/config'),
 
@@ -150,6 +155,9 @@ export const api = {
     fetchJson<{ status: string }>('/llm/cache', { method: 'DELETE' }),
 
   getRAGStats: () => fetchJson<RAGStats>('/llm/rag/stats'),
+
+  deleteRAGCollection: (collection: string) =>
+    fetchJson<{ status: string }>(`/llm/rag/${collection}`, { method: 'DELETE' }),
 
   ingestRAGDocs: (types: string[], symbols?: string[]) =>
     fetchJson<{ status: string; message: string }>('/llm/rag/ingest', {
@@ -173,4 +181,9 @@ export const api = {
 
   tailLogs: (offset: number) =>
     fetchJson<LogTailResponse>(`/logs/tail?offset=${offset}`),
+
+  // ── Decision Memory ──
+
+  getDecisions: (limit = 50) =>
+    fetchJson<DecisionEntry[]>(`/memory/decisions?limit=${limit}`),
 }

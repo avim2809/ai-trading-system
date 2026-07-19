@@ -2,10 +2,23 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { LiveStatus, LiveStartRequest, BrokerPosition, AccountInfo, CycleRecord, PendingApproval } from '../api/types'
+import type {
+  LiveStatus, LiveStartRequest, BrokerPosition, AccountInfo, CycleRecord,
+  PendingApproval, StrategyInfo, LiveAlertsResponse,
+} from '../api/types'
 import MetricCard from '../components/MetricCard'
 import StatusBadge from '../components/StatusBadge'
 import Spinner from '../components/Spinner'
+
+const SCHEDULES = [
+  { value: 'market_open', label: 'Market Open' },
+  { value: 'market_close', label: 'Market Close' },
+  { value: 'every_15_min', label: 'Every 15 Minutes' },
+  { value: 'hourly', label: 'Hourly' },
+]
+
+const inputCls =
+  'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500'
 
 function formatUptime(seconds: number | null): string {
   if (seconds == null) return '—'
@@ -35,6 +48,23 @@ export default function LiveDashboard() {
   const qc = useQueryClient()
   const [showStartForm, setShowStartForm] = useState(false)
   const [startBroker, setStartBroker] = useState('alpaca_paper')
+  const [startSchedule, setStartSchedule] = useState('market_open')
+  const [startInitialCapital, setStartInitialCapital] = useState('100000')
+  const [startSymbols, setStartSymbols] = useState('')
+  const [startEnabledStrategies, setStartEnabledStrategies] = useState<Set<string>>(new Set())
+  const [startAutoApprove, setStartAutoApprove] = useState<Set<string>>(new Set())
+  const [startKillSwitch, setStartKillSwitch] = useState('0.10')
+
+  const { data: availableStrategies } = useQuery<StrategyInfo[]>({
+    queryKey: ['strategies'],
+    queryFn: api.getStrategies,
+  })
+
+  const { data: alertsData } = useQuery<LiveAlertsResponse>({
+    queryKey: ['live-alerts'],
+    queryFn: api.getAlerts,
+    refetchInterval: 5000,
+  })
 
   const { data: status, isLoading } = useQuery<LiveStatus>({
     queryKey: ['live-status'],
@@ -173,7 +203,7 @@ export default function LiveDashboard() {
               <select
                 value={startBroker}
                 onChange={(e) => setStartBroker(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                className={inputCls}
               >
                 <option value="alpaca_paper">Alpaca Paper</option>
                 <option value="alpaca_live">Alpaca Live</option>
@@ -181,12 +211,116 @@ export default function LiveDashboard() {
                 <option value="ibkr_live">Interactive Brokers (Live)</option>
               </select>
             </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Schedule</label>
+              <select
+                value={startSchedule}
+                onChange={(e) => setStartSchedule(e.target.value)}
+                className={inputCls}
+              >
+                {SCHEDULES.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Initial Capital</label>
+              <input
+                type="number"
+                value={startInitialCapital}
+                onChange={(e) => setStartInitialCapital(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Kill Switch Drawdown</label>
+              <input
+                type="number"
+                step="0.01"
+                value={startKillSwitch}
+                onChange={(e) => setStartKillSwitch(e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs text-slate-400 mb-1">Symbols (comma-separated, blank = default 5)</label>
+              <input
+                type="text"
+                value={startSymbols}
+                onChange={(e) => setStartSymbols(e.target.value)}
+                placeholder="AAPL, MSFT, GOOG, AMZN, META"
+                className={inputCls}
+              />
+            </div>
           </div>
+
+          <div className="mt-4">
+            <label className="block text-xs text-slate-400 mb-2">
+              Strategies <span className="text-slate-500">(none checked = all {availableStrategies?.length ?? 0} enabled)</span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {(availableStrategies ?? []).map((strat) => {
+                const enabled = startEnabledStrategies.has(strat.name)
+                const auto = startAutoApprove.has(strat.name)
+                return (
+                  <button
+                    key={strat.name}
+                    type="button"
+                    onClick={() => {
+                      setStartEnabledStrategies((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(strat.name)) next.delete(strat.name)
+                        else next.add(strat.name)
+                        return next
+                      })
+                    }}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-2 ${
+                      enabled ? 'border-blue-500/60 bg-blue-500/10 text-blue-300' : 'border-slate-700 bg-slate-900/30 text-slate-400'
+                    }`}
+                  >
+                    {strat.name}
+                    {enabled && (
+                      <span
+                        role="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setStartAutoApprove((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(strat.name)) next.delete(strat.name)
+                            else next.add(strat.name)
+                            return next
+                          })
+                        }}
+                        className={auto ? 'text-emerald-400' : 'text-slate-500'}
+                        title="Toggle auto-approve"
+                      >
+                        {auto ? 'auto' : 'manual'}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
           <div className="flex gap-3 mt-4">
             <button
-              onClick={() =>
-                startMut.mutate({ broker: startBroker })
-              }
+              onClick={() => {
+                const symbols = startSymbols.split(',').map((s) => s.trim()).filter(Boolean)
+                const strategies = Array.from(startEnabledStrategies)
+                const req: LiveStartRequest = {
+                  broker: startBroker,
+                  schedule: startSchedule,
+                  approval_mode: startAutoApprove.size > 0 && strategies.length > 0 && startAutoApprove.size === strategies.length
+                    ? 'full_auto' : 'semi_auto',
+                  auto_approve_strategies: Array.from(startAutoApprove),
+                  symbols,
+                  initial_capital: parseFloat(startInitialCapital) || 100_000,
+                  strategies,
+                  kill_switch_drawdown: parseFloat(startKillSwitch) || 0.10,
+                }
+                startMut.mutate(req)
+              }}
               disabled={startMut.isPending}
               className="px-5 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-500 disabled:opacity-40 transition-colors flex items-center gap-2"
             >
@@ -205,6 +339,27 @@ export default function LiveDashboard() {
               {(startMut.error as Error).message}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Alerts */}
+      {alertsData && (alertsData.halted || alertsData.alerts.length > 0) && (
+        <div className={`mb-6 rounded-xl border p-4 ${alertsData.halted ? 'bg-red-900/20 border-red-700/50' : 'bg-amber-900/10 border-amber-700/40'}`}>
+          <div className="flex items-center gap-3 mb-2">
+            <span className={`w-2 h-2 rounded-full ${alertsData.halted ? 'bg-red-400 animate-pulse' : 'bg-amber-400'}`} />
+            <span className={`font-medium text-sm ${alertsData.halted ? 'text-red-300' : 'text-amber-300'}`}>
+              {alertsData.halted ? 'Engine halted — drawdown kill switch tripped' : `${alertsData.alerts.length} operational alert${alertsData.alerts.length !== 1 ? 's' : ''}`}
+            </span>
+          </div>
+          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+            {alertsData.alerts.slice(0, 10).map((a, i) => (
+              <div key={i} className="text-xs flex items-start gap-2">
+                <span className="text-slate-500 font-mono flex-shrink-0">{formatTime(a.timestamp)}</span>
+                <span className={a.severity === 'critical' ? 'text-red-400' : 'text-amber-400'}>[{a.kind}]</span>
+                <span className="text-slate-300">{a.message}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

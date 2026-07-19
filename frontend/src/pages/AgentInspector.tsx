@@ -426,6 +426,16 @@ export default function AgentInspector() {
                     </ul>
                   </div>
                 )}
+                {result.risk_decision.actions.length > 0 && (
+                  <div className="mb-3">
+                    <p className="text-xs text-slate-400 mb-1">Actions taken:</p>
+                    <ul className="list-disc list-inside text-xs text-amber-400 space-y-0.5">
+                      {result.risk_decision.actions.map((a, i) => (
+                        <li key={i}>{a}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {Object.keys(result.risk_decision.adjusted_targets).length > 0 && (
                   <table className="w-full text-xs">
                     <thead>

@@ -235,6 +235,9 @@ def set_embedding_model(body: EmbeddingModelRequest):
 @router.post("/test")
 def test_connection(body: TestRequest):
     """Test LLM connection with current config."""
+    import time
+
+    start = time.monotonic()
     try:
         from firm.llm.provider import LLMService
         cfg = _load_llm_config()
@@ -246,6 +249,11 @@ def test_connection(body: TestRequest):
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": body.prompt},
         ])
-        return {"status": "ok", "response": response, "model": provider_cfg.get("default_model", "gpt-4o")}
+        return {
+            "status": "ok",
+            "response": response,
+            "model": provider_cfg.get("default_model", "gpt-4o"),
+            "response_time_ms": round((time.monotonic() - start) * 1000),
+        }
     except Exception as exc:
         return {"status": "error", "detail": str(exc)}

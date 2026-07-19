@@ -166,6 +166,7 @@ class FirmStrategy(bt.Strategy):
                     date=date_str,
                     proposal_weights=dict(proposal.targets),
                     notes=getattr(proposal, "notes", "") or "",
+                    nav_at_decision=nav,
                 )
                 self._prev_rebalance_date = date_str
                 self._prev_rebalance_nav = nav

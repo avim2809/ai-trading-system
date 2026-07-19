@@ -168,6 +168,11 @@ export default function LiveConfig() {
     onSuccess: () => refetchCache(),
   })
 
+  const deleteCollectionMut = useMutation({
+    mutationFn: (collection: string) => api.deleteRAGCollection(collection),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['rag-stats'] }),
+  })
+
   const handleSave = () => {
     const requireApproval = enabledStrategies.filter((s) => !autoApprove.has(s))
     const payload: LiveConfig = {
@@ -487,7 +492,7 @@ export default function LiveConfig() {
               >
                 <option value="">Select provider...</option>
                 {(llmProviders ?? [])
-                  .filter((p) => p.has_key || p.name.toLowerCase() === 'ollama')
+                  .filter((p) => p.configured || p.name.toLowerCase() === 'ollama')
                   .map((p) => (
                     <option key={p.name} value={p.name}>{p.name}</option>
                   ))}
@@ -748,6 +753,7 @@ export default function LiveConfig() {
                     <th className="pb-2 pr-4">Collection</th>
                     <th className="pb-2 pr-4 text-right">Documents</th>
                     <th className="pb-2">Description</th>
+                    <th className="pb-2 pl-4"></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -756,6 +762,21 @@ export default function LiveConfig() {
                       <td className="py-2 pr-4 font-mono">{name}</td>
                       <td className="py-2 pr-4 text-right font-mono">{col.count.toLocaleString()}</td>
                       <td className="py-2 text-slate-400">{col.description}</td>
+                      <td className="py-2 pl-4 text-right">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`Delete all ${col.count.toLocaleString()} documents in "${name}"? This cannot be undone.`)) {
+                              deleteCollectionMut.mutate(name)
+                            }
+                          }}
+                          disabled={deleteCollectionMut.isPending}
+                          className="text-slate-500 hover:text-red-400 disabled:opacity-40 transition-colors"
+                          title={`Delete ${name}`}
+                        >
+                          Delete
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
