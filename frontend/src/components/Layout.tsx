@@ -16,6 +16,10 @@ const liveLinks = [
   { to: '/live/config#ai', label: 'AI Settings', icon: '🧠' },
 ]
 
+const monitoringLinks = [
+  { to: '/logs', label: 'Live Logs', icon: '📜' },
+]
+
 function SidebarLink({ to, label, icon, end }: { to: string; label: string; icon: string; end?: boolean }) {
   return (
     <NavLink
@@ -57,6 +61,15 @@ export default function Layout() {
 
           {liveLinks.map((l) => (
             <SidebarLink key={l.to} to={l.to} label={l.label} icon={l.icon} end={l.to === '/live'} />
+          ))}
+
+          <div className="border-t border-slate-700 my-3" />
+          <p className="px-3 py-1 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            Monitoring
+          </p>
+
+          {monitoringLinks.map((l) => (
+            <SidebarLink key={l.to} to={l.to} label={l.label} icon={l.icon} />
           ))}
         </nav>
         <div className="px-5 py-4 border-t border-slate-700 text-xs text-slate-500">

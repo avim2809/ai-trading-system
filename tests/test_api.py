@@ -227,3 +227,63 @@ class TestAgentStep:
         assert "debate_results" in data
         assert isinstance(data["signal_sets"], list)
         assert len(data["signal_sets"]) > 0
+
+
+# ------------------------------------------------------------------
+# Live log tailing (frontend log monitor)
+# ------------------------------------------------------------------
+
+class TestLogsTail:
+    @pytest.fixture(autouse=True)
+    def _isolate_log_file(self, tmp_path, monkeypatch):
+        import firm.api.routers.logs as logs_mod
+
+        log_file = tmp_path / "api.log"
+        monkeypatch.setattr(logs_mod, "_LOG_FILE", log_file)
+        self.log_file = log_file
+
+    def test_tail_missing_file_returns_empty(self, client):
+        r = client.get("/api/logs/tail")
+        assert r.status_code == 200
+        data = r.json()
+        assert data == {"lines": [], "next_offset": 0, "reset": False}
+
+    def test_tail_reads_new_lines_and_advances_offset(self, client):
+        self.log_file.write_text(
+            '{"ts": "2026-01-01T00:00:00+00:00", "level": "INFO", "logger": "firm.x", "msg": "hello"}\n'
+        )
+        r = client.get("/api/logs/tail")
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["lines"]) == 1
+        assert data["lines"][0]["msg"] == "hello"
+        assert data["reset"] is False
+        assert data["next_offset"] > 0
+
+        # No new content since the returned offset -> nothing new.
+        r2 = client.get(f"/api/logs/tail?offset={data['next_offset']}")
+        assert r2.json()["lines"] == []
+
+        # Appending a second line surfaces only the new one.
+        with self.log_file.open("a") as f:
+            f.write('{"ts": "2026-01-01T00:00:01+00:00", "level": "WARNING", "logger": "firm.y", "msg": "world"}\n')
+        r3 = client.get(f"/api/logs/tail?offset={data['next_offset']}")
+        data3 = r3.json()
+        assert len(data3["lines"]) == 1
+        assert data3["lines"][0]["msg"] == "world"
+        assert data3["lines"][0]["level"] == "WARNING"
+
+    def test_tail_handles_malformed_line(self, client):
+        self.log_file.write_text("not json at all\n")
+        r = client.get("/api/logs/tail")
+        data = r.json()
+        assert len(data["lines"]) == 1
+        assert data["lines"][0]["level"] == "RAW"
+        assert data["lines"][0]["msg"] == "not json at all"
+
+    def test_tail_offset_past_end_resets(self, client):
+        self.log_file.write_text('{"ts": null, "level": "INFO", "logger": "x", "msg": "a"}\n')
+        r = client.get("/api/logs/tail?offset=999999")
+        data = r.json()
+        assert data["reset"] is True
+        assert len(data["lines"]) == 1

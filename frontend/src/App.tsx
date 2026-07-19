@@ -13,6 +13,7 @@ const LiveDashboard = lazy(() => import('./pages/LiveDashboard'))
 const LiveConfig = lazy(() => import('./pages/LiveConfig'))
 const Approvals = lazy(() => import('./pages/Approvals'))
 const OrderHistory = lazy(() => import('./pages/OrderHistory'))
+const Logs = lazy(() => import('./pages/Logs'))
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="live/config" element={<LiveConfig />} />
         <Route path="live/approvals" element={<Approvals />} />
         <Route path="live/orders" element={<OrderHistory />} />
+        <Route path="logs" element={<Logs />} />
       </Route>
     </Routes>
   )

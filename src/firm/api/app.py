@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.staticfiles import StaticFiles
+
+# Wired at import time (not just inside run()) so a rotating log file is
+# written regardless of how the process is launched — `firm-api`, a bare
+# `uvicorn firm.api.app:app`, or the Docker CMD. This is also what the
+# /api/logs/tail endpoint reads from, so without it the frontend log
+# monitor would have nothing to show.
+from firm.logging_setup import setup_logging
+
+setup_logging(log_file="data/logs/api.log")
+
+log = logging.getLogger(__name__)
 
 
 class SPAStaticFiles(StaticFiles):
@@ -38,17 +50,20 @@ def create_app() -> FastAPI:
 
     import firm.strategies  # noqa: F401 — ensure @register decorators fire at startup
 
-    from firm.api.routers import agents, live, meta, runs
+    from firm.api.routers import agents, live, logs, meta, runs
     application.include_router(meta.router, prefix="/api", tags=["meta"])
     application.include_router(runs.router, prefix="/api", tags=["runs"])
     application.include_router(agents.router, prefix="/api", tags=["agents"])
     application.include_router(live.router, prefix="/api", tags=["live"])
+    application.include_router(logs.router, prefix="/api", tags=["logs"])
 
     try:
         from firm.api.routers import llm
         application.include_router(llm.router, prefix="/api", tags=["llm"])
     except Exception:
-        pass  # llm router not available
+        log.warning(
+            "llm router unavailable — /api/llm/* endpoints will 404", exc_info=True
+        )
 
     _instrument_metrics(application)
 
@@ -85,9 +100,6 @@ def _instrument_metrics(application: FastAPI) -> None:
 
 def run() -> None:
     """Entry point for the ``firm-api`` console script."""
-    from firm.logging_setup import setup_logging
-    setup_logging(log_file="data/logs/api.log")
-
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
 

@@ -24,6 +24,7 @@ import type {
   LLMTestResult,
   EmbeddingModelInfo,
   WalkForwardResult,
+  LogTailResponse,
 } from './types'
 
 const BASE = '/api'
@@ -167,4 +168,9 @@ export const api = {
       '/llm/rag/embedding-model',
       { method: 'PUT', body: JSON.stringify({ model_id }) },
     ),
+
+  // ── Logs ──
+
+  tailLogs: (offset: number) =>
+    fetchJson<LogTailResponse>(`/logs/tail?offset=${offset}`),
 }

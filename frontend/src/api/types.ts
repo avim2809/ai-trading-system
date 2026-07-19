@@ -326,3 +326,17 @@ export interface EmbeddingModelInfo {
   speed: 'very_fast' | 'fast' | 'medium'
   description: string
 }
+
+export interface LogEntry {
+  ts: string | null
+  level: string
+  logger: string
+  msg: string
+  exception?: string
+}
+
+export interface LogTailResponse {
+  lines: LogEntry[]
+  next_offset: number
+  reset: boolean
+}
