@@ -64,7 +64,7 @@ class LLMDebateAgent(DebateAgent, LLMAgentMixin):
                     bear_thesis=dr.bear_thesis,
                 ))
             except Exception:
-                log.debug("LLM debate failed for %s", dr.symbol, exc_info=True)
+                log.warning("LLM debate failed for %s", dr.symbol, exc_info=True)
                 enhanced.append(dr)
 
         enhanced.sort(key=lambda r: r.net_conviction, reverse=True)

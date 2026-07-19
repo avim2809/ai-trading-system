@@ -260,6 +260,7 @@ class TradingAssistant:
         try:
             answer = self._synthesize(question, sql, rows, docs)
         except Exception as exc:
+            log.warning("assistant_synthesis_failed question=%r", question, exc_info=True)
             # Keep the structured data usable even when the LLM is unavailable.
             answer = (
                 "(LLM unavailable — returning retrieved data only.) "

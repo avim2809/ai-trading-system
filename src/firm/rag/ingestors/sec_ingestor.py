@@ -6,6 +6,7 @@ Uses the free SEC EDGAR full-text search API to find and ingest
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from html.parser import HTMLParser
@@ -18,6 +19,8 @@ from firm.rag.dates import normalize_date
 from firm.rag.ingestors.base_ingestor import BaseIngestor
 from firm.rag.models import Document
 from firm.rag.store import VectorStore
+
+log = logging.getLogger("firm.rag.ingestors.sec")
 
 COLLECTION = "sec_filings"
 _SEARCH_URL = "https://efts.sec.gov/LATEST/search-index"
@@ -113,11 +116,16 @@ class SECIngestor(BaseIngestor):
             }
             resp = requests.get(_SEARCH_URL, params=params, headers=_HEADERS, timeout=30)
             if resp.status_code != 200:
+                log.warning(
+                    "sec_search_failed symbol=%s status=%d body=%.200s",
+                    symbol, resp.status_code, resp.text,
+                )
                 return []
 
             data = resp.json()
             hits = data.get("hits", {}).get("hits", [])[:max_results]
         except Exception:
+            log.warning("sec_search_error symbol=%s", symbol, exc_info=True)
             return []
 
         all_docs: list[Document] = []
@@ -192,7 +200,9 @@ class SECIngestor(BaseIngestor):
                 url = f"https://www.sec.gov/Archives/{url}"
             resp = requests.get(url, headers=_HEADERS, timeout=30)
             if resp.status_code != 200:
+                log.warning("sec_filing_fetch_failed url=%s status=%d", url, resp.status_code)
                 return ""
             return _html_to_text(resp.text)[:200_000]  # Cap at ~200k chars
         except Exception:
+            log.warning("sec_filing_fetch_error url=%s", url, exc_info=True)
             return ""

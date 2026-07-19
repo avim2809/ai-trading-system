@@ -55,7 +55,7 @@ def _load_llm_config() -> dict[str, Any]:
         if _CONFIG_PATH.exists():
             return yaml.safe_load(_CONFIG_PATH.read_text()) or {}
     except Exception:
-        pass
+        log.warning("llm_config_load_failed path=%s — using hardcoded defaults", _CONFIG_PATH, exc_info=True)
     return {
         "provider": {"default_model": "groq/llama-3.3-70b-versatile", "temperature": 0.3},
         "agent_modes": {},

@@ -144,6 +144,10 @@ class FREDProvider:
                 data = resp.json()
                 obs = data.get("observations", [])
                 if not obs:
+                    log.warning(
+                        "FRED series %r returned no observations for %s..%s",
+                        series_id, start, end,
+                    )
                     return pd.DataFrame()
                 df = pd.DataFrame(obs)[["date", "value"]]
                 # FRED uses "." for missing values
@@ -172,6 +176,10 @@ class FREDProvider:
             freq = srs.get("frequency_short", "m").lower()[0]
             return freq
         except Exception:
+            log.warning(
+                "FRED frequency lookup failed for %r — defaulting to monthly "
+                "(14-day) publication lag", series_id, exc_info=True,
+            )
             return "m"
 
 

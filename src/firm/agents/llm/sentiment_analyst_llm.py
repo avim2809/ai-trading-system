@@ -61,7 +61,7 @@ class LLMSentimentAnalyst(SentimentAnalyst, LLMAgentMixin):
                     meta={**sig.meta, "llm_rationale": result.get("rationale", ""), "llm_enhanced": True},
                 ))
             except Exception:
-                log.debug("LLM enhancement failed for %s, using quant", sig.symbol, exc_info=True)
+                log.warning("LLM enhancement failed for %s, using quant", sig.symbol, exc_info=True)
                 enhanced_signals.append(sig)
 
         return SignalSet(domain=quant_result.domain, asof=quant_result.asof, signals=enhanced_signals)

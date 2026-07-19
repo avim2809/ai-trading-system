@@ -142,6 +142,10 @@ class IBKRProvider(DataProvider):
                     continue
                 df = util.df(bars)
                 if df is None or df.empty:
+                    log.warning(
+                        "IBKR returned %d bars for %s but util.df() conversion "
+                        "produced nothing", len(bars), sym,
+                    )
                     continue
                 df = df.rename(columns={"date": "date"})
                 df["date"] = pd.to_datetime(df["date"]).dt.date
@@ -184,6 +188,7 @@ class IBKRProvider(DataProvider):
                 contract = Stock(sym, "SMART", "USD")
                 ib.qualifyContracts(contract)
                 if not contract.conId:
+                    log.warning("IBKR contract qualification failed for %s; skipping news", sym)
                     continue
                 headlines = ib.reqHistoricalNews(
                     contract.conId,

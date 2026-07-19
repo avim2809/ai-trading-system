@@ -92,6 +92,7 @@ class AlpacaBroker(Broker):
             self._trading.get_account()
             return True
         except Exception:
+            log.warning("Alpaca connectivity check failed", exc_info=True)
             return False
 
     def _ensure_connected(self) -> TradingClient:
@@ -136,6 +137,10 @@ class AlpacaBroker(Broker):
                 unrealized_pnl=float(p.unrealized_pl),
             )
         except Exception:
+            # Alpaca raises a 404-backed exception for "no open position",
+            # which is the expected/benign case — but any other failure
+            # (auth, rate limit, network) looks identical here, so log it.
+            log.debug("get_position(%s) returned no result", symbol, exc_info=True)
             return None
 
     def submit_order(self, order: OrderRequest) -> OrderStatus:
@@ -190,6 +195,11 @@ class AlpacaBroker(Broker):
         try:
             orders = client.get_orders(filter=QueryOrderStatus.OPEN)
         except Exception:
+            log.warning(
+                "Filtered open-orders request failed; falling back to "
+                "unfiltered get_orders() — reconciliation may see stale/closed orders",
+                exc_info=True,
+            )
             orders = client.get_orders()
         return [self._map_order(o) for o in orders]
 
@@ -215,6 +225,8 @@ class AlpacaBroker(Broker):
             if quote is not None:
                 mid = (float(quote.ask_price) + float(quote.bid_price)) / 2
                 result[sym] = mid if mid > 0 else float(quote.ask_price or quote.bid_price)
+            else:
+                log.warning("No quote returned for %s; omitting from prices", sym)
         return result
 
     def is_market_open(self) -> bool:

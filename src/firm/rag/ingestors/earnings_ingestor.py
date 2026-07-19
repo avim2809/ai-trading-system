@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -12,6 +13,8 @@ from firm.rag.dates import normalize_date
 from firm.rag.ingestors.base_ingestor import BaseIngestor
 from firm.rag.models import Document
 from firm.rag.store import VectorStore
+
+log = logging.getLogger("firm.rag.ingestors.earnings")
 
 COLLECTION = "earnings"
 _FMP_BASE = "https://financialmodelingprep.com"
@@ -79,10 +82,18 @@ class EarningsIngestor(BaseIngestor):
             params = {"quarter": quarter, "year": year, "apikey": self._api_key}
             resp = requests.get(url, params=params, timeout=30)
             if resp.status_code != 200:
+                log.warning(
+                    "fmp_transcript_failed symbol=%s year=%d quarter=%d status=%d body=%.200s",
+                    symbol, year, quarter, resp.status_code, resp.text,
+                )
                 return ""
             data = resp.json()
             if isinstance(data, list) and data:
                 return data[0].get("content", "")
             return ""
         except Exception:
+            log.warning(
+                "fmp_transcript_error symbol=%s year=%d quarter=%d",
+                symbol, year, quarter, exc_info=True,
+            )
             return ""

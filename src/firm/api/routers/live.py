@@ -136,7 +136,21 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
         broker = _create_broker(body.broker)
         universe = body.symbols or ["AAPL", "MSFT", "GOOG", "AMZN", "META"]
 
-        data_feed = LiveDataFeed(providers={}, universe=universe)
+        # Broker-agnostic market data: FallbackProvider chains
+        # Massive -> Tiingo -> AlphaVantage -> FMP per capability, skipping
+        # any provider whose key isn't configured. Independent of which
+        # broker is used for execution.
+        from firm.data.providers.fallback import FallbackProvider
+
+        market_data = FallbackProvider()
+        data_feed = LiveDataFeed(
+            providers={
+                "prices": market_data,
+                "fundamentals": market_data,
+                "sentiment": market_data,
+            },
+            universe=universe,
+        )
 
         approval_queue = ApprovalQueue(broker=broker, persist_path="data/approvals.json")
         request.app.state.approval_queue = approval_queue

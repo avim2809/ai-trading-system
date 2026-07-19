@@ -61,7 +61,7 @@ class LLMBullResearcher(BullResearcher, LLMAgentMixin):
                     supporting=list(thesis.supporting),
                 ))
             except Exception:
-                log.debug("LLM enhancement failed for bull %s", thesis.symbol, exc_info=True)
+                log.warning("LLM enhancement failed for bull %s", thesis.symbol, exc_info=True)
                 enhanced.append(thesis)
 
         return enhanced

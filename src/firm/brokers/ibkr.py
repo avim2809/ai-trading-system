@@ -101,7 +101,10 @@ class IBKRBroker(Broker):
                 try:
                     result[mapped] = float(v.value)
                 except (ValueError, TypeError):
-                    pass
+                    log.warning(
+                        "Could not parse IBKR account field %s=%r as float; omitting",
+                        v.tag, v.value,
+                    )
         for k in ("cash", "equity", "buying_power"):
             result.setdefault(k, 0.0)
         return result
@@ -179,7 +182,10 @@ class IBKRBroker(Broker):
         [ticker] = ib.reqTickers(contract)
         mid = ticker.midpoint()
         if mid != mid:  # NaN check
-            return ticker.last if ticker.last == ticker.last else 0.0
+            if ticker.last == ticker.last:
+                return ticker.last
+            log.warning("No midpoint or last price available for %s; returning 0.0", symbol)
+            return 0.0
         return mid
 
     def get_current_prices(self, symbols: list[str]) -> dict[str, float]:
@@ -191,7 +197,14 @@ class IBKRBroker(Broker):
         for contract, ticker in zip(contracts, tickers):
             mid = ticker.midpoint()
             if mid != mid:
-                mid = ticker.last if ticker.last == ticker.last else 0.0
+                if ticker.last == ticker.last:
+                    mid = ticker.last
+                else:
+                    log.warning(
+                        "No midpoint or last price available for %s; returning 0.0",
+                        contract.symbol,
+                    )
+                    mid = 0.0
             result[contract.symbol] = mid
         return result
 

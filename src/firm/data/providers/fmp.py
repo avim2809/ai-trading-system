@@ -64,6 +64,7 @@ class FMPProvider(DataProvider):
                 )
                 records = data if isinstance(data, list) else (data.get("historical") or [])
                 if not records:
+                    log.warning("fmp_no_price_records symbol=%s start=%s end=%s", symbol, start_str, end_str)
                     continue
                 df = pd.DataFrame(records)
                 adj_col = "adjClose" if "adjClose" in df.columns else "close"

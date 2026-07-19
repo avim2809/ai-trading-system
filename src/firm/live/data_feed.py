@@ -110,6 +110,11 @@ class LiveDataFeed:
                 log.info("Fetched %d price rows for %d symbols", len(prices), len(self._universe))
             except Exception:
                 log.error("Price fetch failed", exc_info=True)
+        else:
+            log.error(
+                "No 'prices' provider configured on this LiveDataFeed — "
+                "refresh() will feed the pipeline an empty price frame"
+            )
 
         fund_prov = self._providers.get("fundamentals")
         if fund_prov:
@@ -117,6 +122,8 @@ class LiveDataFeed:
                 fundamentals = fund_prov.get_fundamentals(self._universe, start, end)
             except (NotImplementedError, Exception):
                 log.debug("Fundamental fetch skipped or failed", exc_info=True)
+        else:
+            log.warning("No 'fundamentals' provider configured on this LiveDataFeed")
 
         sent_prov = self._providers.get("sentiment")
         if sent_prov:
@@ -124,6 +131,8 @@ class LiveDataFeed:
                 sentiment = sent_prov.get_news_sentiment(self._universe, start, end)
             except (NotImplementedError, Exception):
                 log.debug("Sentiment fetch skipped or failed", exc_info=True)
+        else:
+            log.warning("No 'sentiment' provider configured on this LiveDataFeed")
 
         self._pit_store = PointInTimeDataStore()
         self._pit_store.load(

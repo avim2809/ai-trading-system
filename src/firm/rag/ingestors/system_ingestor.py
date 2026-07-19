@@ -7,6 +7,7 @@ for internal knowledge retrieval.
 from __future__ import annotations
 
 import importlib
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,8 @@ from firm.rag.dates import ALWAYS_AVAILABLE_DATE
 from firm.rag.ingestors.base_ingestor import BaseIngestor
 from firm.rag.models import Document
 from firm.rag.store import VectorStore
+
+log = logging.getLogger("firm.rag.ingestors.system")
 
 COLLECTION = "system_docs"
 
@@ -65,6 +68,10 @@ class SystemIngestor(BaseIngestor):
                 chunks = self.chunker.chunk(docstring.strip(), metadata)
                 docs.extend(chunks)
             except Exception:
+                log.debug(
+                    "strategy_module_import_failed module=%s — falling back to "
+                    "reading the file directly", module_name, exc_info=True,
+                )
                 # Fall back to reading the file directly for docstring
                 try:
                     content = py_file.read_text(encoding="utf-8")
@@ -84,7 +91,10 @@ class SystemIngestor(BaseIngestor):
                                 chunks = self.chunker.chunk(docstring, metadata)
                                 docs.extend(chunks)
                 except Exception:
-                    pass
+                    log.warning(
+                        "strategy_file_read_failed file=%s — module docstring "
+                        "not indexed", py_file, exc_info=True,
+                    )
 
         return docs
 
@@ -112,7 +122,7 @@ class SystemIngestor(BaseIngestor):
                 )
                 docs.extend(chunks)
             except Exception:
-                pass
+                log.warning("config_index_failed file=%s", yaml_file, exc_info=True)
 
         return docs
 
@@ -137,6 +147,6 @@ class SystemIngestor(BaseIngestor):
             chunks = self.chunker.chunk(content, metadata)
             docs.extend(chunks)
         except Exception:
-            pass
+            log.warning("readme_index_failed", exc_info=True)
 
         return docs

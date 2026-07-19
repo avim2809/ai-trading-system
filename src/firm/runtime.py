@@ -188,7 +188,7 @@ def run_backtest_from_config(
             from firm.config import get_settings
             fred_api_key = get_settings().fred_api_key
         except Exception:
-            pass
+            log.warning("fred_key_lookup_failed — macro data will be skipped", exc_info=True)
     if fred_api_key:
         try:
             from firm.data.providers.fred import fetch_macro_bundle

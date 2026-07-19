@@ -70,6 +70,6 @@ class LLMTraderAgent(TraderAgent, LLMAgentMixin):
                     notes=result.get("notes", quant_proposal.notes),
                 )
         except Exception:
-            log.debug("LLM trader review failed, using quant proposal", exc_info=True)
+            log.warning("LLM trader review failed, using quant proposal", exc_info=True)
 
         return quant_proposal

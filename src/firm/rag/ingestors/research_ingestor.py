@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import xml.etree.ElementTree as ET
 from typing import Any
 
@@ -12,6 +13,8 @@ from firm.rag.dates import normalize_date
 from firm.rag.ingestors.base_ingestor import BaseIngestor
 from firm.rag.models import Document
 from firm.rag.store import VectorStore
+
+log = logging.getLogger("firm.rag.ingestors.research")
 
 COLLECTION = "research"
 _ARXIV_API = "http://export.arxiv.org/api/query"
@@ -53,10 +56,14 @@ class ResearchIngestor(BaseIngestor):
             }
             resp = requests.get(_ARXIV_API, params=params, timeout=30)
             if resp.status_code != 200:
+                log.warning(
+                    "arxiv_search_failed query=%r status=%d", search_query, resp.status_code
+                )
                 return []
 
             return self._parse_atom(resp.text)
         except Exception:
+            log.warning("arxiv_search_error query=%r", search_query, exc_info=True)
             return []
 
     def _parse_atom(self, xml_text: str) -> list[Document]:
@@ -91,5 +98,5 @@ class ResearchIngestor(BaseIngestor):
                 chunks = self.chunker.chunk(text, metadata)
                 docs.extend(chunks)
         except ET.ParseError:
-            pass
+            log.warning("arxiv_parse_failed", exc_info=True)
         return docs

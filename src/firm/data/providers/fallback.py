@@ -33,7 +33,17 @@ def _load(name: str, settings: Settings) -> DataProvider | None:
     try:
         from firm.data.providers import get_provider
         return get_provider(name, settings=settings)
-    except (ProviderError, ValueError, KeyError):
+    except KeyError:
+        # get_provider raises KeyError for an *unknown provider name* — a
+        # typo/config bug, not a missing API key. Worth a real warning since
+        # it's silently identical to "this provider is just unconfigured"
+        # otherwise, masking a config mistake in the fallback chain.
+        log.warning("data_provider_unknown_name name=%s", name, exc_info=True)
+        return None
+    except (ProviderError, ValueError):
+        # The provider's own constructor raises this for a genuinely missing
+        # API key — expected/benign for an optional provider, so debug-only.
+        log.debug("data_provider_unavailable name=%s", name, exc_info=True)
         return None
 
 

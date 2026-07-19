@@ -142,47 +142,56 @@ class BacktestEngine:
             sharpe = strat.analyzers.sharpe.get_analysis()
             analysis["sharpe"] = sharpe.get("sharperatio")
         except Exception:
+            log.warning("backtest_analyzer_failed name=sharpe", exc_info=True)
             analysis["sharpe"] = None
 
         try:
             dd = strat.analyzers.drawdown.get_analysis()
             analysis["max_drawdown_pct"] = dd.get("max", {}).get("drawdown")
         except Exception:
+            log.warning("backtest_analyzer_failed name=drawdown", exc_info=True)
             analysis["max_drawdown_pct"] = None
 
         try:
             analysis["returns"] = strat.analyzers.returns.get_analysis()
         except Exception:
+            log.warning("backtest_analyzer_failed name=returns", exc_info=True)
             analysis["returns"] = {}
 
         try:
             analysis["trades"] = strat.analyzers.trades.get_analysis()
         except Exception:
+            log.warning("backtest_analyzer_failed name=trades", exc_info=True)
             analysis["trades"] = {}
 
         try:
             analysis["turnover"] = strat.analyzers.turnover.get_analysis()
         except Exception:
+            log.warning("backtest_analyzer_failed name=turnover", exc_info=True)
             analysis["turnover"] = {}
 
         try:
             analysis["strategy_attribution"] = strat.analyzers.strategy_attr.get_analysis()
         except Exception:
+            log.warning("backtest_analyzer_failed name=strategy_attribution", exc_info=True)
             analysis["strategy_attribution"] = {}
 
         try:
             analysis["trade_log"] = strat.analyzers.trade_log.get_analysis().get("trades", [])
         except Exception:
+            log.warning("backtest_analyzer_failed name=trade_log", exc_info=True)
             analysis["trade_log"] = []
 
         try:
             analysis["detailed_returns"] = strat.analyzers.detailed_returns.get_analysis()
         except Exception:
+            log.warning("backtest_analyzer_failed name=detailed_returns", exc_info=True)
             analysis["detailed_returns"] = {}
 
         try:
             analysis["benchmark"] = strat.analyzers.benchmark.get_analysis()
         except Exception:
+            log.warning("backtest_analyzer_failed name=benchmark", exc_info=True)
             analysis["benchmark"] = {}
 
         return analysis

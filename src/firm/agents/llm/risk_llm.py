@@ -91,6 +91,6 @@ class LLMRiskAgent(RiskAgent, LLMAgentMixin):
                 actions=merged_actions,
             )
         except Exception:
-            log.debug("LLM risk review failed, using quant decision", exc_info=True)
+            log.warning("LLM risk review failed, using quant decision", exc_info=True)
 
         return quant_decision

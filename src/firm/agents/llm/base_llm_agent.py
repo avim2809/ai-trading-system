@@ -95,6 +95,10 @@ class LLMAgentMixin:
                 text, target_ratio=opt.get("compression_ratio", 0.5)
             )
         except Exception:
+            log.warning(
+                "Compression failed — falling back to a hard 3000-char "
+                "truncation for this call", exc_info=True,
+            )
             return text[:3000]
 
     def _call_llm(

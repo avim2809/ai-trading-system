@@ -85,7 +85,10 @@ class TokenCompressor:
                 )
                 return result.get("compressed_prompt", text)
             except Exception:
-                pass
+                log.warning(
+                    "LLMLingua compression call failed — falling back to "
+                    "sentence-sampling for this text", exc_info=True,
+                )
 
         return self._simple_truncate(text, ratio)
 

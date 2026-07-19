@@ -88,6 +88,7 @@ class TiingoProvider(DataProvider):
                     },
                 )
                 if not data:
+                    log.warning("No news sentiment data for %s", sym)
                     continue
                 rows = []
                 for article in data:
