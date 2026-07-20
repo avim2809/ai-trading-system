@@ -61,3 +61,96 @@ class TestResolvePrice:
         with patch("firm.brokers.ibkr.Stock", side_effect=lambda sym, *_a: SimpleNamespace(symbol=sym)):
             prices = broker.get_current_prices(["AAPL", "MSFT"])
         assert prices == {"AAPL": 200.0, "MSFT": 50.0}
+
+
+class TestIsMarketOpen:
+    """Regression coverage for a real incident: is_market_open() compared
+    Eastern-time trading-hours strings against a raw UTC clock reading with
+    no timezone conversion, and used the extended tradingHours window
+    instead of the regular liquidHours session — together making it report
+    "open" at 2:55am ET simply because the UTC clock digits (06:55) happened
+    to fall inside the Eastern-time range string (0400-2000).
+    """
+
+    def _contract_details(self, liquid_hours: str, trading_hours: str = "20260720:0400-20260720:2000"):
+        return SimpleNamespace(liquidHours=liquid_hours, tradingHours=trading_hours, timeZoneId="US/Eastern")
+
+    def _broker_with(self, details):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=2)
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            qualifyContracts=lambda *cs: None,
+            reqContractDetails=lambda *cs: [details],
+        )
+        return broker
+
+    @patch("firm.brokers.ibkr.Stock")
+    def test_false_before_market_open_despite_utc_string_match(self, mock_stock, monkeypatch):
+        # 06:55 UTC on 2026-07-20 is 02:55am ET — closed. The old bug
+        # compared "20260720:0655" (UTC) directly against the ET session
+        # string "20260720:0400-20260720:2000" and got a false positive.
+        import datetime as dt
+        from zoneinfo import ZoneInfo
+
+        class _FixedDatetime(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return dt.datetime(2026, 7, 20, 2, 55, tzinfo=ZoneInfo("US/Eastern"))
+
+        monkeypatch.setattr("firm.brokers.ibkr.datetime", _FixedDatetime)
+        broker = self._broker_with(self._contract_details("20260720:0930-20260720:1600"))
+        assert broker.is_market_open() is False
+
+    @patch("firm.brokers.ibkr.Stock")
+    def test_true_during_regular_session(self, mock_stock, monkeypatch):
+        import datetime as dt
+        from zoneinfo import ZoneInfo
+
+        class _FixedDatetime(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return dt.datetime(2026, 7, 20, 11, 0, tzinfo=ZoneInfo("US/Eastern"))
+
+        monkeypatch.setattr("firm.brokers.ibkr.datetime", _FixedDatetime)
+        broker = self._broker_with(self._contract_details("20260720:0930-20260720:1600"))
+        assert broker.is_market_open() is True
+
+    @patch("firm.brokers.ibkr.Stock")
+    def test_false_during_extended_hours_only(self, mock_stock, monkeypatch):
+        # 6am ET is inside tradingHours (extended) but not liquidHours
+        # (regular session) — must use liquidHours, not tradingHours.
+        import datetime as dt
+        from zoneinfo import ZoneInfo
+
+        class _FixedDatetime(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return dt.datetime(2026, 7, 20, 6, 0, tzinfo=ZoneInfo("US/Eastern"))
+
+        monkeypatch.setattr("firm.brokers.ibkr.datetime", _FixedDatetime)
+        broker = self._broker_with(self._contract_details("20260720:0930-20260720:1600"))
+        assert broker.is_market_open() is False
+
+    @patch("firm.brokers.ibkr.Stock")
+    def test_holiday_closed_segment_is_skipped_not_crashed(self, mock_stock, monkeypatch):
+        import datetime as dt
+        from zoneinfo import ZoneInfo
+
+        class _FixedDatetime(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return dt.datetime(2026, 7, 25, 11, 0, tzinfo=ZoneInfo("US/Eastern"))
+
+        monkeypatch.setattr("firm.brokers.ibkr.datetime", _FixedDatetime)
+        broker = self._broker_with(self._contract_details("20260725:CLOSED"))
+        assert broker.is_market_open() is False
+
+    @patch("firm.brokers.ibkr.Stock")
+    def test_no_contract_details_returns_false(self, mock_stock):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=3)
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            qualifyContracts=lambda *cs: None,
+            reqContractDetails=lambda *cs: [],
+        )
+        assert broker.is_market_open() is False

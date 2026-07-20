@@ -219,19 +219,42 @@ class IBKRBroker(Broker):
         }
 
     def is_market_open(self) -> bool:
+        """True during the regular trading session (not pre/post-market).
+
+        IBKR doesn't expose a simple is_open flag, so this checks via
+        contract details: ``liquidHours`` is the regular session (e.g.
+        9:30am-4pm ET) — deliberately not ``tradingHours``, which includes
+        the extended pre/post-market window most strategies here aren't
+        designed to trade in. Both fields are expressed in the contract's
+        own exchange timezone (``timeZoneId``, e.g. "US/Eastern"), which
+        must be converted to before comparing — comparing against a raw
+        UTC clock reading (the previous implementation) silently produces
+        wrong answers whenever UTC and the exchange timezone differ, which
+        is always.
+        """
         ib = self._ensure_connected()
-        # IBKR doesn't expose a simple is_open; check via contract details
         contract = Stock("SPY", "SMART", "USD")
         ib.qualifyContracts(contract)
         details = ib.reqContractDetails(contract)
-        if details:
-            hours = details[0].tradingHours
-            now = datetime.utcnow().strftime("%Y%m%d:%H%M")
-            for segment in hours.split(";"):
-                if "-" in segment:
-                    parts = segment.split("-")
-                    if len(parts) == 2 and parts[0] <= now <= parts[1]:
-                        return True
+        if not details:
+            return False
+        cd = details[0]
+        try:
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo(cd.timeZoneId))
+        except Exception:
+            log.warning(
+                "Could not resolve exchange timezone %r; falling back to UTC "
+                "for market-hours check", cd.timeZoneId, exc_info=True,
+            )
+            now = datetime.utcnow()
+        now_str = now.strftime("%Y%m%d:%H%M")
+        for segment in cd.liquidHours.split(";"):
+            if "-" not in segment:
+                continue  # e.g. "20260725:CLOSED" (holiday) — no session that day
+            parts = segment.split("-")
+            if len(parts) == 2 and parts[0] <= now_str <= parts[1]:
+                return True
         return False
 
     @staticmethod
