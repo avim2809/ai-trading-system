@@ -679,6 +679,92 @@ class TestEngineConfigUpdates:
         assert not any(a["kind"] == "daily_limit_breach" for a in result.alerts)
 
 
+class TestMarketHoursGate:
+    """Regression tests: a cycle must not burn a full pipeline pass (and
+    IBKR's misleading off-hours quotes) against a closed market.
+    """
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_skips_cleanly_when_market_closed(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_build.return_value = mock_orch
+        broker._market_open = False
+
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle()
+        assert result.skipped is True
+        assert result.error == "skipped: market closed"
+        # No pipeline work should have happened at all.
+        mock_orch.step.assert_not_called()
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_force_bypasses_market_hours_check(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+        broker._market_open = False
+
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle(force=True)
+        assert result.skipped is False
+        mock_orch.step.assert_called_once()
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_respect_market_hours_false_always_runs(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+        broker._market_open = False
+
+        engine = LiveTradingEngine(
+            config={**config, "respect_market_hours": False},
+            broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine.start()
+
+        result = engine.run_cycle()
+        assert result.skipped is False
+        mock_orch.step.assert_called_once()
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_broken_market_hours_check_fails_open(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+        broker.is_market_open = MagicMock(side_effect=RuntimeError("boom"))
+
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle()
+        # A broken check must never silently prevent every future cycle.
+        assert result.skipped is False
+        mock_orch.step.assert_called_once()
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_runs_normally_when_market_open(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+        assert broker._market_open is True
+
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle()
+        assert result.skipped is False
+        mock_orch.step.assert_called_once()
+
+
 class TestLiveEngineHardening:
     """Regression tests for the live-execution audit fixes."""
 

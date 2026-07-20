@@ -414,3 +414,34 @@ class TestLiveConfigRoundTrip:
         assert cfg["schedule"] == "market_close"
 
         client.post("/api/live/stop")
+
+    def test_trigger_skips_when_market_closed_unless_forced(self, client, monkeypatch):
+        import pandas as pd
+        from unittest.mock import MagicMock
+        import firm.data.providers.fallback as fallback_mod
+        import firm.live.engine as engine_mod
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], None)
+        monkeypatch.setattr(engine_mod, "build_orchestrator", lambda config: mock_orch)
+
+        # /live/start builds a real FallbackProvider, which would otherwise
+        # make real network calls to Massive/Tiingo/etc. on force=true.
+        mock_provider = MagicMock()
+        mock_provider.get_prices.return_value = pd.DataFrame()
+        mock_provider.get_fundamentals.return_value = pd.DataFrame()
+        mock_provider.get_news_sentiment.return_value = pd.DataFrame()
+        monkeypatch.setattr(fallback_mod, "FallbackProvider", lambda *a, **k: mock_provider)
+
+        client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+        engine = client.app.state.live_engine
+        engine._broker._market_open = False
+
+        resp = client.post("/api/live/trigger")
+        assert resp.json()["skipped"] is True
+        mock_orch.step.assert_not_called()
+
+        resp = client.post("/api/live/trigger?force=true")
+        assert resp.json()["skipped"] is False
+
+        client.post("/api/live/stop")

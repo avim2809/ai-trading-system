@@ -85,6 +85,12 @@ class LiveTradingEngine:
         self._daily_date: str | None = None
         self._daily_trade_count = 0
         self._daily_turnover_value = 0.0
+        # Skip cycles outright when the market is closed — avoids burning a
+        # full LLM-enhanced pipeline pass (and IBKR's misleading zero/stale
+        # off-hours quotes) on a cycle that can't submit anything useful
+        # anyway. Scheduled cycles always respect this; a manual /live/trigger
+        # can override with force=True for deliberate off-hours testing.
+        self._respect_market_hours = bool(config.get("respect_market_hours", True))
 
         # Decision memory — optional; enabled when memory_log_path is configured.
         # Pending decisions (and the NAV to diff against) are persisted to
@@ -286,13 +292,20 @@ class LiveTradingEngine:
             log.warning("Error disconnecting broker", exc_info=True)
         log.info("Live engine stopped after %d cycles", self._cycle_count)
 
-    def run_cycle(self) -> CycleResult:
+    def run_cycle(self, force: bool = False) -> CycleResult:
         """Execute one full cycle of the agent pipeline.
 
         Cycles are serialised: if one is already running (e.g. a scheduled
         tick while a manual trigger is in flight) this call returns
         immediately with ``skipped=True`` rather than racing and
         double-submitting orders.
+
+        When the market is closed, the cycle is skipped before any data
+        fetch or agent pipeline work — there's nothing useful a cycle can
+        submit against a closed market, and running it anyway wastes a full
+        LLM-enhanced pass against IBKR's misleading off-hours quotes. Pass
+        ``force=True`` (used by a manual ``/live/trigger?force=true``) to
+        run anyway, e.g. for deliberate off-hours testing.
 
         Returns a :class:`CycleResult` summarizing what happened.
         """
@@ -308,6 +321,24 @@ class LiveTradingEngine:
             self._cycle_count += 1
             now = datetime.utcnow()
             result = CycleResult(cycle_id=self._cycle_count, timestamp=now)
+
+            if self._respect_market_hours and not force:
+                try:
+                    market_open = self._broker.is_market_open()
+                except Exception:
+                    # Fail open: a broken market-hours check must never
+                    # silently prevent every future cycle from running.
+                    log.warning(
+                        "Could not determine market hours; proceeding with cycle",
+                        exc_info=True,
+                    )
+                    market_open = True
+                if not market_open:
+                    log.info("Cycle %d skipped: market is closed", self._cycle_count)
+                    result.skipped = True
+                    result.error = "skipped: market closed"
+                    self._cycle_history.append(result)
+                    return result
 
             try:
                 pit_view = self._data_feed.refresh(asof=now)

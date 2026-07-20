@@ -41,6 +41,10 @@ class StartRequest(BaseModel):
     kill_switch_drawdown: float = 0.10
     max_daily_trades: int = 50
     max_daily_turnover: float = 0.5
+    # Skip scheduled/API-triggered cycles when the market is closed rather
+    # than running the full pipeline against stale/misleading off-hours
+    # quotes. Default on; disable only for deliberate off-hours testing.
+    respect_market_hours: bool = True
     # Passthrough for the deeper risk-agent envelope (max_position_pct,
     # max_gross_exposure, max_net_exposure, max_sector_pct, vol_target,
     # max_drawdown_pct, regime_overlay, ...) — mirrors how
@@ -197,6 +201,7 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
             "kill_switch_drawdown": body.kill_switch_drawdown,
             "max_daily_trades": body.max_daily_trades,
             "max_daily_turnover": body.max_daily_turnover,
+            "respect_market_hours": body.respect_market_hours,
             # Without these, every analyst silently stays in "quant" mode and
             # the LLM layer (sentiment enhancement, bull/bear/debate, memory
             # reflection) never activates for a run started via this endpoint.
@@ -247,10 +252,12 @@ def live_stop(request: Request) -> dict[str, Any]:
 
 
 @router.post("/trigger")
-def live_trigger(request: Request) -> dict[str, Any]:
+def live_trigger(request: Request, force: bool = False) -> dict[str, Any]:
+    """Run one cycle immediately. ``force=true`` bypasses the market-hours
+    check — for deliberate off-hours testing; scheduled cycles never do."""
     engine = _get_engine(request)
 
-    result = engine.run_cycle()
+    result = engine.run_cycle(force=force)
     return {
         "cycle_id": result.cycle_id,
         "timestamp": result.timestamp.isoformat(),
