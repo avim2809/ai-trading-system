@@ -357,6 +357,7 @@ class TestLiveConfigRoundTrip:
         assert resp.status_code == 200, resp.text
 
         cfg = client.get("/api/live/config").json()
+        assert cfg["broker"] == "alpaca_paper"
         assert cfg["strategies"]["enabled"] == ["momentum"]
         assert cfg["risk"]["kill_switch_drawdown"] == 0.2
         assert cfg["risk"]["max_daily_trades"] == 10
@@ -365,6 +366,21 @@ class TestLiveConfigRoundTrip:
 
         status = client.get("/api/live/status").json()
         assert status["active_strategies"] == ["momentum"]
+        assert status["broker"] == "alpaca_paper"
+
+    def test_start_applies_deep_risk_overrides(self, client):
+        resp = client.post("/api/live/start", json={
+            "broker": "alpaca_paper",
+            "schedule": "hourly",
+            "risk_overrides": {"max_position_pct": 0.05, "max_gross_exposure": 1.5},
+        })
+        assert resp.status_code == 200, resp.text
+
+        engine = client.app.state.live_engine
+        assert engine._config["max_position_pct"] == 0.05
+        assert engine._config["max_gross_exposure"] == 1.5
+
+        client.post("/api/live/stop")
 
         client.post("/api/live/stop")
 

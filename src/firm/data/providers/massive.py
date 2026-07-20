@@ -85,11 +85,16 @@ class MassiveProvider(DataProvider):
                 time.sleep(min(_BACKOFF_BASE ** attempt, 10.0))
                 continue
             if resp.status_code == 429:
-                wait = min(_BACKOFF_BASE ** attempt, 30.0)
-                log.warning("massive_rate_limited backing_off=%.1fs", wait)
-                time.sleep(wait)
-                last_exc = ProviderError(f"{url} returned HTTP 429")
-                continue
+                # Massive's rate limit is a hard account-wide per-minute
+                # ceiling, not a per-request fluke — retrying the same
+                # symbol with backoff won't clear it within a few seconds,
+                # and FallbackProvider is already calling this once per
+                # symbol in a batch. Retrying here would multiply a single
+                # rate-limit event into minutes of wasted latency across a
+                # multi-symbol universe. Fail fast so the caller's fallback
+                # chain (Tiingo/AlphaVantage/FMP) engages immediately.
+                log.warning("massive_rate_limited url=%s — failing fast, no retry", url)
+                raise ProviderError(f"{url} returned HTTP 429 (rate limited)")
             if resp.status_code in (500, 502, 503, 504):
                 last_exc = ProviderError(f"{url} returned HTTP {resp.status_code}")
                 log.warning("massive_transient_error status=%d attempt=%d", resp.status_code, attempt)

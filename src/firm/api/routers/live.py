@@ -41,6 +41,13 @@ class StartRequest(BaseModel):
     kill_switch_drawdown: float = 0.10
     max_daily_trades: int = 50
     max_daily_turnover: float = 0.5
+    # Passthrough for the deeper risk-agent envelope (max_position_pct,
+    # max_gross_exposure, max_net_exposure, max_sector_pct, vol_target,
+    # max_drawdown_pct, regime_overlay, ...) — mirrors how
+    # scripts/run_live_trading.py --config flattens a YAML risk: block
+    # straight into the engine config, so the same tuned envelope can be
+    # started via this endpoint instead of only via that script.
+    risk_overrides: dict[str, Any] = {}
 
 
 class ConfigUpdateStrategies(BaseModel):
@@ -196,6 +203,7 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
             "agent_modes": load_llm_config().get("agent_modes", {}),
             "llm_config": provider_config(),
         }
+        config.update(body.risk_overrides)
         engine = LiveTradingEngine(
             config=config,
             broker=broker,
@@ -204,6 +212,10 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
             approval_mode=body.approval_mode,
             auto_approve_strategies=body.auto_approve_strategies,
         )
+        # Set for /live/status and /live/config to report accurately — the
+        # engine itself only holds a Broker instance, not the type string
+        # used to construct it, and nothing was ever setting this before.
+        engine._broker_type = body.broker
         engine.start()
         request.app.state.live_engine = engine
 
