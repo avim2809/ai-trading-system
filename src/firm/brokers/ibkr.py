@@ -175,38 +175,48 @@ class IBKRBroker(Broker):
         ib = self._ensure_connected()
         return [self._map_trade(t) for t in ib.openTrades()]
 
+    @staticmethod
+    def _resolve_price(ticker, symbol: str) -> float:
+        """Best available price from a ticker, falling back gracefully.
+
+        Outside active trading hours (or without a live data subscription),
+        IBKR's bid/ask come back as the empty sentinel ``-1`` (midpoint()
+        computes as NaN from that) and ``last`` defaults to ``0.0`` — a real
+        float, not NaN, so a NaN-only check silently accepts it as a fake
+        zero price. Falls through to the previous session's ``close``
+        (usually still populated) before giving up, since a stale-but-real
+        price is far better than a fabricated zero feeding into order sizing.
+        """
+        mid = ticker.midpoint()
+        if mid == mid and mid > 0:
+            return mid
+        if ticker.last == ticker.last and ticker.last > 0:
+            return ticker.last
+        if ticker.close == ticker.close and ticker.close > 0:
+            log.warning(
+                "No live quote for %s (market likely closed); using previous close %.2f",
+                symbol, ticker.close,
+            )
+            return ticker.close
+        log.warning("No midpoint, last, or close price available for %s; returning 0.0", symbol)
+        return 0.0
+
     def get_current_price(self, symbol: str) -> float:
         ib = self._ensure_connected()
         contract = Stock(symbol, "SMART", "USD")
         ib.qualifyContracts(contract)
         [ticker] = ib.reqTickers(contract)
-        mid = ticker.midpoint()
-        if mid != mid:  # NaN check
-            if ticker.last == ticker.last:
-                return ticker.last
-            log.warning("No midpoint or last price available for %s; returning 0.0", symbol)
-            return 0.0
-        return mid
+        return self._resolve_price(ticker, symbol)
 
     def get_current_prices(self, symbols: list[str]) -> dict[str, float]:
         ib = self._ensure_connected()
         contracts = [Stock(s, "SMART", "USD") for s in symbols]
         ib.qualifyContracts(*contracts)
         tickers = ib.reqTickers(*contracts)
-        result: dict[str, float] = {}
-        for contract, ticker in zip(contracts, tickers):
-            mid = ticker.midpoint()
-            if mid != mid:
-                if ticker.last == ticker.last:
-                    mid = ticker.last
-                else:
-                    log.warning(
-                        "No midpoint or last price available for %s; returning 0.0",
-                        contract.symbol,
-                    )
-                    mid = 0.0
-            result[contract.symbol] = mid
-        return result
+        return {
+            contract.symbol: self._resolve_price(ticker, contract.symbol)
+            for contract, ticker in zip(contracts, tickers)
+        }
 
     def is_market_open(self) -> bool:
         ib = self._ensure_connected()
