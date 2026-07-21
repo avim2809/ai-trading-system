@@ -154,3 +154,74 @@ class TestIsMarketOpen:
             reqContractDetails=lambda *cs: [],
         )
         assert broker.is_market_open() is False
+
+
+class TestGetAccountThreadSafety:
+    """Regression coverage for a real incident: get_account() called
+    ib.reqAccountSummary() (which awaits an asyncio Future) on every call.
+    FastAPI's sync route handlers run in an anyio threadpool that may
+    service any given request on a different thread than the one that
+    called connect() — a thread with no asyncio event loop at all, which
+    crashed reqAccountSummary() with "no current event loop in thread".
+    Reproduced live: /api/live/account failed 100% of the time once the
+    engine had been running a while, while /api/live/positions (which only
+    reads the cached ib.positions() list, no Future) worked fine.
+
+    Fix: subscribe once in connect() (guaranteed to run on a consistent
+    thread), then get_account() only reads the cached accountSummary() —
+    exactly the same pattern get_positions() already used successfully.
+    """
+
+    def test_get_account_does_not_call_reqAccountSummary(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=4)
+        calls = {"req": 0}
+
+        def _req_account_summary():
+            calls["req"] += 1
+
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            reqAccountSummary=_req_account_summary,
+            accountSummary=lambda: [
+                SimpleNamespace(tag="NetLiquidation", value="1001461.74"),
+                SimpleNamespace(tag="TotalCashValue", value="1000086.08"),
+            ],
+        )
+        result = broker.get_account()
+        assert calls["req"] == 0  # only connect() should ever call this
+        assert result["equity"] == 1001461.74
+        assert result["cash"] == 1000086.08
+
+    def test_connect_subscribes_to_account_summary(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=5)
+        calls = {"req": 0}
+        fake_ib = SimpleNamespace(
+            connect=lambda *a, **k: None,
+            reqMarketDataType=lambda *a: None,
+            reqAccountSummary=lambda: calls.__setitem__("req", calls["req"] + 1),
+        )
+        with patch("firm.brokers.ibkr.IB", return_value=fake_ib):
+            broker.connect()
+        assert calls["req"] == 1
+
+    def test_get_account_callable_from_a_different_thread(self):
+        # The actual regression: simulate connect() happening on "this"
+        # thread and get_account() being called from a genuinely different
+        # one, the way FastAPI's threadpool would for a later request.
+        import threading
+
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=6)
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            accountSummary=lambda: [SimpleNamespace(tag="NetLiquidation", value="500.0")],
+        )
+        result_holder = {}
+
+        def _call_from_worker():
+            result_holder["result"] = broker.get_account()
+
+        t = threading.Thread(target=_call_from_worker)
+        t.start()
+        t.join(timeout=5)
+        assert not t.is_alive()
+        assert result_holder["result"]["equity"] == 500.0

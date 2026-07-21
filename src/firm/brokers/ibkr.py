@@ -59,6 +59,16 @@ class IBKRBroker(Broker):
         try:
             self._ib.connect(self._host, self._port, clientId=self._client_id)
             self._ib.reqMarketDataType(self._market_data_type)
+            # Subscribe once, here, on the connecting thread. ib_async binds
+            # any call that awaits a Future (reqAccountSummary, reqTickers,
+            # etc.) to whatever asyncio event loop is current in the calling
+            # thread — but get_account() may later be called from a
+            # different thread (e.g. FastAPI's anyio threadpool services
+            # each request on whichever worker thread is free), which has no
+            # event loop at all and crashes. accountSummary() below is a
+            # plain cached read (like positions()) that's safe from any
+            # thread once the subscription is live, so only subscribe here.
+            self._ib.reqAccountSummary()
             log.info(
                 "Connected to IBKR at %s:%d (client %d, market_data_type=%d)",
                 self._host,
@@ -86,7 +96,10 @@ class IBKRBroker(Broker):
 
     def get_account(self) -> dict[str, Any]:
         ib = self._ensure_connected()
-        ib.reqAccountSummary()
+        # Deliberately not calling reqAccountSummary() here — see the
+        # comment in connect(). accountSummary() is a cached read, safe to
+        # call from any thread once the subscription made in connect() is
+        # live.
         values = ib.accountSummary()
         result: dict[str, float] = {}
         key_map = {
