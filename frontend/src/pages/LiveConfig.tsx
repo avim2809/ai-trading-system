@@ -207,7 +207,7 @@ export default function LiveConfig() {
     setTestLoading(true)
     setTestResult(null)
     try {
-      const res = await api.testLLMConnection()
+      const res = await api.testLLMConnection(activeModel)
       setTestResult({ status: 'ok', message: `${res.model} responded`, time: res.response_time_ms })
     } catch (err) {
       setTestResult({ status: 'error', message: (err as Error).message })

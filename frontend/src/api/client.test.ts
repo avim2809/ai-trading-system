@@ -66,6 +66,38 @@ describe('api client', () => {
     expect(body).toMatchObject({ broker: 'ibkr_paper', strategies: ['momentum'] })
   })
 
+  it('testLLMConnection() always sends a JSON body, never an empty one', async () => {
+    // Regression: the real backend's TestRequest fields are all optional,
+    // but FastAPI still 422s "Field required" on a truly empty POST body —
+    // the previous implementation sent no body at all, so clicking "Test
+    // Connection" in the UI always failed before the handler even ran.
+    // MSW doesn't replicate FastAPI's validation on its own, so this
+    // handler does it explicitly to make sure a regression here is caught.
+    let rawBody = ''
+    server.use(
+      http.post('http://localhost/api/llm/test', async ({ request }) => {
+        rawBody = await request.text()
+        if (!rawBody) return HttpResponse.json({ detail: 'Field required' }, { status: 422 })
+        return HttpResponse.json({ status: 'ok', response: 'hi', model: 'groq/llama-3.3-70b-versatile', response_time_ms: 10 })
+      }),
+    )
+    const res = await api.testLLMConnection()
+    expect(rawBody).not.toBe('')
+    expect(res.status).toBe('ok')
+  })
+
+  it('testLLMConnection(model) includes the model override in the request body', async () => {
+    let body: unknown
+    server.use(
+      http.post('http://localhost/api/llm/test', async ({ request }) => {
+        body = await request.json()
+        return HttpResponse.json({ status: 'ok', response: 'hi', model: 'anthropic/claude-opus-4-8', response_time_ms: 10 })
+      }),
+    )
+    await api.testLLMConnection('anthropic/claude-opus-4-8')
+    expect(body).toMatchObject({ model: 'anthropic/claude-opus-4-8' })
+  })
+
   it('getDecisions() defaults to limit=50', async () => {
     let capturedUrl = ''
     server.use(

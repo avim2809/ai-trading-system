@@ -63,6 +63,33 @@ describe('LiveConfig', () => {
     confirmSpy.mockRestore()
   })
 
+  it('Test Connection sends a real request body and shows the result', async () => {
+    // Regression for the reported bug: clicking Test Connection sent a
+    // POST with no body at all, which the real backend 422s (every field
+    // in TestRequest is optional, but FastAPI still requires *some* JSON
+    // to parse). This handler mimics that validation so a regression back
+    // to an empty body fails the test instead of silently passing.
+    let rawBody = ''
+    let capturedModel: string | undefined
+    server.use(
+      http.post('http://localhost/api/llm/test', async ({ request }) => {
+        rawBody = await request.text()
+        if (!rawBody) return HttpResponse.json({ detail: 'Field required' }, { status: 422 })
+        capturedModel = JSON.parse(rawBody).model
+        return HttpResponse.json({ status: 'ok', response: 'Hello!', model: capturedModel, response_time_ms: 250 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<LiveConfig />)
+    await waitFor(() => expect(screen.getByText('Test Connection')).toBeInTheDocument())
+
+    await user.click(screen.getByText('Test Connection'))
+    await waitFor(() => expect(screen.getByText(/responded/)).toBeInTheDocument())
+    expect(rawBody).not.toBe('')
+    // Tests the currently-selected model, not just the last-saved default.
+    expect(capturedModel).toBe('groq/llama-3.3-70b-versatile')
+  })
+
   it('save button submits both live config and LLM config updates', async () => {
     let liveConfigSaved = false
     let llmConfigSaved = false

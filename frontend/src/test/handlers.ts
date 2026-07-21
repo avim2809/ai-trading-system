@@ -45,7 +45,16 @@ export const handlers = [
   http.get(`${API}/llm/rag/stats`, () => HttpResponse.json(m.mockRAGStats)),
   http.post(`${API}/llm/rag/ingest`, () => HttpResponse.json({ status: 'ingestion_started', message: 'Ingestion started' })),
   http.delete(`${API}/llm/rag/:collection`, () => HttpResponse.json({ status: 'deleted' })),
-  http.post(`${API}/llm/test`, () => HttpResponse.json({ status: 'ok', response: 'Hello!', model: 'groq/llama-3.3-70b-versatile', response_time_ms: 250 })),
+  // Mimics the real backend's validation: every TestRequest field is
+  // optional, but FastAPI still 422s "Field required" on a truly empty
+  // body — catches any regression back to the bug where the client sent
+  // no body at all and the button silently "did nothing".
+  http.post(`${API}/llm/test`, async ({ request }) => {
+    const raw = await request.text()
+    if (!raw) return HttpResponse.json({ detail: [{ msg: 'Field required' }] }, { status: 422 })
+    const body = JSON.parse(raw) as { model?: string }
+    return HttpResponse.json({ status: 'ok', response: 'Hello!', model: body.model ?? 'groq/llama-3.3-70b-versatile', response_time_ms: 250 })
+  }),
   http.get(`${API}/llm/embedding-models`, () => HttpResponse.json(m.mockEmbeddingModels)),
   http.put(`${API}/llm/rag/embedding-model`, () => HttpResponse.json({ status: 'updated', requires_reindex: false, model: m.mockEmbeddingModels[0] })),
 

@@ -165,8 +165,16 @@ export const api = {
       body: JSON.stringify({ types, symbols }),
     }),
 
-  testLLMConnection: () =>
-    fetchJson<LLMTestResult>('/llm/test', { method: 'POST' }),
+  testLLMConnection: (model?: string) =>
+    fetchJson<LLMTestResult>('/llm/test', {
+      method: 'POST',
+      // The backend's TestRequest fields are all optional, but FastAPI
+      // still requires *some* JSON body to parse — POSTing with no body
+      // at all (the previous behavior) fails with a 422 "Field required"
+      // before the handler ever runs, which is exactly why this button
+      // silently "did nothing" (surfaced as a cryptic error instead).
+      body: JSON.stringify(model ? { model } : {}),
+    }),
 
   getEmbeddingModels: () =>
     fetchJson<EmbeddingModelInfo[]>('/llm/embedding-models'),
