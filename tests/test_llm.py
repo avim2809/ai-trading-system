@@ -656,6 +656,28 @@ class TestLLMRouter:
         resp = client.get("/api/llm/rag/stats")
         assert resp.status_code == 200
 
+    def test_rag_stats_reshapes_flat_counts_into_collections(self, client, monkeypatch):
+        # Regression: VectorStore.stats() returns a flat {name: count,
+        # "_total": n} dict — the router used to pass it through raw, which
+        # had no "collections" key at all. The frontend's
+        # Object.keys(ragStats.collections) then threw on any real data,
+        # crashing the whole Configuration page (not just showing empty).
+        import firm.rag.store as store_mod
+
+        class _FakeStore:
+            def stats(self):
+                return {"sec_filings": 4205, "research": 104, "_total": 4309}
+
+        monkeypatch.setattr(store_mod, "VectorStore", lambda *a, **k: _FakeStore())
+        resp = client.get("/api/llm/rag/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "collections" in data
+        assert data["collections"]["sec_filings"]["count"] == 4205
+        assert data["collections"]["research"]["count"] == 104
+        assert "_total" not in data["collections"]
+        assert isinstance(data["collections"]["sec_filings"]["description"], str)
+
     def test_rag_ingest(self, client):
         resp = client.post("/api/llm/rag/ingest", json={"doc_type": "news"})
         assert resp.status_code == 200

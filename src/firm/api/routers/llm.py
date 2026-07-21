@@ -149,13 +149,39 @@ def clear_cache():
         return {"status": "cache_unavailable"}
 
 
+_RAG_COLLECTION_DESCRIPTIONS = {
+    "sec_filings": "SEC filings (10-K/10-Q/8-K)",
+    "research": "Academic research papers (arXiv)",
+    "earnings": "Earnings call transcripts",
+    "news": "News articles",
+    "system_docs": "Strategy/system documentation",
+}
+
+
 @router.get("/rag/stats")
 def rag_stats():
-    """Per-collection document counts and index info."""
+    """Per-collection document counts and index info.
+
+    VectorStore.stats() returns a flat {name: count, "_total": n} dict —
+    reshaped here into {"collections": {name: {count, description}}}, the
+    contract the frontend actually expects (Object.keys(ragStats.collections)
+    on the previous raw pass-through crashed the whole Configuration page
+    whenever real RAG data was present, since there was no "collections"
+    key at all).
+    """
     try:
         from firm.rag.store import VectorStore
         store = VectorStore()
-        return store.stats()
+        raw = store.stats()
+        collections = {
+            name: {
+                "count": count,
+                "description": _RAG_COLLECTION_DESCRIPTIONS.get(name, ""),
+            }
+            for name, count in raw.items()
+            if not name.startswith("_")
+        }
+        return {"collections": collections}
     except Exception:
         return {"collections": {}, "available": False}
 
