@@ -745,7 +745,7 @@ export default function LiveConfig() {
             )}
           </div>
 
-          {ragStats && Object.keys(ragStats.collections).length > 0 && (
+          {ragStats?.collections && Object.keys(ragStats.collections).length > 0 && (
             <div className="mb-4">
               <table className="w-full text-xs">
                 <thead>
