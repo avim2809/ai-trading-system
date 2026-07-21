@@ -48,6 +48,34 @@ class TestMeta:
         assert r.status_code == 200
         assert r.json()["status"] == "ok"
 
+
+# ------------------------------------------------------------------
+# Server bind address (security: default to loopback-only, reachable
+# only through a reverse proxy that adds TLS + auth)
+# ------------------------------------------------------------------
+
+class TestServerBindAddress:
+    def test_defaults_to_loopback(self, monkeypatch):
+        import firm.api.app as app_mod
+        import uvicorn
+
+        monkeypatch.delenv("FIRM_API_HOST", raising=False)
+        captured = {}
+        monkeypatch.setattr(uvicorn, "run", lambda app, host, port: captured.update(host=host, port=port))
+        app_mod.run()
+        assert captured["host"] == "127.0.0.1"
+        assert captured["port"] == 8000
+
+    def test_respects_env_override(self, monkeypatch):
+        import firm.api.app as app_mod
+        import uvicorn
+
+        monkeypatch.setenv("FIRM_API_HOST", "0.0.0.0")
+        captured = {}
+        monkeypatch.setattr(uvicorn, "run", lambda app, host, port: captured.update(host=host, port=port))
+        app_mod.run()
+        assert captured["host"] == "0.0.0.0"
+
     def test_strategies(self, client):
         r = client.get("/api/strategies")
         assert r.status_code == 200

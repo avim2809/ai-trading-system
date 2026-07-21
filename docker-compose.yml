@@ -26,6 +26,12 @@ services:
       IBKR_PORT: "4001"            # IB Gateway LIVE  (TWS default would be 7496)
       IBKR_PAPER_PORT: "4002"      # IB Gateway PAPER (TWS default would be 7497)
       IBKR_CLIENT_ID: "1"
+      # firm-api defaults to binding 127.0.0.1 (only reachable through a
+      # reverse proxy with TLS+auth) — inside this container that would
+      # make Docker's published port unreachable, so opt back in to 0.0.0.0
+      # here. The container network + this being the only published port
+      # is the isolation boundary in this deployment mode instead.
+      FIRM_API_HOST: "0.0.0.0"
     volumes:
       - ./data:/app/data
       - ./runs:/app/runs

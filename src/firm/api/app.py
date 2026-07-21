@@ -100,9 +100,19 @@ def _instrument_metrics(application: FastAPI) -> None:
 
 
 def run() -> None:
-    """Entry point for the ``firm-api`` console script."""
+    """Entry point for the ``firm-api`` console script.
+
+    Binds to loopback by default — this process controls live trading
+    (start/stop, order approval, account data) and should only ever be
+    reached through a reverse proxy that adds TLS + auth, not directly.
+    Set FIRM_API_HOST=0.0.0.0 explicitly (e.g. in docker-compose, where the
+    container network already isolates it) if you need it to listen on all
+    interfaces.
+    """
+    import os
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    host = os.environ.get("FIRM_API_HOST", "127.0.0.1")
+    uvicorn.run(app, host=host, port=8000)
 
 
 app = create_app()
