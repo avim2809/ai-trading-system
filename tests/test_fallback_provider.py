@@ -37,6 +37,19 @@ def _price_df(symbols: list[str], date=None) -> pd.DataFrame:
     })[PRICE_COLS]
 
 
+def _price_df_multi_date(symbol: str, dates: list[str]) -> pd.DataFrame:
+    return pd.DataFrame({
+        "date": dates,
+        "symbol": [symbol] * len(dates),
+        "open": [1.0] * len(dates),
+        "high": [1.0] * len(dates),
+        "low": [1.0] * len(dates),
+        "close": [1.0] * len(dates),
+        "volume": [1.0] * len(dates),
+        "adj_close": [1.0] * len(dates),
+    })[PRICE_COLS]
+
+
 @pytest.fixture()
 def provider():
     with patch("firm.data.providers.fallback.get_settings"):
@@ -137,6 +150,52 @@ class TestMergedResultHasUniformDateDtype:
         assert pd.api.types.is_datetime64_any_dtype(result["date"])
         assert result["date"].dt.tz is None
         result.to_parquet(tmp_path / "out.parquet", index=False)
+
+
+class TestTruncatedRangeIsNotAcceptedAsFullyResolved:
+    """Regression: a real incident where Massive's free tier silently
+    truncated history to its own ~2-year rolling window instead of erroring
+    — returning real, non-empty data for AAPL/MSFT/NVDA/GOOG/AMZN, just not
+    covering the requested 2020-01-01 start. The old "got any non-empty
+    rows for this symbol" check accepted that as fully resolved, so Tiingo
+    (which had the full range for every *other* symbol in the same run)
+    never got a chance to supply the missing years for these five.
+    """
+
+    def test_provider_with_truncated_history_does_not_block_a_fuller_fallback(self, provider):
+        massive = _mock_provider(_price_df_multi_date("AAPL", ["2024-07-22", "2024-07-23"]))
+        tiingo = _mock_provider(_price_df_multi_date("AAPL", ["2020-01-02", "2020-01-03", "2024-07-22", "2024-07-23"]))
+
+        with patch("firm.data.providers.fallback._load", side_effect=lambda name, cfg: {"massive": massive, "tiingo": tiingo}.get(name)):
+            result = provider.get_prices(["AAPL"], "2020-01-01", "2026-07-20")
+
+        # Tiingo's fuller answer wins outright — no splicing/mixing sources.
+        tiingo.get_prices.assert_called_once_with(["AAPL"], "2020-01-01", "2026-07-20")
+        assert sorted(result["date"].dt.strftime("%Y-%m-%d")) == ["2020-01-02", "2020-01-03", "2024-07-22", "2024-07-23"]
+
+    def test_truncated_history_is_kept_as_last_resort_when_no_provider_has_more(self, provider, caplog):
+        massive = _mock_provider(_price_df_multi_date("AAPL", ["2024-07-22", "2024-07-23"]))
+        # Tiingo also can't reach back further — same truncated window.
+        tiingo = _mock_provider(_price_df_multi_date("AAPL", ["2024-07-22", "2024-07-23"]))
+
+        with patch("firm.data.providers.fallback._load", side_effect=lambda name, cfg: {"massive": massive, "tiingo": tiingo}.get(name)):
+            with caplog.at_level("WARNING"):
+                result = provider.get_prices(["AAPL"], "2020-01-01", "2026-07-20")
+
+        assert sorted(result["date"].dt.strftime("%Y-%m-%d")) == ["2024-07-22", "2024-07-23"]
+        assert any("fallback_truncated_range" in r.message for r in caplog.records)
+
+    def test_full_coverage_symbol_is_not_reclassified_as_truncated(self, provider):
+        """A symbol whose provider genuinely covers the requested start must
+        not be re-queried against later providers in the chain."""
+        massive = _mock_provider(_price_df_multi_date("AAPL", ["2020-01-02", "2020-01-03"]))
+        tiingo = MagicMock()
+
+        with patch("firm.data.providers.fallback._load", side_effect=lambda name, cfg: {"massive": massive, "tiingo": tiingo}.get(name)):
+            result = provider.get_prices(["AAPL"], "2020-01-01", "2026-07-20")
+
+        tiingo.get_prices.assert_not_called()
+        assert sorted(result["date"].dt.strftime("%Y-%m-%d")) == ["2020-01-02", "2020-01-03"]
 
 
 class TestLoadDoesNotCrashOnBrokenProvider:

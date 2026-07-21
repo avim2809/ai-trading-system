@@ -87,7 +87,8 @@ class FallbackProvider(DataProvider):
         end: datetime | str,
     ) -> pd.DataFrame:
         """Fill in *symbols* by querying the chain in order, requesting only
-        the symbols still missing from each successive provider.
+        the symbols still missing adequate coverage from each successive
+        provider.
 
         Previously this treated the whole batch as one unit — "first
         non-empty result wins" — which meant a *partial* success from the
@@ -99,9 +100,27 @@ class FallbackProvider(DataProvider):
         data for only 5 symbols with no warning, no error — just quietly
         incomplete. Now every provider in the chain gets a shot at whatever
         symbols are still unresolved after the previous ones.
+
+        "Resolved" also isn't just "got any non-empty rows": a provider's
+        free tier can silently truncate history to its own rolling window
+        (e.g. Massive returning only the last 2 years for a request going
+        back to 2020) instead of erroring — a real incident where 5 of 25
+        symbols happened to succeed against Massive's rate limit and were
+        then never tried against Tiingo, which had the full range for every
+        other symbol. So a symbol only counts as fully resolved once some
+        provider's data reaches back close to *start*; otherwise later
+        providers still get a shot, and whichever provider gave the
+        earliest (fullest) coverage for a symbol wins — the truncated
+        answer is kept only if nothing better ever turns up.
         """
         remaining = list(dict.fromkeys(symbols))  # de-dup, preserve order
-        collected: list[pd.DataFrame] = []
+        try:
+            start_ts = pd.Timestamp(start)
+        except (TypeError, ValueError):
+            start_ts = None
+        coverage_slack = pd.Timedelta(days=10)  # weekends/holidays at the boundary
+
+        best: dict[str, tuple[pd.Timestamp, pd.DataFrame]] = {}
 
         for name in chain:
             if not remaining:
@@ -123,23 +142,43 @@ class FallbackProvider(DataProvider):
                 log.debug("fallback_empty provider=%s method=%s", name, method)
                 continue
 
-            got = set(result["symbol"].unique()) if "symbol" in result.columns else set()
-            still_missing = [s for s in remaining if s not in got]
+            has_symbol = "symbol" in result.columns
+            has_date = start_ts is not None and "date" in result.columns
+            still_missing: list[str] = []
+            for sym in remaining:
+                sub = result[result["symbol"] == sym] if has_symbol else result
+                if sub.empty:
+                    still_missing.append(sym)
+                    continue
+                min_date = pd.to_datetime(sub["date"], utc=True).dt.tz_localize(None).min() if has_date else pd.Timestamp.min
+                prior = best.get(sym)
+                if prior is None or min_date < prior[0]:
+                    best[sym] = (min_date, sub)
+                if has_date and min_date > start_ts + coverage_slack:
+                    still_missing.append(sym)
+
             log.debug(
                 "fallback_partial provider=%s method=%s resolved=%d/%d",
                 name, method, len(remaining) - len(still_missing), len(remaining),
             )
-            collected.append(result)
             remaining = still_missing
 
         if remaining:
-            log.warning(
-                "fallback_incomplete method=%s chain=%s missing_symbols=%s",
-                method, chain, remaining,
-            )
-        if not collected:
+            truly_missing = [s for s in remaining if s not in best]
+            truncated = [s for s in remaining if s in best]
+            if truncated:
+                log.warning(
+                    "fallback_truncated_range method=%s symbols=%s requested_start=%s",
+                    method, truncated, start_ts.date() if start_ts is not None else start,
+                )
+            if truly_missing:
+                log.warning(
+                    "fallback_incomplete method=%s chain=%s missing_symbols=%s",
+                    method, chain, truly_missing,
+                )
+        if not best:
             return empty_df
-        merged = pd.concat(collected, ignore_index=True)
+        merged = pd.concat([df for _, df in best.values()], ignore_index=True)
         # Providers disagree on the "date" column's dtype (Timestamp vs.
         # python date vs. string) *and* on tz-awareness (some emit UTC-suffixed
         # timestamps, e.g. Massive/Tiingo's "published_utc"/"Z"-suffixed
