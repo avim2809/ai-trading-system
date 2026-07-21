@@ -7,6 +7,7 @@ avoid real agent pipeline execution.
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -677,6 +678,68 @@ class TestEngineConfigUpdates:
         assert result.orders_submitted == 2
         assert result.orders_queued == 0
         assert not any(a["kind"] == "daily_limit_breach" for a in result.alerts)
+
+
+class TestCycleWatchdog:
+    """Regression coverage for a real 34-hour incident: a scheduled cycle
+    hung on a stale IBKR connection (after IB Gateway's mandatory daily
+    restart) with zero error, zero alert, and zero log output — silently
+    blocking every subsequent cycle indefinitely with no visibility at all.
+    """
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_normal_cycle_cancels_watchdog_without_alert(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config={**config, "cycle_watchdog_seconds": 5.0},
+            broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine.start()
+        engine.run_cycle()
+
+        # Cancellation happens synchronously in run_cycle()'s finally block,
+        # so this is deterministic — no need to race a sleep against the
+        # 5s watchdog to prove it didn't fire.
+        assert engine._watchdog_timer is None
+        assert not any(a["kind"] == "cycle_watchdog_timeout" for a in engine.alerts)
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_hung_cycle_triggers_watchdog_alert(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+
+        def _hang(*_a, **_k):
+            time.sleep(0.5)
+            return ([], _make_blackboard())
+
+        mock_orch.step.side_effect = _hang
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config={**config, "cycle_watchdog_seconds": 0.1},
+            broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine.start()
+        engine.run_cycle()
+
+        alerts = [a for a in engine.alerts if a["kind"] == "cycle_watchdog_timeout"]
+        assert len(alerts) == 1
+        assert alerts[0]["severity"] == "critical"
+        assert "Cycle 1" in alerts[0]["message"]
+
+    def test_watchdog_alert_fires_directly(self, engine_components):
+        broker, feed, queue, config = engine_components
+        with patch("firm.live.engine.build_orchestrator", return_value=MagicMock()):
+            engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine._on_cycle_watchdog_timeout(7)
+        alerts = engine.alerts
+        assert len(alerts) == 1
+        assert alerts[0]["kind"] == "cycle_watchdog_timeout"
+        assert alerts[0]["severity"] == "critical"
 
 
 class TestMarketHoursGate:

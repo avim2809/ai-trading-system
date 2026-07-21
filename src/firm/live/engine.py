@@ -91,6 +91,16 @@ class LiveTradingEngine:
         # anyway. Scheduled cycles always respect this; a manual /live/trigger
         # can override with force=True for deliberate off-hours testing.
         self._respect_market_hours = bool(config.get("respect_market_hours", True))
+        # Watchdog: a cycle that runs far longer than any normal cycle
+        # should (network/broker calls have no universal timeout — e.g. a
+        # stale IBKR connection after IB Gateway's mandatory daily restart
+        # can hang a blocking call forever with zero error) must not fail
+        # silently for hours with no visibility. This only alerts — it
+        # deliberately does not try to force-abandon the stuck thread or
+        # release the lock, since a thread that resumes later could then
+        # race with a new cycle over shared state.
+        self._cycle_watchdog_seconds = float(config.get("cycle_watchdog_seconds", 1800))
+        self._watchdog_timer: threading.Timer | None = None
 
         # Decision memory — optional; enabled when memory_log_path is configured.
         # Pending decisions (and the NAV to diff against) are persisted to
@@ -322,6 +332,12 @@ class LiveTradingEngine:
             now = datetime.utcnow()
             result = CycleResult(cycle_id=self._cycle_count, timestamp=now)
 
+            self._watchdog_timer = threading.Timer(
+                self._cycle_watchdog_seconds, self._on_cycle_watchdog_timeout, args=(self._cycle_count,)
+            )
+            self._watchdog_timer.daemon = True
+            self._watchdog_timer.start()
+
             if self._respect_market_hours and not force:
                 try:
                     market_open = self._broker.is_market_open()
@@ -446,7 +462,26 @@ class LiveTradingEngine:
             self._cycle_history.append(result)
             return result
         finally:
+            if self._watchdog_timer is not None:
+                self._watchdog_timer.cancel()
+                self._watchdog_timer = None
             self._cycle_lock.release()
+
+    def _on_cycle_watchdog_timeout(self, cycle_id: int) -> None:
+        """Fires if a cycle is still running well past any normal duration.
+
+        Purely observational — does not touch the lock or try to abandon
+        the stuck thread (which could still resume later and race a new
+        cycle over shared state). The goal is simply to never again let a
+        hang go unnoticed for hours with zero error and zero alert.
+        """
+        self._emit_alert(
+            "cycle_watchdog_timeout", "critical",
+            f"Cycle {cycle_id} has been running for over "
+            f"{self._cycle_watchdog_seconds:.0f}s without completing — likely a hung "
+            "network call (e.g. a stale broker connection after an IB Gateway restart). "
+            "No new cycles can start until this one finishes or the service is restarted.",
+        )
 
     def _maybe_reflect(self, now: datetime) -> None:
         """Trigger deferred LLM reflection on any decisions whose P&L is now known.
