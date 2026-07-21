@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+import pandas as pd
+
 from firm.backtest.engine import BacktestEngine
 from firm.data.pit_store import PointInTimeDataStore
 from firm.eval.reports import BacktestReport
@@ -57,6 +59,16 @@ def execute_backtest(config: dict) -> BacktestReport:
 
         prices_df = load_prices(get_settings())
         symbols = config.get("universe_symbols") or []
+
+        # Unlike the synthetic branch (which generates exactly the requested
+        # span), cached/real data is loaded in full regardless of what's
+        # asked for — a walk-forward run's 5 folds each request a different
+        # start_date/end_date, but without this filter every fold ran on the
+        # *entire* cached history and produced byte-identical results,
+        # silently defeating the whole point of walk-forward validation.
+        dates = pd.to_datetime(prices_df["date"])
+        mask = (dates >= pd.Timestamp(start_date)) & (dates <= pd.Timestamp(end_date))
+        prices_df = prices_df[mask]
 
     pit_store = PointInTimeDataStore()
     pit_store.load(prices=prices_df)
