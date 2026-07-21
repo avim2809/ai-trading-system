@@ -45,6 +45,14 @@ def _load(name: str, settings: Settings) -> DataProvider | None:
         # API key — expected/benign for an optional provider, so debug-only.
         log.debug("data_provider_unavailable name=%s", name, exc_info=True)
         return None
+    except Exception:
+        # A provider constructor bug (e.g. a signature mismatch — this has
+        # happened) must not crash the whole chain: the entire point of a
+        # fallback chain is that one broken/unavailable provider doesn't take
+        # down every symbol behind it. Log loudly (this is a real bug, not a
+        # missing key) and let the chain move on to the next provider.
+        log.warning("data_provider_init_failed name=%s", name, exc_info=True)
+        return None
 
 
 class FallbackProvider(DataProvider):

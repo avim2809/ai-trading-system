@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 import requests
 
+from firm.config import Settings, get_settings
 from firm.data.providers.base import DataProvider
 from firm.data.schemas import PRICE_COLS, SENTIMENT_COLS
 
@@ -26,6 +27,10 @@ class TiingoProvider(DataProvider):
     """
 
     name = "tiingo"
+
+    def __init__(self, api_key: str = "", settings: Settings | None = None) -> None:
+        self.settings = settings or get_settings()
+        super().__init__(api_key or self.settings.require("tiingo_api_key"))
 
     def _headers(self) -> dict[str, str]:
         return {

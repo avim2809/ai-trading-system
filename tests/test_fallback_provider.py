@@ -20,7 +20,7 @@ import pandas as pd
 import pytest
 
 from firm.data.providers.base import ProviderError
-from firm.data.providers.fallback import FallbackProvider
+from firm.data.providers.fallback import FallbackProvider, _load
 from firm.data.schemas import PRICE_COLS
 
 
@@ -98,3 +98,21 @@ class TestPartialFallbackMerging:
 
         assert set(result["symbol"]) == {"AAPL"}
         assert any("MSFT" in r.message and "GOOG" in r.message for r in caplog.records)
+
+
+class TestLoadDoesNotCrashOnBrokenProvider:
+    """Regression: a real incident where TiingoProvider had no __init__
+    accepting `settings=`, so get_provider("tiingo", settings=cfg) raised
+    TypeError. _load only caught KeyError/ProviderError/ValueError, so that
+    TypeError propagated uncaught and crashed the entire fetch-data run (and
+    would have crashed a live trading cycle the same way) the moment Massive
+    rate-limited and the chain tried to fall through to Tiingo.
+    """
+
+    def test_unexpected_constructor_error_is_skipped_not_raised(self, caplog):
+        with patch("firm.data.providers.get_provider", side_effect=TypeError("bad kwarg")):
+            with caplog.at_level("WARNING"):
+                result = _load("tiingo", MagicMock())
+
+        assert result is None
+        assert any("data_provider_init_failed" in r.message for r in caplog.records)

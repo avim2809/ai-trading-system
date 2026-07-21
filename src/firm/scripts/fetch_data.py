@@ -84,7 +84,7 @@ def main(argv: list[str] | None = None) -> None:
         log.info("Fetching from %s …", name)
 
         # Prices
-        cache_key = f"prices/{name}/{args.start}_{args.end}"
+        cache_key = cache.make_key("prices", provider=name, symbols=symbols, start=args.start, end=args.end)
         if cache.has(cache_key):
             log.info("  prices: cache hit")
             all_prices.append(cache.get(cache_key))  # type: ignore[arg-type]
@@ -99,7 +99,7 @@ def main(argv: list[str] | None = None) -> None:
                 log.debug("  prices: not supported by %s", name)
 
         # Fundamentals
-        cache_key = f"fundamentals/{name}/{args.start}_{args.end}"
+        cache_key = cache.make_key("fundamentals", provider=name, symbols=symbols, start=args.start, end=args.end)
         if cache.has(cache_key):
             log.info("  fundamentals: cache hit")
             all_fundamentals.append(cache.get(cache_key))  # type: ignore[arg-type]
@@ -114,7 +114,7 @@ def main(argv: list[str] | None = None) -> None:
                 log.debug("  fundamentals: not supported by %s", name)
 
         # Sentiment
-        cache_key = f"sentiment/{name}/{args.start}_{args.end}"
+        cache_key = cache.make_key("sentiment", provider=name, symbols=symbols, start=args.start, end=args.end)
         if cache.has(cache_key):
             log.info("  sentiment: cache hit")
             all_sentiment.append(cache.get(cache_key))  # type: ignore[arg-type]
