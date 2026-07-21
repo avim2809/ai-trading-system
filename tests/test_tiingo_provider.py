@@ -67,3 +67,18 @@ class TestTiingoDateDtype:
             df = provider.get_prices(["AAPL"], "2026-01-01", "2026-01-02")
 
         assert pd.api.types.is_datetime64_any_dtype(df["date"])
+
+    def test_get_prices_date_column_is_tz_naive(self):
+        """Tiingo's raw dates carry a "Z" (UTC) suffix, so a naive
+        to_datetime() call would produce tz-*aware* Timestamps — the rest of
+        the chain (Massive, FMP, AlphaVantage) is tz-naive, and mixing the
+        two crashes downstream when a fallback merge combines results.
+        """
+        provider = TiingoProvider(api_key="test-key")
+        raw = [{"date": "2026-01-01T00:00:00.000Z", "adjClose": 100.0, "open": 99.0,
+                "high": 101.0, "low": 98.0, "close": 100.0, "volume": 1000.0}]
+
+        with patch.object(provider, "_get", return_value=raw):
+            df = provider.get_prices(["AAPL"], "2026-01-01", "2026-01-02")
+
+        assert df["date"].dt.tz is None

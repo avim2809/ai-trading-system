@@ -122,6 +122,22 @@ class TestMergedResultHasUniformDateDtype:
         # Must survive the exact operation that crashed in production.
         result.to_parquet(tmp_path / "out.parquet", index=False)
 
+    def test_mixed_tz_aware_and_naive_dates_across_providers_are_normalized(self, provider, tmp_path):
+        """The actual production crash: pd.to_datetime() on a column mixing
+        tz-naive and tz-aware Timestamps raises ValueError, not just a
+        pyarrow write error — this must be handled before parquet is even
+        attempted.
+        """
+        massive = _mock_provider(_price_df(["AAPL"], date=pd.Timestamp("2026-01-01")))  # naive
+        tiingo = _mock_provider(_price_df(["MSFT"], date=pd.Timestamp("2026-01-01", tz="UTC")))  # aware
+
+        with patch("firm.data.providers.fallback._load", side_effect=lambda name, cfg: {"massive": massive, "tiingo": tiingo}.get(name)):
+            result = provider.get_prices(["AAPL", "MSFT"], "2026-01-01", "2026-01-02")
+
+        assert pd.api.types.is_datetime64_any_dtype(result["date"])
+        assert result["date"].dt.tz is None
+        result.to_parquet(tmp_path / "out.parquet", index=False)
+
 
 class TestLoadDoesNotCrashOnBrokenProvider:
     """Regression: a real incident where TiingoProvider had no __init__

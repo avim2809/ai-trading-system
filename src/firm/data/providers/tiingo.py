@@ -64,10 +64,15 @@ class TiingoProvider(DataProvider):
                     continue
                 df = pd.DataFrame(data)
                 # Every other provider in the fallback chain (Massive, FMP,
-                # AlphaVantage) stores "date" as a normalized Timestamp, not a
-                # python date object. Mixing the two dtypes in one column
-                # after concat breaks pyarrow's parquet writer.
-                df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+                # AlphaVantage) stores "date" as a tz-naive normalized
+                # Timestamp. Tiingo's raw dates carry a "Z" (UTC) suffix, so
+                # a plain to_datetime() here would produce tz-*aware*
+                # Timestamps — mixing those with the rest of the chain's
+                # naive ones in one column breaks pyarrow's parquet writer
+                # (and even a tz-agnostic normalize step, since pandas
+                # refuses to compare/convert naive and aware datetimes
+                # together). Parse as UTC then drop the tz to match.
+                df["date"] = pd.to_datetime(df["date"], utc=True).dt.tz_localize(None).dt.normalize()
                 df["symbol"] = sym
                 df = df.rename(columns={"adjClose": "adj_close"})
                 for col in PRICE_COLS:
@@ -103,7 +108,7 @@ class TiingoProvider(DataProvider):
                 for article in data:
                     rows.append(
                         {
-                            "date": pd.to_datetime(article.get("publishedDate", "")).normalize()
+                            "date": pd.to_datetime(article.get("publishedDate", ""), utc=True).tz_localize(None).normalize()
                             if article.get("publishedDate")
                             else None,
                             "symbol": sym,
