@@ -12,8 +12,9 @@ have crashed a live trading cycle the same way).
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
 from firm.data.providers import get_provider
@@ -46,3 +47,23 @@ class TestTiingoConstruction:
         provider = get_provider("tiingo", settings=settings)
 
         assert isinstance(provider, TiingoProvider)
+
+
+class TestTiingoDateDtype:
+    """Regression: Tiingo used to emit "date" as python datetime.date
+    objects while every other provider in the chain (Massive, FMP,
+    AlphaVantage) emits a normalized Timestamp. Merging results from two
+    providers with mismatched date dtypes broke pyarrow's parquet writer —
+    only surfaced once a real rate limit forced an actual multi-provider
+    merge in production.
+    """
+
+    def test_get_prices_date_column_matches_the_rest_of_the_chain(self):
+        provider = TiingoProvider(api_key="test-key")
+        raw = [{"date": "2026-01-01T00:00:00.000Z", "adjClose": 100.0, "open": 99.0,
+                "high": 101.0, "low": 98.0, "close": 100.0, "volume": 1000.0}]
+
+        with patch.object(provider, "_get", return_value=raw):
+            df = provider.get_prices(["AAPL"], "2026-01-01", "2026-01-02")
+
+        assert pd.api.types.is_datetime64_any_dtype(df["date"])

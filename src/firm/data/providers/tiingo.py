@@ -63,7 +63,11 @@ class TiingoProvider(DataProvider):
                     log.warning("No price data for %s", sym)
                     continue
                 df = pd.DataFrame(data)
-                df["date"] = pd.to_datetime(df["date"]).dt.date
+                # Every other provider in the fallback chain (Massive, FMP,
+                # AlphaVantage) stores "date" as a normalized Timestamp, not a
+                # python date object. Mixing the two dtypes in one column
+                # after concat breaks pyarrow's parquet writer.
+                df["date"] = pd.to_datetime(df["date"]).dt.normalize()
                 df["symbol"] = sym
                 df = df.rename(columns={"adjClose": "adj_close"})
                 for col in PRICE_COLS:
@@ -99,7 +103,7 @@ class TiingoProvider(DataProvider):
                 for article in data:
                     rows.append(
                         {
-                            "date": pd.to_datetime(article.get("publishedDate", "")).date()
+                            "date": pd.to_datetime(article.get("publishedDate", "")).normalize()
                             if article.get("publishedDate")
                             else None,
                             "symbol": sym,

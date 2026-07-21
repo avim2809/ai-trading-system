@@ -139,7 +139,16 @@ class FallbackProvider(DataProvider):
             )
         if not collected:
             return empty_df
-        return pd.concat(collected, ignore_index=True)
+        merged = pd.concat(collected, ignore_index=True)
+        # Providers disagree on the "date" column's dtype (Timestamp vs.
+        # python date vs. string) — harmless per-provider, but a real
+        # incident when two providers' results land in the same merged
+        # frame: pyarrow's parquet writer errors on the resulting mixed
+        # dtype. Normalize once here, at the one place results from
+        # different providers actually get combined.
+        if "date" in merged.columns:
+            merged["date"] = pd.to_datetime(merged["date"]).dt.normalize()
+        return merged
 
     def get_prices(
         self,

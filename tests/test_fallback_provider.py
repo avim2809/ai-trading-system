@@ -24,9 +24,9 @@ from firm.data.providers.fallback import FallbackProvider, _load
 from firm.data.schemas import PRICE_COLS
 
 
-def _price_df(symbols: list[str]) -> pd.DataFrame:
+def _price_df(symbols: list[str], date=None) -> pd.DataFrame:
     return pd.DataFrame({
-        "date": ["2026-01-01"] * len(symbols),
+        "date": [date if date is not None else "2026-01-01"] * len(symbols),
         "symbol": symbols,
         "open": [1.0] * len(symbols),
         "high": [1.0] * len(symbols),
@@ -98,6 +98,29 @@ class TestPartialFallbackMerging:
 
         assert set(result["symbol"]) == {"AAPL"}
         assert any("MSFT" in r.message and "GOOG" in r.message for r in caplog.records)
+
+
+class TestMergedResultHasUniformDateDtype:
+    """Regression: Massive/FMP/AlphaVantage store "date" as a normalized
+    Timestamp; Tiingo used to store it as a python datetime.date. Merging a
+    partial Massive result with a Tiingo fallthrough for the rest produced a
+    "date" column pyarrow couldn't write to parquet — this only ever
+    surfaced once a real rate limit forced an actual multi-provider merge,
+    the exact case this whole fallback chain exists to handle.
+    """
+
+    def test_mixed_date_dtypes_across_providers_are_normalized_after_merge(self, provider, tmp_path):
+        import datetime as dt
+
+        massive = _mock_provider(_price_df(["AAPL"], date=pd.Timestamp("2026-01-01")))
+        tiingo = _mock_provider(_price_df(["MSFT"], date=dt.date(2026, 1, 1)))
+
+        with patch("firm.data.providers.fallback._load", side_effect=lambda name, cfg: {"massive": massive, "tiingo": tiingo}.get(name)):
+            result = provider.get_prices(["AAPL", "MSFT"], "2026-01-01", "2026-01-02")
+
+        assert pd.api.types.is_datetime64_any_dtype(result["date"])
+        # Must survive the exact operation that crashed in production.
+        result.to_parquet(tmp_path / "out.parquet", index=False)
 
 
 class TestLoadDoesNotCrashOnBrokenProvider:
