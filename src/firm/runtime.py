@@ -158,7 +158,23 @@ def build_orchestrator(config: dict):
 
 
 def load_prices(settings: Settings) -> pd.DataFrame:
-    """Load cached price data from the Parquet/CSV cache directory."""
+    """Load cached price data.
+
+    Primary source: ``firm.data.cache.ParquetCache``'s ``"combined/prices"``
+    key — the hashed-filename cache `fetch-data` actually writes to. Falls
+    back to a plain ``prices.parquet``/``prices.csv`` file in the cache dir
+    for data placed there manually (e.g. hand-copied from another source),
+    which is what this function used to assume `fetch-data` produced —
+    it never did, so `data_source="cache"` never had any real data to read
+    after following the documented `fetch-data` workflow.
+    """
+    from firm.data.cache import ParquetCache
+
+    cache = ParquetCache(settings.data.cache_dir)
+    df = cache.get("combined/prices")
+    if df is not None and not df.empty:
+        return df
+
     cache_dir = Path(settings.data.cache_dir)
     prices_path = cache_dir / "prices.parquet"
     if prices_path.exists():
@@ -168,7 +184,7 @@ def load_prices(settings: Settings) -> pd.DataFrame:
         return pd.read_csv(csv_path)
     raise FileNotFoundError(
         f"No cached price data found. Run fetch-data first. "
-        f"Looked in: {prices_path}, {csv_path}"
+        f"Looked in ParquetCache key 'combined/prices' and {prices_path}, {csv_path}"
     )
 
 

@@ -74,25 +74,64 @@ class FallbackProvider(DataProvider):
         chain: list[str],
         method: str,
         empty_df: pd.DataFrame,
-        *args,
+        symbols: Sequence[str],
+        start: datetime | str,
+        end: datetime | str,
     ) -> pd.DataFrame:
+        """Fill in *symbols* by querying the chain in order, requesting only
+        the symbols still missing from each successive provider.
+
+        Previously this treated the whole batch as one unit — "first
+        non-empty result wins" — which meant a *partial* success from the
+        primary provider (e.g. Massive's free-tier rate limit kicking in
+        after 5 of 25 symbols, since MassiveProvider itself catches errors
+        per-symbol and returns whatever succeeded) silently prevented every
+        other provider in the chain from ever being tried for the symbols
+        it didn't cover. A 25-symbol universe could end up with real cached
+        data for only 5 symbols with no warning, no error — just quietly
+        incomplete. Now every provider in the chain gets a shot at whatever
+        symbols are still unresolved after the previous ones.
+        """
+        remaining = list(dict.fromkeys(symbols))  # de-dup, preserve order
+        collected: list[pd.DataFrame] = []
+
         for name in chain:
+            if not remaining:
+                break
             provider = _load(name, self._cfg)
             if provider is None:
                 log.debug("fallback_skip provider=%s method=%s reason=no_key", name, method)
                 continue
             try:
-                result = getattr(provider, method)(*args)
-                if isinstance(result, pd.DataFrame) and not result.empty:
-                    log.debug("fallback_hit provider=%s method=%s rows=%d", name, method, len(result))
-                    return result
-                log.debug("fallback_empty provider=%s method=%s", name, method)
+                result = getattr(provider, method)(remaining, start, end)
             except NotImplementedError:
                 log.debug("fallback_skip provider=%s method=%s reason=not_implemented", name, method)
+                continue
             except ProviderError as exc:
                 log.warning("fallback_error provider=%s method=%s error=%s", name, method, exc)
-        log.warning("fallback_exhausted method=%s chain=%s", method, chain)
-        return empty_df
+                continue
+
+            if not isinstance(result, pd.DataFrame) or result.empty:
+                log.debug("fallback_empty provider=%s method=%s", name, method)
+                continue
+
+            got = set(result["symbol"].unique()) if "symbol" in result.columns else set()
+            still_missing = [s for s in remaining if s not in got]
+            log.debug(
+                "fallback_partial provider=%s method=%s resolved=%d/%d",
+                name, method, len(remaining) - len(still_missing), len(remaining),
+            )
+            collected.append(result)
+            remaining = still_missing
+
+        if remaining:
+            log.warning(
+                "fallback_incomplete method=%s chain=%s missing_symbols=%s",
+                method, chain, remaining,
+            )
+        if not collected:
+            return empty_df
+        return pd.concat(collected, ignore_index=True)
 
     def get_prices(
         self,
