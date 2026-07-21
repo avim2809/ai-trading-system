@@ -64,11 +64,16 @@ def _make_orders() -> list[dict[str, Any]]:
 
 
 @pytest.fixture()
-def engine_components():
+def engine_components(tmp_path):
     broker = MockBroker()
     feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
     queue = ApprovalQueue(broker=broker)
-    config = {"initial_capital": 100_000}
+    # Isolated from the real data/memory/decisions.jsonl — a test writing a
+    # decision there (any run_cycle() with a proposal set) would otherwise
+    # pollute production data and, via store_decision()'s same-day
+    # idempotency check, could silently block a real decision from ever
+    # being recorded for that date.
+    config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
     return broker, feed, queue, config
 
 
@@ -265,11 +270,11 @@ class TestLiveDataFeed:
 
 class TestLiveTradingEngine:
     @pytest.fixture()
-    def engine_components(self):
+    def engine_components(self, tmp_path):
         broker = MockBroker()
         feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
         queue = ApprovalQueue(broker=broker)
-        config = {"initial_capital": 100_000}
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
         return broker, feed, queue, config
 
     def _make_engine(self, broker, feed, queue, config, **kwargs):
@@ -832,11 +837,11 @@ class TestLiveEngineHardening:
     """Regression tests for the live-execution audit fixes."""
 
     @pytest.fixture()
-    def engine_components(self):
+    def engine_components(self, tmp_path):
         broker = MockBroker()
         feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
         queue = ApprovalQueue(broker=broker)
-        config = {"initial_capital": 100_000}
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
         return broker, feed, queue, config
 
     def _make_engine(self, broker, feed, queue, config, **kwargs):
