@@ -293,13 +293,19 @@ class TestLiveTradingEngine:
         mock_build.return_value = mock_orch
 
         engine = self._make_engine(broker, feed, queue, config)
+        assert engine._started_at is None
         engine.start()
         assert engine.is_running
         assert broker.is_connected()
+        # Regression: _started_at was referenced by /live/status's uptime
+        # calculation but never actually set anywhere, so uptime_seconds
+        # was always null even for a genuinely running engine.
+        assert engine._started_at is not None
 
         engine.stop()
         assert not engine.is_running
         assert not broker.is_connected()
+        assert engine._started_at is None
 
     @patch("firm.live.engine.build_orchestrator")
     def test_run_cycle_full_auto(self, mock_build, engine_components):

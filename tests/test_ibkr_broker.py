@@ -225,3 +225,54 @@ class TestGetAccountThreadSafety:
         t.join(timeout=5)
         assert not t.is_alive()
         assert result_holder["result"]["equity"] == 500.0
+
+
+class TestGetPositionsUsesRealMarketValue:
+    """Regression coverage for a real incident: get_positions() read
+    ib.positions() (cost basis only — no live price) and computed
+    market_value as quantity * avgCost — the ORIGINAL cost, not current
+    market value — with unrealized_pnl hardcoded to 0.0 always. A position
+    would show the exact same "market value" and a permanent $0.00 P&L
+    regardless of any real price movement, which looks exactly like a
+    stale/non-updating position in the GUI. Verified live against a real
+    IBKR paper position: the old code would have reported market_value
+    equal to the $332.50 cost basis and unrealized_pnl 0.0 forever, while
+    the real account showed the price had moved to $327.11 (-$5.39
+    unrealized). Fixed by switching to ib.portfolio(), which carries
+    IBKR's own live-priced marketValue/unrealizedPNL (same kind of
+    locally-cached, push-updated list as ib.positions(), so no new
+    blocking call or subscription is introduced).
+    """
+
+    def test_reads_live_market_value_and_pnl_not_cost_basis(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=7)
+        item = SimpleNamespace(
+            contract=SimpleNamespace(symbol="AAPL"),
+            position=1.0,
+            averageCost=332.5,
+            marketValue=327.11,
+            unrealizedPNL=-5.39,
+        )
+        broker._ib = SimpleNamespace(isConnected=lambda: True, portfolio=lambda: [item])
+
+        [pos] = broker.get_positions()
+
+        assert pos.symbol == "AAPL"
+        assert pos.avg_cost == 332.5
+        # The bug: these two used to always be avgCost*qty and 0.0.
+        assert pos.market_value == 327.11
+        assert pos.unrealized_pnl == -5.39
+
+    def test_does_not_call_positions(self):
+        """ib.positions() lacks live pricing entirely — must not be used."""
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=8)
+        calls = {"positions": 0}
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            portfolio=lambda: [],
+            positions=lambda: calls.__setitem__("positions", calls["positions"] + 1),
+        )
+
+        broker.get_positions()
+
+        assert calls["positions"] == 0

@@ -74,6 +74,7 @@ class LiveTradingEngine:
         self._cycle_count = 0
         self._cycle_history: list[CycleResult] = []
         self._running = False
+        self._started_at: datetime | None = None
 
         # Daily risk limits — reset each calendar day. Unlike the drawdown
         # kill switch (which halts permanently), breaching these forces the
@@ -292,10 +293,12 @@ class LiveTradingEngine:
         log.info("Live engine started – account equity: $%.2f", account.get("equity", 0))
         self._portfolio.cash = account.get("cash", self._portfolio.cash)
         self._running = True
+        self._started_at = datetime.now()
 
     def stop(self) -> None:
         """Disconnect from the broker."""
         self._running = False
+        self._started_at = None
         try:
             self._broker.disconnect()
         except Exception:

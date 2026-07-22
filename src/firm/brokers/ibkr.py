@@ -123,18 +123,26 @@ class IBKRBroker(Broker):
         return result
 
     def get_positions(self) -> list[BrokerPosition]:
+        # ib.positions() only carries the cost basis (avgCost), not a live
+        # price, so market_value was being computed as quantity * avgCost
+        # (the ORIGINAL cost, not current market value) with unrealized_pnl
+        # hardcoded to 0.0 — always wrong the moment a price moves.
+        # ib.portfolio() is the same kind of locally-cached, auto-updated
+        # list (populated via IBKR's push updates, no blocking request or
+        # extra subscription needed — same pattern as get_account()) but
+        # carries the real marketValue/unrealizedPNL IBKR computes from the
+        # live price.
         ib = self._ensure_connected()
-        positions = ib.positions()
+        items = ib.portfolio()
         result: list[BrokerPosition] = []
-        for p in positions:
-            mkt_val = float(p.position) * float(p.avgCost)
+        for item in items:
             result.append(
                 BrokerPosition(
-                    symbol=p.contract.symbol,
-                    quantity=float(p.position),
-                    avg_cost=float(p.avgCost),
-                    market_value=mkt_val,
-                    unrealized_pnl=0.0,
+                    symbol=item.contract.symbol,
+                    quantity=float(item.position),
+                    avg_cost=float(item.averageCost),
+                    market_value=float(item.marketValue),
+                    unrealized_pnl=float(item.unrealizedPNL),
                 )
             )
         return result
