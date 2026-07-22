@@ -52,6 +52,7 @@ class IBKRBroker(Broker):
         # field instead of an error, which looks like "no price available".
         self._market_data_type = market_data_type
         self._ib: IB | None = None
+        self._market_hours_details: Any = None
 
     def connect(self) -> None:
         _require_ib()
@@ -69,6 +70,26 @@ class IBKRBroker(Broker):
             # plain cached read (like positions()) that's safe from any
             # thread once the subscription is live, so only subscribe here.
             self._ib.reqAccountSummary()
+            # Same reasoning applies to is_market_open()'s qualifyContracts()/
+            # reqContractDetails() calls — both are blocking async round-trips
+            # tied to the *calling thread's* asyncio event loop (ib_async's
+            # getLoop() is thread-local), not "not connected" like a missing
+            # subscription would be — it just hangs FOREVER with no timeout
+            # and no error, waiting on a Future that a different thread's
+            # event loop can never resolve. This is a real production
+            # incident: a scheduled cycle (run by APScheduler on its own
+            # worker thread, never the thread that called connect()) hung for
+            # 24+ hours here, silently blocking every cycle for the rest of
+            # that day and all of the next. Reproduced directly: calling
+            # is_market_open() from a second thread after connecting on the
+            # main thread hangs indefinitely. Fetch the contract's trading-
+            # hours schedule once, here, and have is_market_open() read the
+            # cache — it doesn't change intraday, so there's no freshness
+            # cost, only a safety win.
+            contract = Stock("SPY", "SMART", "USD")
+            self._ib.qualifyContracts(contract)
+            details = self._ib.reqContractDetails(contract)
+            self._market_hours_details = details[0] if details else None
             log.info(
                 "Connected to IBKR at %s:%d (client %d, market_data_type=%d)",
                 self._host,
@@ -252,14 +273,17 @@ class IBKRBroker(Broker):
         UTC clock reading (the previous implementation) silently produces
         wrong answers whenever UTC and the exchange timezone differ, which
         is always.
+
+        Reads the contract details cached by connect() rather than fetching
+        them live — see the comment there for why a live call here can hang
+        forever when called from a different thread (e.g. a scheduled
+        cycle running on APScheduler's own worker thread).
         """
-        ib = self._ensure_connected()
-        contract = Stock("SPY", "SMART", "USD")
-        ib.qualifyContracts(contract)
-        details = ib.reqContractDetails(contract)
-        if not details:
-            return False
-        cd = details[0]
+        self._ensure_connected()
+        cd = self._market_hours_details
+        if cd is None:
+            log.warning("No cached market-hours contract details; failing open")
+            return True
         try:
             from zoneinfo import ZoneInfo
             now = datetime.now(ZoneInfo(cd.timeZoneId))
@@ -270,12 +294,29 @@ class IBKRBroker(Broker):
             )
             now = datetime.utcnow()
         now_str = now.strftime("%Y%m%d:%H%M")
+        today_str = now.strftime("%Y%m%d")
+        found_today = False
         for segment in cd.liquidHours.split(";"):
+            if segment.startswith(today_str):
+                found_today = True
             if "-" not in segment:
                 continue  # e.g. "20260725:CLOSED" (holiday) — no session that day
             parts = segment.split("-")
             if len(parts) == 2 and parts[0] <= now_str <= parts[1]:
                 return True
+        if not found_today:
+            # The cached schedule (fetched once at connect() time) doesn't
+            # cover today at all — likely stale from a very long-running
+            # connection outliving the window IBKR returned. Failing closed
+            # here would silently stop the engine from ever trading again
+            # with no error, the same class of bug this whole cache exists
+            # to fix elsewhere. Fail open instead and let a human notice via
+            # the resulting (harmless if actually closed) cycle activity.
+            log.warning(
+                "Cached market-hours schedule has no entry for %s; it may be "
+                "stale (reconnect to refresh). Failing open.", today_str,
+            )
+            return True
         return False
 
     @staticmethod

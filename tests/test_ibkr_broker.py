@@ -70,6 +70,19 @@ class TestIsMarketOpen:
     instead of the regular liquidHours session — together making it report
     "open" at 2:55am ET simply because the UTC clock digits (06:55) happened
     to fall inside the Eastern-time range string (0400-2000).
+
+    Also covers a second, later incident: is_market_open() used to fetch
+    contract details live on every call via ib.qualifyContracts()/
+    reqContractDetails() — both blocking async round-trips tied to
+    whichever asyncio event loop is current on the *calling* thread.
+    Reproduced directly against a real IBKR connection: calling this from
+    a thread other than the one that called connect() (exactly what
+    APScheduler's BackgroundScheduler does for every scheduled cycle) hangs
+    forever with no timeout and no error. A real cycle hung for 24+ hours
+    this way. Fixed by fetching the contract details once in connect() (on
+    the connecting thread) and having is_market_open() read that cache —
+    these tests set the cache directly rather than mocking qualifyContracts/
+    reqContractDetails, since is_market_open() must not call either anymore.
     """
 
     def _contract_details(self, liquid_hours: str, trading_hours: str = "20260720:0400-20260720:2000"):
@@ -77,15 +90,11 @@ class TestIsMarketOpen:
 
     def _broker_with(self, details):
         broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=2)
-        broker._ib = SimpleNamespace(
-            isConnected=lambda: True,
-            qualifyContracts=lambda *cs: None,
-            reqContractDetails=lambda *cs: [details],
-        )
+        broker._ib = SimpleNamespace(isConnected=lambda: True)
+        broker._market_hours_details = details
         return broker
 
-    @patch("firm.brokers.ibkr.Stock")
-    def test_false_before_market_open_despite_utc_string_match(self, mock_stock, monkeypatch):
+    def test_false_before_market_open_despite_utc_string_match(self, monkeypatch):
         # 06:55 UTC on 2026-07-20 is 02:55am ET — closed. The old bug
         # compared "20260720:0655" (UTC) directly against the ET session
         # string "20260720:0400-20260720:2000" and got a false positive.
@@ -101,8 +110,7 @@ class TestIsMarketOpen:
         broker = self._broker_with(self._contract_details("20260720:0930-20260720:1600"))
         assert broker.is_market_open() is False
 
-    @patch("firm.brokers.ibkr.Stock")
-    def test_true_during_regular_session(self, mock_stock, monkeypatch):
+    def test_true_during_regular_session(self, monkeypatch):
         import datetime as dt
         from zoneinfo import ZoneInfo
 
@@ -115,8 +123,7 @@ class TestIsMarketOpen:
         broker = self._broker_with(self._contract_details("20260720:0930-20260720:1600"))
         assert broker.is_market_open() is True
 
-    @patch("firm.brokers.ibkr.Stock")
-    def test_false_during_extended_hours_only(self, mock_stock, monkeypatch):
+    def test_false_during_extended_hours_only(self, monkeypatch):
         # 6am ET is inside tradingHours (extended) but not liquidHours
         # (regular session) — must use liquidHours, not tradingHours.
         import datetime as dt
@@ -131,8 +138,7 @@ class TestIsMarketOpen:
         broker = self._broker_with(self._contract_details("20260720:0930-20260720:1600"))
         assert broker.is_market_open() is False
 
-    @patch("firm.brokers.ibkr.Stock")
-    def test_holiday_closed_segment_is_skipped_not_crashed(self, mock_stock, monkeypatch):
+    def test_holiday_closed_segment_is_skipped_not_crashed(self, monkeypatch):
         import datetime as dt
         from zoneinfo import ZoneInfo
 
@@ -145,15 +151,121 @@ class TestIsMarketOpen:
         broker = self._broker_with(self._contract_details("20260725:CLOSED"))
         assert broker.is_market_open() is False
 
-    @patch("firm.brokers.ibkr.Stock")
-    def test_no_contract_details_returns_false(self, mock_stock):
+    def test_no_cached_details_fails_open(self):
+        """Missing cache (e.g. connect() got no details back) must not
+        silently and permanently report "closed" — that would stop the
+        engine from ever trading again with no error, the same class of
+        silent failure this whole cache exists to prevent elsewhere."""
         broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=3)
-        broker._ib = SimpleNamespace(
-            isConnected=lambda: True,
+        broker._ib = SimpleNamespace(isConnected=lambda: True)
+        broker._market_hours_details = None
+        assert broker.is_market_open() is True
+
+    def test_stale_schedule_with_no_entry_for_today_fails_open(self, monkeypatch):
+        """The cache is fetched once at connect() time and never refreshed
+        mid-connection; if a long-lived connection outlives the schedule
+        window IBKR returned, there's no entry for today at all (distinct
+        from an explicit CLOSED holiday entry) — must fail open, not
+        silently report closed forever."""
+        import datetime as dt
+        from zoneinfo import ZoneInfo
+
+        class _FixedDatetime(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return dt.datetime(2027, 1, 15, 11, 0, tzinfo=ZoneInfo("US/Eastern"))
+
+        monkeypatch.setattr("firm.brokers.ibkr.datetime", _FixedDatetime)
+        broker = self._broker_with(self._contract_details("20260720:0930-20260720:1600"))
+        assert broker.is_market_open() is True
+
+    def test_does_not_call_qualify_or_req_contract_details(self, monkeypatch):
+        """The actual fix: no live network round-trip on this call path at
+        all — that's what hung for 24+ hours when called from a different
+        thread than connect()."""
+        import datetime as dt
+        from zoneinfo import ZoneInfo
+
+        class _FixedDatetime(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return dt.datetime(2026, 7, 20, 11, 0, tzinfo=ZoneInfo("US/Eastern"))
+
+        monkeypatch.setattr("firm.brokers.ibkr.datetime", _FixedDatetime)
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=9)
+        calls = {"n": 0}
+
+        def _boom(*_a, **_k):
+            calls["n"] += 1
+            raise AssertionError("must not be called")
+
+        broker._ib = SimpleNamespace(isConnected=lambda: True, qualifyContracts=_boom, reqContractDetails=_boom)
+        broker._market_hours_details = self._contract_details("20260720:0930-20260720:1600")
+
+        assert broker.is_market_open() is True
+        assert calls["n"] == 0
+
+    def test_callable_from_a_different_thread_than_connect(self, monkeypatch):
+        """The actual production scenario: APScheduler runs every scheduled
+        cycle on its own worker thread, never the thread that called
+        connect(). Before the fix, this hung forever (reproduced live
+        against a real IBKR connection); now it's a plain attribute read
+        with no thread affinity at all."""
+        import datetime as dt
+        import threading
+        from zoneinfo import ZoneInfo
+
+        class _FixedDatetime(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return dt.datetime(2026, 7, 20, 11, 0, tzinfo=ZoneInfo("US/Eastern"))
+
+        monkeypatch.setattr("firm.brokers.ibkr.datetime", _FixedDatetime)
+        broker = self._broker_with(self._contract_details("20260720:0930-20260720:1600"))
+        result_holder = {}
+
+        def _call_from_worker():
+            result_holder["result"] = broker.is_market_open()
+
+        t = threading.Thread(target=_call_from_worker)
+        t.start()
+        t.join(timeout=5)
+        assert not t.is_alive()
+        assert result_holder["result"] is True
+
+
+class TestConnectCachesMarketHoursDetails:
+    """connect() must fetch the market-hours contract details once, on the
+    connecting thread, so is_market_open() never needs to — see
+    TestIsMarketOpen for why a live call from a different thread hangs.
+    """
+
+    def test_connect_populates_the_cache(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=10)
+        details = SimpleNamespace(liquidHours="20260720:0930-20260720:1600", timeZoneId="US/Eastern")
+        fake_ib = SimpleNamespace(
+            connect=lambda *a, **k: None,
+            reqMarketDataType=lambda *a: None,
+            reqAccountSummary=lambda: None,
+            qualifyContracts=lambda *cs: None,
+            reqContractDetails=lambda *cs: [details],
+        )
+        with patch("firm.brokers.ibkr.IB", return_value=fake_ib), patch("firm.brokers.ibkr.Stock"):
+            broker.connect()
+        assert broker._market_hours_details is details
+
+    def test_connect_handles_empty_contract_details(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=11)
+        fake_ib = SimpleNamespace(
+            connect=lambda *a, **k: None,
+            reqMarketDataType=lambda *a: None,
+            reqAccountSummary=lambda: None,
             qualifyContracts=lambda *cs: None,
             reqContractDetails=lambda *cs: [],
         )
-        assert broker.is_market_open() is False
+        with patch("firm.brokers.ibkr.IB", return_value=fake_ib), patch("firm.brokers.ibkr.Stock"):
+            broker.connect()
+        assert broker._market_hours_details is None
 
 
 class TestGetAccountThreadSafety:
@@ -199,8 +311,10 @@ class TestGetAccountThreadSafety:
             connect=lambda *a, **k: None,
             reqMarketDataType=lambda *a: None,
             reqAccountSummary=lambda: calls.__setitem__("req", calls["req"] + 1),
+            qualifyContracts=lambda *cs: None,
+            reqContractDetails=lambda *cs: [],
         )
-        with patch("firm.brokers.ibkr.IB", return_value=fake_ib):
+        with patch("firm.brokers.ibkr.IB", return_value=fake_ib), patch("firm.brokers.ibkr.Stock"):
             broker.connect()
         assert calls["req"] == 1
 
