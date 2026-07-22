@@ -152,6 +152,10 @@ def live_status(request: Request) -> dict[str, Any]:
         "approval_mode": getattr(engine, "_approval_mode", ""),
         "uptime_seconds": uptime,
         "last_cycle": last_cycle,
+        # Independent of the watchdog alert (which has a real incident of
+        # firing failing silently) — a plain clock read an operator/GUI can
+        # use to notice a stuck cycle even if the alert path itself breaks.
+        "cycle_running_seconds": engine.current_cycle_running_seconds,
     }
 
 

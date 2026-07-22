@@ -753,6 +753,47 @@ class TestCycleWatchdog:
         assert alerts[0]["severity"] == "critical"
 
 
+class TestCurrentCycleRunningSeconds:
+    """Regression coverage for a real incident where the watchdog *alert*
+    itself never fired during a genuine 24+ hour hung cycle (found while
+    reading production logs — a scheduled market-open cycle silently
+    blocked every cycle for the rest of that day and all of the next with
+    zero alert, zero error, zero log output). Whatever caused that thread
+    callback to go silent, an operator/GUI still needs a way to notice a
+    stuck cycle that doesn't depend on that same alert path succeeding —
+    a plain clock read of when the current cycle started, independent of
+    threading.Timer, answers that.
+    """
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_none_when_idle(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        assert engine.current_cycle_running_seconds is None
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_reports_elapsed_time_while_a_cycle_is_running(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+
+        def _hang(*_a, **_k):
+            # While the pipeline is "running", the running-seconds clock
+            # must already report elapsed time — not just after the fact.
+            assert engine.current_cycle_running_seconds >= 0
+            time.sleep(0.05)
+            return ([], _make_blackboard())
+
+        mock_orch.step.side_effect = _hang
+        mock_build.return_value = mock_orch
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+        engine.run_cycle()
+
+        # Cleared again once the cycle finishes.
+        assert engine.current_cycle_running_seconds is None
+
+
 class TestMarketHoursGate:
     """Regression tests: a cycle must not burn a full pipeline pass (and
     IBKR's misleading off-hours quotes) against a closed market.

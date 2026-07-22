@@ -26,6 +26,31 @@ describe('LiveDashboard', () => {
     expect(await screen.findByText(/operational alert/)).toBeInTheDocument()
   })
 
+  it('shows a stuck-cycle warning when a cycle has run far longer than normal', async () => {
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json({
+        state: 'running', broker: 'ibkr_paper', broker_connected: true, next_run: null,
+        active_strategies: ['momentum'], approval_mode: 'full_auto', uptime_seconds: 90000,
+        last_cycle: null, cycle_running_seconds: 90000,
+      })),
+    )
+    renderWithProviders(<LiveDashboard />)
+    expect(await screen.findByText(/this looks stuck/i)).toBeInTheDocument()
+  })
+
+  it('does not show the stuck-cycle warning when no cycle is running', async () => {
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json({
+        state: 'running', broker: 'ibkr_paper', broker_connected: true, next_run: null,
+        active_strategies: ['momentum'], approval_mode: 'full_auto', uptime_seconds: 10,
+        last_cycle: null, cycle_running_seconds: null,
+      })),
+    )
+    renderWithProviders(<LiveDashboard />)
+    await waitFor(() => expect(screen.getByText('Running')).toBeInTheDocument())
+    expect(screen.queryByText(/this looks stuck/i)).not.toBeInTheDocument()
+  })
+
   it('start form submits the full payload including selected strategies', async () => {
     let capturedBody: Record<string, unknown> = {}
     server.use(

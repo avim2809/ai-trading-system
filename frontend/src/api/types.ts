@@ -178,6 +178,7 @@ export interface LiveStatus {
   approval_mode: string
   uptime_seconds: number | null
   last_cycle: LastCycle | null
+  cycle_running_seconds: number | null
 }
 
 export interface LiveStartRequest {

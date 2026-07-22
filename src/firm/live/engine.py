@@ -102,6 +102,14 @@ class LiveTradingEngine:
         # race with a new cycle over shared state.
         self._cycle_watchdog_seconds = float(config.get("cycle_watchdog_seconds", 1800))
         self._watchdog_timer: threading.Timer | None = None
+        # Independent of the watchdog timer/alert above: a real incident
+        # showed a cycle can hang for 24+ hours with the watchdog's alert
+        # never firing (a threading.Timer callback failing silently is its
+        # own kind of hang). This plain timestamp needs nothing more than a
+        # clock read to answer "is a cycle currently stuck?", so it stays
+        # observable via /live/status even if the alert path itself is
+        # broken — defense in depth, not a replacement for fixing that.
+        self._current_cycle_started_at: datetime | None = None
 
         # Decision memory — optional; enabled when memory_log_path is configured.
         # Pending decisions (and the NAV to diff against) are persisted to
@@ -131,6 +139,13 @@ class LiveTradingEngine:
     @property
     def is_running(self) -> bool:
         return self._running
+
+    @property
+    def current_cycle_running_seconds(self) -> float | None:
+        """Seconds the in-progress cycle has been running, or None if idle."""
+        if self._current_cycle_started_at is None:
+            return None
+        return (datetime.utcnow() - self._current_cycle_started_at).total_seconds()
 
     @property
     def portfolio(self) -> PortfolioState:
@@ -333,6 +348,7 @@ class LiveTradingEngine:
         try:
             self._cycle_count += 1
             now = datetime.utcnow()
+            self._current_cycle_started_at = now
             result = CycleResult(cycle_id=self._cycle_count, timestamp=now)
 
             self._watchdog_timer = threading.Timer(
@@ -468,6 +484,7 @@ class LiveTradingEngine:
             if self._watchdog_timer is not None:
                 self._watchdog_timer.cancel()
                 self._watchdog_timer = None
+            self._current_cycle_started_at = None
             self._cycle_lock.release()
 
     def _on_cycle_watchdog_timeout(self, cycle_id: int) -> None:

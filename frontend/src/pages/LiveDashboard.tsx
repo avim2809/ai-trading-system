@@ -335,6 +335,21 @@ export default function LiveDashboard() {
         </div>
       )}
 
+      {/* Stuck-cycle warning — independent of the alerts feed, since a real
+          incident showed a cycle can hang for 24+ hours with the alert
+          mechanism itself never firing. */}
+      {status && status.cycle_running_seconds != null && status.cycle_running_seconds > 1800 && (
+        <div className="mb-6 bg-red-900/20 border border-red-700/50 rounded-xl p-4">
+          <div className="flex items-center gap-3">
+            <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse" />
+            <span className="text-red-300 font-medium text-sm">
+              A cycle has been running for {formatUptime(status.cycle_running_seconds)} — this looks stuck.
+              No new cycles can start until it finishes or the engine is restarted.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Alerts */}
       {alertsData && (alertsData.halted || alertsData.alerts.length > 0) && (
         <div className={`mb-6 rounded-xl border p-4 ${alertsData.halted ? 'bg-red-900/20 border-red-700/50' : 'bg-amber-900/10 border-amber-700/40'}`}>
