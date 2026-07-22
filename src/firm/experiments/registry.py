@@ -109,6 +109,26 @@ class RunRegistry:
             self._save()
         return run
 
+    def clear_all(self) -> int:
+        """Delete every run's artifacts directory and reset the registry.
+
+        Used when past runs are known to be invalid (e.g. a backtest bug
+        fix means old results no longer reflect real strategy behavior)
+        and shouldn't linger in the dashboard looking like valid history.
+        Returns the number of runs removed.
+        """
+        import shutil
+
+        with self._lock:
+            count = len(self._runs)
+            for run in self._runs:
+                art_dir = Path(run.artifacts_dir) if run.artifacts_dir else None
+                if art_dir and art_dir.exists() and art_dir.is_dir():
+                    shutil.rmtree(art_dir, ignore_errors=True)
+            self._runs = []
+            self._save()
+            return count
+
     def update_run(self, run_id: str, **kwargs: Any) -> None:
         """Update run fields (status, metrics, end_time, etc.)."""
         with self._lock:

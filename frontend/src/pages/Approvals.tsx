@@ -253,12 +253,22 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
 }
 
 export default function Approvals() {
+  const qc = useQueryClient()
   const [tab, setTab] = useState<'pending' | 'history'>('pending')
+  const [confirmClear, setConfirmClear] = useState(false)
 
   const { data: approvals, isLoading, error } = useQuery<PendingApproval[]>({
     queryKey: ['live-approvals'],
     queryFn: api.getApprovals,
     refetchInterval: 3000,
+  })
+
+  const clearMut = useMutation({
+    mutationFn: () => api.clearApprovals(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['live-approvals'] })
+      setConfirmClear(false)
+    },
   })
 
   if (isLoading) {
@@ -291,7 +301,40 @@ export default function Approvals() {
             {pending.length} pending approval{pending.length !== 1 ? 's' : ''}
           </p>
         </div>
+        {approvals && approvals.length > 0 && (
+          confirmClear ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-amber-400">Delete all {approvals.length} approvals?</span>
+              <button
+                onClick={() => clearMut.mutate()}
+                disabled={clearMut.isPending}
+                className="px-3 py-2 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-500 disabled:opacity-40 transition-colors flex items-center gap-2"
+              >
+                {clearMut.isPending && <Spinner className="h-3.5 w-3.5" />}
+                Yes, Clear All
+              </button>
+              <button
+                onClick={() => setConfirmClear(false)}
+                className="px-3 py-2 text-sm text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmClear(true)}
+              className="px-4 py-2 text-sm font-medium rounded-lg border border-red-700 text-red-400 hover:bg-red-900/20 transition-colors"
+            >
+              Clear All
+            </button>
+          )
+        )}
       </div>
+      {clearMut.error && (
+        <div className="bg-red-900/20 border border-red-700 rounded-xl p-4 text-red-400 mb-4 text-sm">
+          {(clearMut.error as Error).message}
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-2 mb-6">

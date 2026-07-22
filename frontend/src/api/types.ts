@@ -374,3 +374,23 @@ export interface LogTailResponse {
   next_offset: number
   reset: boolean
 }
+
+// ── System Resources ──
+
+export interface SystemResources {
+  cpu: {
+    percent: number
+    count: number
+  }
+  memory: {
+    used: number
+    total: number
+    percent: number
+  }
+  disk: {
+    used: number
+    total: number
+    percent: number
+    path: string
+  }
+}

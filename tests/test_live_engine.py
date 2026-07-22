@@ -163,6 +163,36 @@ class TestApprovalQueue:
         assert len(queue2.get_all()) == 1
         assert queue2.get_by_id(aid) is not None
 
+    def test_clear_wipes_pending_and_historical(self):
+        broker = MockBroker()
+        broker.connect()
+        queue = ApprovalQueue(broker=broker)
+        aid1 = queue.add(orders=_make_orders(), blackboard=_make_blackboard())
+        queue.add(orders=_make_orders(), blackboard=_make_blackboard())
+        queue.reject(aid1, reason="test")
+
+        count = queue.clear()
+
+        assert count == 2
+        assert queue.get_all() == []
+        assert queue.get_pending() == []
+
+    def test_clear_persists_to_disk(self, tmp_path):
+        persist = tmp_path / "approvals.json"
+        broker = MockBroker()
+        broker.connect()
+        queue = ApprovalQueue(broker=broker, persist_path=persist)
+        queue.add(orders=_make_orders(), blackboard=_make_blackboard())
+
+        queue.clear()
+
+        reloaded = ApprovalQueue(broker=broker, persist_path=persist)
+        assert reloaded.get_all() == []
+
+    def test_clear_empty_queue_returns_zero(self):
+        queue = ApprovalQueue(broker=MockBroker())
+        assert queue.clear() == 0
+
 
 class TestPendingApproval:
     def test_is_expired(self):
@@ -471,6 +501,33 @@ class TestLiveTradingEngine:
         assert len(engine.cycle_history) == 3
         assert engine.cycle_history[0].cycle_id == 1
         assert engine.cycle_history[2].cycle_id == 3
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_clear_cycle_history_wipes_history(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], Blackboard(asof=datetime.utcnow()))
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+        engine.run_cycle()
+        engine.run_cycle()
+
+        count = engine.clear_cycle_history()
+
+        assert count == 2
+        assert engine.cycle_history == []
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_clear_cycle_history_empty_returns_zero(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+
+        assert engine.clear_cycle_history() == 0
 
     @patch("firm.live.engine.build_orchestrator")
     def test_full_approval_flow(self, mock_build, engine_components):

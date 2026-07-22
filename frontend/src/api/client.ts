@@ -27,6 +27,7 @@ import type {
   LogTailResponse,
   LiveAlertsResponse,
   DecisionEntry,
+  SystemResources,
 } from './types'
 
 const BASE = '/api'
@@ -64,6 +65,9 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(req),
     }),
+
+  clearRuns: () =>
+    fetchJson<{ cleared: number }>('/runs', { method: 'DELETE' }),
 
   compareRuns: (ids: string[]) =>
     fetchJson<Record<string, Record<string, number>>>('/runs/compare', {
@@ -109,7 +113,13 @@ export const api = {
   getCycles: (_limit = 20) =>
     fetchJson<CycleRecord[]>('/live/cycles'),
 
+  clearCycles: () =>
+    fetchJson<{ cleared: number }>('/live/cycles', { method: 'DELETE' }),
+
   getApprovals: () => fetchJson<PendingApproval[]>('/live/approvals'),
+
+  clearApprovals: () =>
+    fetchJson<{ cleared: number }>('/live/approvals', { method: 'DELETE' }),
 
   getAlerts: () => fetchJson<LiveAlertsResponse>('/live/alerts'),
 
@@ -194,4 +204,14 @@ export const api = {
 
   getDecisions: (limit = 50) =>
     fetchJson<DecisionEntry[]>(`/memory/decisions?limit=${limit}`),
+
+  // ── System Resources ──
+
+  getSystemResources: () => fetchJson<SystemResources>('/system/resources'),
+
+  restartService: () =>
+    fetchJson<{ status: string }>('/system/restart', { method: 'POST' }),
+
+  killService: () =>
+    fetchJson<{ status: string }>('/system/kill', { method: 'POST' }),
 }

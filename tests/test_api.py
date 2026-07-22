@@ -216,6 +216,21 @@ class TestRuns:
         r = client.post("/api/runs/compare", json={"run_ids": [id1, id2]})
         assert r.status_code == 200
 
+    def test_clear_runs(self, client):
+        self._launch_and_wait(client)
+        self._launch_and_wait(client)
+        assert len(client.get("/api/runs").json()) == 2
+
+        r = client.delete("/api/runs")
+        assert r.status_code == 200
+        assert r.json() == {"cleared": 2}
+        assert client.get("/api/runs").json() == []
+
+    def test_clear_runs_when_empty(self, client):
+        r = client.delete("/api/runs")
+        assert r.status_code == 200
+        assert r.json() == {"cleared": 0}
+
 
 # ------------------------------------------------------------------
 # Observability: Prometheus /metrics endpoint (Tier A)
@@ -366,11 +381,13 @@ class TestMemoryDecisionsAPI:
 
 class TestLiveConfigRoundTrip:
     @pytest.fixture(autouse=True)
-    def _mock_broker(self, monkeypatch):
+    def _mock_broker(self, monkeypatch, tmp_path):
         import firm.api.routers.live as live_mod
         from tests.test_brokers import MockBroker
 
         monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: MockBroker())
+        # Never let tests read/write the real production approvals file.
+        monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
 
     def test_start_applies_strategies_and_risk(self, client):
         resp = client.post("/api/live/start", json={
@@ -473,3 +490,76 @@ class TestLiveConfigRoundTrip:
         assert resp.json()["skipped"] is False
 
         client.post("/api/live/stop")
+
+
+# ------------------------------------------------------------------
+# Clearing approvals / cycle (order) history
+# ------------------------------------------------------------------
+
+class TestLiveClearEndpoints:
+    @pytest.fixture(autouse=True)
+    def _mock_broker(self, monkeypatch, tmp_path):
+        import firm.api.routers.live as live_mod
+        from tests.test_brokers import MockBroker
+
+        monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: MockBroker())
+        # Never let tests read/write the real production approvals file.
+        monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
+
+    def _mock_cycle_deps(self, monkeypatch):
+        """run_cycle() otherwise builds a real orchestrator + FallbackProvider
+        that make real network calls — mock both like test_trigger_* does."""
+        import pandas as pd
+        from unittest.mock import MagicMock
+        import firm.data.providers.fallback as fallback_mod
+        import firm.live.engine as engine_mod
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], None)
+        monkeypatch.setattr(engine_mod, "build_orchestrator", lambda config: mock_orch)
+
+        mock_provider = MagicMock()
+        mock_provider.get_prices.return_value = pd.DataFrame()
+        mock_provider.get_fundamentals.return_value = pd.DataFrame()
+        mock_provider.get_news_sentiment.return_value = pd.DataFrame()
+        monkeypatch.setattr(fallback_mod, "FallbackProvider", lambda *a, **k: mock_provider)
+
+    def test_clear_cycles_wipes_history(self, client, monkeypatch):
+        self._mock_cycle_deps(monkeypatch)
+        client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+        engine = client.app.state.live_engine
+        engine.run_cycle(force=True)
+        engine.run_cycle(force=True)
+        assert len(client.get("/api/live/cycles").json()) == 2
+
+        r = client.delete("/api/live/cycles")
+        assert r.status_code == 200
+        assert r.json() == {"cleared": 2}
+        assert client.get("/api/live/cycles").json() == []
+        assert client.get("/api/live/orders").json() == []
+
+        client.post("/api/live/stop")
+
+    def test_clear_cycles_no_engine_returns_zero(self, client):
+        r = client.delete("/api/live/cycles")
+        assert r.status_code == 200
+        assert r.json() == {"cleared": 0}
+
+    def test_clear_approvals_wipes_queue(self, client):
+        client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+        queue = client.app.state.approval_queue
+        queue.add(orders=[{"symbol": "AAPL", "side": "buy", "quantity": 1}], blackboard=None)
+
+        assert len(client.get("/api/live/approvals").json()) == 1
+
+        r = client.delete("/api/live/approvals")
+        assert r.status_code == 200
+        assert r.json() == {"cleared": 1}
+        assert client.get("/api/live/approvals").json() == []
+
+        client.post("/api/live/stop")
+
+    def test_clear_approvals_no_queue_returns_zero(self, client):
+        r = client.delete("/api/live/approvals")
+        assert r.status_code == 200
+        assert r.json() == {"cleared": 0}

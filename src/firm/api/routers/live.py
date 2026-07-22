@@ -24,6 +24,12 @@ router = APIRouter(prefix="/live", tags=["live"])
 # app.state singletons.
 _engine_lock = threading.Lock()
 
+# Module-level so tests can monkeypatch it to a tmp path — pointing this at
+# the real production file (as a hardcoded literal previously did) means
+# every test that calls /live/start reads and overwrites live approval
+# history with test data.
+_APPROVALS_PATH = "data/approvals.json"
+
 
 # ---------------------------------------------------------------------------
 # Request / Response schemas
@@ -191,7 +197,7 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
             universe=universe,
         )
 
-        approval_queue = ApprovalQueue(broker=broker, persist_path="data/approvals.json")
+        approval_queue = ApprovalQueue(broker=broker, persist_path=_APPROVALS_PATH)
         request.app.state.approval_queue = approval_queue
 
         from firm.llm.config import load_llm_config, provider_config
@@ -334,6 +340,20 @@ def live_cycles(request: Request) -> list[dict[str, Any]]:
     ]
 
 
+@router.delete("/cycles")
+def clear_cycles(request: Request) -> dict[str, Any]:
+    """Wipe the in-memory cycle/order history.
+
+    Used alongside clearing backtest runs when past history is known to
+    be invalid (e.g. after a strategy bug fix) and shouldn't linger in
+    the dashboard looking like real trading activity.
+    """
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        return {"cleared": 0}
+    return {"cleared": engine.clear_cycle_history()}
+
+
 @router.get("/alerts")
 def live_alerts(request: Request) -> dict[str, Any]:
     """Operational alerts (drawdown breach, broker outage, degraded recon)
@@ -357,6 +377,19 @@ def list_approvals(request: Request) -> list[dict[str, Any]]:
     if queue is None:
         return []
     return [_serialize_approval(a) for a in queue.get_pending()]
+
+
+@router.delete("/approvals")
+def clear_approvals(request: Request) -> dict[str, Any]:
+    """Wipe every approval record (pending and historical).
+
+    Used alongside clearing backtest runs when past approvals are known
+    to be invalid (e.g. after a strategy bug fix).
+    """
+    queue = getattr(request.app.state, "approval_queue", None)
+    if queue is None:
+        return {"cleared": 0}
+    return {"cleared": queue.clear()}
 
 
 @router.get("/approvals/{approval_id}")

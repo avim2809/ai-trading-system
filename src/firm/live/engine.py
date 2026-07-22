@@ -155,6 +155,17 @@ class LiveTradingEngine:
     def cycle_history(self) -> list[CycleResult]:
         return list(self._cycle_history)
 
+    def clear_cycle_history(self) -> int:
+        """Wipe the in-memory cycle/order history. Returns the count removed.
+
+        This already resets on every service restart (cycle_history is
+        in-memory only) — this method just gives an explicit way to do it
+        without restarting the whole live engine.
+        """
+        count = len(self._cycle_history)
+        self._cycle_history = []
+        return count
+
     @property
     def alerts(self) -> list[dict[str, Any]]:
         """All alerts emitted this session (most recent last)."""

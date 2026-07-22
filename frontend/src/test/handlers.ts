@@ -16,6 +16,7 @@ export const handlers = [
   http.get(`${API}/runs/:id/report`, () => HttpResponse.json({ portfolio: { sharpe: 1.2 }, data_points: 100 })),
   http.get(`${API}/runs/:id/equity`, () => HttpResponse.json({ dates: ['2026-01-01'], values: [100000], drawdown: [0] })),
   http.post(`${API}/runs`, () => HttpResponse.json({ run_id: 'new-run-1' })),
+  http.delete(`${API}/runs`, () => HttpResponse.json({ cleared: m.mockRuns.length })),
   http.post(`${API}/runs/compare`, () => HttpResponse.json({ 'run-1': { sharpe: 1.2 } })),
   http.post(`${API}/runs/walk_forward`, () => HttpResponse.json({ fold_ids: ['fold-1'], aggregate: { n_folds: 1, fold_ids: ['fold-1'], metrics: {} } })),
 
@@ -29,8 +30,10 @@ export const handlers = [
   http.get(`${API}/live/account`, () => HttpResponse.json(m.mockAccount)),
   http.get(`${API}/live/orders`, () => HttpResponse.json(m.mockOrders)),
   http.get(`${API}/live/cycles`, () => HttpResponse.json(m.mockCycles)),
+  http.delete(`${API}/live/cycles`, () => HttpResponse.json({ cleared: m.mockCycles.length })),
   http.get(`${API}/live/alerts`, () => HttpResponse.json(m.mockAlerts)),
   http.get(`${API}/live/approvals`, () => HttpResponse.json(m.mockApprovals)),
+  http.delete(`${API}/live/approvals`, () => HttpResponse.json({ cleared: m.mockApprovals.length })),
   http.get(`${API}/live/approvals/:id`, () => HttpResponse.json(m.mockApprovalDetail)),
   http.post(`${API}/live/approvals/:id/approve`, () => HttpResponse.json({ status: 'approved', order_statuses: [] })),
   http.post(`${API}/live/approvals/:id/reject`, () => HttpResponse.json({ status: 'rejected' })),
@@ -61,4 +64,8 @@ export const handlers = [
   http.get(`${API}/logs/tail`, () => HttpResponse.json(m.mockLogTail)),
 
   http.get(`${API}/memory/decisions`, () => HttpResponse.json(m.mockDecisions)),
+
+  http.get(`${API}/system/resources`, () => HttpResponse.json(m.mockSystemResources)),
+  http.post(`${API}/system/restart`, () => HttpResponse.json({ status: 'restarting' })),
+  http.post(`${API}/system/kill`, () => HttpResponse.json({ status: 'killing' })),
 ]

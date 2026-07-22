@@ -71,6 +71,19 @@ def list_runs(status: str | None = None):
     return [_run_to_summary(r) for r in runs]
 
 
+@router.delete("/runs")
+def clear_runs():
+    """Delete every backtest run and its artifacts.
+
+    Used when past runs are known to be invalid — e.g. after fixing a
+    backtest-affecting bug, old results no longer reflect real strategy
+    behavior and shouldn't linger in the dashboard looking valid.
+    """
+    registry = _get_registry()
+    count = registry.clear_all()
+    return {"cleared": count}
+
+
 @router.get("/runs/{run_id}")
 def get_run(run_id: str):
     registry = _get_registry()

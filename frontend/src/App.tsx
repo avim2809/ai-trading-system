@@ -15,6 +15,7 @@ const Approvals = lazy(() => import('./pages/Approvals'))
 const OrderHistory = lazy(() => import('./pages/OrderHistory'))
 const Logs = lazy(() => import('./pages/Logs'))
 const Decisions = lazy(() => import('./pages/Decisions'))
+const SystemResources = lazy(() => import('./pages/SystemResources'))
 
 export default function App() {
   return (
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="live/orders" element={<OrderHistory />} />
         <Route path="logs" element={<Logs />} />
         <Route path="decisions" element={<Decisions />} />
+        <Route path="system" element={<SystemResources />} />
       </Route>
     </Routes>
   )

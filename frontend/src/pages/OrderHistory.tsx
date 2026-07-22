@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type { OrderRecord } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
@@ -18,12 +18,23 @@ function rangeMs(key: RangeKey): number {
 const formatTime = (iso: string) => formatDateTime(iso, { seconds: true })
 
 export default function OrderHistory() {
+  const qc = useQueryClient()
   const [range, setRange] = useState<RangeKey>('7d')
+  const [confirmClear, setConfirmClear] = useState(false)
 
   const { data: allOrders, isLoading, error } = useQuery<OrderRecord[]>({
     queryKey: ['live-orders'],
     queryFn: () => api.getOrders(200),
     refetchInterval: 10000,
+  })
+
+  const clearMut = useMutation({
+    mutationFn: () => api.clearCycles(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['live-orders'] })
+      qc.invalidateQueries({ queryKey: ['live-cycles'] })
+      setConfirmClear(false)
+    },
   })
 
   const cutoff = Date.now() - rangeMs(range)
@@ -65,7 +76,40 @@ export default function OrderHistory() {
             {orders.length} order{orders.length !== 1 ? 's' : ''} in range
           </p>
         </div>
+        {allOrders && allOrders.length > 0 && (
+          confirmClear ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-amber-400">Delete all order history?</span>
+              <button
+                onClick={() => clearMut.mutate()}
+                disabled={clearMut.isPending}
+                className="px-3 py-2 text-sm font-medium rounded-lg bg-red-600 text-white hover:bg-red-500 disabled:opacity-40 transition-colors flex items-center gap-2"
+              >
+                {clearMut.isPending && <Spinner className="h-3.5 w-3.5" />}
+                Yes, Clear All
+              </button>
+              <button
+                onClick={() => setConfirmClear(false)}
+                className="px-3 py-2 text-sm text-slate-400 hover:text-slate-200 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmClear(true)}
+              className="px-4 py-2 text-sm font-medium rounded-lg border border-red-700 text-red-400 hover:bg-red-900/20 transition-colors"
+            >
+              Clear History
+            </button>
+          )
+        )}
       </div>
+      {clearMut.error && (
+        <div className="bg-red-900/20 border border-red-700 rounded-xl p-4 text-red-400 mb-4 text-sm">
+          {(clearMut.error as Error).message}
+        </div>
+      )}
 
       {/* Summary stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">

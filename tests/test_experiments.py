@@ -197,6 +197,32 @@ class TestRunRegistry:
         assert restored.start_time == run.start_time
         assert restored.seed == run.seed
 
+    def test_clear_all_removes_runs_and_artifacts(self, registry, sample_config):
+        run1 = registry.create_run(sample_config)
+        run2 = registry.create_run(sample_config, notes="second")
+        art_dir1 = Path(run1.artifacts_dir)
+        art_dir2 = Path(run2.artifacts_dir)
+        assert art_dir1.exists()
+        assert art_dir2.exists()
+
+        count = registry.clear_all()
+
+        assert count == 2
+        assert registry.list_runs() == []
+        assert not art_dir1.exists()
+        assert not art_dir2.exists()
+
+    def test_clear_all_empty_registry_returns_zero(self, registry):
+        assert registry.clear_all() == 0
+
+    def test_clear_all_persists_across_reload(self, tmp_runs_dir, sample_config):
+        registry = RunRegistry(base_dir=tmp_runs_dir)
+        registry.create_run(sample_config)
+        registry.clear_all()
+
+        reloaded = RunRegistry(base_dir=tmp_runs_dir)
+        assert reloaded.list_runs() == []
+
 
 # ---------------------------------------------------------------------------
 # ExperimentRunner tests

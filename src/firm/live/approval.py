@@ -93,6 +93,14 @@ class ApprovalQueue:
                 return a
         return None
 
+    def clear(self) -> int:
+        """Wipe every approval record (pending and historical) and its
+        persisted file. Returns the number removed."""
+        count = len(self._queue)
+        self._queue = []
+        self._save()
+        return count
+
     def approve(self, approval_id: str) -> list[OrderStatus]:
         """Approve and execute the pending orders."""
         approval = self.get_by_id(approval_id)

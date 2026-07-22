@@ -7,7 +7,7 @@ import type {
   StrategyInfo, ConfigDefaults, RunSummary, LiveStatus, LiveConfig, LiveAlertsResponse,
   BrokerPosition, AccountInfo, CycleRecord, PendingApproval, ApprovalDetail, DecisionEntry,
   LLMProvider, LLMConfig, LLMCacheStats, RAGStats, EmbeddingModelInfo, LogTailResponse,
-  BlackboardView, OrderRecord,
+  BlackboardView, OrderRecord, SystemResources,
 } from '../api/types'
 
 export const mockStrategies: StrategyInfo[] = [
@@ -136,6 +136,12 @@ export const mockLogTail: LogTailResponse = {
   ],
   next_offset: 512,
   reset: false,
+}
+
+export const mockSystemResources: SystemResources = {
+  cpu: { percent: 23.5, count: 2 },
+  memory: { used: 1_800_000_000, total: 3_300_000_000, percent: 54.5 },
+  disk: { used: 40_000_000_000, total: 100_000_000_000, percent: 40.0, path: '/' },
 }
 
 export const mockDecisions: DecisionEntry[] = [

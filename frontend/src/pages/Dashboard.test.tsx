@@ -42,4 +42,39 @@ describe('Dashboard', () => {
     await user.click(checkboxes[1]!)
     expect(compareButton).toBeEnabled()
   })
+
+  it('clears all runs after confirming', async () => {
+    let cleared = false
+    server.use(
+      http.get('http://localhost/api/runs', () =>
+        HttpResponse.json(cleared ? [] : [
+          { run_id: 'run-1', status: 'completed', start_time: '2026-07-01T00:00:00', end_time: null, notes: '', metrics: {} },
+        ]),
+      ),
+      http.delete('http://localhost/api/runs', () => {
+        cleared = true
+        return HttpResponse.json({ cleared: 1 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<Dashboard />)
+    await waitFor(() => expect(screen.getByText('1 backtest run')).toBeInTheDocument())
+
+    await user.click(screen.getByText('Clear All Runs'))
+    expect(screen.getByText(/Delete all 1 runs\?/)).toBeInTheDocument()
+
+    await user.click(screen.getByText('Yes, Clear All'))
+    await waitFor(() => expect(screen.getByText('No backtest runs yet.')).toBeInTheDocument())
+  })
+
+  it('cancels clearing runs without calling the API', async () => {
+    const user = userEvent.setup()
+    renderWithProviders(<Dashboard />)
+    await waitFor(() => expect(screen.getByText('1 backtest run')).toBeInTheDocument())
+
+    await user.click(screen.getByText('Clear All Runs'))
+    await user.click(screen.getByText('Cancel'))
+    expect(screen.getByText('Clear All Runs')).toBeInTheDocument()
+    expect(screen.getByText('1 backtest run')).toBeInTheDocument()
+  })
 })
