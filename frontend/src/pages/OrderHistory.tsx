@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import type { OrderRecord } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import Spinner from '../components/Spinner'
+import { formatDateTime } from '../lib/time'
 
 type RangeKey = '1d' | '7d' | '30d'
 
@@ -14,15 +15,7 @@ function rangeMs(key: RangeKey): number {
   return key === '1d' ? day : key === '7d' ? 7 * day : 30 * day
 }
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-}
+const formatTime = (iso: string) => formatDateTime(iso, { seconds: true })
 
 export default function OrderHistory() {
   const [range, setRange] = useState<RangeKey>('7d')
@@ -114,6 +107,7 @@ export default function OrderHistory() {
         {orders.length === 0 ? (
           <div className="p-8 text-center text-sm text-slate-500">No orders in selected range</div>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-700 text-left">
@@ -150,6 +144,7 @@ export default function OrderHistory() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

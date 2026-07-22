@@ -5,15 +5,9 @@ import { api } from '../api/client'
 import type { RunSummary } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import Spinner from '../components/Spinner'
+import { formatDateTime } from '../lib/time'
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
-}
+const formatTime = formatDateTime
 
 function metricDisplay(val: number | undefined, fmt: 'pct' | 'ratio'): string {
   if (val === undefined || val === null || isNaN(val)) return '—'
@@ -69,7 +63,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Dashboard</h2>
           <p className="text-sm text-slate-400 mt-1">
@@ -105,6 +99,7 @@ export default function Dashboard() {
         </div>
       ) : (
         <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-700 text-left">
@@ -167,6 +162,7 @@ export default function Dashboard() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
     </div>

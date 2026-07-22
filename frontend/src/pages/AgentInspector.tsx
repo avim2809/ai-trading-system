@@ -278,6 +278,7 @@ export default function AgentInspector() {
               result.signal_sets.map((ss) => (
                 <div key={ss.domain} className="mb-4 last:mb-0">
                   <p className="text-xs font-medium text-slate-400 mb-2 uppercase">{ss.domain}</p>
+                  <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-left text-slate-500">
@@ -293,6 +294,7 @@ export default function AgentInspector() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               ))
             )}
@@ -345,6 +347,7 @@ export default function AgentInspector() {
             {result.debate_results.length === 0 ? (
               <p className="text-xs text-slate-500">No debate results</p>
             ) : (
+              <div className="overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-left text-slate-500">
@@ -371,6 +374,7 @@ export default function AgentInspector() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </PipelineStage>
 
@@ -378,6 +382,7 @@ export default function AgentInspector() {
           <PipelineStage title="Portfolio Manager" status={result.proposal ? 'complete' : undefined}>
             {result.proposal ? (
               <div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-xs mb-2">
                   <thead>
                     <tr className="text-left text-slate-500">
@@ -394,6 +399,7 @@ export default function AgentInspector() {
                     ))}
                   </tbody>
                 </table>
+                </div>
                 {result.proposal.notes && (
                   <p className="text-xs text-slate-400 italic">{result.proposal.notes}</p>
                 )}
@@ -437,6 +443,7 @@ export default function AgentInspector() {
                   </div>
                 )}
                 {Object.keys(result.risk_decision.adjusted_targets).length > 0 && (
+                  <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-left text-slate-500">
@@ -453,6 +460,7 @@ export default function AgentInspector() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             ) : (
@@ -473,6 +481,7 @@ export default function AgentInspector() {
                   </span>
                 </div>
                 {result.execution_report.fills.length > 0 ? (
+                  <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-left text-slate-500">
@@ -495,6 +504,7 @@ export default function AgentInspector() {
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 ) : (
                   <p className="text-xs text-slate-500">No fills</p>
                 )}

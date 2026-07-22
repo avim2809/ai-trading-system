@@ -8,6 +8,7 @@ import DrawdownChart from '../components/DrawdownChart'
 import MonthlyHeatmap from '../components/MonthlyHeatmap'
 import AttributionBar from '../components/AttributionBar'
 import Spinner from '../components/Spinner'
+import { formatFullDateTime } from '../lib/time'
 
 export default function RunDetail() {
   const { runId } = useParams<{ runId: string }>()
@@ -72,8 +73,8 @@ export default function RunDetail() {
             <StatusBadge status={run.status} />
           </h2>
           <p className="text-sm text-slate-400 mt-1">
-            Started {new Date(run.start_time).toLocaleString()}
-            {run.end_time && ` · Ended ${new Date(run.end_time).toLocaleString()}`}
+            Started {formatFullDateTime(run.start_time)}
+            {run.end_time && ` · Ended ${formatFullDateTime(run.end_time)}`}
           </p>
           {run.notes && (
             <p className="text-sm text-slate-400 mt-1 italic">{run.notes}</p>

@@ -1,4 +1,4 @@
-import { Suspense } from 'react'
+import { Suspense, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import Spinner from './Spinner'
 
@@ -21,11 +21,24 @@ const monitoringLinks = [
   { to: '/decisions', label: 'Decision Log', icon: '🧠' },
 ]
 
-function SidebarLink({ to, label, icon, end }: { to: string; label: string; icon: string; end?: boolean }) {
+function SidebarLink({
+  to,
+  label,
+  icon,
+  end,
+  onNavigate,
+}: {
+  to: string
+  label: string
+  icon: string
+  end?: boolean
+  onNavigate?: () => void
+}) {
   return (
     <NavLink
       to={to}
       end={end}
+      onClick={onNavigate}
       className={({ isActive }) =>
         `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
           isActive
@@ -41,18 +54,43 @@ function SidebarLink({ to, label, icon, end }: { to: string; label: string; icon
 }
 
 export default function Layout() {
+  const [mobileOpen, setMobileOpen] = useState(false)
+  const closeMobile = () => setMobileOpen(false)
+
   return (
     <div className="flex h-screen bg-slate-900 text-slate-200">
-      <aside className="w-60 flex-shrink-0 bg-slate-950 border-r border-slate-700 flex flex-col">
-        <div className="px-5 py-5 border-b border-slate-700">
-          <h1 className="text-lg font-bold tracking-tight text-white">
-            AI Trading System
-          </h1>
-          <p className="text-xs text-slate-400 mt-0.5">Multi-Agent Trading Platform</p>
+      {/* Backdrop, mobile only, shown while the nav drawer is open */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-30 md:hidden"
+          onClick={closeMobile}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 w-64 flex-shrink-0 bg-slate-950 border-r border-slate-700 flex flex-col transform transition-transform duration-200 ease-in-out md:static md:z-auto md:translate-x-0 ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="px-5 py-5 border-b border-slate-700 flex items-start justify-between">
+          <div>
+            <h1 className="text-lg font-bold tracking-tight text-white">
+              AI Trading System
+            </h1>
+            <p className="text-xs text-slate-400 mt-0.5">Multi-Agent Trading Platform</p>
+          </div>
+          <button
+            onClick={closeMobile}
+            className="md:hidden text-slate-400 hover:text-slate-200 p-1 -mr-1 -mt-1"
+            aria-label="Close menu"
+          >
+            ✕
+          </button>
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {backtestLinks.map((l) => (
-            <SidebarLink key={l.to} to={l.to} label={l.label} icon={l.icon} end={l.to === '/'} />
+            <SidebarLink key={l.to} to={l.to} label={l.label} icon={l.icon} end={l.to === '/'} onNavigate={closeMobile} />
           ))}
 
           <div className="border-t border-slate-700 my-3" />
@@ -61,7 +99,7 @@ export default function Layout() {
           </p>
 
           {liveLinks.map((l) => (
-            <SidebarLink key={l.to} to={l.to} label={l.label} icon={l.icon} end={l.to === '/live'} />
+            <SidebarLink key={l.to} to={l.to} label={l.label} icon={l.icon} end={l.to === '/live'} onNavigate={closeMobile} />
           ))}
 
           <div className="border-t border-slate-700 my-3" />
@@ -70,7 +108,7 @@ export default function Layout() {
           </p>
 
           {monitoringLinks.map((l) => (
-            <SidebarLink key={l.to} to={l.to} label={l.label} icon={l.icon} />
+            <SidebarLink key={l.to} to={l.to} label={l.label} icon={l.icon} onNavigate={closeMobile} />
           ))}
         </nav>
         <div className="px-5 py-4 border-t border-slate-700 text-xs text-slate-500">
@@ -78,19 +116,33 @@ export default function Layout() {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto">
-        <div className="p-6 max-w-[1600px] mx-auto">
-          <Suspense
-            fallback={
-              <div className="flex items-center justify-center h-64">
-                <Spinner className="h-8 w-8" />
-              </div>
-            }
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Mobile-only top bar with the nav-drawer toggle */}
+        <header className="md:hidden flex items-center gap-3 px-4 py-3 bg-slate-950 border-b border-slate-700 flex-shrink-0">
+          <button
+            onClick={() => setMobileOpen(true)}
+            className="text-slate-300 hover:text-white p-1 -ml-1 text-xl leading-none"
+            aria-label="Open menu"
           >
-            <Outlet />
-          </Suspense>
-        </div>
-      </main>
+            ☰
+          </button>
+          <h1 className="text-sm font-bold text-white">AI Trading System</h1>
+        </header>
+
+        <main className="flex-1 overflow-auto">
+          <div className="p-4 md:p-6 max-w-[1600px] mx-auto">
+            <Suspense
+              fallback={
+                <div className="flex items-center justify-center h-64">
+                  <Spinner className="h-8 w-8" />
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </div>
+        </main>
+      </div>
     </div>
   )
 }

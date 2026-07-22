@@ -340,7 +340,7 @@ export default function LiveConfig() {
 
         {/* Strategies */}
         <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
             <h3 className="text-sm font-semibold text-slate-300">
               Strategies & Approval Mode
               <span className="ml-2 text-xs font-normal text-slate-500">
@@ -746,7 +746,7 @@ export default function LiveConfig() {
           </div>
 
           {ragStats?.collections && Object.keys(ragStats.collections).length > 0 && (
-            <div className="mb-4">
+            <div className="mb-4 overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-left text-slate-500 border-b border-slate-700">

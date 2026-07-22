@@ -57,7 +57,7 @@ export default function Compare() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
         <div>
           <h2 className="text-2xl font-bold text-white">Run Comparison</h2>
           <p className="text-sm text-slate-400 mt-1">{runIds.length} runs</p>
@@ -71,6 +71,7 @@ export default function Compare() {
       </div>
 
       <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-slate-700 text-left">
@@ -108,6 +109,7 @@ export default function Compare() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   )

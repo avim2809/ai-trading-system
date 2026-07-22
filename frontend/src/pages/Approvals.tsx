@@ -5,16 +5,9 @@ import type { PendingApproval, ApprovalDetail } from '../api/types'
 import StatusBadge from '../components/StatusBadge'
 import PipelineStage from '../components/PipelineStage'
 import Spinner from '../components/Spinner'
+import { formatDateTime } from '../lib/time'
 
-function formatTime(iso: string): string {
-  return new Date(iso).toLocaleString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
-}
+const formatTime = (iso: string) => formatDateTime(iso, { seconds: true })
 
 function expiresIn(iso: string): string {
   const diff = new Date(iso).getTime() - Date.now()
@@ -91,6 +84,7 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
           {/* Orders table */}
           <div>
             <h4 className="text-xs font-semibold text-slate-400 mb-2 uppercase">Proposed Trades</h4>
+            <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="text-left text-slate-500">
@@ -115,6 +109,7 @@ function ApprovalCard({ approval }: { approval: PendingApproval }) {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
 
           {/* Pipeline context */}

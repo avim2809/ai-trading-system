@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import type { LogEntry } from '../api/types'
+import { formatClockWithMs } from '../lib/time'
 
 const POLL_MS = 2000
 const MAX_LINES = 2000
@@ -19,10 +20,7 @@ const levelStyles: Record<string, string> = {
 
 function formatTs(ts: string | null): string {
   if (!ts) return '—'
-  const d = new Date(ts)
-  if (Number.isNaN(d.getTime())) return ts
-  return d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
-    '.' + String(d.getMilliseconds()).padStart(3, '0')
+  return formatClockWithMs(ts)
 }
 
 export default function Logs() {
@@ -86,8 +84,8 @@ export default function Logs() {
   })
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3rem)]">
-      <div className="flex items-center justify-between mb-4 flex-shrink-0">
+    <div className="flex flex-col h-[calc(100vh-5.25rem)] md:h-[calc(100vh-3rem)]">
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-4 flex-shrink-0">
         <div>
           <h2 className="text-2xl font-bold text-white flex items-center gap-3">
             Live Logs
@@ -116,7 +114,7 @@ export default function Logs() {
         </div>
       </div>
 
-      <div className="flex items-center gap-3 mb-3 flex-shrink-0">
+      <div className="flex items-center flex-wrap gap-3 mb-3 flex-shrink-0">
         <select
           value={levelFilter}
           onChange={(e) => setLevelFilter(e.target.value as LevelFilter)}
@@ -130,7 +128,7 @@ export default function Logs() {
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Filter by logger or message…"
-          className="flex-1 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-xs placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="flex-1 min-w-[140px] px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-xs placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
         <span className="text-xs text-slate-500 whitespace-nowrap">
           {filtered.length} / {lines.length} lines
