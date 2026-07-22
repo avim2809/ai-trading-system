@@ -68,6 +68,55 @@ class TestBacktestCapturesTrades:
         assert (df["size"] != 0).any()
 
 
+class TestBacktestStrategyAttribution:
+    """Regression coverage for a real gap found while analyzing walk-forward
+    results: every trade in trades.parquet was tagged strategy="_default"
+    regardless of which of the 12 strategies actually drove it, and
+    report.json had no "strategies" attribution table at all.
+
+    Root cause was two separate bugs: (1) ExecutionAgent already tags each
+    order with its real dominant strategy, but FirmStrategy.next() dropped
+    that field when placing the backtrader order instead of threading it
+    through to the data feed the trade analyzers read it from, and (2)
+    PerformanceAttribution.update_daily() — which turns tagged holdings
+    into an actual per-strategy return series — was never called anywhere,
+    so even a correct tag would never have produced return metrics.
+    """
+
+    def test_trades_are_tagged_with_real_strategy_names_not_default(self):
+        cfg = {
+            "data_source": "synthetic",
+            "start_date": "2021-01-01",
+            "end_date": "2021-06-30",
+            "seed": 7,
+            "rebalance_frequency": "weekly",
+            "strategies": ["momentum", "trend"],
+        }
+        report = execute_backtest(cfg)
+        assert report.trades, "expected at least one closed trade"
+
+        strategies_seen = {t["strategy"] for t in report.trades}
+        assert "_default" not in strategies_seen
+        assert strategies_seen <= {"momentum", "trend", "composite"}
+
+    def test_report_includes_per_strategy_attribution_table(self):
+        cfg = {
+            "data_source": "synthetic",
+            "start_date": "2021-01-01",
+            "end_date": "2021-06-30",
+            "seed": 7,
+            "rebalance_frequency": "weekly",
+            "strategies": ["momentum", "trend"],
+        }
+        report = execute_backtest(cfg)
+        d = report.to_dict()
+        assert "strategies" in d
+        assert d["strategies"], "expected at least one strategy's metrics"
+        for metrics in d["strategies"].values():
+            assert "total_return" in metrics
+            assert "sharpe_ratio" in metrics
+
+
 def _empty_attribution():
     from firm.portfolio.attribution import PerformanceAttribution
     return PerformanceAttribution()

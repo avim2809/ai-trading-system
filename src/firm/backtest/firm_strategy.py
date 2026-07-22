@@ -105,18 +105,24 @@ class FirmStrategy(bt.Strategy):
     def next(self):
         current_dt: datetime = self.datas[0].datetime.datetime(0)
 
+        prices: dict[str, float] = {}
+        for sym in self.p.universe:
+            data = self._data_map.get(sym)
+            if data is not None and len(data) > 0:
+                prices[sym] = data.close[0]
+
+        # Mark-to-market per-strategy holdings every bar (not just rebalance
+        # bars) so the attribution return series has the same daily
+        # granularity as the overall portfolio's.
+        if self.p.attribution is not None:
+            self.p.attribution.update_daily(current_dt, prices, self.broker.getvalue())
+
         if not self._should_rebalance(current_dt):
             return
 
         pit_view = PitViewAdapter(
             self.p.pit_store, current_dt, self.p.universe
         )
-
-        prices: dict[str, float] = {}
-        for sym in self.p.universe:
-            data = self._data_map.get(sym)
-            if data is not None and len(data) > 0:
-                prices[sym] = data.close[0]
 
         # Reflect on the previous decision now that its P&L is known.
         self._maybe_reflect(current_dt)
@@ -140,6 +146,17 @@ class FirmStrategy(bt.Strategy):
             if symbol is None or symbol not in self._data_map:
                 continue
             data = self._data_map[symbol]
+            # ExecutionAgent already tags each order with its dominant
+            # contributing strategy (order_dict["strategy"]), but that tag
+            # was being dropped here — every trade in trades.parquet ended
+            # up attributed to the "_default" fallback regardless of which
+            # of the 12 strategies actually drove it. Data feeds have no
+            # built-in per-order channel, so stash it on the feed's `.info`
+            # (read by TradeLogAnalyzer/StrategyAttributionAnalyzer at the
+            # moment a trade opens) — safe because a rebalance places at
+            # most one order per symbol, and any resulting trade opens
+            # before this same symbol's next rebalance could overwrite it.
+            data.info = {"strategy": order_dict.get("strategy", "composite")}
             qty = order_dict.get("shares", order_dict.get("quantity", 0))
             if qty > 0:
                 self.buy(data=data, size=qty)

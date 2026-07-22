@@ -50,13 +50,22 @@ class PerformanceAttribution:
         self,
         date: datetime,
         prices: dict[str, float],
-        holdings: dict[str, float],
+        nav: float,
         strategy_holdings: dict[str, dict[str, float]] | None = None,
     ) -> None:
-        """Record daily P&L by strategy using mark-to-market.
+        """Record daily return contribution by strategy using mark-to-market.
 
-        Computes each strategy's daily return as the position-weighted
-        sum of individual asset returns.
+        Each strategy's daily figure is its position-weighted dollar P&L
+        divided by total portfolio NAV — a "contribution to portfolio
+        return" series. Dividing by NAV (not left as raw dollar P&L) matters
+        because get_strategy_metrics() feeds this straight into
+        compute_all_metrics(), which assumes period *percentage* returns
+        (e.g. total_return does ``(1+r).prod()``) — raw dollar P&L values
+        produced nonsense metrics. Strategies here don't have independently
+        allocated capital (all 12 blend into one target-weight decision
+        sharing one capital pool), so NAV-normalized contributions are also
+        the only framing that's directly comparable and summable across
+        strategies.
         """
         strat_hold = strategy_holdings or self._strategy_holdings
         for strategy, sym_shares in strat_hold.items():
@@ -66,7 +75,8 @@ class PerformanceAttribution:
                 curr = prices.get(sym)
                 if prev is not None and curr is not None and prev != 0:
                     daily_pnl += shares * (curr - prev)
-            self._strategy_returns[strategy].append(daily_pnl)
+            daily_return = daily_pnl / nav if nav > 0 else 0.0
+            self._strategy_returns[strategy].append(daily_return)
             self._strategy_dates[strategy].append(date)
 
         self._prev_prices = dict(prices)

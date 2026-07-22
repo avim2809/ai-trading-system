@@ -246,8 +246,25 @@ class TestPerformanceAttribution:
         for i in range(1, 6):
             d = base + timedelta(days=i)
             p = {"AAPL": 100.0 + i, "GOOG": 200.0 - i * 0.5}
-            attr.update_daily(d, p, {}, None)
+            attr.update_daily(d, p, nav=100_000.0)
         return attr
+
+    def test_update_daily_normalizes_by_nav_not_raw_dollar_pnl(self):
+        """Regression: update_daily used to feed raw dollar P&L straight into
+        compute_all_metrics(), which assumes period *percentage* returns
+        (total_return does (1+r).prod()) — nonsense metrics resulted the
+        moment daily P&L exceeded a few dollars."""
+        attr = PerformanceAttribution()
+        attr.record_trades(
+            [{"symbol": "AAPL", "shares": 10, "price": 100.0, "strategy": "momentum"}],
+            {"AAPL": 100.0},
+        )
+        attr._prev_prices = {"AAPL": 100.0}
+        attr.update_daily(datetime(2023, 6, 2), {"AAPL": 105.0}, nav=100_000.0)
+
+        s = attr.get_strategy_returns("momentum")
+        # $10 * 5 = $50 P&L on a $100,000 NAV -> 0.05% return, not "50".
+        assert s.iloc[0] == pytest.approx(0.0005)
 
     def test_strategies(self):
         attr = self._make_attribution()
