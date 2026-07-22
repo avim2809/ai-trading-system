@@ -32,12 +32,14 @@ def execute_backtest(config: dict) -> BacktestReport:
 
     ``config`` keys: ``data_source`` (``"synthetic"`` or a real provider),
     ``start_date``/``end_date``, ``universe_symbols``, ``strategies``,
-    ``seed``, plus the engine fields in :data:`_BT_FIELDS`. Mirrors the
-    wiring previously inline in ``firm.api.jobs.JobManager``.
+    ``seed``, ``warmup_days`` (real-data only, default 365), plus the
+    engine fields in :data:`_BT_FIELDS`. Mirrors the wiring previously
+    inline in ``firm.api.jobs.JobManager``.
     """
     data_source = config.get("data_source", "synthetic")
     start_date = config.get("start_date", "2020-01-01")
     end_date = config.get("end_date", "2023-12-31")
+    warmup_days = config.get("warmup_days", 365)
 
     if data_source == "synthetic":
         from firm.data.synthetic import DEFAULT_SYMBOLS, make_synthetic_prices
@@ -66,8 +68,22 @@ def execute_backtest(config: dict) -> BacktestReport:
         # start_date/end_date, but without this filter every fold ran on the
         # *entire* cached history and produced byte-identical results,
         # silently defeating the whole point of walk-forward validation.
+        #
+        # Loading exactly [start_date, end_date] and nothing more created a
+        # second, subtler bug: strategies with a real lookback requirement
+        # (regime_hmm needs 252 days to train its HMM, momentum's 12-month
+        # factor needs 252, gann needs 120+) got starved for a large chunk
+        # of every ~99-trading-day fold — some generated zero signals until
+        # well into the fold, others silently degraded to a much shorter,
+        # different lookback than what they were designed for. Loading an
+        # extra `warmup_days` of history *before* start_date gives those
+        # strategies real data to work with; FirmStrategy still won't
+        # place a single trade before start_date (see its own start_date
+        # gate), so this can't leak into the reported performance — it only
+        # gives long-lookback strategies a fair, correctly-warmed-up start.
+        load_start = pd.Timestamp(start_date) - pd.Timedelta(days=warmup_days)
         dates = pd.to_datetime(prices_df["date"])
-        mask = (dates >= pd.Timestamp(start_date)) & (dates <= pd.Timestamp(end_date))
+        mask = (dates >= load_start) & (dates <= pd.Timestamp(end_date))
         prices_df = prices_df[mask]
 
     pit_store = PointInTimeDataStore()
@@ -81,7 +97,20 @@ def execute_backtest(config: dict) -> BacktestReport:
     engine = BacktestEngine(bt_config)
     engine.setup(prices_df, pit_store, orchestrator, universe)
     engine.run()
-    return engine.generate_report()
+    report = engine.generate_report()
+
+    if data_source != "synthetic":
+        # Trading/snapshots already can't start before start_date (the
+        # engine-level gate), but the raw return series still runs from
+        # whatever the first loaded bar is — trim it back to the actual
+        # evaluation window before it reaches any metric computation.
+        start_ts = pd.Timestamp(start_date)
+        if not report.returns.empty:
+            report.returns = report.returns[report.returns.index >= start_ts]
+        if not report.benchmark_returns.empty:
+            report.benchmark_returns = report.benchmark_returns[report.benchmark_returns.index >= start_ts]
+
+    return report
 
 
 def build_equity_data(report: BacktestReport) -> dict:

@@ -31,13 +31,23 @@ def _full_history_df() -> pd.DataFrame:
     })
 
 
+class _FakeBareReport:
+    """Minimal stand-in shaped enough for execute_backtest's post-hoc
+    returns-trimming step (empty series -> a no-op, same as a real report
+    with no trades) without needing a real BacktestReport."""
+
+    def __init__(self):
+        self.returns = pd.Series(dtype=float)
+        self.benchmark_returns = pd.Series(dtype=float)
+
+
 class _FakeEngine:
     """Stand-in for BacktestEngine that just records what it was given."""
 
     captured: dict = {}
 
     def __init__(self, bt_config):
-        pass
+        _FakeEngine.captured["bt_config"] = bt_config
 
     def setup(self, prices_df, pit_store, orchestrator, universe, memory=None, llm_config=None):
         _FakeEngine.captured["prices_df"] = prices_df
@@ -46,7 +56,7 @@ class _FakeEngine:
         pass
 
     def generate_report(self):
-        return "report"
+        return _FakeBareReport()
 
 
 class TestExecuteBacktestFiltersRealDataByDateRange:
@@ -57,6 +67,7 @@ class TestExecuteBacktestFiltersRealDataByDateRange:
             "end_date": "2024-03-01",
             "universe_symbols": ["AAPL"],
             "strategies": ["momentum"],
+            "warmup_days": 0,
         }
 
         with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
@@ -65,7 +76,7 @@ class TestExecuteBacktestFiltersRealDataByDateRange:
              patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
             result = execute_backtest(config)
 
-        assert result == "report"
+        assert isinstance(result, _FakeBareReport)
         prices_df = _FakeEngine.captured["prices_df"]
         assert prices_df["date"].min() >= pd.Timestamp("2024-01-01")
         assert prices_df["date"].max() <= pd.Timestamp("2024-03-01")
@@ -91,3 +102,172 @@ class TestExecuteBacktestFiltersRealDataByDateRange:
             seen.append(_FakeEngine.captured["prices_df"]["date"].min())
 
         assert seen[0] != seen[1]
+
+
+class TestWarmupBuffer:
+    """Regression coverage: strategies with a real lookback requirement
+    (regime_hmm needs 252 days to train its HMM, momentum's 12-month factor
+    needs 252, gann needs 120+) got starved for a large chunk of every
+    ~99-trading-day walk-forward fold once the date-range fix above landed
+    — some generated zero signals until well into the fold, others
+    silently degraded to a much shorter lookback than designed for.
+    Loading extra history *before* start_date (but never trading on it —
+    see FirmStrategy's own start_date gate) fixes this without leaking
+    into reported performance.
+    """
+
+    def test_loaded_prices_extend_before_start_date_by_default(self):
+        config = {
+            "data_source": "cache",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "universe_symbols": ["AAPL"],
+            "strategies": ["momentum"],
+        }
+
+        with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
+             patch("firm.config.get_settings"), \
+             patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            execute_backtest(config)
+
+        prices_df = _FakeEngine.captured["prices_df"]
+        # Default warmup_days=365 -> real history well before start_date.
+        assert prices_df["date"].min() <= pd.Timestamp("2024-01-01") - pd.Timedelta(days=300)
+        # But still never past end_date.
+        assert prices_df["date"].max() <= pd.Timestamp("2024-03-01")
+
+    def test_warmup_days_is_configurable(self):
+        config = {
+            "data_source": "cache",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "universe_symbols": ["AAPL"],
+            "strategies": ["momentum"],
+            "warmup_days": 10,
+        }
+
+        with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
+             patch("firm.config.get_settings"), \
+             patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            execute_backtest(config)
+
+        prices_df = _FakeEngine.captured["prices_df"]
+        assert prices_df["date"].min() >= pd.Timestamp("2024-01-01") - pd.Timedelta(days=14)
+
+    def test_start_date_reaches_bt_config_for_the_firm_strategy_gate(self):
+        config = {
+            "data_source": "cache",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "universe_symbols": ["AAPL"],
+            "strategies": ["momentum"],
+        }
+        with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
+             patch("firm.config.get_settings"), \
+             patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            execute_backtest(config)
+
+        assert _FakeEngine.captured["bt_config"]["start_date"] == "2024-01-01"
+
+    def test_synthetic_backtests_are_unaffected(self):
+        """The synthetic branch already generates exactly the requested
+        span (make_synthetic_prices) — warmup_days must not change that."""
+        config = {
+            "data_source": "synthetic",
+            "start_date": "2021-01-01",
+            "end_date": "2021-03-01",
+            "seed": 1,
+        }
+        with patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            execute_backtest(config)
+
+        prices_df = _FakeEngine.captured["prices_df"]
+        # make_synthetic_prices ends exactly at end_date and generates
+        # backward from there — no artificial extension before start_date
+        # should have been requested for the synthetic path.
+        assert prices_df["date"].max() <= pd.Timestamp("2021-03-01")
+
+
+class _FakeReport:
+    def __init__(self, returns, benchmark_returns):
+        self.returns = returns
+        self.benchmark_returns = benchmark_returns
+        self.snapshots = []
+        self.trades = []
+
+
+class _FakeEngineWithReturns(_FakeEngine):
+    def generate_report(self):
+        idx = pd.date_range("2023-06-01", "2024-03-01", freq="B")
+        returns = pd.Series(0.001, index=idx)
+        bench = pd.Series(0.0005, index=idx)
+        return _FakeReport(returns, bench)
+
+
+class TestReturnsTrimmedToEvaluationWindow:
+    """The raw return series backtrader produces spans the full loaded
+    range (warmup + eval), since BacktestEngine itself has no concept of
+    an evaluation boundary — only FirmStrategy's start_date gate stops
+    *trading* early. The reported returns/benchmark series must still be
+    trimmed to the real evaluation window, or metrics would be computed
+    over a stretch of flat, no-trade warmup days that were never meant to
+    count."""
+
+    def test_returns_start_at_start_date_not_the_warmup_buffer(self):
+        config = {
+            "data_source": "cache",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "universe_symbols": ["AAPL"],
+            "strategies": ["momentum"],
+        }
+        with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
+             patch("firm.config.get_settings"), \
+             patch("firm.backtest.run.BacktestEngine", _FakeEngineWithReturns), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            report = execute_backtest(config)
+
+        assert report.returns.index.min() >= pd.Timestamp("2024-01-01")
+        assert report.benchmark_returns.index.min() >= pd.Timestamp("2024-01-01")
+
+
+class TestFirmStrategyNeverTradesDuringWarmup:
+    """End-to-end (real BacktestEngine, not mocked): confirms the
+    warmup-buffer data extending before start_date is visible to
+    strategies via pit_view.prices() but genuinely never traded on."""
+
+    def test_no_trades_or_snapshots_before_start_date(self):
+        from firm.data.synthetic import make_synthetic_prices
+
+        # Real, varied multi-symbol data spanning well before and after
+        # the evaluation window, so momentum has plenty to react to.
+        full_df = make_synthetic_prices(
+            symbols=["AAPL", "MSFT", "GOOG"], n_days=400, end_date="2024-03-01", seed=3,
+        )
+        config = {
+            "data_source": "cache",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "universe_symbols": ["AAPL", "MSFT", "GOOG"],
+            "strategies": ["momentum"],
+            "rebalance_frequency": "weekly",
+            "warmup_days": 300,
+        }
+
+        with patch("firm.runtime.load_prices", return_value=full_df), \
+             patch("firm.config.get_settings"):
+            report = execute_backtest(config)
+
+        start_ts = pd.Timestamp("2024-01-01")
+        for trade in report.trades:
+            assert pd.Timestamp(trade["entry_dt"]) >= start_ts, (
+                f"trade entered at {trade['entry_dt']}, before start_date"
+            )
+        for snap in report.snapshots:
+            assert pd.Timestamp(snap.asof) >= start_ts, (
+                f"snapshot recorded at {snap.asof}, before start_date"
+            )

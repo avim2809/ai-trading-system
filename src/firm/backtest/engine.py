@@ -100,6 +100,7 @@ class BacktestEngine:
             slippage_pct=slippage_pct,
             memory=memory,
             llm_config=llm_config,
+            start_date=self.config.get("start_date"),
         )
 
         self.cerebro.addanalyzer(bt.analyzers.SharpeRatio, _name="sharpe")

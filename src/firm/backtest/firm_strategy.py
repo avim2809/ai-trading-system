@@ -90,6 +90,13 @@ class FirmStrategy(bt.Strategy):
         ("slippage_pct", 0.0005),  # per-trade slippage rate
         ("memory", None),   # TradingMemoryLog instance (optional)
         ("llm_config", None),  # LLM config dict for reflection calls (optional)
+        # First date real trading/evaluation may begin (ISO string, optional).
+        # Data before this may still be fed in (e.g. a warmup buffer so
+        # long-lookback strategies have real history to work with), but
+        # nothing here may place an order, update rebalance state, or record
+        # attribution before this date — see run.py's execute_backtest for
+        # why the warmup buffer exists.
+        ("start_date", None),
     )
 
     def __init__(self):
@@ -100,10 +107,20 @@ class FirmStrategy(bt.Strategy):
         # Track previous bar's NAV and date for deferred reflection.
         self._prev_rebalance_date: str | None = None
         self._prev_rebalance_nav: float | None = None
+        self._eval_start = (
+            datetime.fromisoformat(self.p.start_date).date() if self.p.start_date else None
+        )
         self._llm_service = None
 
     def next(self):
         current_dt: datetime = self.datas[0].datetime.datetime(0)
+
+        # Warmup bars (before the real evaluation window) exist purely so
+        # long-lookback strategies (e.g. regime_hmm's 252-day HMM training
+        # window) have real history via pit_view.prices() — no trading,
+        # rebalance-state, or attribution tracking may happen yet.
+        if self._eval_start is not None and current_dt.date() < self._eval_start:
+            return
 
         prices: dict[str, float] = {}
         for sym in self.p.universe:
