@@ -184,10 +184,18 @@ class MockPitView:
     def fundamentals(
         self,
         symbols: list[str] | None = None,
+        lookback_reports: int = 4,
     ) -> pd.DataFrame:
         df = self._fund_df.copy()
         if symbols and not df.empty:
             df = df[df["symbol"].isin(symbols)]
+        if not df.empty:
+            df = (
+                df.sort_values("date")
+                .groupby("symbol", group_keys=False)
+                .tail(lookback_reports)
+                .reset_index(drop=True)
+            )
         return df
 
     def sentiment(
@@ -218,7 +226,7 @@ class EmptyPitView:
     def prices(self, symbols=None, lookback_days=252) -> pd.DataFrame:
         return pd.DataFrame()
 
-    def fundamentals(self, symbols=None) -> pd.DataFrame:
+    def fundamentals(self, symbols=None, lookback_reports=4) -> pd.DataFrame:
         return pd.DataFrame()
 
     def sentiment(self, symbols=None, lookback_days=5) -> pd.DataFrame:
@@ -248,7 +256,7 @@ class SingleSymbolPitView:
         cutoff = pd.Timestamp(self._asof) - pd.Timedelta(days=lookback_days)
         return df[df["date"] >= cutoff]
 
-    def fundamentals(self, symbols=None) -> pd.DataFrame:
+    def fundamentals(self, symbols=None, lookback_reports=4) -> pd.DataFrame:
         return self._fund_df.copy()
 
     def sentiment(self, symbols=None, lookback_days=5) -> pd.DataFrame:
@@ -443,6 +451,73 @@ class TestMultiFactor:
         assert len(signals) > 0
         _validate_signals(signals, "multi_factor")
 
+    def test_zero_price_at_momentum_window_start_does_not_nan_the_universe(self, pit_view):
+        """Regression: a zero/bad price at the start of the momentum window
+        used to produce +/-inf, which _zscore's old dropna()-only cleanup
+        didn't strip — an inf in the series makes std() == inf, slipping
+        past the "std==0 or NaN" guard, so EVERY symbol's momentum z-score
+        (not just the corrupted one) came out NaN."""
+        strat = get("multi_factor")()
+        lookback = max(252, 12 * 21) + 10
+        filtered = pit_view.prices(lookback_days=lookback)
+        target_sym = filtered["symbol"].iloc[0]
+        earliest_date = filtered[filtered["symbol"] == target_sym]["date"].min()
+
+        corrupted = pit_view._price_df.copy()
+        mask = (corrupted["symbol"] == target_sym) & (corrupted["date"] == earliest_date)
+        corrupted.loc[mask, "adj_close"] = 0.0
+        pit_view._price_df = corrupted
+
+        signals = strat.generate(pit_view)
+        assert len(signals) > 0
+        for sig in signals:
+            assert np.isfinite(sig.score), f"{sig.symbol} got a non-finite score"
+
+
+class TestMultiFactorZscoreHardening:
+    def test_zscore_strips_inf_before_computing_stats(self):
+        from firm.strategies.multi_factor import _zscore
+
+        s = pd.Series({"A": 1.0, "B": 2.0, "C": np.inf, "D": -np.inf})
+        result = _zscore(s)
+
+        assert set(result.index) == {"A", "B"}
+        assert not result.isna().any()
+        assert np.isfinite(result).all()
+
+
+class TestMultiFactorWeightedComposite:
+    """Regression: combining per-factor scores used to divide every symbol
+    by the SAME total factor weight regardless of which factors that symbol
+    actually had a value for — silently diluting a symbol contributing to
+    only 1 of 4 factors by weight it never earned."""
+
+    def test_partial_coverage_symbol_is_not_diluted_by_missing_factors(self):
+        from firm.strategies.multi_factor import _weighted_composite
+
+        scores = {
+            "value": pd.Series({"A": 2.0, "B": 2.0}),
+            "quality": pd.Series({"A": 2.0}),
+            "momentum": pd.Series({"A": 2.0}),
+            "low_vol": pd.Series({"A": 2.0}),
+        }
+        weights = {"value": 0.25, "quality": 0.25, "momentum": 0.25, "low_vol": 0.25}
+
+        result = _weighted_composite(scores, weights)
+
+        # A has all 4 factors at 2.0 -> composite 2.0. B has only "value" at
+        # 2.0 -> composite must also be 2.0 (its own factor's value,
+        # unchanged), NOT 2.0 * 0.25 / 1.0 = 0.5 (diluted by weights for
+        # factors it never had).
+        assert result["A"] == pytest.approx(2.0)
+        assert result["B"] == pytest.approx(2.0)
+
+    def test_empty_scores_returns_empty(self):
+        from firm.strategies.multi_factor import _weighted_composite
+
+        result = _weighted_composite({}, {"value": 1.0})
+        assert result.empty
+
 
 class TestSentiment:
     def test_generate(self, pit_view):
@@ -459,6 +534,83 @@ class TestSentiment:
         view = MockPitView(include_sentiment=False)
         strat = get("sentiment")()
         assert strat.generate(view) == []
+
+    def test_fewer_than_3_symbols_emits_nothing_not_a_raw_score(self):
+        """Regression: used to fall back to a raw [-1,1] score for <2
+        symbols while normally emitting a z-score clipped to [-3,3] — two
+        incompatible scales from the same strategy depending on how many
+        symbols happened to have data that day."""
+        view = MockPitView(symbols=["AAPL", "MSFT"])
+        strat = get("sentiment")()
+        assert strat.generate(view) == []
+
+    def test_news_volume_weighting_changes_the_aggregate(self):
+        """Regression: the docstring promises volume-weighted sentiment,
+        but the code used to take a plain unweighted mean — a symbol with
+        one wildly positive article scored identically to one with 100
+        moderately positive articles on the same day."""
+        view = MockPitView(symbols=["AAPL", "MSFT", "GOOG"])
+        asof = pd.Timestamp(view.asof)
+        # AAPL: one mildly-positive article with huge volume, one wildly
+        # positive article with volume=1 -> volume-weighted mean ~0.108,
+        # far from the naive unweighted mean of 0.5.
+        rows = [
+            {"date": asof, "symbol": "AAPL", "sentiment_score": 0.1, "news_volume": 100,
+             "source": "t", "headline": "h1"},
+            {"date": asof, "symbol": "AAPL", "sentiment_score": 0.9, "news_volume": 1,
+             "source": "t", "headline": "h2"},
+            {"date": asof, "symbol": "MSFT", "sentiment_score": -0.3, "news_volume": 5,
+             "source": "t", "headline": "h3"},
+            {"date": asof, "symbol": "GOOG", "sentiment_score": 0.4, "news_volume": 5,
+             "source": "t", "headline": "h4"},
+        ]
+        view._sent_df = pd.DataFrame(rows)
+        strat = get("sentiment")()
+
+        unweighted_mean = (0.1 + 0.9) / 2
+        weighted_mean = (0.1 * 100 + 0.9 * 1) / 101
+
+        signals = strat.generate(view)
+        aapl = next(s for s in signals if s.symbol == "AAPL")
+
+        assert aapl.meta["sentiment_level"] == pytest.approx(weighted_mean, abs=1e-6)
+        assert aapl.meta["sentiment_level"] != pytest.approx(unweighted_mean, abs=0.05)
+
+    def test_delta_uses_lookback_days_not_the_full_fetch_buffer(self):
+        """Regression: delta used the FIRST row of the whole fetched buffer
+        (lookback_days + 5) as "old", not a row ~lookback_days before asof —
+        the effective window silently drifted with data sparsity instead of
+        tracking the lookback_days parameter."""
+        view = MockPitView(symbols=["AAPL", "MSFT", "GOOG"])
+        asof = pd.Timestamp(view.asof)
+        rows = []
+        # 10 days of flat sentiment per symbol (days -10..-1), then a jump
+        # on the asof day itself for AAPL only. lookback_days default is 5,
+        # so "old" should land on day -5, well after the buffer's actual
+        # earliest day (-9 once fetched with the +5 padding).
+        for offset in range(10, 0, -1):
+            d = asof - pd.Timedelta(days=offset)
+            rows.append({"date": d, "symbol": "AAPL", "sentiment_score": 0.0, "news_volume": 5,
+                         "source": "t", "headline": "h"})
+            rows.append({"date": d, "symbol": "MSFT", "sentiment_score": 0.1, "news_volume": 5,
+                         "source": "t", "headline": "h"})
+            rows.append({"date": d, "symbol": "GOOG", "sentiment_score": -0.1, "news_volume": 5,
+                         "source": "t", "headline": "h"})
+        # asof day: AAPL jumps to 0.8, others stay flat.
+        rows.append({"date": asof, "symbol": "AAPL", "sentiment_score": 0.8, "news_volume": 5,
+                     "source": "t", "headline": "jump"})
+        rows.append({"date": asof, "symbol": "MSFT", "sentiment_score": 0.1, "news_volume": 5,
+                     "source": "t", "headline": "h"})
+        rows.append({"date": asof, "symbol": "GOOG", "sentiment_score": -0.1, "news_volume": 5,
+                     "source": "t", "headline": "h"})
+        view._sent_df = pd.DataFrame(rows)
+        strat = get("sentiment")()
+
+        signals = strat.generate(view)
+        aapl = next(s for s in signals if s.symbol == "AAPL")
+        # "old" (~5 days back) was flat at 0.0, so delta should be ~0.8,
+        # not diluted by averaging against the buffer's much-older days.
+        assert aapl.meta["sentiment_delta"] == pytest.approx(0.8, abs=0.05)
 
 
 class TestEventDriven:
@@ -510,6 +662,48 @@ class TestEventDriven:
         assert len(signals) == 1
         assert signals[0].score > 0  # positive surprise → bullish
         _validate_signals(signals, "event_driven")
+
+    def test_real_production_path_detects_earnings_surprise(self):
+        """Regression for a critical bug: PointInTimeDataStore.get_
+        fundamentals() used to always collapse to exactly ONE row per
+        symbol (groupby("symbol").last()), so _signals_from_fundamentals'
+        own "need >= 2 snapshots to compute a surprise" check could never
+        pass in production (only in this file's hand-rolled SurpriseView
+        mock above, which never had the bug since it returns raw rows
+        directly, bypassing the real PIT store entirely). event_driven had
+        never actually detected a real earnings surprise via the real
+        backtest/live adapters — it silently always fell back to the
+        price-move proxy. This test goes through the REAL
+        PointInTimeDataStore + PitViewAdapter, not a shortcut mock."""
+        from firm.backtest.firm_strategy import PitViewAdapter
+        from firm.data.pit_store import PointInTimeDataStore
+
+        asof = datetime(2025, 6, 1)
+        fund_df = pd.DataFrame([
+            {"date": pd.Timestamp(asof) - pd.Timedelta(days=90), "symbol": "TEST", "eps": 1.0,
+             "market_cap": 1e10, "pe_ratio": 15, "pb_ratio": 3, "roe": 0.15,
+             "debt_to_equity": 0.5, "revenue": 1e9, "net_income": 1e8, "dividend_yield": 0.02},
+            {"date": pd.Timestamp(asof), "symbol": "TEST", "eps": 1.5,
+             "market_cap": 1e10, "pe_ratio": 12, "pb_ratio": 3, "roe": 0.18,
+             "debt_to_equity": 0.5, "revenue": 1.2e9, "net_income": 1.5e8, "dividend_yield": 0.02},
+        ])
+        prices_df = pd.DataFrame([{
+            "date": pd.Timestamp(asof), "symbol": "TEST",
+            "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.0,
+            "volume": 1000.0, "adj_close": 100.0,
+        }])
+
+        store = PointInTimeDataStore()
+        store.load(prices=prices_df, fundamentals=fund_df)
+        pit_view = PitViewAdapter(store, asof, ["TEST"])
+
+        strat = get("event_driven")()
+        signals = strat.generate(pit_view)
+
+        assert len(signals) == 1
+        assert signals[0].score > 0
+        assert signals[0].meta["earnings_surprise"] == pytest.approx(0.5)
+        assert "proxy_event" not in signals[0].meta  # real surprise, not the price-move fallback
 
 
 class TestMLPrediction:

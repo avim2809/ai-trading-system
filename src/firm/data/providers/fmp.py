@@ -19,7 +19,11 @@ import pandas as pd
 
 from firm.config import Settings, get_settings
 from firm.data.providers._rest import RestClient
-from firm.data.providers.base import DataProvider, ProviderError
+from firm.data.providers.base import (
+    FUNDAMENTALS_PUBLICATION_LAG_DAYS,
+    DataProvider,
+    ProviderError,
+)
 from firm.data.schemas import FUNDAMENTAL_COLS, PRICE_COLS
 from firm.logging_setup import get_logger
 
@@ -137,7 +141,8 @@ class FMPProvider(DataProvider):
                     date_raw = rec.get("date")
                     if not date_raw:
                         continue
-                    ts = pd.Timestamp(date_raw).normalize()
+                    period_end = pd.Timestamp(date_raw).normalize()
+                    ts = period_end + pd.Timedelta(days=FUNDAMENTALS_PUBLICATION_LAG_DAYS)
                     if not (start_ts <= ts <= end_ts):
                         continue
                     key = (rec.get("fiscalYear"), rec.get("period"))

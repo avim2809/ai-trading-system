@@ -70,7 +70,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
                 .sort_values("date")
                 .reset_index(drop=True)
             )
-            if len(sym_df) < range_days + 2:
+            if len(sym_df) < max(range_days, atr_period) + 2:
                 continue
 
             high = sym_df["high"].values if "high" in sym_df.columns else sym_df["adj_close"].values
@@ -80,8 +80,15 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             range_high = np.max(high[-range_days - 1:-1])
             range_low = np.min(low[-range_days - 1:-1])
 
+            # ATR and realized_vol below must reflect conditions BEFORE the
+            # potential breakout bar (the "squeeze precedes breakout" logic
+            # this strategy is built on) — including today's own bar here
+            # would let a genuine breakout's large move inflate its own vol
+            # filter and self-sabotage the very signal it's meant to catch.
+            # Start the true-range loop at i=2 (yesterday) instead of i=1
+            # (today) to exclude the current bar.
             true_ranges = []
-            for i in range(1, min(atr_period + 1, len(close))):
+            for i in range(2, min(atr_period + 2, len(close) + 1)):
                 tr = max(
                     high[-i] - low[-i],
                     abs(high[-i] - close[-i - 1]) if i < len(close) else 0,
@@ -92,11 +99,16 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             if not true_ranges:
                 continue
             atr = float(np.mean(true_ranges))
-            if atr == 0:
+            if not np.isfinite(atr) or atr <= 0:
                 continue
 
-            returns = np.diff(close[-21:]) / close[-21:-1]
-            realized_vol = float(np.std(returns) * np.sqrt(252)) if len(returns) > 5 else 999.0
+            # Same exclusion for realized vol: window ends yesterday, not today.
+            returns = np.diff(close[-22:-1]) / close[-22:-2]
+            realized_vol = (
+                float(np.std(returns) * np.sqrt(252))
+                if len(returns) > 5 and np.isfinite(returns).all()
+                else 999.0
+            )
 
             current_close = close[-1]
             upper_break = range_high + breakout_multiplier * atr

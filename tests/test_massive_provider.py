@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
 from firm.data.providers.base import ProviderError
@@ -58,3 +59,32 @@ class TestMassiveRateLimitHandling:
         result = provider._get("/v2/aggs/ticker/AAPL/range/1/day/2026-01-01/2026-01-02")
         assert result == {"results": []}
         assert mock_get.call_count == 3
+
+
+class TestMassiveFundamentalsPublicationLag:
+    """Regression: the ratios endpoint's "date" is the fiscal period-end,
+    not the actual filing date — a real look-ahead bug for any strategy
+    trusting date <= asof (multi_factor's value/quality factors read this
+    directly). A Q4 report would become visible the instant the quarter
+    ends, weeks to months before the 10-K/10-Q is actually public.
+    """
+
+    @patch.object(MassiveProvider, "_get")
+    def test_date_is_shifted_forward_by_the_publication_lag(self, mock_get, provider):
+        from firm.data.providers.base import FUNDAMENTALS_PUBLICATION_LAG_DAYS
+
+        period_end = "2025-12-31"
+        mock_get.return_value = {
+            "results": [{
+                "date": period_end, "market_cap": 1e9, "price_to_earnings": 20.0,
+                "price_to_book": 3.0, "return_on_equity": 0.15, "debt_to_equity": 0.5,
+                "earnings_per_share": 2.0,
+            }]
+        }
+
+        df = provider.get_fundamentals(["AAPL"], "2020-01-01", "2027-01-01")
+
+        expected = pd.Timestamp(period_end) + pd.Timedelta(days=FUNDAMENTALS_PUBLICATION_LAG_DAYS)
+        assert len(df) == 1
+        assert pd.Timestamp(df.iloc[0]["date"]) == expected
+        assert pd.Timestamp(df.iloc[0]["date"]) > pd.Timestamp(period_end)

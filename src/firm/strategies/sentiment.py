@@ -58,11 +58,24 @@ class SentimentStrategy(BaseStrategy):
         sent_df = sent_df.copy()
         sent_df["date"] = pd.to_datetime(sent_df["date"])
 
-        daily_sent = (
-            sent_df.groupby(["date", "symbol"])["sentiment_score"]
-            .mean()
-            .reset_index()
-        )
+        # Volume-weighted mean, as the docstring promises: a symbol with one
+        # wildly positive article shouldn't score identically to one with
+        # 50 moderately positive articles the same day. Falls back to a
+        # plain mean if news_volume isn't present (e.g. a minimal fixture).
+        if "news_volume" in sent_df.columns:
+            vol = pd.to_numeric(sent_df["news_volume"], errors="coerce").fillna(1.0).clip(lower=1.0)
+            sent_df = sent_df.assign(_vol=vol, _weighted=sent_df["sentiment_score"] * vol)
+            grouped = sent_df.groupby(["date", "symbol"])
+            daily_sent = (
+                (grouped["_weighted"].sum() / grouped["_vol"].sum())
+                .reset_index(name="sentiment_score")
+            )
+        else:
+            daily_sent = (
+                sent_df.groupby(["date", "symbol"])["sentiment_score"]
+                .mean()
+                .reset_index()
+            )
         daily_pivot = daily_sent.pivot_table(
             index="date", columns="symbol", values="sentiment_score"
         ).sort_index()
@@ -72,8 +85,15 @@ class SentimentStrategy(BaseStrategy):
 
         level = daily_pivot.iloc[-1]
 
-        if len(daily_pivot) >= 2:
-            old_val = daily_pivot.iloc[0]
+        # "old" must be ~lookback_days before asof, not just whichever row
+        # happens to be first in the fetched buffer (lookback_days + 5) —
+        # the buffer's actual span varies with data sparsity around
+        # weekends/holidays, so the delta window used to silently drift
+        # away from the lookback_days parameter it's supposed to measure.
+        target_old_date = pd.Timestamp(pit_view.asof) - pd.Timedelta(days=lookback_days)
+        older_rows = daily_pivot.index[daily_pivot.index <= target_old_date]
+        if len(older_rows) > 0:
+            old_val = daily_pivot.loc[older_rows[-1]]
             delta = level - old_val
         else:
             delta = pd.Series(0.0, index=level.index)
@@ -81,22 +101,16 @@ class SentimentStrategy(BaseStrategy):
         combined = level + delta_weight * delta
         combined = combined.dropna()
 
-        if len(combined) < 2:
-            signals = []
-            for symbol, val in combined.items():
-                score = float(np.clip(val, -1, 1))
-                signals.append(
-                    Signal(
-                        symbol=str(symbol),
-                        strategy="sentiment",
-                        score=score,
-                        confidence=min(abs(score), 1.0),
-                        horizon="5d",
-                        asof=pit_view.asof,
-                        meta={"sentiment_level": float(level.get(symbol, np.nan))},
-                    )
-                )
-            return signals
+        # Fewer than 3 symbols can't be meaningfully z-scored cross-
+        # sectionally (matches momentum.py/mean_reversion.py's own "< 3"
+        # convention) — emit nothing rather than falling back to a
+        # differently-scaled raw score. The strategy used to mix two
+        # incompatible scales (raw [-1,1] here vs. a z-score clipped to
+        # [-3,3] below) depending on how many symbols happened to have
+        # data that day, breaking comparability for anything downstream
+        # that combines/normalizes signals assuming one stable scale.
+        if len(combined) < 3:
+            return []
 
         mean = combined.mean()
         std = combined.std()

@@ -22,7 +22,11 @@ from typing import Any, Sequence
 import pandas as pd
 import requests
 
-from firm.data.providers.base import DataProvider, ProviderError
+from firm.data.providers.base import (
+    FUNDAMENTALS_PUBLICATION_LAG_DAYS,
+    DataProvider,
+    ProviderError,
+)
 from firm.data.schemas import (
     CORPORATE_ACTION_COLS,
     FUNDAMENTAL_COLS,
@@ -288,7 +292,8 @@ class MassiveProvider(DataProvider):
                     date_raw = rec.get("date")
                     if not date_raw:
                         continue
-                    ts = pd.Timestamp(date_raw).normalize()
+                    period_end = pd.Timestamp(date_raw).normalize()
+                    ts = period_end + pd.Timedelta(days=FUNDAMENTALS_PUBLICATION_LAG_DAYS)
                     if not (start_ts <= ts <= end_ts):
                         continue
                     rows.append(

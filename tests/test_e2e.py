@@ -249,8 +249,8 @@ def test_no_look_ahead():
 
     original_get_fundamentals = pit_store.get_fundamentals
 
-    def tracking_get_fundamentals(syms, asof):
-        result = original_get_fundamentals(syms, asof)
+    def tracking_get_fundamentals(syms, asof, lookback_reports=4):
+        result = original_get_fundamentals(syms, asof, lookback_reports)
         if not result.empty and "date" in result.columns:
             accessed_dates.extend(result["date"].tolist())
         return result

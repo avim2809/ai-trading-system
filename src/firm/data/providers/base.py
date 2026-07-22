@@ -19,6 +19,19 @@ class ProviderError(Exception):
     """Raised when a data-provider operation fails."""
 
 
+# Shared across every fundamentals provider (fmp.py, massive.py): vendor
+# "date" fields for ratios/financials endpoints are the fiscal PERIOD-END
+# date, not the actual filing/announcement date — a real look-ahead bug for
+# any strategy trusting date <= asof (multi_factor's value/quality factors
+# in particular). SEC deadlines are 40-45 days for a 10-Q (accelerated
+# filers) and up to 90 days for a 10-K; 45 days is a conservative estimate
+# covering the common case without needing to distinguish quarterly from
+# annual reports. Mirrors the same fix already applied to macro data (see
+# fred.py's _PUBLICATION_LAG_DAYS) — shift the date forward so the PIT
+# store's date <= asof filter can't see a report before it would exist.
+FUNDAMENTALS_PUBLICATION_LAG_DAYS = 45
+
+
 class DataProvider(ABC):
     """Abstract base for all data providers."""
 

@@ -38,6 +38,7 @@ class PitView(Protocol):
     def fundamentals(
         self,
         symbols: list[str] | None = None,
+        lookback_reports: int = 4,
     ) -> pd.DataFrame:
         ...
 

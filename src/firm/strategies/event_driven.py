@@ -75,10 +75,21 @@ class EventDrivenStrategy(BaseStrategy):
                 )
             )
 
-        if not signals and not prices_df.empty:
+        # Price-move proxy per the docstring is "a proxy when direct
+        # surprise data is unavailable" — per SYMBOL, not per universe. Now
+        # that get_fundamentals() can actually return the 2+ snapshots this
+        # needs (see PointInTimeDataStore.get_fundamentals), some symbols
+        # will have a real fundamentals-based signal while others won't
+        # (no recent earnings event) — only fall back to the proxy for the
+        # latter, instead of skipping it for the WHOLE universe the moment
+        # any single symbol got a real signal.
+        covered = {s.symbol for s in signals}
+        remaining_universe = [s for s in universe if s not in covered]
+        if remaining_universe and not prices_df.empty:
+            remaining_prices = prices_df[prices_df["symbol"].isin(remaining_universe)]
             signals.extend(
                 self._signals_from_price_moves(
-                    prices_df, asof, surprise_threshold, drift_days, decay_factor
+                    remaining_prices, asof, surprise_threshold, drift_days, decay_factor
                 )
             )
 
@@ -117,7 +128,15 @@ class EventDrivenStrategy(BaseStrategy):
                 continue
 
             days_since = (pd.Timestamp(asof) - pd.Timestamp(event_date)).days
-            if days_since < 0 or days_since > drift_days:
+            # drift_days is a TRADING-day count elsewhere in this file
+            # (prices(lookback_days=drift_days + 10) is a row count, per
+            # PointInTimeDataStore's contract), but days_since is measured
+            # in raw CALENDAR days — comparing them directly truncated the
+            # effective drift window to ~70% of what drift_days actually
+            # specifies (a 21-trading-day window is ~29 calendar days, not
+            # 21). Convert once for this cutoff check.
+            drift_days_calendar = drift_days * 7 / 5
+            if days_since < 0 or days_since > drift_days_calendar:
                 continue
 
             decay = decay_factor ** days_since
@@ -177,7 +196,10 @@ class EventDrivenStrategy(BaseStrategy):
 
             last_event_date = big_moves.index[-1]
             days_since = (pd.Timestamp(pivot.index[-1]) - pd.Timestamp(last_event_date)).days
-            if days_since > drift_days:
+            # Same calendar-vs-trading-day unit mismatch as
+            # _signals_from_fundamentals — see the comment there.
+            drift_days_calendar = drift_days * 7 / 5
+            if days_since > drift_days_calendar:
                 continue
 
             surprise = float(big_moves.iloc[-1])

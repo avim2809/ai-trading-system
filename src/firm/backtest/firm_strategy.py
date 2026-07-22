@@ -55,9 +55,10 @@ class PitViewAdapter:
     def fundamentals(
         self,
         symbols: list[str] | None = None,
+        lookback_reports: int = 4,
     ) -> pd.DataFrame:
         syms = symbols or self._universe
-        return self._pit_store.get_fundamentals(syms, self._asof)
+        return self._pit_store.get_fundamentals(syms, self._asof, lookback_reports)
 
     def sentiment(
         self,

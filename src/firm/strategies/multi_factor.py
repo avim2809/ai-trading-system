@@ -43,8 +43,15 @@ from firm.strategies.registry import register
 
 
 def _zscore(s: pd.Series) -> pd.Series:
-    """Cross-sectional z-score, dropping NaNs."""
-    s = s.dropna()
+    """Cross-sectional z-score, dropping NaNs and infs.
+
+    A single bad input (e.g. a zero price feeding a division elsewhere)
+    producing +/-inf must not poison every symbol's score: dropna() alone
+    doesn't remove inf, and an inf in the series makes std() == inf, which
+    slips past the "std == 0 or NaN" guard — every entry then evaluates to
+    NaN via inf-involving arithmetic (finite - inf, then dividing by inf).
+    """
+    s = s.replace([np.inf, -np.inf], np.nan).dropna()
     std = s.std()
     if std == 0 or np.isnan(std):
         return s * 0.0
@@ -62,6 +69,41 @@ def _mean_available(parts: list[pd.Series]) -> pd.Series:
     if not parts:
         return pd.Series(dtype=float)
     return pd.concat(parts, axis=1).mean(axis=1, skipna=True)
+
+
+def _weighted_composite(
+    scores: dict[str, pd.Series], factor_weights: dict[str, float]
+) -> pd.Series:
+    """Combine per-factor z-scores into one composite, weighted per symbol.
+
+    The weight denominator is tracked PER SYMBOL (only the weights of
+    factors that symbol actually has a value for), not as one universe-wide
+    total — mirroring _mean_available's own anti-dilution logic one level
+    up. Dividing every symbol by the same total_weight regardless of which
+    factors it actually had would silently shrink a symbol's lone real
+    signal toward zero by weight it never earned (e.g. a symbol with only
+    a value-factor score, divided by all 4 factors' combined weight instead
+    of just value's).
+    """
+    all_symbols: set[str] = set()
+    for s in scores.values():
+        all_symbols.update(s.index)
+    if not all_symbols:
+        return pd.Series(dtype=float)
+
+    composite = pd.Series(0.0, index=sorted(all_symbols))
+    weight_sum = pd.Series(0.0, index=sorted(all_symbols))
+    for factor_name, w in factor_weights.items():
+        if factor_name in scores:
+            factor_scores = scores[factor_name]
+            composite = composite.add(factor_scores * w, fill_value=0)
+            weight_sum = weight_sum.add(
+                pd.Series(w, index=factor_scores.index), fill_value=0
+            )
+
+    if (weight_sum == 0).all():
+        return pd.Series(dtype=float)
+    return (composite / weight_sum.replace(0, np.nan)).dropna()
 
 
 @register("multi_factor")
@@ -133,10 +175,21 @@ class MultiFactorStrategy(BaseStrategy):
             )
             mom_days = mom_lookback * 21
             skip_days = mom_skip * 21
-            if len(pivot) > skip_days + 21:
+            # Degrade to whatever's actually available (mirroring
+            # momentum.py's own strategy) instead of silently computing a
+            # much-shorter, unflagged window against the skip_days+21
+            # check alone, which only required ~22 days of data regardless
+            # of how much shorter than the intended 12-1 month window that is.
+            effective_mom_days = min(mom_days, len(pivot))
+            if effective_mom_days > skip_days + 21:
                 end = len(pivot) - skip_days if skip_days > 0 else len(pivot)
-                start = max(0, end - (mom_days - skip_days))
-                cum_ret = (pivot.iloc[end - 1] / pivot.iloc[start]) - 1.0
+                start = max(0, end - (effective_mom_days - skip_days))
+                # A zero/bad price at the start of the window must not
+                # propagate +/-inf into the whole factor's z-score (see
+                # _zscore's own hardening) — guard the division directly,
+                # matching every other factor's .replace(0, np.nan) pattern.
+                start_prices = pivot.iloc[start].replace(0, np.nan)
+                cum_ret = (pivot.iloc[end - 1] / start_prices) - 1.0
                 scores["momentum"] = _zscore(cum_ret.dropna())
 
         # --- Low-vol factor ---
@@ -155,22 +208,9 @@ class MultiFactorStrategy(BaseStrategy):
         if not scores:
             return []
 
-        all_symbols: set[str] = set()
-        for s in scores.values():
-            all_symbols.update(s.index)
-        if not all_symbols:
+        composite = _weighted_composite(scores, factor_weights)
+        if composite.empty:
             return []
-
-        composite = pd.Series(0.0, index=sorted(all_symbols))
-        total_weight = 0.0
-        for factor_name, w in factor_weights.items():
-            if factor_name in scores:
-                composite = composite.add(scores[factor_name] * w, fill_value=0)
-                total_weight += w
-
-        if total_weight == 0:
-            return []
-        composite = composite / total_weight
 
         composite = _zscore(composite)
 

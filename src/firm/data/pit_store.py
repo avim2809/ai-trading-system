@@ -95,8 +95,23 @@ class PointInTimeDataStore:
         self,
         symbols: list[str],
         asof: datetime,
+        lookback_reports: int = 4,
     ) -> pd.DataFrame:
-        """Return latest fundamental data for each symbol where date <= asof."""
+        """Return the most recent *lookback_reports* snapshots per symbol
+        where date <= asof (oldest first, newest last) — not just a single
+        latest row.
+
+        Event-driven surprise detection (e.g. EPS change quarter-over-
+        quarter) needs at least 2 snapshots to compute anything; this used
+        to always collapse to exactly one row per symbol via
+        groupby("symbol").last(), so any such surprise detection could
+        never see more than one data point and silently always fell
+        through to whatever fallback existed — a real incident, not a
+        hypothetical. Strategies that only want the latest snapshot (e.g.
+        multi_factor's point-in-time value/quality factors) already reduce
+        to one row themselves via their own groupby("symbol").last(), so
+        returning more history here doesn't change their behaviour.
+        """
         if self._fundamentals.empty:
             return pd.DataFrame()
         asof_ts = pd.Timestamp(asof)
@@ -104,7 +119,12 @@ class PointInTimeDataStore:
         filtered = self._fundamentals.loc[mask]
         if filtered.empty:
             return pd.DataFrame()
-        return filtered.sort_values("date").groupby("symbol").last().reset_index()
+        return (
+            filtered.sort_values("date")
+            .groupby("symbol", group_keys=False)
+            .tail(lookback_reports)
+            .reset_index(drop=True)
+        )
 
     def get_sentiment(
         self,

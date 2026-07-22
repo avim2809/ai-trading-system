@@ -91,13 +91,19 @@ class TestGetPrices:
 
 
 class TestGetFundamentals:
-    def test_latest_as_of(self, store: PointInTimeDataStore) -> None:
-        """Only the latest row per symbol as-of asof should be returned."""
+    def test_returns_recent_snapshots_not_just_one(self, store: PointInTimeDataStore) -> None:
+        """Regression: used to always collapse to exactly ONE row per
+        symbol via groupby("symbol").last(), so event-driven surprise
+        detection (which needs >= 2 snapshots to compute anything) could
+        never see more than one data point in production and always fell
+        through to its fallback. Now returns up to lookback_reports recent
+        snapshots, oldest first / newest last."""
         asof = datetime(2020, 1, 4)
         result = store.get_fundamentals(["AAPL"], asof)
-        assert len(result) == 1
-        assert result.iloc[0]["date"] <= pd.Timestamp(asof)
-        assert result.iloc[0]["date"] == pd.Timestamp("2020-01-03")
+        # Both 01-01 and 01-03 are <= asof; 01-05 is excluded (future).
+        assert len(result) == 2
+        assert list(result["date"]) == [pd.Timestamp("2020-01-01"), pd.Timestamp("2020-01-03")]
+        assert (result["date"] <= pd.Timestamp(asof)).all()
 
     def test_no_future_fundamentals(self, store: PointInTimeDataStore) -> None:
         """Fundamentals released after asof must be excluded."""
@@ -105,6 +111,18 @@ class TestGetFundamentals:
         result = store.get_fundamentals(["AAPL"], asof)
         assert len(result) == 1
         assert result.iloc[0]["date"] == pd.Timestamp("2020-01-01")
+
+    def test_lookback_reports_limits_how_far_back(self, store: PointInTimeDataStore) -> None:
+        asof = datetime(2020, 1, 10)  # all 3 fundamentals rows are <= asof
+        result = store.get_fundamentals(["AAPL"], asof, lookback_reports=2)
+        assert len(result) == 2
+        assert list(result["date"]) == [pd.Timestamp("2020-01-03"), pd.Timestamp("2020-01-05")]
+
+    def test_default_lookback_reports_is_4(self, store: PointInTimeDataStore) -> None:
+        asof = datetime(2020, 1, 10)
+        result = store.get_fundamentals(["AAPL"], asof)
+        assert len(result) == 3  # only 3 rows exist total, all within the default of 4
+        assert result.iloc[-1]["date"] == pd.Timestamp("2020-01-05")  # latest is last
 
 
 class TestEmptyResult:
