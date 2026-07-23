@@ -79,6 +79,17 @@ class BacktestEngine:
                 perc=slippage_pct, slip_open=True, slip_match=True, slip_out=False
             )
 
+        # Honour end_date on the trading feed. FirmStrategy already refuses to
+        # trade before start_date (its warmup guard), but nothing trimmed the
+        # tail — so this engine path silently ran to the end of the data
+        # regardless of end_date (the run.py/CLI path trims separately). Trim
+        # here so start_date/end_date behave consistently across entry points.
+        end_date = self.config.get("end_date")
+        if end_date is not None and "date" in getattr(prices_df, "columns", []):
+            prices_df = prices_df[
+                pd.to_datetime(prices_df["date"]) <= pd.Timestamp(end_date)
+            ]
+
         feeds = load_feeds(prices_df, universe)
         for symbol, feed in feeds.items():
             self.cerebro.adddata(feed, name=symbol)
