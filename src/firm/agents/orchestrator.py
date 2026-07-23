@@ -76,7 +76,13 @@ class Orchestrator(Agent):
         memory = context.get("memory")
 
         bb = Blackboard(asof=pit_view.asof)
-        ctx = AgentContext(now=pit_view.asof, pit_view=pit_view, portfolio=portfolio)
+        ctx = AgentContext(
+            now=pit_view.asof,
+            pit_view=pit_view,
+            portfolio=portfolio,
+            config=self.config,
+            strategy_returns=context.get("strategy_returns"),
+        )
 
         # 1. Run analysts in parallel, deterministic merge by domain
         with ThreadPoolExecutor() as pool:

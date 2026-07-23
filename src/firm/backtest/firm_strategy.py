@@ -152,6 +152,17 @@ class FirmStrategy(bt.Strategy):
             "memory": self.p.memory,
         }
 
+        # Feed per-strategy return history to the optimal (inverse-covariance)
+        # signal combination. Gated on the config method so the confidence-
+        # weighted default pays no cost. Early bars have thin history and the
+        # combiner falls back to the confidence-weighted mean per symbol.
+        if self.p.attribution is not None:
+            combo = (getattr(self.p.orchestrator, "config", {}) or {}).get(
+                "signal_combination"
+            ) or {}
+            if combo.get("method") == "optimal":
+                context["strategy_returns"] = self.p.attribution.get_all_strategy_returns()
+
         try:
             orders, blackboard = self.p.orchestrator.step(context)
         except Exception:

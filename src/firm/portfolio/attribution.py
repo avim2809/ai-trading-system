@@ -93,6 +93,20 @@ class PerformanceAttribution:
             return pd.Series(dtype=float)
         return pd.Series(values, index=pd.DatetimeIndex(dates), name=strategy)
 
+    def get_all_strategy_returns(self, min_points: int = 2) -> dict[str, pd.Series]:
+        """Return ``{strategy: return_series}`` for every tracked strategy.
+
+        Strategies with fewer than *min_points* observations are omitted so
+        callers (e.g. the optimal inverse-covariance signal combination) never
+        try to estimate a covariance from near-empty history.
+        """
+        out: dict[str, pd.Series] = {}
+        for strategy in self._strategy_returns:
+            series = self.get_strategy_returns(strategy)
+            if len(series.dropna()) >= min_points:
+                out[strategy] = series
+        return out
+
     def get_strategy_metrics(self) -> dict[str, dict[str, float]]:
         """Compute metrics for each strategy using compute_all_metrics.
 

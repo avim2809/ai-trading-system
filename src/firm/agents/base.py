@@ -28,12 +28,17 @@ class AgentContext:
         pit_view: Read-only point-in-time data accessor bound to ``now``.
         portfolio: Immutable snapshot of the current book.
         config: Arbitrary run configuration (settings/strategy params).
+        strategy_returns: Optional ``{strategy_name: return_series}`` history,
+            used by the optimal (inverse-covariance) signal combination to
+            down-weight correlated/redundant strategies. ``None`` (the default)
+            makes the researchers fall back to the confidence-weighted mean.
     """
 
     now: datetime
     pit_view: "PitView | None" = None
     portfolio: "PortfolioState | None" = None
     config: dict[str, Any] = field(default_factory=dict)
+    strategy_returns: dict[str, Any] | None = None
 
 
 class Agent(ABC):

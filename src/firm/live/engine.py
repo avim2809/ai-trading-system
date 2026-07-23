@@ -104,6 +104,15 @@ class LiveTradingEngine:
         self._news_guard_before = int(ng_cfg.get("before_min", 30))
         self._news_guard_after = int(ng_cfg.get("after_min", 15))
         self._news_guard_offline = bool(ng_cfg.get("offline", False))
+        # Per-strategy return history for the optimal (inverse-covariance)
+        # signal combination. Maintained in-process and only updated when
+        # ``signal_combination.method == 'optimal'`` — so the confidence-
+        # weighted default path is completely unaffected. History resets on
+        # restart; until enough cycles accumulate the combiner falls back to
+        # the confidence-weighted mean per symbol.
+        from firm.portfolio.attribution import PerformanceAttribution
+
+        self._attribution = PerformanceAttribution()
         # Watchdog: a cycle that runs far longer than any normal cycle
         # should (network/broker calls have no universal timeout — e.g. a
         # stale IBKR connection after IB Gateway's mandatory daily restart
@@ -268,6 +277,11 @@ class LiveTradingEngine:
         self._config = {**self._config, "signal_combination": dict(signal_combination)}
         self._orchestrator = build_orchestrator(self._config)
         log.info("Live engine signal_combination updated: %s", signal_combination)
+
+    def _signal_combination_method(self) -> str:
+        """Current research signal-combination method ('confidence'|'optimal')."""
+        combo = self._config.get("signal_combination") or {}
+        return str(combo.get("method", "confidence"))
 
     def update_allocation(
         self,
@@ -547,6 +561,23 @@ class LiveTradingEngine:
                     "prices": prices,
                     "memory": self._memory,
                 }
+
+                # Optimal (inverse-covariance) signal combination: mark the
+                # per-strategy book to today's prices and hand its return
+                # history to the researchers. Gated so the confidence-weighted
+                # default incurs no work and no behaviour change.
+                if self._signal_combination_method() == "optimal":
+                    try:
+                        self._attribution.update_daily(now, prices, self._portfolio.nav)
+                        strategy_returns = self._attribution.get_all_strategy_returns()
+                        if strategy_returns:
+                            context["strategy_returns"] = strategy_returns
+                    except Exception:
+                        log.debug(
+                            "optimal signal-combination attribution update failed",
+                            exc_info=True,
+                        )
+
                 orders, blackboard = self._orchestrator.step(context)
                 result.orders_generated = len(orders)
 
@@ -593,6 +624,17 @@ class LiveTradingEngine:
                     result.order_statuses = [self._status_to_dict(s) for s in statuses]
                     result.failed_orders = failed
                     result.orders_failed = len(failed)
+
+                    # Tag submitted trades to their strategy so the optimal
+                    # signal combination can build per-strategy return history.
+                    if self._signal_combination_method() == "optimal":
+                        try:
+                            self._attribution.record_trades(auto_orders, prices)
+                        except Exception:
+                            log.debug(
+                                "optimal signal-combination trade recording failed",
+                                exc_info=True,
+                            )
 
                 if manual_orders:
                     for strategy, group in self._group_by_strategy(manual_orders).items():
