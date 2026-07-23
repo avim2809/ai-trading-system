@@ -28,23 +28,22 @@ class BearResearcher(Agent):
 
     def run(self, ctx: AgentContext, **inputs: Any) -> list[Thesis]:
         from firm.agents.blackboard import Blackboard
+        from firm.agents.research._combine import net_scores_for_blackboard
 
         blackboard: Blackboard = inputs["blackboard"]
         theses: list[Thesis] = []
+
+        # Symmetric with the bull side: net (signed) score per symbol, using the
+        # confidence-weighted mean by default or the optimal inverse-covariance
+        # combination when configured and return history is available.
+        net_scores = net_scores_for_blackboard(blackboard, ctx, self.config)
 
         for symbol in sorted(blackboard.get_all_symbols()):
             signals = blackboard.get_signals_by_symbol(symbol)
             if not signals:
                 continue
 
-            # Symmetric with the bull side: conviction is the NET (signed)
-            # confidence-weighted mean over ALL signals; a bear thesis is built
-            # only when that net is negative.
-            total_conf = sum(s.confidence for s in signals)
-            if total_conf > 0:
-                net = sum(s.score * s.confidence for s in signals) / total_conf
-            else:
-                net = sum(s.score for s in signals) / len(signals)
+            net = net_scores.get(symbol, 0.0)
 
             if net >= 0:  # not net-bearish – leave to the bull researcher
                 continue

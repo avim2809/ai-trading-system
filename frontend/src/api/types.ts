@@ -41,9 +41,25 @@ export interface RunRequest {
   rebalance_frequency: string
   risk_overrides: Record<string, number>
   regime_overlay?: RegimeOverlayConfig
+  allocation_method?: string
+  kelly_fraction?: number
+  signal_combination?: SignalCombinationConfig
   data_source: string
   seed: number
   notes: string
+}
+
+export interface SignalCombinationConfig {
+  method: string
+  [key: string]: unknown
+}
+
+export interface MonteCarloSummary {
+  n_simulations: number
+  confidence: number
+  drawdowns: Record<string, number>
+  probability_of_loss: Record<string, number>
+  confidence_interval: Record<string, number>
 }
 
 export interface ReportData {
@@ -53,6 +69,8 @@ export interface ReportData {
   period?: { start: string; end: string }
   final_nav?: number
   data_points: number
+  trade_metrics?: Record<string, number>
+  monte_carlo?: MonteCarloSummary
 }
 
 export interface WalkForwardAggMetric {
@@ -63,12 +81,21 @@ export interface WalkForwardAggMetric {
   values: number[]
 }
 
+export interface WalkForwardOverfitting {
+  n_folds: number
+  probabilistic_sharpe?: number
+  deflated_sharpe?: number
+  pbo?: number
+  verdict?: string
+}
+
 export interface WalkForwardResult {
   fold_ids: string[]
   aggregate: {
     n_folds: number
     fold_ids: string[]
     metrics: Record<string, WalkForwardAggMetric>
+    overfitting?: WalkForwardOverfitting
   }
 }
 
@@ -159,6 +186,10 @@ export interface ConfigDefaults {
   universe: Record<string, unknown>
   backtest: Record<string, unknown>
   risk: Record<string, unknown>
+  strategy_params?: Record<string, Record<string, unknown>>
+  allocation_method?: string
+  kelly_fraction?: number
+  signal_combination?: SignalCombinationConfig
 }
 
 // ── Live Trading Types ──
@@ -192,6 +223,10 @@ export interface LiveStartRequest {
   kill_switch_drawdown?: number
   max_daily_trades?: number
   max_daily_turnover?: number
+  news_guard?: LiveConfigNewsGuard
+  signal_combination?: SignalCombinationConfig
+  allocation_method?: string
+  kelly_fraction?: number
 }
 
 export interface LiveAlert {
@@ -294,6 +329,13 @@ export interface LiveConfigUniverse {
   symbols: string[]
 }
 
+export interface LiveConfigNewsGuard {
+  enabled: boolean
+  before_min: number
+  after_min: number
+  offline: boolean
+}
+
 export interface LiveConfig {
   broker: string
   schedule: string
@@ -302,6 +344,10 @@ export interface LiveConfig {
   strategy_params?: Record<string, Record<string, unknown>>
   risk: LiveConfigRisk
   universe: LiveConfigUniverse
+  news_guard?: LiveConfigNewsGuard
+  signal_combination?: SignalCombinationConfig
+  allocation_method?: string
+  kelly_fraction?: number
 }
 
 // ── LLM / AI Types ──

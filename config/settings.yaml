@@ -16,6 +16,17 @@ backtest:
 #   strategies: ["momentum", "trend", "regime_hmm"]
 strategies: []
 
+# Portfolio allocation (TraderAgent) — backtest parity with config/live.yaml.
+#   allocation_method: conviction_weighted | equal_weight | risk_parity | kelly
+#   kelly_fraction only used when allocation_method: kelly (half-Kelly = 0.5)
+allocation_method: conviction_weighted
+kelly_fraction: 0.5
+
+# Research signal combination:
+#   method: confidence (default) | optimal (inverse-covariance weighting)
+signal_combination:
+  method: confidence
+
 # Per-strategy params — mirrored in config/live.yaml for IBKR paper runs.
 strategy_params:
   stat_arb:

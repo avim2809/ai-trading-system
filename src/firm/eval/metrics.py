@@ -7,8 +7,12 @@ otherwise.  Edge cases (empty series, zero variance, zero drawdown) return
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 TRADING_DAYS_PER_YEAR = 252
 
@@ -127,6 +131,78 @@ def hit_rate(returns: pd.Series) -> float:
     if returns.empty:
         return 0.0
     return float((returns > 0).sum() / len(returns))
+
+
+# ---------------------------------------------------------------------------
+# Trade-level metrics
+# ---------------------------------------------------------------------------
+
+def _trade_pnls(trades: list[dict], key: str = "pnl_net") -> list[float]:
+    """Extract numeric per-trade P&L, preferring net then gross."""
+    pnls: list[float] = []
+    for t in trades:
+        val = t.get(key)
+        if val is None:
+            val = t.get("pnl")
+        if isinstance(val, (int, float)) and not pd.isna(val):
+            pnls.append(float(val))
+    return pnls
+
+
+def profit_factor(trades: list[dict]) -> float:
+    """Gross profit / gross loss across closed trades.
+
+    ``inf`` when there are wins but no losses; ``0.0`` when empty or all flat.
+    """
+    pnls = _trade_pnls(trades)
+    gross_profit = sum(p for p in pnls if p > 0)
+    gross_loss = -sum(p for p in pnls if p < 0)
+    if gross_loss == 0:
+        return float("inf") if gross_profit > 0 else 0.0
+    return float(gross_profit / gross_loss)
+
+
+def expectancy(trades: list[dict]) -> float:
+    """Average net P&L per closed trade (expected value of a trade)."""
+    pnls = _trade_pnls(trades)
+    if not pnls:
+        return 0.0
+    return float(sum(pnls) / len(pnls))
+
+
+def trade_win_rate(trades: list[dict]) -> float:
+    """Fraction of closed trades with positive net P&L."""
+    pnls = _trade_pnls(trades)
+    if not pnls:
+        return 0.0
+    return float(sum(1 for p in pnls if p > 0) / len(pnls))
+
+
+def compute_trade_metrics(trades: list[dict]) -> dict[str, float]:
+    """Roll-up of trade-level metrics from a per-trade log.
+
+    Complements the return-based metrics (which operate on the daily equity
+    curve) with statistics only visible at the individual-trade level.
+    """
+    pnls = _trade_pnls(trades)
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    result = {
+        "num_trades": float(len(pnls)),
+        "trade_win_rate": trade_win_rate(trades),
+        "profit_factor": profit_factor(trades),
+        "expectancy": expectancy(trades),
+        "avg_win": float(sum(wins) / len(wins)) if wins else 0.0,
+        "avg_loss": float(sum(losses) / len(losses)) if losses else 0.0,
+        "gross_profit": float(sum(wins)),
+        "gross_loss": float(sum(losses)),
+    }
+    log.debug(
+        "compute_trade_metrics: %d trades, win_rate=%.3f profit_factor=%.3f "
+        "expectancy=%.4f", result["num_trades"], result["trade_win_rate"],
+        result["profit_factor"], result["expectancy"],
+    )
+    return result
 
 
 # ---------------------------------------------------------------------------

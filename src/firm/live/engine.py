@@ -68,6 +68,10 @@ class LiveTradingEngine:
         self._auto_approve: set[str] = set(auto_approve_strategies or [])
 
         self._orchestrator = build_orchestrator(config)
+        # Broker type string (e.g. "ibkr_paper", "ibkr_live"). The API router
+        # overrides this after construction; default from config so the
+        # execution-safety live lock works even for engines built directly.
+        self._broker_type: str = str(config.get("broker", ""))
         self._enabled_strategies: list[str] = list(config.get("strategies") or self._all_strategy_names())
         initial_capital = config.get("initial_capital", 100_000)
         self._portfolio = PortfolioState(initial_capital=initial_capital)
@@ -92,6 +96,14 @@ class LiveTradingEngine:
         # anyway. Scheduled cycles always respect this; a manual /live/trigger
         # can override with force=True for deliberate off-hours testing.
         self._respect_market_hours = bool(config.get("respect_market_hours", True))
+        # Macro-event blackout gate (news-guard). Default OFF — when enabled it
+        # holds orders whose instrument sits inside a high-impact economic-event
+        # window (FOMC/NFP/CPI...). ``offline`` uses only the bundled calendar.
+        ng_cfg = config.get("news_guard") or {}
+        self._news_guard_enabled = bool(ng_cfg.get("enabled", False))
+        self._news_guard_before = int(ng_cfg.get("before_min", 30))
+        self._news_guard_after = int(ng_cfg.get("after_min", 15))
+        self._news_guard_offline = bool(ng_cfg.get("offline", False))
         # Watchdog: a cycle that runs far longer than any normal cycle
         # should (network/broker calls have no universal timeout — e.g. a
         # stale IBKR connection after IB Gateway's mandatory daily restart
@@ -212,6 +224,68 @@ class LiveTradingEngine:
         self._orchestrator = build_orchestrator(self._config)
         log.info("Live engine strategy_params updated: %s", list(strategy_params))
 
+    def update_news_guard(
+        self,
+        enabled: bool | None = None,
+        before_min: int | None = None,
+        after_min: int | None = None,
+        offline: bool | None = None,
+    ) -> None:
+        """Update the macro-event blackout gate on a running engine.
+
+        Takes effect on the next cycle. Keeps ``_config['news_guard']`` in sync
+        so a subsequent orchestrator rebuild preserves the setting.
+        """
+        if enabled is not None:
+            self._news_guard_enabled = bool(enabled)
+        if before_min is not None:
+            self._news_guard_before = int(before_min)
+        if after_min is not None:
+            self._news_guard_after = int(after_min)
+        if offline is not None:
+            self._news_guard_offline = bool(offline)
+        self._config = {
+            **self._config,
+            "news_guard": {
+                "enabled": self._news_guard_enabled,
+                "before_min": self._news_guard_before,
+                "after_min": self._news_guard_after,
+                "offline": self._news_guard_offline,
+            },
+        }
+        log.info(
+            "Live engine news_guard updated: enabled=%s before=%d after=%d offline=%s",
+            self._news_guard_enabled, self._news_guard_before,
+            self._news_guard_after, self._news_guard_offline,
+        )
+
+    def update_signal_combination(self, signal_combination: dict[str, Any]) -> None:
+        """Switch the research signal-combination method and rebuild the pipeline.
+
+        ``{"method": "confidence"|"optimal"}``. The bull/bear researchers read
+        this from config at construction, so the orchestrator is rebuilt.
+        """
+        self._config = {**self._config, "signal_combination": dict(signal_combination)}
+        self._orchestrator = build_orchestrator(self._config)
+        log.info("Live engine signal_combination updated: %s", signal_combination)
+
+    def update_allocation(
+        self,
+        allocation_method: str | None = None,
+        kelly_fraction: float | None = None,
+    ) -> None:
+        """Switch the TraderAgent allocation method and rebuild the pipeline."""
+        updates: dict[str, Any] = {}
+        if allocation_method is not None:
+            updates["allocation_method"] = allocation_method
+        if kelly_fraction is not None:
+            updates["kelly_fraction"] = float(kelly_fraction)
+        if not updates:
+            return
+        self._config = {**self._config, **updates}
+        self._orchestrator = build_orchestrator(self._config)
+        log.info("Live engine allocation updated: %s", updates)
+
     def update_risk(
         self,
         kill_switch_drawdown: float | None = None,
@@ -295,6 +369,52 @@ class LiveTradingEngine:
             except Exception:
                 log.warning("Alert callback failed", exc_info=True)
         return alert
+
+    def _apply_news_guard(
+        self, orders: list[dict[str, Any]], now: datetime, result: CycleResult
+    ) -> list[dict[str, Any]]:
+        """Hold orders whose instrument sits inside a high-impact event window.
+
+        Returns the orders that are cleared to proceed. Held orders are dropped
+        from this cycle (they are re-generated next cycle once the window
+        passes) and each is surfaced as a warning alert. No-op when the gate is
+        disabled (the default).
+        """
+        if not self._news_guard_enabled or not orders:
+            return orders
+
+        from datetime import timezone
+
+        from firm.live import news_guard as ng
+
+        at = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+        try:
+            events, source = ng.load_events(offline=self._news_guard_offline)
+        except Exception as exc:  # never let the calendar break the cycle
+            log.warning("news-guard calendar load failed: %s", exc)
+            return orders
+
+        allowed: list[dict[str, Any]] = []
+        for o in orders:
+            symbol = o.get("symbol", "")
+            try:
+                res = ng.decide(
+                    symbol, at, events,
+                    self._news_guard_before, self._news_guard_after, source,
+                )
+            except Exception as exc:
+                log.warning("news-guard decide failed for %s: %s", symbol, exc)
+                allowed.append(o)
+                continue
+            if res.get("decision") == "block":
+                alert = self._emit_alert(
+                    "news_guard_blackout", "warning", res.get("reason", ""),
+                    symbol=symbol, blocking_event=res.get("blocking_event"),
+                )
+                result.alerts.append(alert)
+            else:
+                allowed.append(o)
+        return allowed
 
     def _check_drawdown(self, result: CycleResult) -> None:
         """Update peak equity and trip the kill switch on a drawdown breach."""
@@ -446,6 +566,15 @@ class LiveTradingEngine:
 
                 if not orders:
                     log.info("Cycle %d: no orders generated", self._cycle_count)
+                    self._cycle_history.append(result)
+                    return result
+
+                # Macro-event blackout: hold orders in a high-impact event window.
+                orders = self._apply_news_guard(orders, now, result)
+                if not orders:
+                    log.info(
+                        "Cycle %d: all orders held by news-guard", self._cycle_count
+                    )
                     self._cycle_history.append(result)
                     return result
 
@@ -631,9 +760,25 @@ class LiveTradingEngine:
         deterministic ``client_order_id`` so the broker can deduplicate a
         re-submission of the same cycle's order.
         """
+        from firm.live.execution_safety import guard_live_submission
+
         statuses: list[OrderStatus] = []
         failed: list[dict[str, Any]] = []
         for o in orders:
+            # Hard env lock: a live broker must have FIRM_ALLOW_TRADING=1 set in
+            # the service environment or the order is blocked (never silently
+            # downgraded) and audited. Paper brokers pass straight through.
+            gate = guard_live_submission(
+                self._broker_type, o, cycle_id=cycle_id
+            )
+            if not gate["allowed"]:
+                failed.append({**o, "error": gate["reason"]})
+                self._emit_alert(
+                    "live_trading_locked", "critical", gate["reason"],
+                    symbol=o.get("symbol"), audit_id=gate["audit_id"],
+                )
+                continue
+
             req = OrderRequest(
                 symbol=o["symbol"],
                 side=o["side"],

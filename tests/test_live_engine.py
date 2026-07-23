@@ -1082,3 +1082,107 @@ class TestCycleResult:
         assert r.orders_generated == 0
         assert r.error is None
         assert r.approval_ids == []
+
+
+# ---------------------------------------------------------------------------
+# News-guard blackout gate
+# ---------------------------------------------------------------------------
+
+class TestNewsGuardGate:
+    @patch("firm.live.engine.build_orchestrator")
+    def _engine(self, mock_build, tmp_path, news_guard):
+        mock_build.return_value = MagicMock()
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["SPY"])
+        queue = ApprovalQueue(broker=broker)
+        config = {
+            "initial_capital": 100_000,
+            "memory_log_path": str(tmp_path / "decisions.jsonl"),
+            "news_guard": news_guard,
+        }
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+
+    def test_blocks_orders_in_event_window(self, tmp_path):
+        engine = self._engine(
+            tmp_path=tmp_path,
+            news_guard={"enabled": True, "offline": True},
+        )
+        result = CycleResult(cycle_id=1, timestamp=datetime.utcnow())
+        # 18:05 UTC on FOMC day is inside the bundled-CSV blackout window.
+        at = datetime(2026, 7, 29, 18, 5)
+        allowed = engine._apply_news_guard(
+            [{"symbol": "SPY", "side": "buy", "quantity": 1}], at, result
+        )
+        assert allowed == []
+        assert any(a["kind"] == "news_guard_blackout" for a in result.alerts)
+
+    def test_allows_orders_in_quiet_window(self, tmp_path):
+        engine = self._engine(
+            tmp_path=tmp_path,
+            news_guard={"enabled": True, "offline": True},
+        )
+        result = CycleResult(cycle_id=1, timestamp=datetime.utcnow())
+        at = datetime(2026, 7, 20, 12, 0)  # no event nearby
+        orders = [{"symbol": "SPY", "side": "buy", "quantity": 1}]
+        assert engine._apply_news_guard(orders, at, result) == orders
+
+    def test_disabled_is_noop(self, tmp_path):
+        engine = self._engine(
+            tmp_path=tmp_path,
+            news_guard={"enabled": False},
+        )
+        result = CycleResult(cycle_id=1, timestamp=datetime.utcnow())
+        at = datetime(2026, 7, 29, 18, 5)
+        orders = [{"symbol": "SPY", "side": "buy", "quantity": 1}]
+        assert engine._apply_news_guard(orders, at, result) == orders
+
+
+# ---------------------------------------------------------------------------
+# Execution-safety live lock in _execute_orders
+# ---------------------------------------------------------------------------
+
+class TestExecutionSafetyGate:
+    @patch("firm.live.engine.build_orchestrator")
+    def _engine(self, mock_build, tmp_path, broker_type):
+        mock_build.return_value = MagicMock()
+        broker = MockBroker()
+        broker.connect()
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {
+            "initial_capital": 100_000,
+            "memory_log_path": str(tmp_path / "decisions.jsonl"),
+        }
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine._broker_type = broker_type
+        return engine, broker
+
+    def test_live_broker_blocked_without_env(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FIRM_ALLOW_TRADING", raising=False)
+        monkeypatch.setenv("FIRM_EXECUTION_AUDIT", str(tmp_path / "audit.jsonl"))
+        engine, broker = self._engine(tmp_path=tmp_path, broker_type="ibkr_live")
+        statuses, failed = engine._execute_orders(_make_orders())
+        assert statuses == []
+        assert len(failed) == 2
+        assert all("FIRM_ALLOW_TRADING" in f["error"] for f in failed)
+        assert any(a["kind"] == "live_trading_locked" for a in engine.alerts)
+
+    def test_paper_broker_submits(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("FIRM_ALLOW_TRADING", raising=False)
+        monkeypatch.setenv("FIRM_EXECUTION_AUDIT", str(tmp_path / "audit.jsonl"))
+        engine, broker = self._engine(tmp_path=tmp_path, broker_type="ibkr_paper")
+        statuses, failed = engine._execute_orders(_make_orders())
+        assert len(statuses) == 2
+        assert failed == []
+
+    def test_live_broker_submits_with_env(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FIRM_ALLOW_TRADING", "1")
+        monkeypatch.setenv("FIRM_EXECUTION_AUDIT", str(tmp_path / "audit.jsonl"))
+        engine, broker = self._engine(tmp_path=tmp_path, broker_type="alpaca_live")
+        statuses, failed = engine._execute_orders(_make_orders())
+        assert len(statuses) == 2
+        assert failed == []

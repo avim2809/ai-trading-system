@@ -92,4 +92,7 @@ def config_defaults():
         "backtest": settings.backtest.model_dump(),
         "risk": settings.risk.model_dump(),
         "strategy_params": settings.strategy_params,
+        "allocation_method": settings.allocation_method,
+        "kelly_fraction": settings.kelly_fraction,
+        "signal_combination": settings.signal_combination or {"method": "confidence"},
     }

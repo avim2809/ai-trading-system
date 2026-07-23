@@ -326,6 +326,39 @@ class TestExperimentRunner:
         assert agg["n_folds"] == 0
         assert agg["metrics"] == {}
 
+    def test_aggregate_walk_forward_includes_overfitting(self, tmp_path):
+        """Folds with equity artifacts get a PBO/DSR overfitting block."""
+        from datetime import datetime
+
+        runs = []
+        for i in range(5):
+            art = tmp_path / f"fold{i}"
+            art.mkdir()
+            nav = [100_000.0]
+            for _ in range(40):
+                nav.append(nav[-1] * (1 + 0.001))  # steady OOS drift
+            (art / "equity.json").write_text(
+                json.dumps({"dates": [], "values": nav}), encoding="utf-8"
+            )
+            runs.append(
+                ExperimentRun(
+                    run_id=f"r{i}",
+                    config={},
+                    config_hash="x",
+                    start_time=datetime.now(),
+                    status="completed",
+                    metrics={"sharpe_ratio": 1.0},
+                    artifacts_dir=str(art),
+                )
+            )
+
+        agg = ExperimentRunner.aggregate_walk_forward(runs)
+        assert "overfitting" in agg
+        of = agg["overfitting"]
+        assert of["n_folds"] == 5
+        assert "deflated_sharpe" in of
+        assert of["deflated_sharpe"] <= of["probabilistic_sharpe"] + 1e-9
+
     def test_in_sample_oos_config_splitting(self, tmp_runs_dir, sample_config):
         runner = ExperimentRunner(registry=RunRegistry(base_dir=tmp_runs_dir))
         is_run, oos_run = runner.run_in_sample_oos(

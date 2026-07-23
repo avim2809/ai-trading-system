@@ -63,8 +63,8 @@ export default function RunDetail() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-6">
+        <div className="min-w-0">
           <Link to="/" className="text-sm text-slate-400 hover:text-slate-300 mb-2 inline-block">
             &larr; Dashboard
           </Link>
@@ -80,6 +80,17 @@ export default function RunDetail() {
             <p className="text-sm text-slate-400 mt-1 italic">{run.notes}</p>
           )}
         </div>
+        {isComplete && (
+          <a
+            href={api.tearsheetUrl(run.run_id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-4 py-2 bg-slate-700 border border-slate-600 text-slate-200 rounded-lg text-sm hover:bg-slate-600 transition-colors whitespace-nowrap flex-shrink-0"
+            title="Open the full QuantStats HTML tear-sheet in a new tab (requires the 'report' extra installed on the server)"
+          >
+            Open Tear-Sheet ↗
+          </a>
+        )}
       </div>
 
       {/* Config summary */}
@@ -145,6 +156,48 @@ export default function RunDetail() {
                 <MetricCard label="Information Ratio" value={report.benchmark['information_ratio'] ?? 0} format="ratio" />
                 <MetricCard label="Excess Return" value={report.benchmark['excess_return'] ?? 0} format="pct" />
                 <MetricCard label="Benchmark Return" value={report.benchmark['benchmark_total_return'] ?? 0} format="pct" />
+              </div>
+            </div>
+          )}
+
+          {report.trade_metrics && Object.keys(report.trade_metrics).length > 0 && (
+            <div className="mb-6">
+              <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">
+                Trade-Level Metrics
+              </h2>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                <MetricCard label="Trades" value={report.trade_metrics['num_trades'] ?? 0} format="ratio" />
+                <MetricCard label="Win Rate" value={report.trade_metrics['trade_win_rate'] ?? 0} format="pct" />
+                <MetricCard label="Profit Factor" value={report.trade_metrics['profit_factor'] ?? 0} format="ratio" />
+                <MetricCard label="Expectancy" value={report.trade_metrics['expectancy'] ?? 0} format="currency" />
+                <MetricCard label="Avg Win" value={report.trade_metrics['avg_win'] ?? 0} format="currency" />
+                <MetricCard label="Avg Loss" value={report.trade_metrics['avg_loss'] ?? 0} format="currency" />
+              </div>
+            </div>
+          )}
+
+          {report.monte_carlo && (
+            <div className="mb-6 bg-slate-800 rounded-xl border border-slate-700 p-5">
+              <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-1">
+                Monte Carlo Robustness
+              </h2>
+              <p className="text-xs text-slate-500 mb-4">
+                Bootstrap of {(report.monte_carlo.n_simulations ?? 0).toLocaleString()} resampled
+                return paths ({Math.round((report.monte_carlo.confidence ?? 0.95) * 100)}% confidence).
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {Object.entries(report.monte_carlo.drawdowns ?? {}).map(([k, v]) => (
+                  <div key={k} className="bg-slate-900/50 rounded-lg px-4 py-3">
+                    <p className="text-[10px] text-slate-500 uppercase">{k.replace(/_/g, ' ')}</p>
+                    <p className="text-lg font-mono text-red-400">{(v * 100).toFixed(2)}%</p>
+                  </div>
+                ))}
+                {Object.entries(report.monte_carlo.probability_of_loss ?? {}).map(([k, v]) => (
+                  <div key={`pol-${k}`} className="bg-slate-900/50 rounded-lg px-4 py-3">
+                    <p className="text-[10px] text-slate-500 uppercase">P(loss) @ {k}</p>
+                    <p className="text-lg font-mono text-amber-400">{(v * 100).toFixed(1)}%</p>
+                  </div>
+                ))}
               </div>
             </div>
           )}

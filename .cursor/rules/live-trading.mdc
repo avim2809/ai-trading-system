@@ -30,6 +30,13 @@ Full reference: `docs/PROJECT_CONTEXT.md`
 
 Only `full_auto` and `semi_auto` are valid. Anything else queues all orders.
 
+## Live config round-trip (behavioural knobs)
+
+- `GET`/`PUT /api/live/config` and `POST /api/live/start` round-trip `news_guard`, `signal_combination`, `allocation_method`, `kelly_fraction` (alongside strategies/risk/universe)
+- Apply on a running engine via setters: `update_news_guard()` (sets `_news_guard_*` attrs), `update_signal_combination()` / `update_allocation()` (merge `_config` + **rebuild orchestrator**)
+- YAML in `config/live.yaml`; `resolve_live_startup()` seeds `engine_config`; explicit request fields override
+- UI: `frontend/src/pages/LiveConfig.tsx`
+
 ## Ops
 
 - Status: `GET /api/live/status` — watch `cycle_running_seconds` for stuck cycles

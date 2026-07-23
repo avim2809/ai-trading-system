@@ -81,6 +81,15 @@ export default function LiveConfig() {
   const [symbols, setSymbols] = useState('')
   const [strategyParams, setStrategyParams] = useState<Record<string, Record<string, unknown>>>({})
 
+  // Behavioural knobs
+  const [newsGuardEnabled, setNewsGuardEnabled] = useState(false)
+  const [newsGuardBefore, setNewsGuardBefore] = useState('30')
+  const [newsGuardAfter, setNewsGuardAfter] = useState('15')
+  const [newsGuardOffline, setNewsGuardOffline] = useState(false)
+  const [allocationMethod, setAllocationMethod] = useState('conviction_weighted')
+  const [kellyFraction, setKellyFraction] = useState('0.5')
+  const [signalCombination, setSignalCombination] = useState('confidence')
+
   // AI / LLM state
   const { data: llmProviders } = useQuery<LLMProvider[]>({
     queryKey: ['llm-providers'],
@@ -153,6 +162,13 @@ export default function LiveConfig() {
     setMaxDailyTurnover(String(config.risk?.max_daily_turnover ?? 0.5))
     setSymbols((config.universe?.symbols ?? []).join(', '))
     setStrategyParams(config.strategy_params ?? {})
+    setNewsGuardEnabled(config.news_guard?.enabled ?? false)
+    setNewsGuardBefore(String(config.news_guard?.before_min ?? 30))
+    setNewsGuardAfter(String(config.news_guard?.after_min ?? 15))
+    setNewsGuardOffline(config.news_guard?.offline ?? false)
+    setAllocationMethod(config.allocation_method ?? 'conviction_weighted')
+    setKellyFraction(String(config.kelly_fraction ?? 0.5))
+    setSignalCombination(config.signal_combination?.method ?? 'confidence')
   }, [config])
 
   const saveMut = useMutation({
@@ -195,6 +211,15 @@ export default function LiveConfig() {
         symbols: symbols.split(',').map((s) => s.trim()).filter(Boolean),
       },
       strategy_params: strategyParams,
+      news_guard: {
+        enabled: newsGuardEnabled,
+        before_min: parseInt(newsGuardBefore) || 30,
+        after_min: parseInt(newsGuardAfter) || 15,
+        offline: newsGuardOffline,
+      },
+      signal_combination: { method: signalCombination },
+      allocation_method: allocationMethod,
+      kelly_fraction: parseFloat(kellyFraction) || 0.5,
     }
     saveMut.mutate(payload)
 
@@ -468,6 +493,113 @@ export default function LiveConfig() {
                 className={inputCls}
               />
               <p className="text-xs text-slate-500 mt-1">Fraction of portfolio value</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Allocation & Signal Combination */}
+        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
+          <h3 className="text-sm font-semibold text-slate-300 mb-4">Allocation & Signal Combination</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Allocation method</label>
+              <select
+                value={allocationMethod}
+                onChange={(e) => setAllocationMethod(e.target.value)}
+                className={inputCls}
+              >
+                <option value="conviction_weighted">Conviction Weighted</option>
+                <option value="equal_weight">Equal Weight</option>
+                <option value="risk_parity">Risk Parity</option>
+                <option value="kelly">Kelly</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                Kelly fraction {allocationMethod !== 'kelly' && <span className="text-slate-600">(kelly only)</span>}
+              </label>
+              <input
+                type="number"
+                step="0.05"
+                min="0"
+                max="1"
+                value={kellyFraction}
+                disabled={allocationMethod !== 'kelly'}
+                onChange={(e) => setKellyFraction(e.target.value)}
+                className={inputCls + ' disabled:opacity-40'}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Signal combination</label>
+              <select
+                value={signalCombination}
+                onChange={(e) => setSignalCombination(e.target.value)}
+                className={inputCls}
+              >
+                <option value="confidence">Confidence-Weighted</option>
+                <option value="optimal">Optimal (inverse-variance)</option>
+              </select>
+            </div>
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            Takes effect on the next cycle (rebuilds the research/trader pipeline).
+          </p>
+        </div>
+
+        {/* News-Guard Blackout */}
+        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              type="button"
+              onClick={() => setNewsGuardEnabled(!newsGuardEnabled)}
+              className="flex items-center gap-2 text-xs"
+            >
+              <div className={`w-9 h-5 rounded-full relative transition-colors ${newsGuardEnabled ? 'bg-blue-600' : 'bg-slate-600'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${newsGuardEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </div>
+            </button>
+            <h3 className="text-sm font-semibold text-slate-300">News-Guard Macro-Event Blackout</h3>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">
+            Blocks new orders around high-impact macro events (rate decisions, CPI, NFP). Uses the
+            bundled offline event calendar unless a live source is configured.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Blackout before (min)</label>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={newsGuardBefore}
+                disabled={!newsGuardEnabled}
+                onChange={(e) => setNewsGuardBefore(e.target.value)}
+                className={inputCls + ' disabled:opacity-40'}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Blackout after (min)</label>
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={newsGuardAfter}
+                disabled={!newsGuardEnabled}
+                onChange={(e) => setNewsGuardAfter(e.target.value)}
+                className={inputCls + ' disabled:opacity-40'}
+              />
+            </div>
+            <div className="flex items-end pb-1">
+              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newsGuardOffline}
+                  disabled={!newsGuardEnabled}
+                  onChange={(e) => setNewsGuardOffline(e.target.checked)}
+                  className="rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 disabled:opacity-40"
+                />
+                Force offline calendar
+              </label>
             </div>
           </div>
         </div>

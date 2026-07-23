@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     strategies: list[str] = []
     # Per-strategy constructor params (e.g. stat_arb predefined_pairs).
     strategy_params: dict[str, Any] = Field(default_factory=dict)
+    # Portfolio allocation method: conviction_weighted | equal_weight |
+    # risk_parity | kelly. ``kelly_fraction`` only used when method == kelly.
+    allocation_method: str = "conviction_weighted"
+    kelly_fraction: float = 0.5
+    # Research signal combination: {"method": "confidence"|"optimal"}.
+    signal_combination: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

@@ -22,6 +22,12 @@ class RunRequest(BaseModel):
     # default. Nested (enable flag + exposure_map), so it cannot ride in the
     # number-only ``risk_overrides`` map.
     regime_overlay: dict | None = None
+    # Portfolio allocation + research combination (fall back to settings.yaml
+    # defaults when omitted). allocation_method: conviction_weighted |
+    # equal_weight | risk_parity | kelly. signal_combination: {"method": ...}.
+    allocation_method: str | None = None
+    kelly_fraction: float | None = None
+    signal_combination: dict | None = None
     data_source: str = "synthetic"
     seed: int = 42
     notes: str = ""

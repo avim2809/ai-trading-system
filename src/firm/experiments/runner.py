@@ -7,6 +7,7 @@ randomness, walk-forward analysis, and in-sample/OOS splitting.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import random
 from datetime import datetime
@@ -17,6 +18,8 @@ import numpy as np
 import yaml
 
 from firm.experiments.registry import ExperimentRun, RunRegistry
+
+log = logging.getLogger(__name__)
 
 
 class ExperimentRunner:
@@ -109,6 +112,7 @@ class ExperimentRunner:
         for key in (
             "strategy_params", "regime_overlay", "agent_modes",
             "llm_config", "universe_symbols",
+            "allocation_method", "kelly_fraction", "signal_combination",
         ):
             if key in config:
                 flat[key] = config[key]
@@ -251,7 +255,61 @@ class ExperimentRunner:
                 "max": max(vals),
                 "values": vals,
             }
-        return {"n_folds": len(completed), "fold_ids": fold_ids, "metrics": agg}
+
+        result: dict[str, Any] = {
+            "n_folds": len(completed),
+            "fold_ids": fold_ids,
+            "metrics": agg,
+        }
+
+        # Formal overfitting read (PBO / Deflated Sharpe) across the OOS folds.
+        overfitting = ExperimentRunner._walk_forward_overfitting(completed)
+        if overfitting:
+            result["overfitting"] = overfitting
+        return result
+
+    @staticmethod
+    def _walk_forward_overfitting(runs: list[ExperimentRun]) -> dict[str, Any]:
+        """Load each fold's OOS returns and run the Bailey/LdP overfitting checks.
+
+        Reads ``equity.json`` from each fold's artifacts dir, converts the NAV
+        curve to per-period returns, and delegates to
+        :func:`firm.eval.overfitting.walk_forward_overfitting`. Degrades to an
+        empty dict if the equity artifacts are missing or too short.
+        """
+        from firm.eval.overfitting import walk_forward_overfitting
+
+        fold_returns: list[list[float]] = []
+        for r in runs:
+            equity_path = Path(r.artifacts_dir) / "equity.json"
+            if not equity_path.exists():
+                log.debug(
+                    "overfitting: fold %s has no equity.json; skipping",
+                    getattr(r, "run_id", "?"),
+                )
+                continue
+            try:
+                data = json.loads(equity_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                log.warning(
+                    "overfitting: could not read %s (%s); skipping fold",
+                    equity_path, exc,
+                )
+                continue
+            values = [float(v) for v in data.get("values", []) if v]
+            if len(values) < 3:
+                continue
+            rets = [
+                values[i] / values[i - 1] - 1.0
+                for i in range(1, len(values))
+                if values[i - 1] > 0
+            ]
+            if len(rets) >= 2:
+                fold_returns.append(rets)
+
+        if len(fold_returns) < 2:
+            return {}
+        return walk_forward_overfitting([np.asarray(f) for f in fold_returns])
 
     @staticmethod
     def _compute_walk_forward_splits(

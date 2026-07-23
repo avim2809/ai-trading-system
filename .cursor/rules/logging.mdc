@@ -1,0 +1,43 @@
+---
+description: Logging & traceability conventions for all modules (esp. new ones)
+alwaysApply: true
+---
+
+# Logging & Traceability
+
+Every module must be traceable through stdlib `logging` — no `print`, no silent
+control flow. This is required for new modules and when touching existing ones.
+
+## Baseline
+
+- Top of each module: `import logging` then `log = logging.getLogger(__name__)`.
+- Never configure handlers/levels in library code (only the app/CLI entrypoint does).
+- Use `%`-style lazy args: `log.info("x=%s", x)` — not f-strings in the log call.
+
+## What to log (traceability, not spam)
+
+- **Decisions & branches**: which path/method was taken and why (e.g. allocation
+  method chosen, `optimal` vs `confidence` combination, block vs approve).
+- **Fallbacks/degradations**: any silent fallback must log at `debug`/`warning`
+  (e.g. Kelly → conviction weighting, optimal → confidence mean, live calendar →
+  bundled CSV). Never swallow an exception with a bare `pass`.
+- **External I/O & failures**: network/file loads and their outcome; log caught
+  exceptions with context (`log.warning("... (%s)", exc)` or `log.exception(...)`).
+- **Safety-critical events** at `warning`/`error`: execution-gate blocks,
+  news-guard blackouts, kill-switch trips, risk-limit breaches. Include the
+  audit id / symbol / cycle where available.
+- **Entry/summary** of expensive computations at `debug`/`info` (inputs sized,
+  key outputs), e.g. overfitting verdict, Monte Carlo sim counts, tear-sheet render.
+
+## Levels
+
+- `debug`: routine internals, per-item decisions, fallbacks in hot loops.
+- `info`: notable state (engine/config changes, renders, calendar source loaded).
+- `warning`: recoverable problems, blocked/degraded behaviour.
+- `error`/`exception`: failures; use `log.exception` inside `except` to keep the traceback.
+
+## Reference implementations
+
+`eval/overfitting.py`, `eval/robustness.py`, `eval/tearsheet.py`,
+`live/news_guard.py`, `live/execution_safety.py` (also writes an immutable audit
+JSONL), `agents/research/_combine.py`, `agents/trader.py` (Kelly fallback).

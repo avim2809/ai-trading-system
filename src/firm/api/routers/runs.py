@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
@@ -17,6 +18,8 @@ from firm.api.schemas import (
 )
 from firm.config import get_settings
 from firm.experiments.registry import RunRegistry
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -117,6 +120,54 @@ def get_equity(run_id: str):
     return json.loads(equity_path.read_text(encoding="utf-8"))
 
 
+@router.get("/runs/{run_id}/tearsheet")
+def get_tearsheet(run_id: str):
+    """Render (and cache) a QuantStats HTML tear-sheet for a run.
+
+    Requires the optional ``report`` extra (``pip install -e '.[report]'``);
+    returns 503 with an install hint when quantstats is unavailable.
+    """
+    from fastapi.responses import HTMLResponse
+
+    registry = _get_registry()
+    run = registry.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail=f"Run {run_id!r} not found")
+
+    artifacts = Path(run.artifacts_dir)
+    html_path = artifacts / "tearsheet.html"
+    if html_path.exists():
+        return HTMLResponse(html_path.read_text(encoding="utf-8"))
+
+    equity_path = artifacts / "equity.json"
+    if not equity_path.exists():
+        raise HTTPException(status_code=404, detail="Equity data not yet available")
+
+    import pandas as pd
+
+    data = json.loads(equity_path.read_text(encoding="utf-8"))
+    dates = data.get("dates", [])
+    values = data.get("values", [])
+    if len(values) < 2:
+        raise HTTPException(status_code=422, detail="Not enough equity data to render")
+    nav = pd.Series(values, index=pd.to_datetime(dates))
+    returns = nav.pct_change().dropna()
+
+    try:
+        from firm.eval.tearsheet import render_tearsheet
+
+        log.info("Rendering tear-sheet for run %s", run_id)
+        render_tearsheet(returns, out_html=str(html_path), title=f"Run {run_id}")
+    except ImportError as exc:
+        log.warning("Tear-sheet unavailable for run %s: %s", run_id, exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:  # pragma: no cover - rendering edge cases
+        log.exception("Tear-sheet rendering failed for run %s", run_id)
+        raise HTTPException(status_code=500, detail=f"Tear-sheet failed: {exc}") from exc
+
+    return HTMLResponse(html_path.read_text(encoding="utf-8"))
+
+
 @router.post("/runs")
 def launch_run(req: RunRequest):
     registry = _get_registry()
@@ -137,6 +188,12 @@ def launch_run(req: RunRequest):
         "rebalance_frequency": req.rebalance_frequency,
         "strategies": req.strategies,
         "strategy_params": req.strategy_params,
+        "allocation_method": req.allocation_method or settings.allocation_method,
+        "kelly_fraction": (
+            req.kelly_fraction if req.kelly_fraction is not None
+            else settings.kelly_fraction
+        ),
+        "signal_combination": req.signal_combination or settings.signal_combination,
         "data_source": req.data_source,
         "seed": req.seed,
         **req.risk_overrides,
@@ -180,6 +237,12 @@ def launch_walk_forward(req: WalkForwardRequest):
         },
         "strategies": {"enabled": req.strategies},
         "strategy_params": req.strategy_params,
+        "allocation_method": req.allocation_method or settings.allocation_method,
+        "kelly_fraction": (
+            req.kelly_fraction if req.kelly_fraction is not None
+            else settings.kelly_fraction
+        ),
+        "signal_combination": req.signal_combination or settings.signal_combination,
         "data_source": req.data_source,
         "seed": req.seed,
         "risk": {**settings.risk.model_dump(), **req.risk_overrides},

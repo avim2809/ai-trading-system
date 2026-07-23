@@ -59,6 +59,10 @@ llm = [
 local = [
     "sentence-transformers",
 ]
+# Optional: QuantStats HTML tear-sheet reporting (firm.eval.tearsheet).
+report = [
+    "quantstats>=0.0.62",
+]
 
 [project.scripts]
 fetch-data = "firm.scripts.fetch_data:main"

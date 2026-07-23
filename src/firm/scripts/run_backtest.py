@@ -34,6 +34,11 @@ def main() -> None:
         default=None,
         help="Directory for run artifacts (default: runs/<timestamp>)",
     )
+    parser.add_argument(
+        "--tearsheet",
+        action="store_true",
+        help="Also render a QuantStats HTML tear-sheet (needs the 'report' extra)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -62,6 +67,11 @@ def main() -> None:
     merged_config = {**bt_config, **risk_config, "strategies": settings.strategies}
     if settings.strategy_params:
         merged_config["strategy_params"] = settings.strategy_params
+    # Optional signal-combination / allocation knobs (backtest parity with live).
+    merged_config["allocation_method"] = settings.allocation_method
+    merged_config["kelly_fraction"] = settings.kelly_fraction
+    if settings.signal_combination:
+        merged_config["signal_combination"] = settings.signal_combination
     orchestrator = build_orchestrator(merged_config)
 
     from firm.backtest.engine import BacktestEngine
@@ -83,6 +93,25 @@ def main() -> None:
 
     report.save(str(out / "report.json"))
     log.info("Results saved to %s", out)
+
+    if args.tearsheet:
+        try:
+            from firm.eval.tearsheet import render_tearsheet
+
+            html_path = render_tearsheet(
+                report.returns,
+                benchmark=(
+                    report.benchmark_returns
+                    if not report.benchmark_returns.empty
+                    else None
+                ),
+                out_html=str(out / "tearsheet.html"),
+            )
+            log.info("Tear-sheet written to %s", html_path)
+        except ImportError as exc:
+            log.error("Tear-sheet skipped: %s", exc)
+        except Exception as exc:
+            log.error("Tear-sheet rendering failed: %s", exc)
 
 
 if __name__ == "__main__":

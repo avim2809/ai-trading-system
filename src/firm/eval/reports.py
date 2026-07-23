@@ -73,6 +73,35 @@ class BacktestReport:
         return self.attribution.summary()
 
     # ------------------------------------------------------------------
+    # Trade-level & robustness
+    # ------------------------------------------------------------------
+
+    def trade_metrics_summary(self) -> dict[str, float]:
+        """Trade-level roll-up (profit factor, expectancy, win rate...).
+
+        Empty dict when the run produced no closed trades.
+        """
+        if not self.trades:
+            return {}
+        from firm.eval.metrics import compute_trade_metrics
+
+        return compute_trade_metrics(self.trades)
+
+    def monte_carlo_summary(
+        self, n_simulations: int = 1000, seed: int = 42
+    ) -> dict[str, object]:
+        """Bootstrap Monte Carlo robustness read on the daily returns.
+
+        Empty dict when there are too few return observations.
+        """
+        if self.returns is None or len(self.returns.dropna()) < 20:
+            return {}
+        from firm.eval.robustness import MonteCarloAnalyzer
+
+        analyzer = MonteCarloAnalyzer(n_simulations=n_simulations, seed=seed)
+        return analyzer.summary(self.returns.dropna())
+
+    # ------------------------------------------------------------------
     # Serialisation helpers
     # ------------------------------------------------------------------
 
@@ -105,6 +134,13 @@ class BacktestReport:
                 lines.append(f"  {k:30s}: {v:>12.6f}")
             lines.append("")
 
+        trade_metrics = self.trade_metrics_summary()
+        if trade_metrics:
+            lines.append("--- Trade-Level Metrics ---")
+            for k, v in trade_metrics.items():
+                lines.append(f"  {k:30s}: {v:>12.6f}")
+            lines.append("")
+
         strat = self.strategy_summary()
         if not strat.empty:
             lines.append("--- Strategy Attribution ---")
@@ -131,6 +167,14 @@ class BacktestReport:
                 "end": self.snapshots[-1].asof.isoformat(),
             }
             result["final_nav"] = self.snapshots[-1].nav
+
+        trade_metrics = self.trade_metrics_summary()
+        if trade_metrics:
+            result["trade_metrics"] = trade_metrics
+
+        monte_carlo = self.monte_carlo_summary()
+        if monte_carlo:
+            result["monte_carlo"] = monte_carlo
 
         strat = self.strategy_summary()
         if not strat.empty:

@@ -9,13 +9,25 @@ from firm.eval.metrics import (
     cagr,
     calmar_ratio,
     compute_all_metrics,
+    compute_trade_metrics,
+    expectancy,
     hit_rate,
     max_drawdown,
+    profit_factor,
     sharpe_ratio,
     sortino_ratio,
     total_return,
+    trade_win_rate,
     turnover,
 )
+from firm.eval.overfitting import (
+    cscv_pbo,
+    deflated_sharpe,
+    probabilistic_sharpe,
+    verdict,
+    walk_forward_overfitting,
+)
+from firm.eval.robustness import MonteCarloAnalyzer
 
 
 def __getattr__(name: str):
@@ -30,11 +42,21 @@ __all__ = [
     "cagr",
     "calmar_ratio",
     "compute_all_metrics",
+    "compute_trade_metrics",
+    "expectancy",
     "hit_rate",
     "max_drawdown",
+    "profit_factor",
     "sharpe_ratio",
     "sortino_ratio",
     "total_return",
+    "trade_win_rate",
     "turnover",
+    "cscv_pbo",
+    "deflated_sharpe",
+    "probabilistic_sharpe",
+    "verdict",
+    "walk_forward_overfitting",
+    "MonteCarloAnalyzer",
     "BacktestReport",
 ]

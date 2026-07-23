@@ -28,24 +28,23 @@ class BullResearcher(Agent):
 
     def run(self, ctx: AgentContext, **inputs: Any) -> list[Thesis]:
         from firm.agents.blackboard import Blackboard
+        from firm.agents.research._combine import net_scores_for_blackboard
 
         blackboard: Blackboard = inputs["blackboard"]
         theses: list[Thesis] = []
+
+        # Net (signed) score per symbol. Default is the confidence-weighted
+        # mean; when ``signal_combination.method == 'optimal'`` and per-strategy
+        # return history is available on the context, strategies are weighted by
+        # inverse covariance (down-weighting correlated/redundant signals).
+        net_scores = net_scores_for_blackboard(blackboard, ctx, self.config)
 
         for symbol in sorted(blackboard.get_all_symbols()):
             signals = blackboard.get_signals_by_symbol(symbol)
             if not signals:
                 continue
 
-            # Conviction reflects the NET (signed) confidence-weighted mean of
-            # ALL signals for the symbol, not just the positive subset.  This
-            # is symmetric with the bear side and consistent with the debate
-            # netting, so a lone loud signal can't dominate a quiet opposing one.
-            total_conf = sum(s.confidence for s in signals)
-            if total_conf > 0:
-                net = sum(s.score * s.confidence for s in signals) / total_conf
-            else:
-                net = sum(s.score for s in signals) / len(signals)
+            net = net_scores.get(symbol, 0.0)
 
             if net <= 0:  # not net-bullish – leave to the bear researcher
                 continue

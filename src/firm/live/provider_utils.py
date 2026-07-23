@@ -105,6 +105,19 @@ def resolve_live_startup(
         risk.update(risk_overrides)
     engine_config.update(risk)
 
+    # Optional behavioural knobs from live.yaml → engine/orchestrator config.
+    # All default OFF/unchanged when absent (news-guard, optimal signal
+    # combination, Kelly sizing), so live behaviour is unchanged until enabled.
+    for key in (
+        "news_guard",
+        "signal_combination",
+        "allocation_method",
+        "kelly_fraction",
+        "max_positions",
+    ):
+        if key in yaml_cfg:
+            engine_config[key] = yaml_cfg[key]
+
     if kill_switch_drawdown is not None:
         engine_config["kill_switch_drawdown"] = kill_switch_drawdown
     if max_daily_trades is not None:

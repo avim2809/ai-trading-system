@@ -59,6 +59,12 @@ class StartRequest(BaseModel):
     # started via this endpoint instead of only via that script.
     risk_overrides: dict[str, Any] = {}
     strategy_params: dict[str, dict[str, Any]] = {}
+    # Optional behavioural knobs (default OFF/unchanged): macro-event blackout,
+    # research signal combination, and TraderAgent allocation method.
+    news_guard: dict[str, Any] | None = None
+    signal_combination: dict[str, Any] | None = None
+    allocation_method: str | None = None
+    kelly_fraction: float | None = None
 
 
 class ConfigUpdateStrategies(BaseModel):
@@ -76,6 +82,13 @@ class ConfigUpdateUniverse(BaseModel):
     symbols: list[str] | None = None
 
 
+class ConfigUpdateNewsGuard(BaseModel):
+    enabled: bool | None = None
+    before_min: int | None = None
+    after_min: int | None = None
+    offline: bool | None = None
+
+
 class ConfigUpdateRequest(BaseModel):
     """Mirrors the shape returned by GET /live/config for round-trip saves.
 
@@ -88,6 +101,10 @@ class ConfigUpdateRequest(BaseModel):
     risk: ConfigUpdateRisk | None = None
     universe: ConfigUpdateUniverse | None = None
     strategy_params: dict[str, dict[str, Any]] | None = None
+    news_guard: ConfigUpdateNewsGuard | None = None
+    signal_combination: dict[str, Any] | None = None
+    allocation_method: str | None = None
+    kelly_fraction: float | None = None
 
 
 class RejectRequest(BaseModel):
@@ -304,6 +321,15 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
         )
         engine_config = dict(resolved["engine_config"])
         engine_config["respect_market_hours"] = body.respect_market_hours
+        # Explicit request knobs override live.yaml defaults.
+        if body.news_guard is not None:
+            engine_config["news_guard"] = body.news_guard
+        if body.signal_combination is not None:
+            engine_config["signal_combination"] = body.signal_combination
+        if body.allocation_method is not None:
+            engine_config["allocation_method"] = body.allocation_method
+        if body.kelly_fraction is not None:
+            engine_config["kelly_fraction"] = body.kelly_fraction
 
         return _start_live_engine(
             request.app,
@@ -512,6 +538,8 @@ def get_live_config(request: Request) -> dict[str, Any]:
         from firm.live.provider_utils import load_live_yaml_defaults
 
         all_strategies = list_strategies()
+        yaml_defaults = load_live_yaml_defaults()
+        ng = yaml_defaults.get("news_guard") or {}
         return {
             "broker": "alpaca_paper",
             "schedule": "market_open",
@@ -521,7 +549,7 @@ def get_live_config(request: Request) -> dict[str, Any]:
                 "auto_approve": [],
                 "require_approval": all_strategies,
             },
-            "strategy_params": load_live_yaml_defaults().get("strategy_params", {}),
+            "strategy_params": yaml_defaults.get("strategy_params", {}),
             "risk": {
                 "kill_switch_drawdown": 0.10,
                 "max_daily_trades": 50,
@@ -530,6 +558,19 @@ def get_live_config(request: Request) -> dict[str, Any]:
             "universe": {
                 "symbols": ["AAPL", "MSFT", "GOOG", "AMZN", "META", "TSLA", "NVDA", "JPM", "V", "JNJ"],
             },
+            "news_guard": {
+                "enabled": bool(ng.get("enabled", False)),
+                "before_min": int(ng.get("before_min", 30)),
+                "after_min": int(ng.get("after_min", 15)),
+                "offline": bool(ng.get("offline", False)),
+            },
+            "signal_combination": yaml_defaults.get(
+                "signal_combination", {"method": "confidence"}
+            ),
+            "allocation_method": yaml_defaults.get(
+                "allocation_method", "conviction_weighted"
+            ),
+            "kelly_fraction": float(yaml_defaults.get("kelly_fraction", 0.5)),
         }
 
     auto = sorted(engine._auto_approve) if hasattr(engine, "_auto_approve") else []
@@ -553,6 +594,22 @@ def get_live_config(request: Request) -> dict[str, Any]:
         "universe": {
             "symbols": list(universe),
         },
+        "news_guard": {
+            "enabled": bool(getattr(engine, "_news_guard_enabled", False)),
+            "before_min": int(getattr(engine, "_news_guard_before", 30)),
+            "after_min": int(getattr(engine, "_news_guard_after", 15)),
+            "offline": bool(getattr(engine, "_news_guard_offline", False)),
+        },
+        "signal_combination": dict(
+            getattr(engine, "_config", {}).get("signal_combination")
+            or {"method": "confidence"}
+        ),
+        "allocation_method": getattr(engine, "_config", {}).get(
+            "allocation_method", "conviction_weighted"
+        ),
+        "kelly_fraction": float(
+            getattr(engine, "_config", {}).get("kelly_fraction", 0.5)
+        ),
     }
 
 
@@ -581,6 +638,20 @@ def update_live_config(body: ConfigUpdateRequest, request: Request) -> dict[str,
         engine._data_feed._universe = body.universe.symbols
     if body.strategy_params is not None:
         engine.update_strategy_params(body.strategy_params)
+    if body.news_guard is not None:
+        engine.update_news_guard(
+            enabled=body.news_guard.enabled,
+            before_min=body.news_guard.before_min,
+            after_min=body.news_guard.after_min,
+            offline=body.news_guard.offline,
+        )
+    if body.signal_combination is not None:
+        engine.update_signal_combination(body.signal_combination)
+    if body.allocation_method is not None or body.kelly_fraction is not None:
+        engine.update_allocation(
+            allocation_method=body.allocation_method,
+            kelly_fraction=body.kelly_fraction,
+        )
 
     if body.schedule is not None:
         with _engine_lock:

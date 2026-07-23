@@ -29,6 +29,14 @@ Full reference: `docs/PROJECT_CONTEXT.md`
 2. Restart `ai-trading.service` or `POST /api/live/stop` then `/api/live/start`
 3. Use `resolve_live_startup()` in `src/firm/live/provider_utils.py` — do not duplicate YAML merge logic
 
+## Eval & behavioural knobs (wired backend + UI)
+
+- Overfitting (PBO/DSR/PSR) `src/firm/eval/overfitting.py`; trade metrics + Monte Carlo `metrics.py`/`robustness.py`; QuantStats tear-sheet `tearsheet.py` (optional `report` extra)
+- API: `RunRequest`/walk-forward accept `allocation_method`/`kelly_fraction`/`signal_combination`; `GET /api/runs/{id}/tearsheet`; report JSON carries `trade_metrics`/`monte_carlo`; walk-forward aggregate carries `overfitting`
+- Live: `news_guard` blackout + `FIRM_ALLOW_TRADING` execution lock (`execution_safety.py`)
+- UI surfaces in `frontend/src/pages/{RunDetail,NewBacktest,LiveConfig}.tsx`
+- Full detail: `docs/PROJECT_CONTEXT.md` → "REST API & Web UI wiring"
+
 ## IBKR rule of thumb
 
 Never call `IBKRBroker.connect()` from uvicorn's asyncio loop. Use sync handler thread or `asyncio.to_thread()`.

@@ -1,0 +1,44 @@
+---
+description: React frontend conventions — mobile-responsive UI + API client sync
+globs: frontend/**
+alwaysApply: false
+---
+
+# Frontend (React + Tailwind)
+
+The dashboard is **mobile-first responsive** and must stay usable on a phone
+(~375px). `components/Layout.tsx` already provides the mobile shell: a slide-in
+sidebar with overlay (`md:hidden` / `md:static`), a mobile top bar (`md:hidden`),
+and responsive content padding (`p-4 md:p-6`). New UI must not break this.
+
+## Breakpoints
+
+- Primary switch is Tailwind **`md` (768px)** = phone ↔ desktop (sidebar collapse).
+- Write base classes for mobile, then scale up with `sm:` / `md:` / `lg:`.
+
+## Rules for every new page/section
+
+- **Grids**: default to `grid-cols-1` or `grid-cols-2` on mobile; add
+  `md:grid-cols-*` / `lg:grid-cols-*` for wider screens. Never a bare
+  `grid-cols-3+` without a smaller mobile fallback.
+  - e.g. metric cards `grid-cols-2 md:grid-cols-3 lg:grid-cols-6`;
+    form fields `grid-cols-1 md:grid-cols-3`.
+- **Header / action rows**: `flex flex-wrap items-start justify-between gap-3`;
+  give fixed actions (buttons/badges) `flex-shrink-0` and truncatable text
+  containers `min-w-0` so a title + button wrap instead of overflowing.
+- **Inputs**: full-width (`w-full`) inside their responsive grid cell.
+- **Tables**: wrap in `overflow-x-auto` so they scroll instead of overflowing.
+- **No fixed pixel widths** that exceed a phone viewport; prefer `max-w-*` + `w-full`.
+- Verify new layouts at ~375px before finishing.
+
+## Reference (added responsively)
+
+`pages/RunDetail.tsx` (trade metrics, Monte Carlo, tear-sheet button),
+`pages/NewBacktest.tsx` (allocation/combination controls, overfitting panel),
+`pages/LiveConfig.tsx` (allocation + news-guard sections).
+
+## API sync
+
+When adding/changing backend endpoints, keep `src/api/types.ts` and
+`src/api/client.ts` in sync (typed request/response + a client method), and add
+handlers in `src/test/handlers.ts` for tests.

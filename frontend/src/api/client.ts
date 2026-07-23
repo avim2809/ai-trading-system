@@ -60,6 +60,10 @@ export const api = {
 
   getEquity: (id: string) => fetchJson<EquityData>(`/runs/${id}/equity`),
 
+  // Absolute URL to the QuantStats HTML tear-sheet (opened in a new tab /
+  // iframe rather than fetched as JSON).
+  tearsheetUrl: (id: string) => `${BASE}/runs/${id}/tearsheet`,
+
   launchRun: (req: RunRequest) =>
     fetchJson<{ run_id: string }>('/runs', {
       method: 'POST',

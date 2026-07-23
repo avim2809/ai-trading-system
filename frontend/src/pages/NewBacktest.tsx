@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
@@ -33,6 +33,9 @@ export default function NewBacktest() {
   const [notes, setNotes] = useState('')
   const [showRisk, setShowRisk] = useState(false)
   const [riskOverrides, setRiskOverrides] = useState<Record<string, number>>({})
+  const [allocationMethod, setAllocationMethod] = useState('conviction_weighted')
+  const [kellyFraction, setKellyFraction] = useState(0.5)
+  const [signalCombination, setSignalCombination] = useState('confidence')
   const [regime, setRegime] = useState<RegimeOverlayConfig>({
     enabled: false,
     benchmark_symbol: null,
@@ -42,6 +45,14 @@ export default function NewBacktest() {
   })
 
   const [nSplits, setNSplits] = useState(4)
+
+  // Seed the allocation/combination controls from server defaults once loaded.
+  useEffect(() => {
+    if (!defaults) return
+    if (defaults.allocation_method) setAllocationMethod(defaults.allocation_method)
+    if (typeof defaults.kelly_fraction === 'number') setKellyFraction(defaults.kelly_fraction)
+    if (defaults.signal_combination?.method) setSignalCombination(defaults.signal_combination.method)
+  }, [defaults])
 
   const buildRequest = (): RunRequest => {
     const universeSymbols = symbols.trim()
@@ -60,6 +71,9 @@ export default function NewBacktest() {
       rebalance_frequency: rebalance,
       risk_overrides: riskOverrides,
       regime_overlay: regime,
+      allocation_method: allocationMethod,
+      kelly_fraction: kellyFraction,
+      signal_combination: { method: signalCombination },
       data_source: dataSource,
       seed,
       notes,
@@ -195,6 +209,58 @@ export default function NewBacktest() {
             <option value="weekly">Weekly</option>
             <option value="monthly">Monthly</option>
           </select>
+        </section>
+
+        {/* Allocation & Signal Combination */}
+        <section>
+          <label className="block text-sm font-medium text-slate-300 mb-2">
+            Portfolio Allocation & Signal Combination
+          </label>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Allocation method</label>
+              <select
+                value={allocationMethod}
+                onChange={(e) => setAllocationMethod(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              >
+                <option value="conviction_weighted">Conviction Weighted</option>
+                <option value="equal_weight">Equal Weight</option>
+                <option value="risk_parity">Risk Parity</option>
+                <option value="kelly">Kelly</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                Kelly fraction {allocationMethod !== 'kelly' && <span className="text-slate-600">(kelly only)</span>}
+              </label>
+              <input
+                type="number"
+                step="0.05"
+                min={0}
+                max={1}
+                value={kellyFraction}
+                disabled={allocationMethod !== 'kelly'}
+                onChange={(e) => setKellyFraction(Number(e.target.value))}
+                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm disabled:opacity-40"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Signal combination</label>
+              <select
+                value={signalCombination}
+                onChange={(e) => setSignalCombination(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              >
+                <option value="confidence">Confidence-Weighted</option>
+                <option value="optimal">Optimal (inverse-variance)</option>
+              </select>
+            </div>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Kelly sizes positions by edge/odds; optimal combination blends the 12 signals by
+            inverse variance instead of a simple confidence mean.
+          </p>
         </section>
 
         {/* Risk Overrides */}
@@ -431,6 +497,57 @@ export default function NewBacktest() {
                   )
                 })}
             </div>
+            {walkForward.data.aggregate.overfitting && (
+              <div className="mt-4 rounded-lg border border-slate-700 bg-slate-900/50 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <p className="text-xs font-medium text-slate-300 uppercase tracking-wider">
+                    Overfitting Diagnostics
+                  </p>
+                  {walkForward.data.aggregate.overfitting.verdict && (
+                    <span
+                      className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                        /overfit|weak|caution/i.test(walkForward.data.aggregate.overfitting.verdict)
+                          ? 'bg-red-500/20 text-red-400'
+                          : 'bg-emerald-500/20 text-emerald-400'
+                      }`}
+                    >
+                      {walkForward.data.aggregate.overfitting.verdict}
+                    </span>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {typeof walkForward.data.aggregate.overfitting.pbo === 'number' && (
+                    <div className="bg-slate-800 rounded-lg px-3 py-2">
+                      <p className="text-[10px] text-slate-500 uppercase">PBO</p>
+                      <p className="text-base font-mono text-white">
+                        {(walkForward.data.aggregate.overfitting.pbo * 100).toFixed(1)}%
+                      </p>
+                    </div>
+                  )}
+                  {typeof walkForward.data.aggregate.overfitting.deflated_sharpe === 'number' && (
+                    <div className="bg-slate-800 rounded-lg px-3 py-2">
+                      <p className="text-[10px] text-slate-500 uppercase">Deflated Sharpe</p>
+                      <p className="text-base font-mono text-white">
+                        {walkForward.data.aggregate.overfitting.deflated_sharpe.toFixed(3)}
+                      </p>
+                    </div>
+                  )}
+                  {typeof walkForward.data.aggregate.overfitting.probabilistic_sharpe === 'number' && (
+                    <div className="bg-slate-800 rounded-lg px-3 py-2">
+                      <p className="text-[10px] text-slate-500 uppercase">Prob. Sharpe</p>
+                      <p className="text-base font-mono text-white">
+                        {(walkForward.data.aggregate.overfitting.probabilistic_sharpe * 100).toFixed(1)}%
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <p className="mt-2 text-[11px] text-slate-500">
+                  PBO = probability the in-sample-best config underperforms out-of-sample; lower is
+                  better. Deflated/Probabilistic Sharpe adjust for multiple-trial selection bias.
+                </p>
+              </div>
+            )}
+
             <div className="mt-4 flex flex-wrap gap-2">
               {walkForward.data.fold_ids.map((id, i) => (
                 <button
