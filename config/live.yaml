@@ -148,7 +148,7 @@ costs:
 # event window (FOMC / NFP / CPI / ECB / BoE). Default OFF.
 # ──────────────────────────────────────────────────────────────
 news_guard:
-  enabled: false                # set true to arm the blackout gate
+  enabled: true                 # set true to arm the blackout gate
   before_min: 30                # minutes before an event to start holding
   after_min: 15                 # minutes after an event to keep holding
   offline: false                # true = use only the bundled events.csv
