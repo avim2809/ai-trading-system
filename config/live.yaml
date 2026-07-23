@@ -18,6 +18,8 @@ schedule: "market_open"
 # (e.g. plain "auto") silently falls through to "everything needs approval".
 approval_mode: "full_auto"
 
+# Fundamental strategies (multi_factor, event_driven) require FMP_API_KEY when
+# using IBKR for prices — see firm.live.provider_utils.
 strategies:
   enabled:
     - momentum
@@ -45,6 +47,24 @@ strategies:
     - seasonality
     - gann
     - regime_hmm
+
+# Per-strategy parameters passed to build_orchestrator via strategy_params.
+strategy_params:
+  stat_arb:
+    require_cointegration: true
+    coint_pvalue: 0.10
+    max_pairs: 5
+    entry_z: 2.0
+    exit_z: 0.5
+    lookback_days: 60
+    # Sector/thematic anchors — avoids correlation-mining across the full universe.
+    predefined_pairs:
+      - ["SPY", "QQQ"]
+      - ["SPY", "IWM"]
+      - ["AAPL", "MSFT"]
+      - ["JPM", "BAC"]
+      - ["XOM", "CVX"]
+      - ["GOOG", "META"]
 
 universe:
   symbols:

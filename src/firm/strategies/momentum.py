@@ -79,38 +79,32 @@ class MomentumStrategy(BaseStrategy):
         if len(cum_ret) < 3:
             return []
 
-        mean = cum_ret.mean()
-        std = cum_ret.std()
-        if std == 0 or np.isnan(std):
-            return []
-
-        z_scores = (cum_ret - mean) / std
-        z_scores = z_scores.clip(-5, 5)
-
-        n = len(z_scores)
+        # Emit raw cumulative returns; analysts z-score cross-sectionally once.
+        n = len(cum_ret)
         top_n = max(1, int(n * top_pct))
         bottom_n = max(1, int(n * bottom_pct))
-        sorted_z = z_scores.sort_values(ascending=False)
-        top_symbols = set(sorted_z.head(top_n).index)
-        bottom_symbols = set(sorted_z.tail(bottom_n).index)
+        sorted_ret = cum_ret.sort_values(ascending=False)
+        top_symbols = set(sorted_ret.head(top_n).index)
+        bottom_symbols = set(sorted_ret.tail(bottom_n).index)
 
         signals: list[Signal] = []
-        for symbol, z in z_scores.items():
+        for symbol, raw in cum_ret.items():
+            raw_f = float(raw)
             if symbol in top_symbols or symbol in bottom_symbols:
-                confidence = min(abs(float(z)) / 3.0, 1.0)
+                confidence = min(abs(raw_f) / 0.30, 1.0)
             else:
-                confidence = min(abs(float(z)) / 5.0, 0.5)
+                confidence = min(abs(raw_f) / 0.50, 0.5)
 
             signals.append(
                 Signal(
                     symbol=str(symbol),
                     strategy="momentum",
-                    score=float(z),
+                    score=raw_f,
                     confidence=confidence,
                     horizon="21d",
                     asof=pit_view.asof,
                     meta={
-                        "cum_return": float(cum_ret.get(symbol, np.nan)),
+                        "cum_return": raw_f,
                         "in_top_decile": symbol in top_symbols,
                         "in_bottom_decile": symbol in bottom_symbols,
                     },

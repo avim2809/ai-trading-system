@@ -60,6 +60,8 @@ def main() -> None:
     log.info("Universe: %d symbols", len(universe))
 
     merged_config = {**bt_config, **risk_config, "strategies": settings.strategies}
+    if settings.strategy_params:
+        merged_config["strategy_params"] = settings.strategy_params
     orchestrator = build_orchestrator(merged_config)
 
     from firm.backtest.engine import BacktestEngine

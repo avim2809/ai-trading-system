@@ -1,0 +1,34 @@
+---
+description: Core project context — entry points, production deployment, config sources
+alwaysApply: true
+---
+
+# AI Trading System — Project Context
+
+Full reference: `docs/PROJECT_CONTEXT.md`
+
+## Entry points
+
+- **Production**: `ai-trading.service` runs `firm-api` (not `scripts/run_live_trading.py`)
+- **Live config**: `config/live.yaml` is canonical for universe, risk, strategies, `strategy_params`
+- **Backtests**: `scripts/run_backtest.py` + `config/settings.yaml`
+
+## Production stack (this host)
+
+- `ibgateway.service` → IB Gateway paper port 4002
+- `ai-trading.service` → `.venv/bin/firm-api` on port 8000
+- `FIRM_AUTO_START_LIVE=1` boots live from `config/live.yaml` via worker thread
+
+## Pipeline
+
+12 strategies (raw scores) → 3 analysts (sole z-score) → bull/bear → PM → risk → execution
+
+## When changing live behavior
+
+1. Edit `config/live.yaml` for universe/risk/strategies/params
+2. Restart `ai-trading.service` or `POST /api/live/stop` then `/api/live/start`
+3. Use `resolve_live_startup()` in `src/firm/live/provider_utils.py` — do not duplicate YAML merge logic
+
+## IBKR rule of thumb
+
+Never call `IBKRBroker.connect()` from uvicorn's asyncio loop. Use sync handler thread or `asyncio.to_thread()`.

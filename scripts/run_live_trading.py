@@ -25,6 +25,10 @@ from firm.brokers.ibkr import IBKRBroker
 from firm.live.approval import ApprovalQueue
 from firm.live.data_feed import LiveDataFeed
 from firm.live.engine import LiveTradingEngine
+from firm.live.provider_utils import (
+    build_live_providers,
+    filter_strategies_for_providers,
+)
 from firm.llm.config import load_llm_config, provider_config
 from firm.logging_setup import setup_logging
 import firm.strategies  # noqa: F401 — ensure @register decorators fire
@@ -40,33 +44,8 @@ DEFAULT_UNIVERSE = [
 
 
 def _build_providers(host: str, port: int) -> dict:
-    """Wire data providers keyed as the LiveDataFeed expects.
-
-    LiveDataFeed looks up providers by role: ``"prices"``, ``"fundamentals"``,
-    ``"sentiment"``.  Prices come from IB Gateway itself (no third-party signup);
-    optional fundamentals/sentiment are added if their API keys are configured.
-    """
-    from firm.data.providers.ibkr import IBKRProvider
-
-    # Single IBKR connection (client_id=2, separate from the trading
-    # connection on 1) serves both price history and news sentiment.
-    ibkr = IBKRProvider(host=host, port=port, client_id=2)
-    providers: dict = {
-        "prices": ibkr,
-        "sentiment": ibkr,
-    }
-
-    # Optional fundamentals – only added when a real API key is present.
-    optional = (
-        ("fundamentals", "firm.data.providers.fmp", "FMPProvider"),
-    )
-    for role, module_path, cls_name in optional:
-        try:
-            module = __import__(module_path, fromlist=[cls_name])
-            providers[role] = getattr(module, cls_name)()
-        except Exception as exc:
-            log.info("%s provider not configured (%s); skipping.", role, exc)
-    return providers
+    """Wire data providers keyed as the LiveDataFeed expects (IBKR stack)."""
+    return build_live_providers("ibkr_paper")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -125,6 +104,12 @@ def main(argv: list[str] | None = None) -> int:
         auto_approve = strategies_cfg.get("auto_approve", auto_approve)
         initial_capital = live_yaml.get("initial_capital", initial_capital)
         risk_overrides = live_yaml.get("risk", {}) or {}
+        if live_yaml.get("strategy_params"):
+            config_strategy_params = live_yaml["strategy_params"]
+        else:
+            config_strategy_params = None
+    else:
+        config_strategy_params = None
 
     host = os.getenv("IBKR_HOST", "127.0.0.1")
     port = int(os.getenv("IBKR_PAPER_PORT", "4002"))
@@ -138,8 +123,8 @@ def main(argv: list[str] | None = None) -> int:
     # experiment YAML's nested `risk:` section is merged in flattened.
     config: dict = {"initial_capital": initial_capital, "symbols": universe}
     config.update(risk_overrides)
-    if strategies_enabled:
-        config["strategies"] = strategies_enabled
+    if config_strategy_params:
+        config["strategy_params"] = config_strategy_params
     # Wires config/llm.yaml's agent_modes + provider (default/fallback models,
     # load-balancing) into the orchestrator — without this every analyst
     # silently stays in "quant" mode and the LLM layer never activates.
@@ -147,6 +132,13 @@ def main(argv: list[str] | None = None) -> int:
     config["llm_config"] = provider_config()
 
     data_feed = LiveDataFeed(providers=_build_providers(host, port), universe=universe)
+    providers = data_feed._providers  # noqa: SLF001 — filter strategies before engine build
+    if strategies_enabled:
+        strategies_enabled = filter_strategies_for_providers(
+            strategies_enabled, providers, logger=log
+        )
+        auto_approve = [s for s in auto_approve if s in strategies_enabled]
+        config["strategies"] = strategies_enabled
     approval_queue = ApprovalQueue(broker=broker, persist_path="data/approvals.json")
 
     engine_approval_mode = _APPROVAL_MODE_MAP[args.approval_mode]

@@ -1,0 +1,36 @@
+---
+description: Live trading engine, YAML merge, provider wiring, systemd auto-start
+globs: src/firm/live/**,src/firm/api/routers/live.py,config/live.yaml
+alwaysApply: false
+---
+
+# Live Trading
+
+Full reference: `docs/PROJECT_CONTEXT.md`
+
+## Config merge
+
+- `resolve_live_startup()` in `provider_utils.py` merges `config/live.yaml` with API overrides
+- Flattened `risk:` block goes into engine config (kill switch, exposure limits, `regime_overlay`)
+- Empty `POST /api/live/start` body uses YAML defaults
+
+## Auto-start (systemd)
+
+- `FIRM_AUTO_START_LIVE=1` → `bootstrap_live_from_yaml()` in `live.py`
+- Runs via `asyncio.to_thread()` in `app.py` lifespan — not on uvicorn's event loop
+- Failures are logged; API stays up for manual start
+
+## Providers
+
+- `build_live_providers("ibkr_paper")` → IBKR prices/sentiment + FMP fundamentals if `FMP_API_KEY` set
+- `filter_strategies_for_providers()` drops `multi_factor`, `event_driven` without fundamentals
+- Data provider uses `client_id=2`; broker uses `IBKR_CLIENT_ID`
+
+## Approval modes
+
+Only `full_auto` and `semi_auto` are valid. Anything else queues all orders.
+
+## Ops
+
+- Status: `GET /api/live/status` — watch `cycle_running_seconds` for stuck cycles
+- Unit: `deploy/ai-trading.service`

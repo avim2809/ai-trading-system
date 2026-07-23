@@ -1,0 +1,36 @@
+---
+description: Strategy signal conventions — raw scores, stat_arb, seasonality, registration
+globs: src/firm/strategies/**
+alwaysApply: false
+---
+
+# Strategies
+
+Full reference: `docs/PROJECT_CONTEXT.md`
+
+## Signal convention
+
+- Strategies emit **raw cross-sectional scores** — do NOT call `zscore_signals` inside strategies
+- Analysts (`src/firm/agents/analysts/`) are the sole normalization pass
+
+## stat_arb
+
+- Log prices, OLS hedge ratio, Engle-Granger cointegration gate (`require_cointegration` default true)
+- Net to **one signal per symbol** (no duplicate long/short from pair legs)
+- Use `predefined_pairs` in `config/live.yaml` — avoid correlation mining the full universe
+- Params: `strategy_params.stat_arb` in live.yaml and settings.yaml
+
+## seasonality
+
+- Turn-of-month (TOM) must use **trading calendar** (`pd.bdate_range`), not calendar days
+
+## Registration
+
+- New strategies: `@register` decorator, add to `config/live.yaml` `strategies.enabled` for live
+- Fundamental strategies (`multi_factor`, `event_driven`) need `FMP_API_KEY` on IBKR live stack
+
+## Known simplifications
+
+- `event_driven`: earnings proxy, not true SUE/PEAD
+- `regime_hmm`: per-symbol HMM
+- `gann`: heuristic composite

@@ -1,8 +1,9 @@
 """Fundamental analyst agent.
 
 Receives strategies tagged with domain ``"fundamental"`` (e.g. multi_factor),
-calls each strategy's ``generate(pit_view)``, z-scores the signals
-cross-sectionally, and produces a ``SignalSet(domain="fundamental", ...)``.
+calls each strategy's ``generate(pit_view)``, then applies the sole
+cross-sectional :func:`zscore_signals` pass before producing a
+``SignalSet(domain="fundamental", ...)``.
 """
 
 from __future__ import annotations

@@ -1,0 +1,35 @@
+---
+description: IBKR broker and data provider — ports, threading, market hours cache
+globs: src/firm/brokers/ibkr.py,src/firm/data/providers/ibkr.py
+alwaysApply: false
+---
+
+# IBKR Integration
+
+Full reference: `docs/PROJECT_CONTEXT.md`
+
+## Ports
+
+- Paper Gateway: `IBKR_PAPER_PORT=4002` (not TWS 7497)
+- Live: `IBKR_PORT=7496` or Gateway 4001
+- Host: `IBKR_HOST=127.0.0.1` (or `ib-gateway` in Docker Compose)
+
+## Client IDs
+
+- Broker execution: `IBKR_CLIENT_ID` (default 1)
+- Data provider (`build_live_providers`): `client_id=2` — keep separate
+
+## Threading (critical)
+
+- `connect()` must run on a thread that owns the ib_async event loop
+- Subscribe once in `connect()`: `reqAccountSummary`, `qualifyContracts`, `reqContractDetails` (SPY)
+- `is_market_open()` reads cached `_market_hours_details` — safe from any thread after connect
+- Calling ib_async async methods from APScheduler or random FastAPI threads **hangs forever**
+
+## Market data type
+
+- Default `market_data_type=3` (delayed) — paper accounts often lack live subscriptions
+
+## Auto-start
+
+- Never call `connect()` from FastAPI lifespan directly — use `asyncio.to_thread(bootstrap_live_from_yaml)`

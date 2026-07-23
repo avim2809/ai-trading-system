@@ -520,45 +520,21 @@ class GannStrategy(BaseStrategy):
                 "trend_dampener": trend_dampener,
             }
 
-        if len(raw_scores) < 2:
-            # With a single symbol we can't z-score; emit raw
-            signals: list[Signal] = []
-            for sym, sc in raw_scores.items():
-                signals.append(
-                    Signal(
-                        symbol=sym,
-                        strategy="gann",
-                        score=float(np.clip(sc, -1.0, 1.0)),
-                        confidence=float(np.clip(raw_confs.get(sym, 0.0), 0.0, 1.0)),
-                        horizon="10d",
-                        asof=pit_view.asof,
-                        meta=meta_all.get(sym, {}),
-                    )
-                )
-            return signals
+        if not raw_scores:
+            return []
 
-        score_series = pd.Series(raw_scores)
-        mean = score_series.mean()
-        std = score_series.std()
-        if std == 0 or np.isnan(std):
-            z_scores = score_series * 0.0
-        else:
-            z_scores = ((score_series - mean) / std).clip(-3, 3)
-
-        signals = []
-        for symbol in z_scores.index:
-            z = float(z_scores[symbol])
-            if np.isnan(z):
-                continue
+        signals: list[Signal] = []
+        for symbol in sorted(raw_scores):
+            sc = float(np.clip(raw_scores[symbol], -1.0, 1.0))
             signals.append(
                 Signal(
                     symbol=str(symbol),
                     strategy="gann",
-                    score=z,
-                    confidence=float(np.clip(raw_confs.get(str(symbol), 0.0), 0.0, 1.0)),
+                    score=sc,
+                    confidence=float(np.clip(raw_confs.get(symbol, 0.0), 0.0, 1.0)),
                     horizon="10d",
                     asof=pit_view.asof,
-                    meta=meta_all.get(str(symbol), {}),
+                    meta=meta_all.get(symbol, {}),
                 )
             )
         return signals

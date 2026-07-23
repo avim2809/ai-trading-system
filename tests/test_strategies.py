@@ -410,24 +410,28 @@ class TestMeanReversion:
 
 
 class TestStatArb:
+    _STAT_ARB_TEST_PARAMS = {"max_pairs": 3, "require_cointegration": False}
+
     def test_generate(self, pit_view):
-        strat = get("stat_arb")(params={"max_pairs": 3})
+        strat = get("stat_arb")(params=self._STAT_ARB_TEST_PARAMS)
         signals = strat.generate(pit_view)
         assert len(signals) > 0
         _validate_signals(signals, "stat_arb")
 
     def test_empty_universe(self, empty_view):
-        strat = get("stat_arb")()
+        strat = get("stat_arb")(params={"require_cointegration": False})
         assert strat.generate(empty_view) == []
 
-    def test_pairs_produce_two_legs(self, pit_view):
-        strat = get("stat_arb")(params={"max_pairs": 1})
+    def test_pairs_net_to_one_signal_per_symbol(self, pit_view):
+        strat = get("stat_arb")(params=self._STAT_ARB_TEST_PARAMS)
         signals = strat.generate(pit_view)
-        # Each pair produces exactly 2 signals
-        assert len(signals) % 2 == 0
+        symbols = [s.symbol for s in signals]
+        assert len(symbols) == len(set(symbols))
+        for sig in signals:
+            assert "pair_count" in sig.meta
 
     def test_single_symbol(self, single_symbol_view):
-        strat = get("stat_arb")()
+        strat = get("stat_arb")(params={"require_cointegration": False})
         signals = strat.generate(single_symbol_view)
         assert signals == []
 
@@ -782,6 +786,19 @@ class TestSeasonality:
         assert len(signals) > 0
         assert signals[0].meta["tom_score"] == 0.0
 
+    def test_tom_uses_trading_days_not_calendar_days(self):
+        """Last calendar day that is NOT the last trading day should not fire."""
+        # June 2025: last trading day is Mon 30; Sat 28 is calendar-near-end only.
+        asof = datetime(2025, 6, 28)  # Saturday — no session
+        view = MockPitView(asof=asof)
+        strat = get("seasonality")(params={"tom_days_before": 1, "tom_days_after": 3})
+        signals = strat.generate(view)
+        assert signals
+        # Ref date is last trading day <= asof (Fri 27), not Sat 28.
+        assert signals[0].meta["tom_uses_trading_days"] is True
+        # Fri 27 is not the last trading day of June (Mon 30 is).
+        assert signals[0].meta["tom_score"] == 0.0
+
     def test_uniform_scores(self, pit_view):
         strat = get("seasonality")()
         signals = strat.generate(pit_view)
@@ -816,7 +833,7 @@ class TestGann:
         strat = get("gann")()
         signals = strat.generate(pit_view)
         for sig in signals:
-            assert -3.0 <= sig.score <= 3.0, f"Score {sig.score} out of [-3, 3]"
+            assert -1.0 <= sig.score <= 1.0, f"Score {sig.score} out of [-1, 1]"
 
     def test_meta_contains_sub_scores(self, pit_view):
         strat = get("gann")()
@@ -931,6 +948,8 @@ class TestAllStrategies:
             params = {"train_lookback_days": 300, "model_type": "ridge"}
         if name == "volatility_breakout":
             params = {"vol_threshold": 999.0}
+        if name == "stat_arb":
+            params = {"max_pairs": 3, "require_cointegration": False}
         strat = cls(params=params)
         signals = strat.generate(view)
         assert isinstance(signals, list)
@@ -940,7 +959,10 @@ class TestAllStrategies:
     @pytest.mark.parametrize("name", ALL_STRATEGY_NAMES)
     def test_empty_universe_returns_empty(self, name, empty_view):
         cls = get(name)
-        strat = cls()
+        params: dict = {}
+        if name == "stat_arb":
+            params = {"require_cointegration": False}
+        strat = cls(params=params)
         result = strat.generate(empty_view)
         assert result == []
 

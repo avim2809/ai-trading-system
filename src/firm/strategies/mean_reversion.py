@@ -66,14 +66,8 @@ class MeanReversionStrategy(BaseStrategy):
         if len(recent_ret) < 3:
             return []
 
-        mean = recent_ret.mean()
-        std = recent_ret.std()
-        if std == 0 or np.isnan(std):
-            return []
-
-        z_scores = (recent_ret - mean) / std
-        reversal_scores = -z_scores
-        reversal_scores = reversal_scores.clip(-zscore_cap, zscore_cap)
+        # Negated raw return — analysts apply the sole cross-sectional z-score.
+        reversal_scores = (-recent_ret).clip(-zscore_cap, zscore_cap)
 
         signals: list[Signal] = []
         for symbol, score in reversal_scores.items():
@@ -82,12 +76,11 @@ class MeanReversionStrategy(BaseStrategy):
                     symbol=str(symbol),
                     strategy="mean_reversion",
                     score=float(score),
-                    confidence=min(abs(float(score)) / zscore_cap, 1.0),
+                    confidence=min(abs(float(score)) / max(zscore_cap, 1e-9), 1.0),
                     horizon="5d",
                     asof=pit_view.asof,
                     meta={
                         "raw_return": float(recent_ret.get(symbol, np.nan)),
-                        "z_score_before_negate": float(z_scores.get(symbol, np.nan)),
                     },
                 )
             )

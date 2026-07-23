@@ -212,12 +212,10 @@ class MultiFactorStrategy(BaseStrategy):
         if composite.empty:
             return []
 
-        composite = _zscore(composite)
-
         signals: list[Signal] = []
         for symbol in composite.index:
-            z = float(composite[symbol])
-            if np.isnan(z):
+            raw = float(composite[symbol])
+            if np.isnan(raw):
                 continue
             factor_detail = {
                 fname: float(s.get(symbol, np.nan))
@@ -227,8 +225,8 @@ class MultiFactorStrategy(BaseStrategy):
                 Signal(
                     symbol=str(symbol),
                     strategy="multi_factor",
-                    score=z,
-                    confidence=min(abs(z) / 3.0, 1.0),
+                    score=raw,
+                    confidence=min(abs(raw) / 2.0, 1.0),
                     horizon="21d",
                     asof=pit_view.asof,
                     meta={"factor_scores": factor_detail},

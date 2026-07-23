@@ -79,6 +79,7 @@ export default function LiveConfig() {
   const [maxDailyTrades, setMaxDailyTrades] = useState('50')
   const [maxDailyTurnover, setMaxDailyTurnover] = useState('0.5')
   const [symbols, setSymbols] = useState('')
+  const [strategyParams, setStrategyParams] = useState<Record<string, Record<string, unknown>>>({})
 
   // AI / LLM state
   const { data: llmProviders } = useQuery<LLMProvider[]>({
@@ -151,6 +152,7 @@ export default function LiveConfig() {
     setMaxDailyTrades(String(config.risk?.max_daily_trades ?? 50))
     setMaxDailyTurnover(String(config.risk?.max_daily_turnover ?? 0.5))
     setSymbols((config.universe?.symbols ?? []).join(', '))
+    setStrategyParams(config.strategy_params ?? {})
   }, [config])
 
   const saveMut = useMutation({
@@ -192,6 +194,7 @@ export default function LiveConfig() {
       universe: {
         symbols: symbols.split(',').map((s) => s.trim()).filter(Boolean),
       },
+      strategy_params: strategyParams,
     }
     saveMut.mutate(payload)
 

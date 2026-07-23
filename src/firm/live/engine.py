@@ -206,6 +206,12 @@ class LiveTradingEngine:
         self._config = new_config
         log.info("Live engine strategies updated: %s", self._enabled_strategies)
 
+    def update_strategy_params(self, strategy_params: dict[str, Any]) -> None:
+        """Replace per-strategy params and rebuild the orchestrator."""
+        self._config = {**self._config, "strategy_params": strategy_params}
+        self._orchestrator = build_orchestrator(self._config)
+        log.info("Live engine strategy_params updated: %s", list(strategy_params))
+
     def update_risk(
         self,
         kill_switch_drawdown: float | None = None,

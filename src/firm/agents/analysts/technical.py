@@ -1,9 +1,8 @@
 """Technical analyst agent.
 
 Receives strategies: momentum, trend, mean_reversion, volatility_breakout,
-seasonality, gann.  Runs each, z-scores cross-sectionally, aggregates via
-IC-weighting (if available) or equal-weight, and produces a
-``SignalSet(domain="technical", ...)``.
+seasonality, gann.  Runs each; :func:`zscore_signals` is the **sole**
+cross-sectional normalisation step for technical strategy outputs.
 """
 
 from __future__ import annotations

@@ -176,6 +176,8 @@ The web UI provides:
 pip install -e ".[live]"
 ```
 
+See [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) for architecture and production ops on bare-metal/systemd.
+
 1. Add broker credentials to `.env` (Alpaca or IBKR)
 2. Start `firm-api`
 3. Navigate to `/live` and click **Start Engine**

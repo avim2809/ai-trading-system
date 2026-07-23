@@ -1,0 +1,18 @@
+[Unit]
+Description=AI Trading System API (live trading engine + web UI)
+After=network.target ibgateway.service
+Wants=ibgateway.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/local/store/git/ai-trading-system
+EnvironmentFile=/local/store/git/ai-trading-system/.env
+# firm-api reads config/live.yaml on boot when this is set (see firm.api.routers.live).
+Environment=FIRM_AUTO_START_LIVE=1
+ExecStart=/local/store/git/ai-trading-system/.venv/bin/firm-api
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -3,9 +3,8 @@
 Financial intuition:
     Well-documented calendar anomalies create exploitable return patterns:
     - **Turn-of-month (TOM)** effect: equity returns are significantly
-      higher during the last 1-2 and first 2-3 trading days of each
-      calendar month, likely due to institutional cash flows (salary
-      payments, pension fund rebalancing).
+      higher during the last 1-2 and first 2-3 **trading days** of each
+      calendar month (Lakonishok & Smidt, 1988).
     - **Day-of-week** effect: Mondays historically show lower returns
       (weekend uncertainty), while Fridays show slightly higher returns
       (position squaring).
@@ -18,9 +17,9 @@ Signal logic:
     1. **Day-of-week score**: compute the historical average return for
        each weekday across the universe.  Score the current day's expected
        return relative to the weekly mean.
-    2. **Turn-of-month score**: +1 bias if asof falls within the TOM
-       window (last *tom_days_before* or first *tom_days_after* trading
-       days of the month), 0 otherwise.
+    2. **Turn-of-month score**: +1 if asof falls within the TOM
+       window measured in **trading days** (last *tom_days_before* or
+       first *tom_days_after* sessions of the calendar month).
     3. Final score = (dow_score + tom_score) / 2, applied uniformly across
        the universe (calendar effects are market-wide).
 
@@ -36,8 +35,6 @@ Risk notes:
 """
 
 from __future__ import annotations
-
-import calendar
 
 import numpy as np
 import pandas as pd
@@ -60,14 +57,20 @@ class SeasonalityStrategy(BaseStrategy):
         if not universe:
             return []
 
-        asof = pd.Timestamp(pit_view.asof)
+        asof = pd.Timestamp(pit_view.asof).normalize()
 
         prices_df = pit_view.prices(symbols=universe, lookback_days=252)
         dow_score = 0.0
+        trading_dates: list[pd.Timestamp] = []
         if not prices_df.empty:
             dow_score = self._day_of_week_score(prices_df, asof)
+            trading_dates = sorted(
+                pd.to_datetime(prices_df["date"]).dt.normalize().unique()
+            )
 
-        tom_score = self._turn_of_month_score(asof, tom_days_before, tom_days_after)
+        tom_score = self._turn_of_month_score(
+            asof, tom_days_before, tom_days_after, trading_dates
+        )
 
         raw_score = (dow_score + tom_score) / 2.0
         score = float(np.clip(raw_score, -1, 1))
@@ -87,6 +90,7 @@ class SeasonalityStrategy(BaseStrategy):
                         "dow_score": dow_score,
                         "tom_score": tom_score,
                         "day_of_week": asof.day_name(),
+                        "tom_uses_trading_days": bool(trading_dates),
                     },
                 )
             )
@@ -131,14 +135,31 @@ class SeasonalityStrategy(BaseStrategy):
         asof: pd.Timestamp,
         tom_days_before: int,
         tom_days_after: int,
+        trading_dates: list[pd.Timestamp],
     ) -> float:
-        """Return +1 if asof is in the turn-of-month window, else 0."""
+        """Return +1 if *asof* is in the turn-of-month trading-day window."""
+        if trading_dates:
+            eligible = [d for d in trading_dates if d <= asof]
+            if not eligible:
+                return 0.0
+            ref = eligible[-1]
+            month_start = ref.replace(day=1)
+            month_end = month_start + pd.offsets.MonthEnd(0)
+            month_sessions = list(pd.bdate_range(month_start, month_end))
+            if ref not in month_sessions:
+                return 0.0
+            idx = month_sessions.index(ref)
+            near_end = idx >= len(month_sessions) - tom_days_before
+            near_start = idx < tom_days_after
+            if near_end or near_start:
+                return 1.0
+            return 0.0
+
+        # Fallback when no price calendar is available (should be rare).
+        import calendar
+
         day = asof.day
         _, last_day = calendar.monthrange(asof.year, asof.month)
-
         near_end = day >= (last_day - tom_days_before)
         near_start = day <= tom_days_after
-
-        if near_end or near_start:
-            return 1.0
-        return 0.0
+        return 1.0 if (near_end or near_start) else 0.0

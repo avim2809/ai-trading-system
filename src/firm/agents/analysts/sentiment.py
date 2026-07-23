@@ -1,7 +1,8 @@
 """Sentiment analyst agent.
 
-Receives strategies: sentiment, event_driven.  Runs each, z-scores
-cross-sectionally, and produces a ``SignalSet(domain="sentiment", ...)``.
+Receives strategies: sentiment, event_driven.  Runs each; analysts apply
+the sole cross-sectional :func:`zscore_signals` pass before producing a
+``SignalSet(domain="sentiment", ...)``.
 """
 
 from __future__ import annotations

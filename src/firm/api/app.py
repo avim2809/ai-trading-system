@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -38,7 +39,28 @@ class SPAStaticFiles(StaticFiles):
 
 def create_app() -> FastAPI:
     """Build and return the configured FastAPI application."""
-    application = FastAPI(title="AI Trading System", version="0.1.0")
+
+    @asynccontextmanager
+    async def lifespan(application: FastAPI):
+        import asyncio
+        import os
+
+        async def _auto_start_live() -> None:
+            flag = os.getenv("FIRM_AUTO_START_LIVE", "").lower()
+            if flag not in ("1", "true", "yes"):
+                return
+            # IBKR connect uses ib_async on a worker thread — must not run on
+            # uvicorn's main asyncio loop (same constraint as POST /live/start).
+            await asyncio.sleep(1)
+            from firm.api.routers.live import bootstrap_live_from_yaml
+
+            await asyncio.to_thread(bootstrap_live_from_yaml, application)
+
+        task = asyncio.create_task(_auto_start_live())
+        yield
+        task.cancel()
+
+    application = FastAPI(title="AI Trading System", version="0.1.0", lifespan=lifespan)
 
     application.add_middleware(
         CORSMiddleware,

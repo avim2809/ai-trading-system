@@ -270,7 +270,34 @@ WantedBy=multi-user.target
 EOF
 ```
 
-**`/etc/systemd/system/firm-api.service`**
+**API service — use the repo unit (recommended)**
+
+The production host uses [`deploy/ai-trading.service`](deploy/ai-trading.service) (not `firm-api.service`):
+
+```bash
+sudo cp deploy/ai-trading.service /etc/systemd/system/ai-trading.service
+# Edit paths/user if needed, then:
+sudo systemctl daemon-reload
+sudo systemctl enable ai-trading
+```
+
+Key settings in that unit:
+
+- `ExecStart=$(pwd)/.venv/bin/firm-api` — single process for API + web UI + live engine
+- `EnvironmentFile=$(pwd)/.env` — API keys and broker credentials
+- `Environment=FIRM_AUTO_START_LIVE=1` — boots live from `config/live.yaml` on startup
+- `After=ibgateway.service` — waits for IB Gateway
+
+Add to `.env`:
+
+```env
+FIRM_AUTO_START_LIVE=1    # set to 0 to start live manually from the dashboard
+```
+
+`POST /api/live/start` merges missing fields (universe, strategies, risk, `strategy_params`) from `config/live.yaml`. See [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md).
+
+**Alternative: generic `firm-api.service` (manual live start)**
+
 ```bash
 sudo tee /etc/systemd/system/firm-api.service > /dev/null << EOF
 [Unit]
@@ -292,6 +319,8 @@ WantedBy=multi-user.target
 EOF
 ```
 
+This variant does not set `FIRM_AUTO_START_LIVE` — you must start live via the dashboard or `POST /api/live/start`.
+
 Xvfb (virtual framebuffer) is needed by IB Gateway's Java UI even in headless mode.
 Install it if not present: `sudo apt-get install -y xvfb`.
 
@@ -299,12 +328,12 @@ Enable and start:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable ib-gateway firm-api
+sudo systemctl enable ib-gateway ai-trading   # or: ib-gateway firm-api
 sudo systemctl start ib-gateway
 
 # Wait ~60s for Gateway to complete login, then:
-sudo systemctl start firm-api
-sudo systemctl status firm-api      # should show "active (running)"
+sudo systemctl start ai-trading
+sudo systemctl status ai-trading      # should show "active (running)"
 ```
 
 ### 6d. Firewall
@@ -348,23 +377,23 @@ sudo certbot --nginx -d trading.yourdomain.com
 
 ```bash
 # Logs
-sudo journalctl -u firm-api -f
+sudo journalctl -u ai-trading -f    # or: firm-api
 sudo journalctl -u ib-gateway -f
 
 # Restart after config change
-sudo systemctl restart firm-api
+sudo systemctl restart ai-trading
 
 # Pull latest + restart
 git pull
-sudo systemctl restart firm-api
+sudo systemctl restart ai-trading
 
 # Check Gateway connectivity
 nc -zv 127.0.0.1 4002 && echo "Gateway reachable" || echo "Gateway not up"
 
-# Start trading
+# Start trading manually (if FIRM_AUTO_START_LIVE=0)
 curl -X POST http://localhost:8000/api/live/start \
   -H "Content-Type: application/json" \
-  -d '{"broker":"ibkr_paper","approval_mode":"auto"}'
+  -d '{"broker":"ibkr_paper","approval_mode":"full_auto"}'
 ```
 
 ---

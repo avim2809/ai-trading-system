@@ -91,4 +91,5 @@ def config_defaults():
         "universe": settings.universe.model_dump(),
         "backtest": settings.backtest.model_dump(),
         "risk": settings.risk.model_dump(),
+        "strategy_params": settings.strategy_params,
     }

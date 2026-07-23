@@ -16,6 +16,23 @@ backtest:
 #   strategies: ["momentum", "trend", "regime_hmm"]
 strategies: []
 
+# Per-strategy params — mirrored in config/live.yaml for IBKR paper runs.
+strategy_params:
+  stat_arb:
+    require_cointegration: true
+    coint_pvalue: 0.10
+    max_pairs: 5
+    entry_z: 2.0
+    exit_z: 0.5
+    lookback_days: 60
+    predefined_pairs:
+      - ["SPY", "QQQ"]
+      - ["SPY", "IWM"]
+      - ["AAPL", "MSFT"]
+      - ["JPM", "BAC"]
+      - ["XOM", "CVX"]
+      - ["GOOG", "META"]
+
 risk:
   max_position_pct: 0.05        # 5% single-stock cap
   max_gross_exposure: 1.5       # 1.5× gross leverage

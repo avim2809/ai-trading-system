@@ -36,17 +36,17 @@ _APPROVALS_PATH = "data/approvals.json"
 # ---------------------------------------------------------------------------
 
 class StartRequest(BaseModel):
-    broker: str = "alpaca_paper"
-    schedule: str = "market_open"
-    approval_mode: str = "semi_auto"
+    broker: str | None = None
+    schedule: str | None = None
+    approval_mode: str | None = None
     auto_approve_strategies: list[str] = []
     symbols: list[str] = []
-    initial_capital: float = 100_000
+    initial_capital: float | None = None
     # Empty = all registered strategies (matches build_orchestrator's default).
     strategies: list[str] = []
-    kill_switch_drawdown: float = 0.10
-    max_daily_trades: int = 50
-    max_daily_turnover: float = 0.5
+    kill_switch_drawdown: float | None = None
+    max_daily_trades: int | None = None
+    max_daily_turnover: float | None = None
     # Skip scheduled/API-triggered cycles when the market is closed rather
     # than running the full pipeline against stale/misleading off-hours
     # quotes. Default on; disable only for deliberate off-hours testing.
@@ -58,6 +58,7 @@ class StartRequest(BaseModel):
     # straight into the engine config, so the same tuned envelope can be
     # started via this endpoint instead of only via that script.
     risk_overrides: dict[str, Any] = {}
+    strategy_params: dict[str, dict[str, Any]] = {}
 
 
 class ConfigUpdateStrategies(BaseModel):
@@ -86,6 +87,7 @@ class ConfigUpdateRequest(BaseModel):
     strategies: ConfigUpdateStrategies | None = None
     risk: ConfigUpdateRisk | None = None
     universe: ConfigUpdateUniverse | None = None
+    strategy_params: dict[str, dict[str, Any]] | None = None
 
 
 class RejectRequest(BaseModel):
@@ -108,6 +110,117 @@ def _get_queue(request: Request):
     if queue is None:
         raise HTTPException(status_code=400, detail="Live engine not started")
     return queue
+
+
+def _start_live_engine(
+    app,
+    *,
+    broker: str,
+    schedule: str,
+    approval_mode: str,
+    symbols: list[str],
+    strategies: list[str] | None,
+    strategy_params: dict[str, Any],
+    auto_approve: list[str],
+    engine_config: dict[str, Any],
+) -> dict[str, Any]:
+    """Create broker, data feed, engine, and scheduler on ``app.state``."""
+    from firm.live.approval import ApprovalQueue
+    from firm.live.data_feed import LiveDataFeed
+    from firm.live.engine import LiveTradingEngine
+    from firm.live.provider_utils import build_live_providers, filter_strategies_for_providers
+    from firm.live.scheduler import TradingScheduler
+    from firm.llm.config import load_llm_config, provider_config
+
+    broker_instance = _create_broker(broker)
+    live_providers = build_live_providers(broker)
+    data_feed = LiveDataFeed(providers=live_providers, universe=symbols)
+
+    if strategies:
+        strategies = filter_strategies_for_providers(strategies, live_providers, logger=log)
+        auto_approve = [s for s in auto_approve if s in strategies]
+
+    approval_queue = ApprovalQueue(broker=broker_instance, persist_path=_APPROVALS_PATH)
+    app.state.approval_queue = approval_queue
+
+    config = {
+        **engine_config,
+        "symbols": symbols,
+        "strategies": strategies,
+        "strategy_params": strategy_params,
+        "agent_modes": load_llm_config().get("agent_modes", {}),
+        "llm_config": provider_config(),
+    }
+    config.setdefault("respect_market_hours", True)
+    engine = LiveTradingEngine(
+        config=config,
+        broker=broker_instance,
+        data_feed=data_feed,
+        approval_queue=approval_queue,
+        approval_mode=approval_mode,
+        auto_approve_strategies=auto_approve,
+    )
+    engine._broker_type = broker
+    engine.start()
+    app.state.live_engine = engine
+
+    try:
+        scheduler = TradingScheduler(engine=engine, schedule=schedule)
+        scheduler.start()
+        app.state.live_scheduler = scheduler
+    except ImportError:
+        log.warning("APScheduler not installed; scheduling disabled")
+        app.state.live_scheduler = None
+
+    return {"status": "started", "broker": broker, "schedule": schedule}
+
+
+def bootstrap_live_from_yaml(app) -> None:
+    """Start the live engine from ``config/live.yaml`` when enabled for systemd.
+
+    Set ``FIRM_AUTO_START_LIVE=1`` in the service environment so ``firm-api``
+    picks up universe, risk, strategies, and ``strategy_params`` on boot without
+    using ``scripts/run_live_trading.py``.
+    """
+    import os
+
+    flag = os.getenv("FIRM_AUTO_START_LIVE", "").lower()
+    if flag not in ("1", "true", "yes"):
+        return
+
+    try:
+        with _engine_lock:
+            engine = getattr(app.state, "live_engine", None)
+            if engine is not None and engine.is_running:
+                log.info("Live engine already running; skipping auto-start")
+                return
+
+            from firm.live.provider_utils import resolve_live_startup
+
+            resolved = resolve_live_startup()
+            log.info(
+                "Auto-starting live engine from config/live.yaml "
+                "(broker=%s, %d symbols, %d strategies)",
+                resolved["broker"],
+                len(resolved["symbols"]),
+                len(resolved["strategies"] or []),
+            )
+            _start_live_engine(
+                app,
+                broker=resolved["broker"],
+                schedule=resolved["schedule"],
+                approval_mode=resolved["approval_mode"],
+                symbols=resolved["symbols"],
+                strategies=resolved["strategies"],
+                strategy_params=resolved["strategy_params"],
+                auto_approve=resolved["auto_approve"],
+                engine_config=resolved["engine_config"],
+            )
+    except Exception:
+        log.exception(
+            "Auto-start from config/live.yaml failed; API will continue "
+            "(start live manually from the dashboard or POST /api/live/start)"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -167,10 +280,7 @@ def live_status(request: Request) -> dict[str, Any]:
 
 @router.post("/start")
 def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
-    from firm.live.approval import ApprovalQueue
-    from firm.live.data_feed import LiveDataFeed
-    from firm.live.engine import LiveTradingEngine
-    from firm.live.scheduler import TradingScheduler
+    from firm.live.provider_utils import resolve_live_startup
 
     with _engine_lock:
         if getattr(request.app.state, "live_engine", None) is not None:
@@ -178,71 +288,34 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
             if engine.is_running:
                 raise HTTPException(status_code=409, detail="Engine already running")
 
-        broker = _create_broker(body.broker)
-        universe = body.symbols or ["AAPL", "MSFT", "GOOG", "AMZN", "META"]
-
-        # Broker-agnostic market data: FallbackProvider chains
-        # Massive -> Tiingo -> AlphaVantage -> FMP per capability, skipping
-        # any provider whose key isn't configured. Independent of which
-        # broker is used for execution.
-        from firm.data.providers.fallback import FallbackProvider
-
-        market_data = FallbackProvider()
-        data_feed = LiveDataFeed(
-            providers={
-                "prices": market_data,
-                "fundamentals": market_data,
-                "sentiment": market_data,
-            },
-            universe=universe,
-        )
-
-        approval_queue = ApprovalQueue(broker=broker, persist_path=_APPROVALS_PATH)
-        request.app.state.approval_queue = approval_queue
-
-        from firm.llm.config import load_llm_config, provider_config
-
-        config = {
-            "initial_capital": body.initial_capital,
-            "symbols": universe,
-            # Empty -> build_orchestrator defaults to all registered
-            # strategies; a non-empty list enables only those.
-            "strategies": body.strategies or None,
-            "kill_switch_drawdown": body.kill_switch_drawdown,
-            "max_daily_trades": body.max_daily_trades,
-            "max_daily_turnover": body.max_daily_turnover,
-            "respect_market_hours": body.respect_market_hours,
-            # Without these, every analyst silently stays in "quant" mode and
-            # the LLM layer (sentiment enhancement, bull/bear/debate, memory
-            # reflection) never activates for a run started via this endpoint.
-            "agent_modes": load_llm_config().get("agent_modes", {}),
-            "llm_config": provider_config(),
-        }
-        config.update(body.risk_overrides)
-        engine = LiveTradingEngine(
-            config=config,
-            broker=broker,
-            data_feed=data_feed,
-            approval_queue=approval_queue,
+        resolved = resolve_live_startup(
+            broker=body.broker,
+            symbols=body.symbols or None,
+            strategies=body.strategies or None,
+            strategy_params=body.strategy_params if body.strategy_params else None,
+            auto_approve=body.auto_approve_strategies,
+            initial_capital=body.initial_capital,
+            risk_overrides=body.risk_overrides,
+            schedule=body.schedule,
             approval_mode=body.approval_mode,
-            auto_approve_strategies=body.auto_approve_strategies,
+            kill_switch_drawdown=body.kill_switch_drawdown,
+            max_daily_trades=body.max_daily_trades,
+            max_daily_turnover=body.max_daily_turnover,
         )
-        # Set for /live/status and /live/config to report accurately — the
-        # engine itself only holds a Broker instance, not the type string
-        # used to construct it, and nothing was ever setting this before.
-        engine._broker_type = body.broker
-        engine.start()
-        request.app.state.live_engine = engine
+        engine_config = dict(resolved["engine_config"])
+        engine_config["respect_market_hours"] = body.respect_market_hours
 
-        try:
-            scheduler = TradingScheduler(engine=engine, schedule=body.schedule)
-            scheduler.start()
-            request.app.state.live_scheduler = scheduler
-        except ImportError:
-            log.warning("APScheduler not installed; scheduling disabled")
-            request.app.state.live_scheduler = None
-
-    return {"status": "started", "broker": body.broker, "schedule": body.schedule}
+        return _start_live_engine(
+            request.app,
+            broker=resolved["broker"],
+            schedule=resolved["schedule"],
+            approval_mode=resolved["approval_mode"],
+            symbols=resolved["symbols"],
+            strategies=resolved["strategies"],
+            strategy_params=resolved["strategy_params"],
+            auto_approve=resolved["auto_approve"],
+            engine_config=engine_config,
+        )
 
 
 @router.post("/stop")
@@ -436,6 +509,8 @@ def get_live_config(request: Request) -> dict[str, Any]:
 
     if engine is None:
         from firm.strategies.registry import list_strategies
+        from firm.live.provider_utils import load_live_yaml_defaults
+
         all_strategies = list_strategies()
         return {
             "broker": "alpaca_paper",
@@ -446,6 +521,7 @@ def get_live_config(request: Request) -> dict[str, Any]:
                 "auto_approve": [],
                 "require_approval": all_strategies,
             },
+            "strategy_params": load_live_yaml_defaults().get("strategy_params", {}),
             "risk": {
                 "kill_switch_drawdown": 0.10,
                 "max_daily_trades": 50,
@@ -472,6 +548,7 @@ def get_live_config(request: Request) -> dict[str, Any]:
             "auto_approve": auto,
             "require_approval": [s for s in enabled if s not in auto],
         },
+        "strategy_params": dict(getattr(engine, "_config", {}).get("strategy_params") or {}),
         "risk": risk,
         "universe": {
             "symbols": list(universe),
@@ -502,6 +579,8 @@ def update_live_config(body: ConfigUpdateRequest, request: Request) -> dict[str,
         )
     if body.universe is not None and body.universe.symbols is not None:
         engine._data_feed._universe = body.universe.symbols
+    if body.strategy_params is not None:
+        engine.update_strategy_params(body.strategy_params)
 
     if body.schedule is not None:
         with _engine_lock:

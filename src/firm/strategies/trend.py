@@ -76,24 +76,17 @@ class TrendStrategy(BaseStrategy):
         if len(raw_score) < 2:
             return []
 
-        mean = raw_score.mean()
-        std = raw_score.std()
-        if std == 0 or np.isnan(std):
-            z_scores = raw_score * 0.0
-        else:
-            z_scores = ((raw_score - mean) / std).clip(-3, 3)
-
         signals: list[Signal] = []
-        for symbol in z_scores.index:
-            z = float(z_scores[symbol])
+        for symbol in raw_score.index:
+            raw = float(raw_score[symbol])
             d = float(direction.get(symbol, 0))
             v = float(vol.get(symbol, np.nan))
             signals.append(
                 Signal(
                     symbol=str(symbol),
                     strategy="trend",
-                    score=z,
-                    confidence=min(abs(z) / 3.0, 1.0),
+                    score=raw,
+                    confidence=min(abs(raw) / 5.0, 1.0),
                     horizon="21d",
                     asof=pit_view.asof,
                     meta={

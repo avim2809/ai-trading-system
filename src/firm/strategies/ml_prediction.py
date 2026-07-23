@@ -247,25 +247,19 @@ class MLPredictionStrategy(BaseStrategy):
             return []
 
         pred_series = pd.Series(predictions, index=symbols)
-        mean = pred_series.mean()
-        std = pred_series.std()
-        if std == 0 or np.isnan(std):
-            z_scores = pred_series * 0.0
-        else:
-            z_scores = ((pred_series - mean) / std).clip(-3, 3)
 
         signals: list[Signal] = []
-        for symbol, z in z_scores.items():
+        for symbol, pred in pred_series.items():
             signals.append(
                 Signal(
                     symbol=str(symbol),
                     strategy="ml_prediction",
-                    score=float(z),
-                    confidence=min(abs(float(z)) / 3.0, 1.0),
+                    score=float(pred),
+                    confidence=min(abs(float(pred)) / 0.05, 1.0),
                     horizon=f"{predict_horizon}d",
                     asof=pit_view.asof,
                     meta={
-                        "predicted_return": float(pred_series[symbol]),
+                        "predicted_return": float(pred),
                         "model_type": model_type,
                         "train_samples": len(train_data),
                     },

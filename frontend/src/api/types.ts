@@ -299,6 +299,7 @@ export interface LiveConfig {
   schedule: string
   approval_mode: string
   strategies: LiveConfigStrategies
+  strategy_params?: Record<string, Record<string, unknown>>
   risk: LiveConfigRisk
   universe: LiveConfigUniverse
 }

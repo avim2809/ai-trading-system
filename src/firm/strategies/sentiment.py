@@ -112,22 +112,15 @@ class SentimentStrategy(BaseStrategy):
         if len(combined) < 3:
             return []
 
-        mean = combined.mean()
-        std = combined.std()
-        if std == 0 or np.isnan(std):
-            z_scores = combined * 0.0
-        else:
-            z_scores = ((combined - mean) / std).clip(-3, 3)
-
         signals: list[Signal] = []
-        for symbol in z_scores.index:
-            z = float(z_scores[symbol])
+        for symbol in combined.index:
+            raw = float(combined[symbol])
             signals.append(
                 Signal(
                     symbol=str(symbol),
                     strategy="sentiment",
-                    score=z,
-                    confidence=min(abs(z) / 3.0, 1.0),
+                    score=raw,
+                    confidence=min(abs(raw), 1.0),
                     horizon="5d",
                     asof=pit_view.asof,
                     meta={

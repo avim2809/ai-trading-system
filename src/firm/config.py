@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
 
@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     data: DataConfig = DataConfig()
     # Alpha strategies to wire into the analysts. Empty → all registered.
     strategies: list[str] = []
+    # Per-strategy constructor params (e.g. stat_arb predefined_pairs).
+    strategy_params: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
