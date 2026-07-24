@@ -2,10 +2,13 @@
 
 Financial intuition:
     When an asset's price sits above its long-term moving average it is in
-    an uptrend; below signals a downtrend.  Scaling the binary signal by
-    inverse volatility allocates more risk budget to lower-vol (higher
-    Sharpe) trends, following the managed-momentum literature (Barroso &
-    Santa-Clara, 2015).
+    an uptrend; below signals a downtrend.  The score uses *continuous*
+    crossover strength — how far the fast MA sits above/below the slow MA —
+    so cross-sectional ranking reflects trend conviction, not a binary sign.
+
+    Volatility scaling belongs in portfolio construction (e.g. risk-agent vol
+    targeting), not in the cross-sectional alpha score: embedding ``1/vol``
+    in the signal made rankings track inverse vol and produced negative IC.
 
 Data inputs:
     Adjusted close prices from PitView.prices() with lookback sufficient for
@@ -13,14 +16,12 @@ Data inputs:
 
 Signal logic:
     1. Compute fast MA (default 50 d) and slow MA (default 200 d) per symbol.
-    2. Direction = +1 if fast MA > slow MA, else -1.
-    3. Realized volatility = annualized std of daily returns over vol_lookback.
-    4. Signal score = direction / volatility (inverse-vol scaled), then
-       normalized across the universe to roughly [-1, 1].
+    2. Score = (fast MA − slow MA) / slow MA  (signed trend strength).
+    3. Direction and annualized vol are kept in ``meta`` for diagnostics/sizing.
 
 Portfolio construction approach:
-    Each signal encodes direction and conviction (inverse vol).  Consumers
-    size positions proportionally to the score.
+    Each signal encodes direction and conviction via crossover strength.
+    Consumers z-score across the universe in the analyst layer.
 
 Risk notes:
     Trend strategies suffer during choppy, range-bound markets.  Works best
@@ -29,11 +30,18 @@ Risk notes:
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from firm.contracts.models import Signal
 from firm.strategies.base import BaseStrategy, PitView
 from firm.strategies.registry import register
+
+log = logging.getLogger(__name__)
+
+# MA spread at which confidence saturates (15% fast-above-slow ≈ strong trend).
+_CONFIDENCE_SCALE = 0.15
 
 
 @register("trend")
@@ -70,11 +78,17 @@ class TrendStrategy(BaseStrategy):
         vol = daily_ret.iloc[-vol_lookback:].std() * np.sqrt(252)
         vol = vol.replace(0, np.nan)
 
-        raw_score = direction / vol
-        raw_score = raw_score.dropna()
+        # Continuous crossover strength — do not divide by vol here (hurts IC).
+        strength = (fast_ma - slow_ma) / slow_ma
+        raw_score = strength.dropna()
 
         if len(raw_score) < 2:
             return []
+
+        log.debug(
+            "trend: %d symbols, score range [%.4f, %.4f]",
+            len(raw_score), float(raw_score.min()), float(raw_score.max()),
+        )
 
         signals: list[Signal] = []
         for symbol in raw_score.index:
@@ -86,12 +100,13 @@ class TrendStrategy(BaseStrategy):
                     symbol=str(symbol),
                     strategy="trend",
                     score=raw,
-                    confidence=min(abs(raw) / 5.0, 1.0),
+                    confidence=min(abs(raw) / _CONFIDENCE_SCALE, 1.0),
                     horizon="21d",
                     asof=pit_view.asof,
                     meta={
                         "direction": d,
                         "annualized_vol": v,
+                        "strength": raw,
                         "fast_ma": float(fast_ma.get(symbol, np.nan)),
                         "slow_ma": float(slow_ma.get(symbol, np.nan)),
                     },

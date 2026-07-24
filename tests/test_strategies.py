@@ -389,8 +389,18 @@ class TestTrend:
         for sig in signals:
             assert sig.meta["direction"] in (-1.0, 0.0, 1.0)
 
+    def test_score_is_continuous_crossover_strength(self, pit_view):
+        """Score must be (fast-slow)/slow strength, not direction/vol."""
+        strat = get("trend")(params={"fast_window": 20, "slow_window": 50})
+        signals = strat.generate(pit_view)
+        for sig in signals:
+            assert "strength" in sig.meta
+            assert sig.score == sig.meta["strength"]
+            if sig.meta["direction"] > 0:
+                assert sig.score > 0
+            elif sig.meta["direction"] < 0:
+                assert sig.score < 0
 
-class TestMeanReversion:
     def test_generate(self, pit_view):
         strat = get("mean_reversion")()
         signals = strat.generate(pit_view)
