@@ -41,3 +41,16 @@ class TestLoadFundamentals:
 
     def test_returns_none_when_absent(self, tmp_path):
         assert load_fundamentals(_settings(tmp_path)) is None
+
+    def test_expands_googl_alias_to_goog(self, tmp_path):
+        cache = ParquetCache(tmp_path)
+        df = pd.DataFrame({
+            "date": ["2024-01-01"],
+            "symbol": ["GOOGL"],
+            "pe_ratio": [22.0],
+        })
+        cache.put("combined/fundamentals", df)
+
+        result = load_fundamentals(_settings(tmp_path))
+        assert result is not None
+        assert set(result["symbol"]) == {"GOOGL", "GOOG"}

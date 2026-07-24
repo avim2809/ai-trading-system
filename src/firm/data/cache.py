@@ -70,3 +70,23 @@ class ParquetCache:
 
     def read(self, key: str) -> pd.DataFrame | None:
         return self.get(key)
+
+    def merge_combined(self, key: str, new_df: pd.DataFrame) -> pd.DataFrame:
+        """Merge *new_df* into an existing combined panel, deduping symbol+date."""
+        if new_df.empty:
+            existing = self.get(key)
+            return existing if existing is not None else new_df
+
+        existing = self.get(key)
+        if existing is None or existing.empty:
+            merged = new_df
+        else:
+            merged = pd.concat([existing, new_df], ignore_index=True)
+            if "date" in merged.columns and "symbol" in merged.columns:
+                merged["date"] = pd.to_datetime(merged["date"])
+                merged = merged.sort_values(["symbol", "date"]).drop_duplicates(
+                    subset=["symbol", "date"],
+                    keep="last",
+                )
+        self.put(key, merged)
+        return merged

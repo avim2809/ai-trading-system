@@ -138,11 +138,15 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     if not combined_prices.empty:
-        cache.put("combined/prices", combined_prices)
+        combined_prices = cache.merge_combined("combined/prices", combined_prices)
     if not combined_fundamentals.empty:
-        cache.put("combined/fundamentals", combined_fundamentals)
+        combined_fundamentals = cache.merge_combined(
+            "combined/fundamentals", combined_fundamentals,
+        )
     if not combined_sentiment.empty:
-        cache.put("combined/sentiment", combined_sentiment)
+        combined_sentiment = cache.merge_combined(
+            "combined/sentiment", combined_sentiment,
+        )
 
     log.info(
         "Done. Prices=%d rows, Fundamentals=%d rows, Sentiment=%d rows",

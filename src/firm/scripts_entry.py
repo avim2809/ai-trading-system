@@ -97,6 +97,14 @@ def build_pit_panel(
         "fetch_done",
         extra={"context": {name: len(df) for name, df in panels.items()}},
     )
+
+    if panels.get("prices") is not None and not panels["prices"].empty:
+        cache.merge_combined("combined/prices", panels["prices"])
+    if panels.get("fundamentals") is not None and not panels["fundamentals"].empty:
+        cache.merge_combined("combined/fundamentals", panels["fundamentals"])
+    if panels.get("news_sentiment") is not None and not panels["news_sentiment"].empty:
+        cache.merge_combined("combined/sentiment", panels["news_sentiment"])
+
     return panels
 
 

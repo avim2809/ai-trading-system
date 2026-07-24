@@ -64,7 +64,7 @@ class TestFetchDataCacheKeys:
         assert set(second_run["symbol"]) == {"GOOG", "TSLA"}
         assert set(first_run["symbol"]) == {"AAPL", "MSFT"}
 
-    def test_combined_prices_reflects_latest_run_symbols(self, tmp_path):
+    def test_combined_prices_merges_incremental_symbol_runs(self, tmp_path):
         cfg = MagicMock()
         cfg.data.cache_dir = str(tmp_path)
 
@@ -82,3 +82,22 @@ class TestFetchDataCacheKeys:
         cache = ParquetCache(str(tmp_path))
         combined = cache.get("combined/prices")
         assert set(combined["symbol"]) == {"AAPL", "MSFT", "GOOG"}
+
+    def test_combined_prices_keeps_symbols_from_prior_runs(self, tmp_path):
+        cfg = MagicMock()
+        cfg.data.cache_dir = str(tmp_path)
+
+        with patch("firm.scripts.fetch_data.get_settings", return_value=cfg), \
+             patch("firm.scripts.fetch_data.setup_logging"), \
+             patch("firm.scripts.fetch_data.get_provider", side_effect=lambda name, settings: _fake_provider(["AAPL"])):
+            fetch_data.main(["--symbols", "AAPL", "--start", "2020-01-01", "--end", "2026-01-01", "--providers", "massive"])
+
+        with patch("firm.scripts.fetch_data.get_settings", return_value=cfg), \
+             patch("firm.scripts.fetch_data.setup_logging"), \
+             patch("firm.scripts.fetch_data.get_provider", side_effect=lambda name, settings: _fake_provider(["GOOG"])):
+            fetch_data.main(["--symbols", "GOOG", "--start", "2020-01-01", "--end", "2026-01-01", "--providers", "massive"])
+
+        from firm.data.cache import ParquetCache
+        cache = ParquetCache(str(tmp_path))
+        combined = cache.get("combined/prices")
+        assert set(combined["symbol"]) == {"AAPL", "GOOG"}

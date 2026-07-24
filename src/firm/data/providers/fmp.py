@@ -31,6 +31,9 @@ log = get_logger(__name__)
 
 _BASE_URL = "https://financialmodelingprep.com"
 
+# FMP free tier often exposes Class A listings only; query aliases keep universe tickers.
+_FMP_QUERY_ALIASES: dict[str, str] = {"GOOG": "GOOGL"}
+
 
 class FMPProvider(DataProvider):
     """Adapter for the FMP REST API (fundamentals, prices, constituents)."""
@@ -115,18 +118,19 @@ class FMPProvider(DataProvider):
         start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
         frames: list[pd.DataFrame] = []
         for symbol in symbols:
+            api_symbol = _FMP_QUERY_ALIASES.get(symbol.upper(), symbol)
             try:
                 income = self._client.get_json(
                     "/stable/income-statement",
-                    params=self._params(symbol=symbol, limit=5),
+                    params=self._params(symbol=api_symbol, limit=5),
                 )
                 metrics = self._client.get_json(
                     "/stable/key-metrics",
-                    params=self._params(symbol=symbol, limit=5),
+                    params=self._params(symbol=api_symbol, limit=5),
                 )
                 ratios = self._client.get_json(
                     "/stable/ratios",
-                    params=self._params(symbol=symbol, limit=5),
+                    params=self._params(symbol=api_symbol, limit=5),
                 )
                 # Index by (fiscalYear, period) for merging
                 income_map = {

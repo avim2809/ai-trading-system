@@ -56,6 +56,26 @@ class TestParquetCacheApi:
         assert cache.get("a/one")["v"].iloc[0] == 1
         assert cache.get("a/two")["v"].iloc[0] == 2
 
+    def test_merge_combined_dedupes_symbol_date(self, cache: ParquetCache) -> None:
+        cache.put(
+            "combined/prices",
+            pd.DataFrame({
+                "date": ["2024-01-01"],
+                "symbol": ["AAPL"],
+                "close": [100.0],
+            }),
+        )
+        merged = cache.merge_combined(
+            "combined/prices",
+            pd.DataFrame({
+                "date": ["2024-01-01", "2024-01-02"],
+                "symbol": ["AAPL", "MSFT"],
+                "close": [101.0, 200.0],
+            }),
+        )
+        assert set(merged["symbol"]) == {"AAPL", "MSFT"}
+        aapl = merged[merged["symbol"] == "AAPL"].iloc[0]
+        assert aapl["close"] == 101.0
 
 class TestTokenCompressor:
     def test_truncation_samples_across_document(self) -> None:

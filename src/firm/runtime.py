@@ -201,8 +201,36 @@ def load_fundamentals(settings: Settings) -> pd.DataFrame | None:
     for key in ("combined/fundamentals", "fundamentals"):
         df = cache.get(key)
         if df is not None and not df.empty:
-            return df
+            return _expand_fundamental_symbol_aliases(df)
     return None
+
+
+_FUNDAMENTALS_SYMBOL_ALIASES: dict[str, str] = {"GOOG": "GOOGL"}
+
+
+def _expand_fundamental_symbol_aliases(df: pd.DataFrame) -> pd.DataFrame:
+    """Duplicate rows for tickers that share fundamentals with a cached listing."""
+    if df.empty or "symbol" not in df.columns:
+        return df
+    have = set(df["symbol"].astype(str).str.upper())
+    extras: list[pd.DataFrame] = []
+    for target, source in _FUNDAMENTALS_SYMBOL_ALIASES.items():
+        if target in have or source not in have:
+            continue
+        copy = df[df["symbol"].astype(str).str.upper() == source].copy()
+        copy["symbol"] = target
+        extras.append(copy)
+        log.debug("Expanded fundamentals alias %s -> %s (%d rows)", source, target, len(copy))
+    if not extras:
+        return df
+    merged = pd.concat([df, *extras], ignore_index=True)
+    if "date" in merged.columns:
+        merged["date"] = pd.to_datetime(merged["date"])
+        merged = merged.sort_values(["symbol", "date"]).drop_duplicates(
+            subset=["symbol", "date"],
+            keep="last",
+        )
+    return merged
 
 
 def run_backtest_from_config(
