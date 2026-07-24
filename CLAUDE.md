@@ -31,6 +31,7 @@ concise agent memory lives in `.cursor/rules/` and the full reference in
   `config/settings.yaml`, `config/live.yaml`, and `PUT /api/live/config`.
 - **News-guard blackout** (`src/firm/live/news_guard.py`) + **execution lock**
   `FIRM_ALLOW_TRADING` (`src/firm/live/execution_safety.py`) — both default OFF/fail-closed.
+- **Backtest cache**: `data_source: cache` loads `combined/prices` + `combined/fundamentals` from `data/cache`.
 - **UI**: `frontend/src/pages/{RunDetail,NewBacktest,LiveConfig}.tsx`.
 
 ## Rules of thumb
@@ -39,8 +40,9 @@ concise agent memory lives in `.cursor/rules/` and the full reference in
   (`log = logging.getLogger(__name__)`); log decisions, fallbacks, external-I/O
   outcomes, and safety events (execution-gate blocks, news-guard, kill-switch).
   No `print`, no bare `except: pass`. See `.cursor/rules/logging.mdc`.
-- Edit `config/live.yaml` for live universe/risk/strategies/params; use
+- Edit `config/live.yaml` for live universe/risk/strategies/params (include `risk.sector_map` for sector caps); use
   `resolve_live_startup()` in `src/firm/live/provider_utils.py` — do not duplicate YAML merge logic.
+- Backtests with **Cache** data source load prices + fundamentals from `data/cache` (not live API).
 - On a running engine, change behavioural knobs via engine setters
   (`update_news_guard` / `update_signal_combination` / `update_allocation`).
 - Never call `IBKRBroker.connect()` from uvicorn's asyncio loop — use a sync handler

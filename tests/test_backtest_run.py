@@ -271,3 +271,72 @@ class TestFirmStrategyNeverTradesDuringWarmup:
             assert pd.Timestamp(snap.asof) >= start_ts, (
                 f"snapshot recorded at {snap.asof}, before start_date"
             )
+
+
+class TestExecuteBacktestLoadsFundamentals:
+    def test_cache_backtest_loads_fundamentals_into_pit_store(self):
+        fund_df = pd.DataFrame({
+            "date": ["2024-01-01"],
+            "symbol": ["AAPL"],
+            "pe_ratio": [20.0],
+            "roe": [0.15],
+        })
+        load_calls: list[dict] = []
+
+        class FakePitStore:
+            def load(self, **kwargs):
+                load_calls.append(kwargs)
+
+            def get_universe(self, asof):
+                return ["AAPL"]
+
+        config = {
+            "data_source": "cache",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "universe_symbols": ["AAPL"],
+            "strategies": ["momentum"],
+            "warmup_days": 0,
+        }
+
+        with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
+             patch("firm.runtime.load_fundamentals", return_value=fund_df), \
+             patch("firm.config.get_settings"), \
+             patch("firm.backtest.run.PointInTimeDataStore", FakePitStore), \
+             patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            execute_backtest(config)
+
+        assert any("prices" in call for call in load_calls)
+        assert any(
+            "fundamentals" in call and call["fundamentals"] is fund_df
+            for call in load_calls
+        )
+
+    def test_synthetic_backtest_does_not_load_fundamentals(self):
+        load_calls: list[dict] = []
+
+        class FakePitStore:
+            def load(self, **kwargs):
+                load_calls.append(kwargs)
+
+            def get_universe(self, asof):
+                return ["AAPL"]
+
+        config = {
+            "data_source": "synthetic",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "universe_symbols": ["AAPL"],
+            "strategies": ["momentum"],
+        }
+
+        with patch("firm.runtime.load_fundamentals") as load_fund, \
+             patch("firm.backtest.run.PointInTimeDataStore", FakePitStore), \
+             patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            execute_backtest(config)
+
+        load_fund.assert_not_called()
+        assert all("fundamentals" not in call for call in load_calls)
+

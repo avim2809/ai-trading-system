@@ -188,6 +188,23 @@ def load_prices(settings: Settings) -> pd.DataFrame:
     )
 
 
+def load_fundamentals(settings: Settings) -> pd.DataFrame | None:
+    """Load cached fundamental panels when ``fetch-data`` wrote them.
+
+    Primary key: ``combined/fundamentals`` (ParquetCache). Falls back to
+    ``fundamentals`` for older cache layouts. Returns ``None`` when absent so
+    callers can degrade gracefully (mirrors optional FRED macro loading).
+    """
+    from firm.data.cache import ParquetCache
+
+    cache = ParquetCache(settings.data.cache_dir)
+    for key in ("combined/fundamentals", "fundamentals"):
+        df = cache.get(key)
+        if df is not None and not df.empty:
+            return df
+    return None
+
+
 def run_backtest_from_config(
     config: dict,
     prices_df: pd.DataFrame,
@@ -196,6 +213,26 @@ def run_backtest_from_config(
     """Setup + run + report in one call.  Used by both CLI and API."""
     pit_store = PointInTimeDataStore()
     pit_store.load(prices=prices_df)
+
+    # Fundamentals: same ParquetCache keys as ``fetch-data`` so multi_factor /
+    # event_driven backtests match live when FMP/Massive data is cached.
+    try:
+        from firm.config import get_settings
+
+        fund_df = load_fundamentals(get_settings())
+        if fund_df is not None:
+            pit_store.load(fundamentals=fund_df)
+            log.info(
+                "Loaded fundamentals cache: %d rows, %d symbols",
+                len(fund_df), fund_df["symbol"].nunique(),
+            )
+        else:
+            log.debug(
+                "No cached fundamentals in backtest; fundamental strategies "
+                "use degraded logic (see multi_factor / event_driven)"
+            )
+    except Exception:
+        log.warning("Fundamentals cache load failed — continuing price-only", exc_info=True)
 
     # Optionally load FRED macro data — gracefully skipped when key is absent.
     fred_api_key = config.get("fred_api_key", "")

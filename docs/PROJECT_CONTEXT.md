@@ -32,10 +32,10 @@ Canonical reference for architecture, production deployment, and conventions in 
 | Name | Module | Notes |
 |------|--------|-------|
 | momentum | `momentum.py` | 12-1 month cross-sectional momentum |
-| trend | `trend.py` | Moving-average trend |
+| trend | `trend.py` | MA crossover strength `(fast−slow)/slow` — not direction/vol |
 | mean_reversion | `mean_reversion.py` | Short-horizon reversion |
 | stat_arb | `stat_arb.py` | Log-price OLS pairs; cointegration gate; nets one signal per symbol |
-| multi_factor | `multi_factor.py` | Needs fundamentals (FMP on IBKR live) |
+| multi_factor | `multi_factor.py` | Value/quality/momentum/low-vol; omits `low_vol` when fundamentals missing |
 | sentiment | `sentiment.py` | News/sentiment scores |
 | event_driven | `event_driven.py` | Simplified PEAD proxy; needs fundamentals |
 | ml_prediction | `ml_prediction.py` | PIT-safe ML features |
@@ -262,7 +262,9 @@ Every module is traceable via stdlib `logging` — see [`.cursor/rules/logging.m
 1. **Raw scores only** — strategies must not call `zscore_signals`; analysts normalize.
 2. **stat_arb** — log prices, OLS hedge ratio, optional Engle-Granger cointegration (`require_cointegration` default true), one net signal per symbol, predefined pairs in YAML to avoid correlation mining.
 3. **seasonality** — turn-of-month uses trading sessions, not calendar days.
-4. **Backtest parity** — `config/settings.yaml` mirrors `strategy_params` for backtests.
+4. **Backtest parity** — `config/settings.yaml` mirrors `strategy_params`, `risk.sector_map`, and behavioural knobs for backtests.
+5. **Cached fundamentals in backtests** — when `data_source` is not `synthetic`, `load_fundamentals()` reads `data/cache` (`combined/fundamentals`) into the PIT store via `execute_backtest`, `run_backtest_from_config`, and the CLI — same panel live gets from FMP when keyed.
+6. **Risk sector cap** — set `risk.sector_map` in `config/live.yaml` / `settings.yaml` so `max_sector_pct` is enforced (without it the risk agent logs a warning each rebalance).
 
 ### Known simplifications vs literature
 

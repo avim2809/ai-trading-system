@@ -20,7 +20,11 @@ Signal logic:
     3. Momentum score = z-score of 12-1 month cumulative return.
     4. Low-vol score   = z-score of inverse realized vol (252-day).
     5. Composite = weighted sum of the four factor z-scores.
-    6. Final signal score = composite z-score (re-standardized).
+
+    When fundamentals are unavailable, ``low_vol`` is omitted (price-only
+    degraded path) and momentum alone may be used rather than blending with
+    an anti-signal low-vol leg. At least ``min_factors`` legs are required
+    when fundamentals are present (default 2).
 
 Portfolio construction approach:
     Long the highest composite scores, short the lowest.  Factor tilts
@@ -34,6 +38,8 @@ Risk notes:
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 import pandas as pd
 
@@ -41,6 +47,10 @@ from firm.contracts.models import Signal
 from firm.strategies.base import BaseStrategy, PitView
 from firm.strategies.registry import register
 
+log = logging.getLogger(__name__)
+
+# Fundamental legs need quarterly data; price-only legs are momentum + low_vol.
+_FUNDAMENTAL_FACTORS = frozenset({"value", "quality"})
 
 def _zscore(s: pd.Series) -> pd.Series:
     """Cross-sectional z-score, dropping NaNs and infs.
@@ -106,6 +116,43 @@ def _weighted_composite(
     return (composite / weight_sum.replace(0, np.nan)).dropna()
 
 
+def _prepare_factor_scores(
+    scores: dict[str, pd.Series],
+    *,
+    min_factors: int,
+    has_fundamentals: bool,
+) -> dict[str, pd.Series]:
+    """Drop unreliable legs and enforce a minimum factor count before blending.
+
+    When value/quality are unavailable the strategy used to blend momentum with
+    low_vol only; low_vol's inverse-vol z-score had negative IC in our 2022-2026
+    audit, so omit it on the price-only degraded path. Allow a single momentum
+    leg rather than emitting nothing.
+    """
+    out = dict(scores)
+    if not has_fundamentals and "low_vol" in out:
+        log.debug(
+            "multi_factor: no fundamentals — omitting low_vol on price-only path"
+        )
+        del out["low_vol"]
+
+    if not out:
+        return {}
+
+    required = min_factors if has_fundamentals else 1
+    if len(out) < required:
+        log.debug(
+            "multi_factor: %d factor(s) available, need %d — skipping bar",
+            len(out), required,
+        )
+        return {}
+
+    if not has_fundamentals and set(out.keys()) == {"momentum"}:
+        log.debug("multi_factor: momentum-only degraded composite")
+
+    return out
+
+
 @register("multi_factor")
 class MultiFactorStrategy(BaseStrategy):
     def __init__(self, params: dict | None = None):
@@ -124,6 +171,7 @@ class MultiFactorStrategy(BaseStrategy):
         mom_lookback: int = self.params.get("momentum_lookback_months", 12)
         mom_skip: int = self.params.get("momentum_skip_months", 1)
         vol_lookback: int = self.params.get("vol_lookback_days", 252)
+        min_factors: int = int(self.params.get("min_factors", 2))
 
         universe = pit_view.universe
         if not universe:
@@ -205,6 +253,10 @@ class MultiFactorStrategy(BaseStrategy):
             inv_vol = (1.0 / vol.replace(0, np.nan)).dropna()
             scores["low_vol"] = _zscore(inv_vol)
 
+        has_fundamentals = any(name in scores for name in _FUNDAMENTAL_FACTORS)
+        scores = _prepare_factor_scores(
+            scores, min_factors=min_factors, has_fundamentals=has_fundamentals,
+        )
         if not scores:
             return []
 

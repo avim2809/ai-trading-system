@@ -1,14 +1,12 @@
 # ──────────────────────────────────────────────────────────────
-#  1-Week All-Strategy Paper Comparison Experiment
-#  Risk limits mirror realistic live-account constraints so
-#  paper results are a valid proxy for live profitability.
+#  Paper trading — 10 strategies (gann + ml_prediction disabled:
+#  audit showed ~zero / negative IC on cached 2022-2026 data)
 #  Monitor live at: http://localhost:8000/live
-#  Start: 2026-07-17    End: 2026-07-24
 # ──────────────────────────────────────────────────────────────
 
 experiment:
-  name: "1_week_all_strategies_paper"
-  description: "All 12 strategies in parallel — realistic live-equivalent risk"
+  name: "paper_10_strategy"
+  description: "10 strategies — gann/ml_prediction off after IC audit"
   start_date: "2026-07-17"
   end_date: "2026-07-24"
 
@@ -29,10 +27,10 @@ strategies:
     - multi_factor
     - sentiment
     - event_driven
-    - ml_prediction
+    # ml_prediction — disabled: overfit risk on 25-name universe (IC audit)
     - volatility_breakout
     - seasonality
-    - gann
+    # gann — disabled: ~zero forward IC (geometry noise)
     - regime_hmm
   auto_approve:
     - momentum
@@ -42,10 +40,8 @@ strategies:
     - multi_factor
     - sentiment
     - event_driven
-    - ml_prediction
     - volatility_breakout
     - seasonality
-    - gann
     - regime_hmm
 
 # Per-strategy parameters passed to build_orchestrator via strategy_params.
@@ -121,6 +117,34 @@ risk:
   max_sector_pct: 0.25          # 25% sector cap — diversification guardrail
   vol_target: 0.12              # 12% annualised vol target — conservative live baseline
   max_drawdown_pct: 0.15        # 15% per-strategy drawdown before it is sized down
+
+  # GICS-style sector tags for the 25-name universe (enables max_sector_pct).
+  sector_map:
+    AAPL: technology
+    MSFT: technology
+    NVDA: technology
+    GOOG: communication
+    AMZN: consumer_discretionary
+    META: communication
+    TSLA: consumer_discretionary
+    AVGO: technology
+    AMD: technology
+    CRM: technology
+    NFLX: communication
+    ADBE: technology
+    JPM: financials
+    GS: financials
+    BAC: financials
+    V: financials
+    MA: financials
+    JNJ: healthcare
+    UNH: healthcare
+    LLY: healthcare
+    XOM: energy
+    CVX: energy
+    SPY: etf
+    QQQ: etf
+    IWM: etf
 
   # HMM regime overlay — live-equivalent exposure scaling
   regime_overlay:

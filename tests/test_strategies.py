@@ -500,6 +500,41 @@ class TestMultiFactorZscoreHardening:
         assert np.isfinite(result).all()
 
 
+class TestMultiFactorDegradedPath:
+    def test_omits_low_vol_without_fundamentals(self, pit_view):
+        from firm.strategies.multi_factor import _prepare_factor_scores
+
+        scores = {
+            "momentum": pd.Series({"A": 1.0, "B": -0.5}),
+            "low_vol": pd.Series({"A": 0.8, "B": -0.2}),
+        }
+        prepared = _prepare_factor_scores(
+            scores, min_factors=2, has_fundamentals=False,
+        )
+        assert "low_vol" not in prepared
+        assert "momentum" in prepared
+
+    def test_price_only_momentum_emits_with_min_one(self, pit_view):
+        from firm.strategies.multi_factor import _prepare_factor_scores
+
+        scores = {
+            "momentum": pd.Series({"A": 1.0}),
+            "low_vol": pd.Series({"A": 0.5}),
+        }
+        prepared = _prepare_factor_scores(
+            scores, min_factors=2, has_fundamentals=False,
+        )
+        assert prepared == {"momentum": scores["momentum"]}
+
+    def test_requires_min_factors_when_fundamentals_present(self):
+        from firm.strategies.multi_factor import _prepare_factor_scores
+
+        scores = {"momentum": pd.Series({"A": 1.0})}
+        assert _prepare_factor_scores(
+            scores, min_factors=2, has_fundamentals=True,
+        ) == {}
+
+
 class TestMultiFactorWeightedComposite:
     """Regression: combining per-factor scores used to divide every symbol
     by the SAME total factor weight regardless of which factors that symbol

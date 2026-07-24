@@ -52,6 +52,33 @@ risk:
   vol_target: 0.12              # 12% annualised vol target
   max_drawdown_pct: 0.15        # 15% per-strategy drawdown stop
 
+  sector_map:
+    AAPL: technology
+    MSFT: technology
+    NVDA: technology
+    GOOG: communication
+    AMZN: consumer_discretionary
+    META: communication
+    TSLA: consumer_discretionary
+    AVGO: technology
+    AMD: technology
+    CRM: technology
+    NFLX: communication
+    ADBE: technology
+    JPM: financials
+    GS: financials
+    BAC: financials
+    V: financials
+    MA: financials
+    JNJ: healthcare
+    UNH: healthcare
+    LLY: healthcare
+    XOM: energy
+    CVX: energy
+    SPY: etf
+    QQQ: etf
+    IWM: etf
+
   # HMM regime overlay — conservative live-equivalent scaling
   regime_overlay:
     enabled: true

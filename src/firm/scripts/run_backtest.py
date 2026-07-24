@@ -16,7 +16,7 @@ from pathlib import Path
 
 from firm.config import get_settings
 from firm.data.pit_store import PointInTimeDataStore
-from firm.runtime import build_orchestrator, load_prices
+from firm.runtime import build_orchestrator, load_fundamentals, load_prices
 
 
 log = logging.getLogger(__name__)
@@ -56,6 +56,13 @@ def main() -> None:
     log.info("Determining universe")
     pit_store = PointInTimeDataStore()
     pit_store.load(prices=prices_df)
+    fund_df = load_fundamentals(settings)
+    if fund_df is not None:
+        pit_store.load(fundamentals=fund_df)
+        log.info(
+            "Loaded fundamentals cache: %d rows, %d symbols",
+            len(fund_df), fund_df["symbol"].nunique(),
+        )
 
     start_dt = datetime.fromisoformat(settings.backtest.start_date)
     universe = pit_store.get_universe(start_dt)
