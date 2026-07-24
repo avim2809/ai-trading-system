@@ -22,8 +22,8 @@ Full reference: `docs/PROJECT_CONTEXT.md`
 
 ## Providers
 
-- `build_live_providers("ibkr_paper")` → IBKR prices/sentiment + FMP fundamentals if `FMP_API_KEY` set
-- `filter_strategies_for_providers()` drops `multi_factor`, `event_driven` without fundamentals
+- `build_live_providers("ibkr_paper")` → IBKR prices/sentiment + FMP → … fundamentals fallback chain
+- Fundamentals cache refreshes in-app: daily APScheduler job + boot when stale (`fundamentals_refresh_hour` in `live.yaml`); live cycles are cache-only
 - Data provider uses `client_id=2`; broker uses `IBKR_CLIENT_ID`
 
 ## Approval modes

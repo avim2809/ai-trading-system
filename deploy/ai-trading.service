@@ -13,6 +13,8 @@ Environment=FIRM_AUTO_START_LIVE=1
 ExecStart=/local/store/git/ai-trading-system/.venv/bin/firm-api
 Restart=always
 RestartSec=10
+TimeoutStopSec=120
+KillMode=mixed
 
 [Install]
 WantedBy=multi-user.target

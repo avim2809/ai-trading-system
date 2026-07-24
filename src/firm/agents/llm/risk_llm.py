@@ -27,6 +27,9 @@ class LLMRiskAgent(RiskAgent, LLMAgentMixin):
     def run(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
         quant_decision = RiskAgent.run(self, ctx, **inputs)
 
+        if not self._allow_risk_llm():
+            return quant_decision
+
         proposal = inputs.get("proposal")
         symbols = list((proposal.targets if proposal else {}).keys())
         if not symbols:

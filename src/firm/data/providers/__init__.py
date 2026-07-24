@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from firm.data.providers.alphavantage import AlphaVantageProvider
 from firm.data.providers.base import DataProvider, ProviderError
+from firm.data.providers.edgar import EdgarProvider
 from firm.data.providers.fallback import FallbackProvider
+from firm.data.providers.finnhub import FinnhubProvider
 from firm.data.providers.fmp import FMPProvider
 from firm.data.providers.ibkr import IBKRProvider
 from firm.data.providers.massive import MassiveProvider
 from firm.data.providers.tiingo import TiingoProvider
+from firm.data.providers.twelvedata import TwelveDataProvider
 
 __all__ = [
     "DataProvider",
@@ -17,6 +20,9 @@ __all__ = [
     "TiingoProvider",
     "AlphaVantageProvider",
     "FMPProvider",
+    "FinnhubProvider",
+    "EdgarProvider",
+    "TwelveDataProvider",
     "IBKRProvider",
     "MassiveProvider",
     "get_provider",
@@ -28,6 +34,9 @@ _REGISTRY: dict[str, type[DataProvider]] = {
     TiingoProvider.name: TiingoProvider,
     AlphaVantageProvider.name: AlphaVantageProvider,
     FMPProvider.name: FMPProvider,
+    FinnhubProvider.name: FinnhubProvider,
+    EdgarProvider.name: EdgarProvider,
+    TwelveDataProvider.name: TwelveDataProvider,
     IBKRProvider.name: IBKRProvider,
 }
 

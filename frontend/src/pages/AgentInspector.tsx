@@ -4,6 +4,7 @@ import { api } from '../api/client'
 import type { StepRequest, BlackboardView, Signal } from '../api/types'
 import PipelineStage from '../components/PipelineStage'
 import Spinner from '../components/Spinner'
+import { asString, fmtNum, fmtPct } from '../lib/format'
 
 function AIBadge() {
   return (
@@ -31,8 +32,9 @@ function RegimeBadge({ label, confidence }: { label: string; confidence?: number
 
 /** Most common regime across regime_hmm signals, with average confidence. */
 function marketRegime(view: BlackboardView): { label: string; confidence: number; n: number } | null {
-  const regimeSigs = view.signal_sets
-    .flatMap((ss) => ss.signals)
+  const signalSets = Array.isArray(view.signal_sets) ? view.signal_sets : []
+  const regimeSigs = signalSets
+    .flatMap((ss) => (Array.isArray(ss.signals) ? ss.signals : []))
     .filter((s) => s.strategy === 'regime_hmm' && typeof s.meta?.regime === 'string')
   if (regimeSigs.length === 0) return null
   const counts: Record<string, { n: number; conf: number }> = {}
@@ -96,21 +98,22 @@ function LLMUsageSummary({ usage }: { usage: { total_tokens?: number; total_cost
 
 function SignalRow({ sig }: { sig: Signal }) {
   const isLLMEnhanced = sig.meta?.llm_enhanced === true
-  const rationale = sig.meta?.llm_rationale as string | undefined
+  const rationale = asString(sig.meta?.llm_rationale, '')
   const regime = typeof sig.meta?.regime === 'string' ? (sig.meta.regime as string) : undefined
+  const score = sig.score ?? 0
   return (
     <>
       <tr className="text-slate-300">
         <td className="pr-4 py-0.5 font-mono">
           {sig.symbol}
           {isLLMEnhanced && <AIBadge />}
-          {regime && <RegimeBadge label={regime} />}
+          {regime && <RegimeBadge label={regime} confidence={sig.confidence ?? undefined} />}
         </td>
         <td className="pr-4 py-0.5">{sig.strategy}</td>
-        <td className={`pr-4 py-0.5 text-right font-mono ${sig.score > 0 ? 'text-emerald-400' : sig.score < 0 ? 'text-red-400' : ''}`}>
-          {sig.score.toFixed(3)}
+        <td className={`pr-4 py-0.5 text-right font-mono ${score > 0 ? 'text-emerald-400' : score < 0 ? 'text-red-400' : ''}`}>
+          {fmtNum(sig.score, 3)}
         </td>
-        <td className="pr-4 py-0.5 text-right font-mono">{sig.confidence.toFixed(2)}</td>
+        <td className="pr-4 py-0.5 text-right font-mono">{fmtNum(sig.confidence, 2)}</td>
       </tr>
       {rationale && (
         <tr>
@@ -124,10 +127,11 @@ function SignalRow({ sig }: { sig: Signal }) {
 }
 
 export default function AgentInspector() {
-  const { data: strategies } = useQuery({
+  const { data: strategiesRaw, isError: strategiesError, error: strategiesLoadError } = useQuery({
     queryKey: ['strategies'],
     queryFn: api.getStrategies,
   })
+  const strategies = Array.isArray(strategiesRaw) ? strategiesRaw : []
 
   const [selected, setSelected] = useState<string[]>([])
   const [symbols, setSymbols] = useState('AAPL,MSFT,GOOGL')
@@ -164,8 +168,13 @@ export default function AgentInspector() {
           {/* Strategies */}
           <div className="col-span-full">
             <label className="block text-xs text-slate-400 mb-2">Strategies</label>
+            {strategiesError && (
+              <p className="text-xs text-amber-400 mb-2">
+                Could not load strategies: {(strategiesLoadError as Error).message}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
-              {strategies?.map((s) => (
+              {strategies.map((s) => (
                 <label
                   key={s.name}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs cursor-pointer transition-colors ${
@@ -252,7 +261,16 @@ export default function AgentInspector() {
       </div>
 
       {/* Pipeline Visualization */}
-      {result && (
+      {result && (() => {
+        const signalSets = Array.isArray(result.signal_sets) ? result.signal_sets : []
+        const theses = Array.isArray(result.theses) ? result.theses : []
+        const debateResults = Array.isArray(result.debate_results) ? result.debate_results : []
+        const violations = result.risk_decision?.violations ?? []
+        const actions = result.risk_decision?.actions ?? []
+        const adjustedTargets = result.risk_decision?.adjusted_targets ?? {}
+        const proposalTargets = result.proposal?.targets ?? {}
+        const fills = result.execution_report?.fills ?? []
+        return (
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <p className="text-xs text-slate-400">
@@ -272,10 +290,10 @@ export default function AgentInspector() {
 
           {/* Analysts */}
           <PipelineStage title="Analysts" status="complete">
-            {result.signal_sets.length === 0 ? (
+            {signalSets.length === 0 ? (
               <p className="text-xs text-slate-500">No signals generated</p>
             ) : (
-              result.signal_sets.map((ss) => (
+              signalSets.map((ss) => (
                 <div key={ss.domain} className="mb-4 last:mb-0">
                   <p className="text-xs font-medium text-slate-400 mb-2 uppercase">{ss.domain}</p>
                   <div className="overflow-x-auto">
@@ -289,7 +307,7 @@ export default function AgentInspector() {
                       </tr>
                     </thead>
                     <tbody>
-                      {ss.signals.map((sig, i) => (
+                      {(Array.isArray(ss.signals) ? ss.signals : []).map((sig, i) => (
                         <SignalRow key={i} sig={sig} />
                       ))}
                     </tbody>
@@ -302,19 +320,19 @@ export default function AgentInspector() {
 
           {/* Bull Researcher */}
           <PipelineStage title="Bull Researcher" status="complete">
-            {result.theses.filter((t) => t.side === 'bull').length === 0 ? (
+            {theses.filter((t) => t.side === 'bull').length === 0 ? (
               <p className="text-xs text-slate-500">No bull theses</p>
             ) : (
               <div className="space-y-2">
-                {result.theses.filter((t) => t.side === 'bull').map((t, i) => (
+                {theses.filter((t) => t.side === 'bull').map((t, i) => (
                   <div key={i} className="bg-emerald-900/10 border border-emerald-800/30 rounded-lg p-3">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-mono text-emerald-400">{t.symbol}</span>
                       <span className="text-xs text-slate-400">
-                        Conviction: <span className="text-emerald-400 font-mono">{t.conviction.toFixed(2)}</span>
+                        Conviction: <span className="text-emerald-400 font-mono">{fmtNum(t.conviction, 2)}</span>
                       </span>
                     </div>
-                    <p className="text-xs text-slate-300">{t.rationale}</p>
+                    <p className="text-xs text-slate-300">{asString(t.rationale)}</p>
                   </div>
                 ))}
               </div>
@@ -323,19 +341,19 @@ export default function AgentInspector() {
 
           {/* Bear Researcher */}
           <PipelineStage title="Bear Researcher" status="complete">
-            {result.theses.filter((t) => t.side === 'bear').length === 0 ? (
+            {theses.filter((t) => t.side === 'bear').length === 0 ? (
               <p className="text-xs text-slate-500">No bear theses</p>
             ) : (
               <div className="space-y-2">
-                {result.theses.filter((t) => t.side === 'bear').map((t, i) => (
+                {theses.filter((t) => t.side === 'bear').map((t, i) => (
                   <div key={i} className="bg-red-900/10 border border-red-800/30 rounded-lg p-3">
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-mono text-red-400">{t.symbol}</span>
                       <span className="text-xs text-slate-400">
-                        Conviction: <span className="text-red-400 font-mono">{t.conviction.toFixed(2)}</span>
+                        Conviction: <span className="text-red-400 font-mono">{fmtNum(t.conviction, 2)}</span>
                       </span>
                     </div>
-                    <p className="text-xs text-slate-300">{t.rationale}</p>
+                    <p className="text-xs text-slate-300">{asString(t.rationale)}</p>
                   </div>
                 ))}
               </div>
@@ -344,7 +362,7 @@ export default function AgentInspector() {
 
           {/* Debate */}
           <PipelineStage title="Debate" status="complete">
-            {result.debate_results.length === 0 ? (
+            {debateResults.length === 0 ? (
               <p className="text-xs text-slate-500">No debate results</p>
             ) : (
               <div className="overflow-x-auto">
@@ -358,17 +376,17 @@ export default function AgentInspector() {
                   </tr>
                 </thead>
                 <tbody>
-                  {result.debate_results.map((d, i) => (
+                  {debateResults.map((d, i) => (
                     <tr key={i} className="text-slate-300">
                       <td className="pr-4 py-0.5 font-mono">{d.symbol}</td>
-                      <td className={`pr-4 py-0.5 text-right font-mono ${d.net_conviction > 0 ? 'text-emerald-400' : d.net_conviction < 0 ? 'text-red-400' : ''}`}>
-                        {d.net_conviction.toFixed(2)}
+                      <td className={`pr-4 py-0.5 text-right font-mono ${(d.net_conviction ?? 0) > 0 ? 'text-emerald-400' : (d.net_conviction ?? 0) < 0 ? 'text-red-400' : ''}`}>
+                        {fmtNum(d.net_conviction, 2)}
                       </td>
                       <td className="pr-4 py-0.5 text-right font-mono text-emerald-400">
-                        {d.bull_thesis?.conviction.toFixed(2) ?? '—'}
+                        {fmtNum(d.bull_thesis?.conviction, 2)}
                       </td>
                       <td className="pr-4 py-0.5 text-right font-mono text-red-400">
-                        {d.bear_thesis?.conviction.toFixed(2) ?? '—'}
+                        {fmtNum(d.bear_thesis?.conviction, 2)}
                       </td>
                     </tr>
                   ))}
@@ -391,10 +409,10 @@ export default function AgentInspector() {
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.entries(result.proposal.targets).map(([sym, wt]) => (
+                    {Object.entries(proposalTargets).map(([sym, wt]) => (
                       <tr key={sym} className="text-slate-300">
                         <td className="pr-4 py-0.5 font-mono">{sym}</td>
-                        <td className="pr-4 py-0.5 text-right font-mono">{(wt * 100).toFixed(1)}%</td>
+                        <td className="pr-4 py-0.5 text-right font-mono">{fmtPct(wt, 1)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -422,27 +440,27 @@ export default function AgentInspector() {
                     {result.risk_decision.approved ? 'APPROVED' : 'REJECTED'}
                   </span>
                 </div>
-                {result.risk_decision.violations.length > 0 && (
+                {violations.length > 0 && (
                   <div className="mb-3">
                     <p className="text-xs text-slate-400 mb-1">Violations:</p>
                     <ul className="list-disc list-inside text-xs text-red-400 space-y-0.5">
-                      {result.risk_decision.violations.map((v, i) => (
+                      {violations.map((v, i) => (
                         <li key={i}>{v}</li>
                       ))}
                     </ul>
                   </div>
                 )}
-                {result.risk_decision.actions.length > 0 && (
+                {actions.length > 0 && (
                   <div className="mb-3">
                     <p className="text-xs text-slate-400 mb-1">Actions taken:</p>
                     <ul className="list-disc list-inside text-xs text-amber-400 space-y-0.5">
-                      {result.risk_decision.actions.map((a, i) => (
+                      {actions.map((a, i) => (
                         <li key={i}>{a}</li>
                       ))}
                     </ul>
                   </div>
                 )}
-                {Object.keys(result.risk_decision.adjusted_targets).length > 0 && (
+                {Object.keys(adjustedTargets).length > 0 && (
                   <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
@@ -452,10 +470,10 @@ export default function AgentInspector() {
                       </tr>
                     </thead>
                     <tbody>
-                      {Object.entries(result.risk_decision.adjusted_targets).map(([sym, wt]) => (
+                      {Object.entries(adjustedTargets).map(([sym, wt]) => (
                         <tr key={sym} className="text-slate-300">
                           <td className="pr-4 py-0.5 font-mono">{sym}</td>
-                          <td className="pr-4 py-0.5 text-right font-mono">{(wt * 100).toFixed(1)}%</td>
+                          <td className="pr-4 py-0.5 text-right font-mono">{fmtPct(wt, 1)}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -474,13 +492,13 @@ export default function AgentInspector() {
               <div>
                 <div className="flex gap-6 mb-3 text-xs">
                   <span className="text-slate-400">
-                    Turnover: <span className="text-slate-200 font-mono">{(result.execution_report.turnover * 100).toFixed(2)}%</span>
+                    Turnover: <span className="text-slate-200 font-mono">{fmtPct(result.execution_report.turnover, 2)}</span>
                   </span>
                   <span className="text-slate-400">
-                    Costs: <span className="text-slate-200 font-mono">${result.execution_report.costs.toFixed(2)}</span>
+                    Costs: <span className="text-slate-200 font-mono">${fmtNum(result.execution_report.costs, 2, '0.00')}</span>
                   </span>
                 </div>
-                {result.execution_report.fills.length > 0 ? (
+                {fills.length > 0 ? (
                   <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
@@ -492,7 +510,7 @@ export default function AgentInspector() {
                       </tr>
                     </thead>
                     <tbody>
-                      {result.execution_report.fills.map((f, i) => (
+                      {fills.map((f, i) => (
                         <tr key={i} className="text-slate-300">
                           <td className="pr-4 py-0.5 font-mono">{f.symbol}</td>
                           <td className={`pr-4 py-0.5 ${f.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -519,7 +537,8 @@ export default function AgentInspector() {
             <LLMUsageSummary usage={(result as BlackboardView & { llm_usage: { total_tokens?: number; total_cost?: number; total_calls?: number } }).llm_usage} />
           )}
         </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

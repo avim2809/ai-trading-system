@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter
 
 from firm.api.schemas import StepRequest
 from firm.api.serializers import serialize_blackboard
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -50,6 +53,14 @@ def agent_step(req: StepRequest):
         "strategies": req.strategies,
         "strategy_params": req.strategy_params,
     }
+    try:
+        from firm.llm.config import load_llm_config, provider_config
+        llm_yaml = load_llm_config()
+        config["agent_modes"] = llm_yaml.get("agent_modes", {})
+        config["llm_config"] = provider_config()
+        config["backtest_policy"] = llm_yaml.get("backtest_policy", "cache_only")
+    except Exception:
+        log.warning("Could not load LLM config for agent step; using quant agents", exc_info=True)
     orchestrator = build_orchestrator(config)
 
     context = {

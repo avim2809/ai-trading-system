@@ -8,14 +8,42 @@ data through the same PitView interface used in backtesting.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timedelta
 
 import pandas as pd
 
+from firm.data.fundamentals_cache import (
+    hours_since_refresh,
+    load_cached_fundamentals_df,
+    merge_with_cached_fundamentals,
+    symbols_missing_fundamentals,
+)
 from firm.data.pit_store import PointInTimeDataStore
 from firm.data.providers.base import DataProvider
 
 log = logging.getLogger(__name__)
+
+# Live cycles default to cache-only fundamentals (refresh offline via
+# ``firm.live.fundamentals_refresh`` / daily APScheduler job in firm-api).
+# ``FIRM_LIVE_FETCH_FUNDAMENTALS=1`` to opt back into per-cycle network
+# fetches for symbols missing from cache.
+_LIVE_FETCH_ENV = "FIRM_LIVE_FETCH_FUNDAMENTALS"
+# When live fetch is enabled, only hit the network if the cache is older than
+# this many hours (daily refresh cadence by default).
+_REFRESH_MAX_AGE_HOURS_ENV = "FIRM_FUNDAMENTALS_REFRESH_MAX_AGE_HOURS"
+
+
+def _live_fundamentals_fetch_enabled() -> bool:
+    return os.getenv(_LIVE_FETCH_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
+def _refresh_max_age_hours() -> float:
+    raw = os.getenv(_REFRESH_MAX_AGE_HOURS_ENV, "24")
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return 24.0
 
 
 class LivePitViewAdapter:
@@ -118,14 +146,45 @@ class LiveDataFeed:
                 "refresh() will feed the pipeline an empty price frame"
             )
 
+        cached_fundamentals = load_cached_fundamentals_df()
         fund_prov = self._providers.get("fundamentals")
-        if fund_prov:
-            try:
-                fundamentals = fund_prov.get_fundamentals(self._universe, start, end)
-            except (NotImplementedError, Exception):
-                log.debug("Fundamental fetch skipped or failed", exc_info=True)
+        if fund_prov and _live_fundamentals_fetch_enabled():
+            from firm.config import get_settings
+
+            age = hours_since_refresh(get_settings().data.cache_dir)
+            max_age = _refresh_max_age_hours()
+            if age is None or age >= max_age:
+                missing_fund = symbols_missing_fundamentals(
+                    self._universe, cached_fundamentals,
+                )
+                if missing_fund:
+                    try:
+                        log.info(
+                            "Live fundamentals fetch for %d uncached symbol(s): %s",
+                            len(missing_fund), missing_fund,
+                        )
+                        fundamentals = fund_prov.get_fundamentals(missing_fund, start, end)
+                    except (NotImplementedError, Exception):
+                        log.debug("Fundamental fetch skipped or failed", exc_info=True)
+                else:
+                    log.info(
+                        "Fundamentals cache covers full universe (%d symbols)",
+                        len(self._universe),
+                    )
+            else:
+                log.debug(
+                    "Skipping live fundamentals fetch — cache refreshed %.1fh ago (< %.0fh)",
+                    age, max_age,
+                )
+        elif fund_prov:
+            log.debug(
+                "Live fundamentals: cache-only mode (set %s=1 to enable network fetch)",
+                _LIVE_FETCH_ENV,
+            )
         else:
             log.warning("No 'fundamentals' provider configured on this LiveDataFeed")
+
+        fundamentals = merge_with_cached_fundamentals(fundamentals, cached_fundamentals)
 
         sent_prov = self._providers.get("sentiment")
         if sent_prov:

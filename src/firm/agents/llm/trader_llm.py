@@ -27,6 +27,9 @@ class LLMTraderAgent(TraderAgent, LLMAgentMixin):
     def run(self, ctx: AgentContext, **inputs: Any) -> TradeProposal:
         quant_proposal = TraderAgent.run(self, ctx, **inputs)
 
+        if not self._allow_portfolio_llm():
+            return quant_proposal
+
         targets_str = ", ".join(
             f"{sym}: {w:.4f}" for sym, w in sorted(quant_proposal.targets.items())
         )

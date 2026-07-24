@@ -28,7 +28,15 @@ class LLMProvider:
 
     def is_configured(self) -> bool:
         """True when the provider needs no key, or its key is set in the env."""
-        return self.env_var is None or bool(os.environ.get(self.env_var))
+        if self.env_var is None:
+            return True
+        if self.key == "gemini":
+            # LiteLLM reads GEMINI_API_KEY; Google AI Studio also documents
+            # GOOGLE_API_KEY for the same credential.
+            return bool(
+                os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+            )
+        return bool(os.environ.get(self.env_var))
 
 
 # Model IDs verified against current provider docs (Claude: Opus 4.8 / Sonnet 4.6
@@ -51,10 +59,14 @@ PROVIDERS: dict[str, LLMProvider] = {
         "gpt-4o", "gpt-", True,
         ("gpt-4o", "gpt-4o-mini"),
     ),
-    "google": LLMProvider(
-        "google", "Google Gemini", "GEMINI_API_KEY",
-        "gemini/gemini-1.5-pro", "gemini/", True,
-        ("gemini/gemini-1.5-pro", "gemini/gemini-1.5-flash"),
+    "gemini": LLMProvider(
+        "gemini", "Google Gemini", "GEMINI_API_KEY",
+        "gemini/gemini-2.5-flash", "gemini/", True,
+        (
+            "gemini/gemini-2.5-flash",
+            "gemini/gemini-2.5-pro",
+            "gemini/gemini-2.0-flash",
+        ),
     ),
     "mistral": LLMProvider(
         "mistral", "Mistral", "MISTRAL_API_KEY",
@@ -93,10 +105,17 @@ def list_providers() -> list[LLMProvider]:
     return list(PROVIDERS.values())
 
 
+_PROVIDER_ALIASES: dict[str, str] = {
+    # Backward compat + UI shorthand ("google" / bare "gemini" route prefix).
+    "google": "gemini",
+}
+
+
 def get_provider(key: str) -> LLMProvider:
     """Look up a provider by key, raising a clear error on an unknown name."""
+    resolved = _PROVIDER_ALIASES.get(key, key)
     try:
-        return PROVIDERS[key]
+        return PROVIDERS[resolved]
     except KeyError:
         raise ValueError(
             f"Unknown LLM provider {key!r}. Known: {', '.join(PROVIDERS)}"
@@ -113,7 +132,16 @@ def resolve_provider(model: str) -> LLMProvider | None:
     # Bare Anthropic IDs (e.g. "claude-opus-4-8") carry no "anthropic/" prefix.
     if "claude" in model:
         return PROVIDERS["anthropic"]
+    # Bare Gemini IDs (e.g. "gemini-2.5-flash") carry no "gemini/" prefix.
+    if model.startswith("gemini-"):
+        return PROVIDERS["gemini"]
     return None
+
+
+def provider_key_for_model(model: str) -> str | None:
+    """Return the registry key for *model*, or None if unrecognised."""
+    prov = resolve_provider(model)
+    return prov.key if prov else None
 
 
 def available_providers() -> list[LLMProvider]:
@@ -143,11 +171,17 @@ def build_llm_service(
     if prov is None:
         prov = resolve_provider(model or "")
 
-    if require_key and prov is not None and prov.env_var and not os.environ.get(prov.env_var):
+    if require_key and prov is not None and not prov.is_configured():
+        env_hint = prov.env_var or "API key"
         raise RuntimeError(
-            f"{prov.label} requires {prov.env_var} to be set. "
+            f"{prov.label} requires {env_hint} to be set. "
             f"Export it, or pick a configured provider (e.g. Groq's free tier)."
         )
+
+    # LiteLLM only reads GEMINI_API_KEY; mirror GOOGLE_API_KEY when set.
+    if prov is not None and prov.key == "gemini":
+        if not os.environ.get("GEMINI_API_KEY") and os.environ.get("GOOGLE_API_KEY"):
+            os.environ["GEMINI_API_KEY"] = os.environ["GOOGLE_API_KEY"]
 
     if model:
         cfg["default_model"] = model

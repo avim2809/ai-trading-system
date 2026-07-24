@@ -92,7 +92,16 @@ def build_orchestrator(config: dict):
     from firm.agents.execution import ExecutionAgent
 
     agent_modes: dict = config.get("agent_modes", {})
-    llm_config: dict = config.get("llm_config", {})
+    llm_config: dict = dict(config.get("llm_config") or {})
+    if not llm_config:
+        try:
+            from firm.llm.config import provider_config
+            llm_config = provider_config()
+        except Exception:
+            llm_config = {}
+    bt_policy = config.get("backtest_policy")
+    if bt_policy in ("cache_only", "live_calls", "disabled"):
+        llm_config.setdefault("enhancement", {})["policy"] = bt_policy
 
     strats = _build_categorized_strategies(config)
 

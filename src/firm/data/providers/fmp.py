@@ -34,6 +34,9 @@ _BASE_URL = "https://financialmodelingprep.com"
 # FMP free tier often exposes Class A listings only; query aliases keep universe tickers.
 _FMP_QUERY_ALIASES: dict[str, str] = {"GOOG": "GOOGL"}
 
+# ETFs have no issuer fundamentals — skip to avoid premium-tier 402 noise.
+_FMP_ETF_SYMBOLS: frozenset[str] = frozenset({"SPY", "QQQ", "IWM"})
+
 
 class FMPProvider(DataProvider):
     """Adapter for the FMP REST API (fundamentals, prices, constituents)."""
@@ -118,6 +121,9 @@ class FMPProvider(DataProvider):
         start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
         frames: list[pd.DataFrame] = []
         for symbol in symbols:
+            if symbol.upper() in _FMP_ETF_SYMBOLS:
+                log.debug("Skipping ETF fundamentals fetch for %s", symbol)
+                continue
             api_symbol = _FMP_QUERY_ALIASES.get(symbol.upper(), symbol)
             try:
                 income = self._client.get_json(
@@ -172,6 +178,14 @@ class FMPProvider(DataProvider):
                             columns=FUNDAMENTAL_COLS,
                         )
                     )
+            except ProviderError as exc:
+                if "402" in str(exc):
+                    log.warning(
+                        "fmp_fundamentals_unavailable symbol=%s (subscription limit)",
+                        symbol,
+                    )
+                else:
+                    log.warning("fmp_fundamentals_failed symbol=%s (%s)", symbol, exc)
             except Exception:
                 log.exception("fmp_fundamentals_failed symbol=%s", symbol)
         if not frames:

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from firm.data.providers.base import FUNDAMENTALS_PUBLICATION_LAG_DAYS
+from firm.data.providers.base import FUNDAMENTALS_PUBLICATION_LAG_DAYS, ProviderError
 from firm.data.providers.fmp import FMPProvider
 
 
@@ -52,3 +52,23 @@ class TestFMPFundamentalsPublicationLag:
         assert len(df) == 1
         assert pd.Timestamp(df.iloc[0]["date"]) == expected
         assert pd.Timestamp(df.iloc[0]["date"]) > pd.Timestamp(period_end)
+
+    def test_402_subscription_limit_logs_warning_not_exception(self, provider, caplog):
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(
+            side_effect=ProviderError(
+                "https://financialmodelingprep.com/stable/income-statement "
+                "returned HTTP 402: Premium Query Parameter"
+            )
+        )
+        with caplog.at_level("WARNING"):
+            df = provider.get_fundamentals(["AVGO"], "2020-01-01", "2026-01-01")
+        assert df.empty
+        assert any("fmp_fundamentals_unavailable" in r.message for r in caplog.records)
+        assert not any(r.levelname == "ERROR" for r in caplog.records)
+
+    def test_etf_symbols_skipped(self, provider):
+        provider._client = MagicMock()
+        df = provider.get_fundamentals(["SPY", "QQQ"], "2020-01-01", "2026-01-01")
+        assert df.empty
+        provider._client.get_json.assert_not_called()

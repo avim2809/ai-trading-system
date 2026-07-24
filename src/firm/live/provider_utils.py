@@ -114,6 +114,10 @@ def resolve_live_startup(
         "allocation_method",
         "kelly_fraction",
         "max_positions",
+        "cycle_hard_timeout_seconds",
+        "cycle_watchdog_seconds",
+        "schedule_timezone",
+        "fundamentals_refresh_hour",
     ):
         if key in yaml_cfg:
             engine_config[key] = yaml_cfg[key]
@@ -141,8 +145,9 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
     """Build the provider map expected by :class:`LiveDataFeed`.
 
     IBKR brokers use IB Gateway for prices + news sentiment; fundamentals
-  come from FMP when ``FMP_API_KEY`` is set.  All other brokers use the
-    multi-vendor :class:`FallbackProvider` chain.
+    use the same Massive → FMP fallback chain as backtests when either API
+    key is set.  All other brokers use :class:`FallbackProvider` for all
+    capabilities.
     """
     if broker_type.startswith("ibkr"):
         from firm.data.providers.ibkr import IBKRProvider
@@ -154,13 +159,14 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
             port = int(os.getenv("IBKR_PORT", "7496"))
         ibkr = IBKRProvider(host=host, port=port, client_id=2)
         providers: dict[str, Any] = {"prices": ibkr, "sentiment": ibkr}
-        if os.getenv("FMP_API_KEY"):
+        if os.getenv("FMP_API_KEY") or os.getenv("MASSIVE_API_KEY"):
             try:
-                from firm.data.providers.fmp import FMPProvider
+                from firm.data.providers.fallback import FallbackProvider
 
-                providers["fundamentals"] = FMPProvider()
+                providers["fundamentals"] = FallbackProvider()
+                log.info("IBKR live fundamentals: FMP → Finnhub → EDGAR → … fallback chain")
             except Exception as exc:
-                log.info("FMP fundamentals provider not available: %s", exc)
+                log.warning("Fundamentals fallback provider not available: %s", exc)
         return providers
 
     from firm.data.providers.fallback import FallbackProvider
@@ -175,8 +181,17 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
 
 def fundamentals_available(providers: dict[str, Any] | None = None) -> bool:
     """Return True when a fundamentals feed is likely reachable."""
-    if os.getenv("FMP_API_KEY") or os.getenv("MASSIVE_API_KEY"):
+    from firm.data.fundamentals_cache import load_cached_fundamentals_df
+
+    if load_cached_fundamentals_df() is not None:
         return True
+    if any(os.getenv(k) for k in (
+        "FMP_API_KEY", "MASSIVE_API_KEY", "FINNHUB_API_KEY", "TWELVEDATA_API_KEY",
+        "ALPHAVANTAGE_API_KEY",
+    )):
+        return True
+    # SEC EDGAR works without an API key (User-Agent only).
+    return True
     if providers is None:
         return False
     fund_prov = providers.get("fundamentals")
@@ -201,7 +216,7 @@ def filter_strategies_for_providers(
         return list(strategies)
     remaining = [s for s in strategies if s not in FUNDAMENTAL_DEPENDENT_STRATEGIES]
     msg = (
-        "No fundamentals provider configured (set FMP_API_KEY for IBKR live) — "
+        "No fundamentals provider configured (set FMP_API_KEY or MASSIVE_API_KEY for IBKR live) — "
         f"disabling {skipped}. Active strategies: {remaining or '(none)'}"
     )
     (logger or log).warning(msg)

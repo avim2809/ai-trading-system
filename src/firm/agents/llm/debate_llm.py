@@ -28,7 +28,11 @@ class LLMDebateAgent(DebateAgent, LLMAgentMixin):
         quant_results = DebateAgent.run(self, ctx, **inputs)
 
         enhanced: list[DebateResult] = []
+        enhance_syms = self._debate_symbols_to_enhance(quant_results)
         for dr in quant_results:
+            if dr.symbol not in enhance_syms:
+                enhanced.append(dr)
+                continue
             bull_text = dr.bull_thesis.rationale if dr.bull_thesis else "No bull thesis"
             bear_text = dr.bear_thesis.rationale if dr.bear_thesis else "No bear thesis"
 

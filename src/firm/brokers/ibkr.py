@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+import time
 from datetime import datetime
 from typing import Any
 
@@ -53,53 +55,58 @@ class IBKRBroker(Broker):
         self._market_data_type = market_data_type
         self._ib: IB | None = None
         self._market_hours_details: Any = None
+        # ib_async is bound to the thread that called connect(); all IB I/O
+        # must be serialised on that path so API approval handlers and the
+        # live-cycle worker thread never call qualifyContracts/placeOrder
+        # concurrently (that deadlock hangs the whole firm-api process).
+        self._ib_lock = threading.Lock()
 
     def connect(self) -> None:
         _require_ib()
-        self._ib = IB()
-        try:
-            self._ib.connect(self._host, self._port, clientId=self._client_id)
-            self._ib.reqMarketDataType(self._market_data_type)
-            # Subscribe once, here, on the connecting thread. ib_async binds
-            # any call that awaits a Future (reqAccountSummary, reqTickers,
-            # etc.) to whatever asyncio event loop is current in the calling
-            # thread — but get_account() may later be called from a
-            # different thread (e.g. FastAPI's anyio threadpool services
-            # each request on whichever worker thread is free), which has no
-            # event loop at all and crashes. accountSummary() below is a
-            # plain cached read (like positions()) that's safe from any
-            # thread once the subscription is live, so only subscribe here.
-            self._ib.reqAccountSummary()
-            # Same reasoning applies to is_market_open()'s qualifyContracts()/
-            # reqContractDetails() calls — both are blocking async round-trips
-            # tied to the *calling thread's* asyncio event loop (ib_async's
-            # getLoop() is thread-local), not "not connected" like a missing
-            # subscription would be — it just hangs FOREVER with no timeout
-            # and no error, waiting on a Future that a different thread's
-            # event loop can never resolve. This is a real production
-            # incident: a scheduled cycle (run by APScheduler on its own
-            # worker thread, never the thread that called connect()) hung for
-            # 24+ hours here, silently blocking every cycle for the rest of
-            # that day and all of the next. Reproduced directly: calling
-            # is_market_open() from a second thread after connecting on the
-            # main thread hangs indefinitely. Fetch the contract's trading-
-            # hours schedule once, here, and have is_market_open() read the
-            # cache — it doesn't change intraday, so there's no freshness
-            # cost, only a safety win.
-            contract = Stock("SPY", "SMART", "USD")
-            self._ib.qualifyContracts(contract)
-            details = self._ib.reqContractDetails(contract)
-            self._market_hours_details = details[0] if details else None
-            log.info(
-                "Connected to IBKR at %s:%d (client %d, market_data_type=%d)",
-                self._host,
-                self._port,
-                self._client_id,
-                self._market_data_type,
-            )
-        except Exception as exc:
-            self._ib = None
-            raise BrokerError(f"Failed to connect to IBKR: {exc}") from exc
+        last_exc: Exception | None = None
+        for attempt in range(1, 4):
+            self._ib = IB()
+            try:
+                self._ib.connect(self._host, self._port, clientId=self._client_id)
+                self._ib.reqMarketDataType(self._market_data_type)
+                # Subscribe once, here, on the connecting thread. ib_async binds
+                # any call that awaits a Future (reqAccountSummary, reqTickers,
+                # etc.) to whatever asyncio event loop is current in the calling
+                # thread — but get_account() may later be called from a
+                # different thread (e.g. FastAPI's anyio threadpool services
+                # each request on whichever worker thread is free), which has no
+                # event loop at all and crashes. accountSummary() below is a
+                # plain cached read (like positions()) that's safe from any
+                # thread once the subscription is live, so only subscribe here.
+                self._ib.reqAccountSummary()
+                contract = Stock("SPY", "SMART", "USD")
+                self._ib.qualifyContracts(contract)
+                details = self._ib.reqContractDetails(contract)
+                self._market_hours_details = details[0] if details else None
+                log.info(
+                    "Connected to IBKR at %s:%d (client %d, market_data_type=%d)",
+                    self._host,
+                    self._port,
+                    self._client_id,
+                    self._market_data_type,
+                )
+                return
+            except Exception as exc:
+                last_exc = exc
+                if self._ib is not None:
+                    try:
+                        self._ib.disconnect()
+                    except Exception:
+                        pass
+                self._ib = None
+                if attempt < 3:
+                    delay = 2.0 * attempt
+                    log.warning(
+                        "IBKR connect attempt %d/3 failed (%s) — retrying in %.0fs",
+                        attempt, exc, delay,
+                    )
+                    time.sleep(delay)
+        raise BrokerError(f"Failed to connect to IBKR: {last_exc}") from last_exc
 
     def disconnect(self) -> None:
         if self._ib is not None:
@@ -116,6 +123,10 @@ class IBKRBroker(Broker):
         return self._ib
 
     def get_account(self) -> dict[str, Any]:
+        with self._ib_lock:
+            return self._get_account_unlocked()
+
+    def _get_account_unlocked(self) -> dict[str, Any]:
         ib = self._ensure_connected()
         # Deliberately not calling reqAccountSummary() here — see the
         # comment in connect(). accountSummary() is a cached read, safe to
@@ -144,15 +155,10 @@ class IBKRBroker(Broker):
         return result
 
     def get_positions(self) -> list[BrokerPosition]:
-        # ib.positions() only carries the cost basis (avgCost), not a live
-        # price, so market_value was being computed as quantity * avgCost
-        # (the ORIGINAL cost, not current market value) with unrealized_pnl
-        # hardcoded to 0.0 — always wrong the moment a price moves.
-        # ib.portfolio() is the same kind of locally-cached, auto-updated
-        # list (populated via IBKR's push updates, no blocking request or
-        # extra subscription needed — same pattern as get_account()) but
-        # carries the real marketValue/unrealizedPNL IBKR computes from the
-        # live price.
+        with self._ib_lock:
+            return self._get_positions_unlocked()
+
+    def _get_positions_unlocked(self) -> list[BrokerPosition]:
         ib = self._ensure_connected()
         items = ib.portfolio()
         result: list[BrokerPosition] = []
@@ -175,47 +181,52 @@ class IBKRBroker(Broker):
         return None
 
     def submit_order(self, order: OrderRequest) -> OrderStatus:
-        ib = self._ensure_connected()
-        contract = Stock(order.symbol, "SMART", "USD")
-        ib.qualifyContracts(contract)
+        with self._ib_lock:
+            ib = self._ensure_connected()
+            contract = Stock(order.symbol, "SMART", "USD")
+            ib.qualifyContracts(contract)
 
-        qty = order.quantity if order.side == "buy" else -order.quantity
-        action = "BUY" if order.side == "buy" else "SELL"
+            qty = int(round(abs(order.quantity)))
+            if qty <= 0:
+                raise BrokerError(f"invalid quantity for {order.symbol}: {order.quantity!r}")
+            action = "BUY" if order.side == "buy" else "SELL"
 
-        if order.order_type == "limit":
-            if order.limit_price is None:
-                raise BrokerError("limit_price required for limit orders")
-            ib_order = LimitOrder(action, abs(qty), order.limit_price)
-        else:
-            ib_order = MarketOrder(action, abs(qty))
+            if order.order_type == "limit":
+                if order.limit_price is None:
+                    raise BrokerError("limit_price required for limit orders")
+                ib_order = LimitOrder(action, qty, order.limit_price)
+            else:
+                ib_order = MarketOrder(action, qty)
 
-        # Forward the idempotency token as the IBKR order reference.
-        if order.client_order_id:
-            ib_order.orderRef = order.client_order_id
+            if order.client_order_id:
+                ib_order.orderRef = order.client_order_id
 
-        trade = ib.placeOrder(contract, ib_order)
-        ib.sleep(0.5)
+            trade = ib.placeOrder(contract, ib_order)
+            ib.sleep(0.5)
 
-        return self._map_trade(trade)
+            return self._map_trade(trade)
 
     def cancel_order(self, order_id: str) -> bool:
-        ib = self._ensure_connected()
-        for trade in ib.openTrades():
-            if str(trade.order.orderId) == order_id:
-                ib.cancelOrder(trade.order)
-                return True
-        return False
+        with self._ib_lock:
+            ib = self._ensure_connected()
+            for trade in ib.openTrades():
+                if str(trade.order.orderId) == order_id:
+                    ib.cancelOrder(trade.order)
+                    return True
+            return False
 
     def get_order_status(self, order_id: str) -> OrderStatus:
-        ib = self._ensure_connected()
-        for trade in ib.trades():
-            if str(trade.order.orderId) == order_id:
-                return self._map_trade(trade)
-        raise BrokerError(f"Order {order_id} not found")
+        with self._ib_lock:
+            ib = self._ensure_connected()
+            for trade in ib.trades():
+                if str(trade.order.orderId) == order_id:
+                    return self._map_trade(trade)
+            raise BrokerError(f"Order {order_id} not found")
 
     def get_open_orders(self) -> list[OrderStatus]:
-        ib = self._ensure_connected()
-        return [self._map_trade(t) for t in ib.openTrades()]
+        with self._ib_lock:
+            ib = self._ensure_connected()
+            return [self._map_trade(t) for t in ib.openTrades()]
 
     @staticmethod
     def _resolve_price(ticker, symbol: str) -> float:
@@ -244,21 +255,23 @@ class IBKRBroker(Broker):
         return 0.0
 
     def get_current_price(self, symbol: str) -> float:
-        ib = self._ensure_connected()
-        contract = Stock(symbol, "SMART", "USD")
-        ib.qualifyContracts(contract)
-        [ticker] = ib.reqTickers(contract)
-        return self._resolve_price(ticker, symbol)
+        with self._ib_lock:
+            ib = self._ensure_connected()
+            contract = Stock(symbol, "SMART", "USD")
+            ib.qualifyContracts(contract)
+            [ticker] = ib.reqTickers(contract)
+            return self._resolve_price(ticker, symbol)
 
     def get_current_prices(self, symbols: list[str]) -> dict[str, float]:
-        ib = self._ensure_connected()
-        contracts = [Stock(s, "SMART", "USD") for s in symbols]
-        ib.qualifyContracts(*contracts)
-        tickers = ib.reqTickers(*contracts)
-        return {
-            contract.symbol: self._resolve_price(ticker, contract.symbol)
-            for contract, ticker in zip(contracts, tickers)
-        }
+        with self._ib_lock:
+            ib = self._ensure_connected()
+            contracts = [Stock(s, "SMART", "USD") for s in symbols]
+            ib.qualifyContracts(*contracts)
+            tickers = ib.reqTickers(*contracts)
+            return {
+                contract.symbol: self._resolve_price(ticker, contract.symbol)
+                for contract, ticker in zip(contracts, tickers)
+            }
 
     def is_market_open(self) -> bool:
         """True during the regular trading session (not pre/post-market).

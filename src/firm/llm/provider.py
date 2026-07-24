@@ -21,6 +21,7 @@ class LLMService:
         )
         self.temperature: float = config.get("temperature", 0.3)
         self.max_tokens: int = config.get("max_tokens", 2000)
+        self.request_timeout: float = float(config.get("request_timeout", 90))
 
         # Model pool for load-balancing + fallback: default_model first, then
         # any configured fallback_models, de-duplicated. A single-entry pool
@@ -94,6 +95,7 @@ class LLMService:
             "messages": send_messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
+            "timeout": self.request_timeout,
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
@@ -124,6 +126,25 @@ class LLMService:
             self._cache.put(cache_key, content, served_model, tokens_in, tokens_out, cost)
 
         return content
+
+    def get_cached(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int = 2000,
+        json_mode: bool = False,
+    ) -> str | None:
+        """Return a cached completion if present; never calls the provider."""
+        if self._cache is None:
+            return None
+        model = model or self._select_model(messages)
+        temperature = temperature if temperature is not None else self.temperature
+        cache_key = ResponseCache._hash(
+            model, messages,
+            temperature=temperature, max_tokens=max_tokens, json_mode=json_mode,
+        )
+        return self._cache.get(cache_key)
 
     def _select_model(self, messages: list[dict[str, Any]] | None = None) -> str:
         """Pick the model for a call with no explicit ``model=`` override.

@@ -234,7 +234,7 @@ Engine setters (`src/firm/live/engine.py`), effective next cycle:
 |------------|-----------|----------------|
 | prices | `IBKRProvider` | `FallbackProvider` chain |
 | sentiment | `IBKRProvider` | `FallbackProvider` |
-| fundamentals | `FMPProvider` if `FMP_API_KEY` set | `FallbackProvider` |
+| fundamentals | `FallbackProvider` chain; **cache-only** live cycles; daily refresh via APScheduler in `firm-api` (`fundamentals_refresh_hour` in `live.yaml`) | `FallbackProvider` |
 
 [`filter_strategies_for_providers()`](../src/firm/live/provider_utils.py) drops `multi_factor` and `event_driven` when no fundamentals feed is available.
 

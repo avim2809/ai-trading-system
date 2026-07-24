@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from firm.llm.provider import LLMService
@@ -17,7 +19,10 @@ from firm.llm.providers import (
 class TestRegistry:
     def test_common_providers_present(self):
         keys = {p.key for p in list_providers()}
-        assert {"groq", "anthropic", "openai", "google", "mistral", "ollama"} <= keys
+        assert {"groq", "anthropic", "openai", "gemini", "mistral", "ollama"} <= keys
+
+    def test_get_provider_google_alias(self):
+        assert get_provider("google").key == "gemini"
 
     def test_get_provider_unknown_raises(self):
         with pytest.raises(ValueError):
@@ -27,11 +32,14 @@ class TestRegistry:
         assert resolve_provider("groq/llama-3.3-70b-versatile").key == "groq"
         assert resolve_provider("gpt-4o").key == "openai"
         assert resolve_provider("anthropic/claude-opus-4-8").key == "anthropic"
-        assert resolve_provider("gemini/gemini-1.5-pro").key == "google"
+        assert resolve_provider("gemini/gemini-2.5-flash").key == "gemini"
 
     def test_resolve_bare_claude_id(self):
         # No "anthropic/" prefix, still routes to Anthropic.
         assert resolve_provider("claude-opus-4-8").key == "anthropic"
+
+    def test_resolve_bare_gemini_id(self):
+        assert resolve_provider("gemini-2.5-flash").key == "gemini"
 
     def test_resolve_unknown_is_none(self):
         assert resolve_provider("totally-made-up-model") is None
@@ -61,6 +69,32 @@ class TestBuildLLMService:
         monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
         svc = build_llm_service(provider="mistral", require_key=False)
         assert svc.default_model == "mistral/mistral-large-latest"
+
+    def test_gemini_google_api_key_alias(self, monkeypatch):
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        monkeypatch.setenv("GOOGLE_API_KEY", "google-key")
+        svc = build_llm_service(provider="gemini")
+        assert svc.default_model == "gemini/gemini-2.5-flash"
+        assert os.environ.get("GEMINI_API_KEY") == "google-key"
+
+    def test_request_timeout_passed_to_litellm(self, monkeypatch):
+        monkeypatch.setenv("GROQ_API_KEY", "test-key")
+        captured: dict = {}
+
+        class FakeLitellm:
+            @staticmethod
+            def completion(**kwargs):
+                captured.update(kwargs)
+                resp = type("R", (), {})()
+                resp.choices = [type("C", (), {"message": type("M", (), {"content": "ok"})()})()]
+                resp.usage = None
+                resp._hidden_params = {}
+                return resp
+
+        monkeypatch.setattr("litellm.completion", FakeLitellm.completion)
+        svc = LLMService({"default_model": "groq/llama-3.3-70b-versatile", "request_timeout": 42, "cache_enabled": False})
+        assert svc.chat([{"role": "user", "content": "hi"}]) == "ok"
+        assert captured.get("timeout") == 42
 
 
 class TestPromptCache:

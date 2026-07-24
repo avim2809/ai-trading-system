@@ -57,6 +57,10 @@ class MassiveProvider(DataProvider):
     """
 
     name = "massive"
+    # Free-tier keys often lack the financial-ratios endpoint; after the
+    # first plan-wide 403 we skip the rest of the batch (and future calls)
+    # to avoid hammering the API and spamming logs every live cycle.
+    _fundamentals_plan_blocked: bool = False
 
     def __init__(self, api_key: str = "", settings=None) -> None:
         if not api_key:
@@ -276,8 +280,12 @@ class MassiveProvider(DataProvider):
         """
         start_ts = pd.Timestamp(start)
         end_ts = pd.Timestamp(end)
+        if self._fundamentals_plan_blocked:
+            return pd.DataFrame(columns=FUNDAMENTAL_COLS)
         frames: list[pd.DataFrame] = []
         for sym in symbols:
+            if self._fundamentals_plan_blocked:
+                break
             try:
                 data = self._get(
                     "/stocks/financials/v1/ratios",
@@ -313,7 +321,18 @@ class MassiveProvider(DataProvider):
                     )
                 if rows:
                     frames.append(pd.DataFrame(rows, columns=FUNDAMENTAL_COLS))
-            except ProviderError:
+            except ProviderError as exc:
+                msg = str(exc)
+                if "403" in msg and "NOT_AUTHORIZED" in msg:
+                    if not type(self)._fundamentals_plan_blocked:
+                        log.warning(
+                            "massive_fundamentals_unavailable (plan does not include "
+                            "financial ratios — skipping Massive for fundamentals)"
+                        )
+                        type(self)._fundamentals_plan_blocked = True
+                    continue
+                log.warning("massive_fundamentals_failed symbol=%s (%s)", sym, exc)
+            except Exception:
                 log.exception("massive_fundamentals_failed symbol=%s", sym)
         if not frames:
             return pd.DataFrame(columns=FUNDAMENTAL_COLS)

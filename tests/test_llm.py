@@ -62,6 +62,9 @@ class MockLLMService:
         self._calls.append({"messages": messages, **kw})
         return {"score": 0.75, "confidence": 0.9, "rationale": "Mock LLM analysis"}
 
+    def get_cached(self, messages, **kw):
+        return None
+
 
 class MockLLMServiceBroken:
     """LLMService that always raises."""
@@ -95,8 +98,24 @@ def _build_fake_llm_module():
     def _fake_optimization_config(cfg=None):
         return {"compression_enabled": True, "compression_ratio": 0.5}
 
+    def _fake_enhancement_config(cfg=None, overrides=None):
+        base = {
+            "policy": "live_calls",
+            "min_abs_score": 0.0,
+            "max_signals_per_agent": 0,
+            "rag_n_results": 3,
+        }
+        if overrides:
+            base.update(overrides)
+        return base
+
+    def _fake_rag_config(cfg=None):
+        return {"reranking": True, "hybrid": False}
+
     compression_mod.TokenCompressor = FakeCompressor  # type: ignore[attr-defined]
     config_mod.optimization_config = _fake_optimization_config  # type: ignore[attr-defined]
+    config_mod.enhancement_config = _fake_enhancement_config  # type: ignore[attr-defined]
+    config_mod.rag_config = _fake_rag_config  # type: ignore[attr-defined]
     return {
         "firm.llm": mod,
         "firm.llm.provider": provider_mod,
@@ -181,7 +200,12 @@ class TestLLMAgentMixin:
     def test_retrieve_context_handles_failure(self):
         from firm.agents.llm.base_llm_agent import LLMAgentMixin
 
+        class _BrokenRetriever:
+            def retrieve_for_symbol(self, *a, **k):
+                raise RuntimeError("retriever down")
+
         mixin = LLMAgentMixin()
+        mixin._retriever = _BrokenRetriever()
         ctx = mixin._retrieve_context("AAPL", "news")
         assert ctx == ""
 
@@ -424,7 +448,10 @@ class TestLLMRiskAgent:
     def test_returns_risk_decision(self, mock_llm_modules):
         from firm.agents.llm.risk_llm import LLMRiskAgent
 
-        agent = LLMRiskAgent(config={"max_position_pct": 1.0})
+        agent = LLMRiskAgent(
+            config={"max_position_pct": 1.0},
+            llm_config={"enhancement": {"enhance_risk_review": True}},
+        )
 
         agent._llm = MockLLMService()
         agent._call_llm = lambda s, u, json_mode=False: {

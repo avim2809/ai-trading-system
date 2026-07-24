@@ -93,6 +93,21 @@ class ApprovalQueue:
                 return a
         return None
 
+    def resolve_id(self, approval_id: str) -> str:
+        """Resolve a full or unique-prefix approval id."""
+        if self.get_by_id(approval_id) is not None:
+            return approval_id
+        matches = [
+            a.approval_id for a in self._queue if a.approval_id.startswith(approval_id)
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise ValueError(
+                f"Approval id {approval_id!r} is ambiguous ({len(matches)} matches)"
+            )
+        raise ValueError(f"Approval {approval_id} not found")
+
     def clear(self) -> int:
         """Wipe every approval record (pending and historical) and its
         persisted file. Returns the number removed."""
@@ -103,6 +118,7 @@ class ApprovalQueue:
 
     def approve(self, approval_id: str) -> list[OrderStatus]:
         """Approve and execute the pending orders."""
+        approval_id = self.resolve_id(approval_id)
         approval = self.get_by_id(approval_id)
         if approval is None:
             raise ValueError(f"Approval {approval_id} not found")
@@ -117,10 +133,18 @@ class ApprovalQueue:
 
         results: list[OrderStatus] = []
         for order_dict in approval.orders:
+            raw_qty = float(order_dict.get("quantity", abs(order_dict.get("shares", 0))))
+            share_qty = int(round(abs(raw_qty)))
+            if share_qty <= 0:
+                log.debug(
+                    "Skipping dust approval order %s %s (raw qty %.4f rounds to 0 shares)",
+                    order_dict.get("side"), order_dict.get("symbol"), raw_qty,
+                )
+                continue
             req = OrderRequest(
                 symbol=order_dict["symbol"],
                 side=order_dict["side"],
-                quantity=order_dict.get("quantity", abs(order_dict.get("shares", 0))),
+                quantity=share_qty,
                 order_type=order_dict.get("order_type", "market"),
                 limit_price=order_dict.get("limit_price"),
                 strategy=order_dict.get("strategy", ""),

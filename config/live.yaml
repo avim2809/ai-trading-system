@@ -12,12 +12,16 @@ experiment:
 
 broker: "ibkr_paper"
 schedule: "market_open"
+# Cron timezone for market_open / market_close (US equity RTH).
+schedule_timezone: "US/Eastern"
 # LiveTradingEngine only recognises "full_auto" / "semi_auto" — anything else
 # (e.g. plain "auto") silently falls through to "everything needs approval".
 approval_mode: "full_auto"
 
-# Fundamental strategies (multi_factor, event_driven) require FMP_API_KEY when
-# using IBKR for prices — see firm.live.provider_utils.
+# Live cycles read ``data/cache/combined/fundamentals`` only (no per-cycle API).
+# firm-api refreshes that cache daily at fundamentals_refresh_hour and at boot
+# when older than FIRM_FUNDAMENTALS_REFRESH_MAX_AGE_HOURS (default 24).
+fundamentals_refresh_hour: 8
 strategies:
   enabled:
     - momentum
@@ -98,6 +102,11 @@ universe:
 
 rebalance_frequency: "daily"
 initial_capital: 1_000_000
+
+# Live cycle timeouts (seconds). Hard timeout releases the cycle lock so a
+# hung LLM/IBKR call cannot block every future scheduled cycle.
+cycle_hard_timeout_seconds: 900
+cycle_watchdog_seconds: 1800
 
 # ──────────────────────────────────────────────────────────────
 # Risk — realistic live-account constraints

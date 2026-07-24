@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
 import pytest
 
 from firm.agents.blackboard import Blackboard
@@ -279,7 +280,13 @@ class TestLiveDataFeed:
         assert pit_view.universe == ["AAPL", "MSFT"]
         assert pit_view.asof is not None
 
-    def test_pit_view_protocol_methods(self):
+    def test_pit_view_protocol_methods(self, tmp_path, monkeypatch):
+        from firm.config import Settings
+
+        settings = Settings()
+        settings.data.cache_dir = str(tmp_path)
+        monkeypatch.setattr("firm.config.get_settings", lambda: settings)
+
         feed = LiveDataFeed(providers={}, universe=["AAPL"])
         view = feed.refresh()
 
@@ -292,6 +299,46 @@ class TestLiveDataFeed:
 
         sent = view.sentiment()
         assert sent.empty
+
+    def test_refresh_merges_cached_fundamentals(self, tmp_path, monkeypatch):
+        from firm.data.cache import ParquetCache
+        from firm.config import Settings
+
+        monkeypatch.setenv("FIRM_LIVE_FETCH_FUNDAMENTALS", "1")
+        monkeypatch.setenv("FIRM_FUNDAMENTALS_REFRESH_MAX_AGE_HOURS", "0")
+        cache = ParquetCache(tmp_path)
+        cache.put(
+            "combined/fundamentals",
+            pd.DataFrame({
+                "date": ["2024-06-01"],
+                "symbol": ["MSFT"],
+                "pe_ratio": [30.0],
+            }),
+        )
+
+        settings = Settings()
+        settings.data.cache_dir = str(tmp_path)
+        monkeypatch.setattr("firm.config.get_settings", lambda: settings)
+
+        class FundProv:
+            def get_fundamentals(self, symbols, start, end):
+                return pd.DataFrame({
+                    "date": ["2024-06-01"],
+                    "symbol": ["AAPL"],
+                    "pe_ratio": [25.0],
+                })
+
+        class PriceProv:
+            def get_prices(self, symbols, start, end):
+                return pd.DataFrame()
+
+        feed = LiveDataFeed(
+            providers={"fundamentals": FundProv(), "prices": PriceProv()},
+            universe=["AAPL", "MSFT"],
+        )
+        view = feed.refresh()
+        funds = view.fundamentals()
+        assert set(funds["symbol"]) == {"AAPL", "MSFT"}
 
 
 # ---------------------------------------------------------------------------
@@ -696,14 +743,33 @@ class TestEngineConfigUpdates:
 
         engine = LiveTradingEngine(
             config={**config, "max_daily_trades": 1}, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="semi_auto",
+        )
+        engine.start()
+
+        result = engine.run_cycle()
+        assert result.orders_submitted == 0
+        assert result.orders_queued == 2
+        assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_daily_trade_limit_full_auto_still_submits(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        orders = _make_orders()
+        bb = _make_blackboard()
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (orders, bb)
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config={**config, "max_daily_trades": 1}, broker=broker, data_feed=feed,
             approval_queue=queue, approval_mode="full_auto",
         )
         engine.start()
 
         result = engine.run_cycle()
-        # 2 orders this cycle > max_daily_trades=1 -> forced to manual despite full_auto.
-        assert result.orders_submitted == 0
-        assert result.orders_queued == 2
+        assert result.orders_submitted == 2
+        assert result.orders_queued == 0
         assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
 
     @patch("firm.live.engine.build_orchestrator")
@@ -715,7 +781,26 @@ class TestEngineConfigUpdates:
         mock_orch.step.return_value = (orders, bb)
         mock_build.return_value = mock_orch
 
-        # NAV is 100_000 (initial_capital) -> turnover_frac ~= 0.03; cap it far below that.
+        engine = LiveTradingEngine(
+            config={**config, "max_daily_turnover": 0.01}, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="semi_auto",
+        )
+        engine.start()
+
+        result = engine.run_cycle()
+        assert result.orders_submitted == 0
+        assert result.orders_queued == 2
+        assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_daily_turnover_limit_full_auto_still_submits(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        orders = _make_orders()
+        bb = _make_blackboard()
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (orders, bb)
+        mock_build.return_value = mock_orch
+
         engine = LiveTradingEngine(
             config={**config, "max_daily_turnover": 0.01}, broker=broker, data_feed=feed,
             approval_queue=queue, approval_mode="full_auto",
@@ -723,8 +808,8 @@ class TestEngineConfigUpdates:
         engine.start()
 
         result = engine.run_cycle()
-        assert result.orders_submitted == 0
-        assert result.orders_queued == 2
+        assert result.orders_submitted == 2
+        assert result.orders_queued == 0
         assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
 
     @patch("firm.live.engine.build_orchestrator")
@@ -849,6 +934,71 @@ class TestCurrentCycleRunningSeconds:
 
         # Cleared again once the cycle finishes.
         assert engine.current_cycle_running_seconds is None
+
+
+class TestMarketSessionSync:
+    def test_had_cycle_today_false_when_history_empty(self, engine_components):
+        broker, feed, queue, config = engine_components
+        with patch("firm.live.engine.build_orchestrator", return_value=MagicMock()):
+            engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        assert engine.had_cycle_today() is False
+
+    def test_had_cycle_today_true_after_run(self, engine_components):
+        broker, feed, queue, config = engine_components
+        with patch("firm.live.engine.build_orchestrator", return_value=MagicMock()):
+            engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine._cycle_history.append(
+            CycleResult(cycle_id=1, timestamp=datetime.utcnow())
+        )
+        assert engine.had_cycle_today() is True
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_catch_up_starts_cycle_when_market_open(self, mock_build, engine_components):
+        from firm.live.scheduler import maybe_catch_up_session_cycle
+
+        broker, feed, queue, config = engine_components
+        broker._market_open = True
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+        maybe_catch_up_session_cycle(engine, "market_open", timezone="US/Eastern")
+
+        deadline = time.time() + 5.0
+        while time.time() < deadline and not engine.had_cycle_today():
+            time.sleep(0.05)
+        assert engine.had_cycle_today()
+
+
+class TestCycleHardTimeout:
+    @patch("firm.live.engine.build_orchestrator")
+    def test_hard_timeout_releases_lock_and_alerts(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+
+        def _hang(*_a, **_k):
+            time.sleep(2.0)
+            return ([], _make_blackboard())
+
+        mock_orch.step.side_effect = _hang
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config={**config, "cycle_hard_timeout_seconds": 0.2},
+            broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine.start()
+        result = engine.run_cycle()
+        assert "hard timeout" in (result.error or "")
+        assert any(a["kind"] == "cycle_hard_timeout" for a in result.alerts)
+
+        # Lock must be released — a second cycle should not be skipped.
+        mock_orch.step.side_effect = None
+        mock_orch.step.return_value = ([], _make_blackboard())
+        result2 = engine.run_cycle()
+        assert result2.skipped is False
 
 
 class TestMarketHoursGate:

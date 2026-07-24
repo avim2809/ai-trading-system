@@ -103,7 +103,15 @@ def list_providers():
 @router.get("/config")
 def get_config():
     """Read current LLM config."""
-    return _load_llm_config()
+    from firm.llm.providers import provider_key_for_model
+
+    cfg = _load_llm_config()
+    default_model = (cfg.get("provider") or {}).get("default_model", "")
+    if default_model:
+        cfg.setdefault("provider", {})["resolved_provider"] = provider_key_for_model(
+            default_model
+        )
+    return cfg
 
 
 @router.put("/config")

@@ -29,7 +29,11 @@ class LLMTechnicalAnalyst(TechnicalAnalyst, LLMAgentMixin):
         quant_result = TechnicalAnalyst.run(self, ctx, **inputs)
 
         enhanced_signals: list[Signal] = []
+        enhance_keys = self._signal_keys_to_enhance(quant_result.signals)
         for sig in quant_result.signals:
+            if (sig.symbol, sig.strategy) not in enhance_keys:
+                enhanced_signals.append(sig)
+                continue
             rag_context = self._retrieve_context(
                 sig.symbol,
                 f"academic research on {sig.strategy} strategy patterns for {sig.symbol}",

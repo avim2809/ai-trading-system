@@ -91,9 +91,58 @@ class AlphaVantageProvider(DataProvider):
     def get_fundamentals(
         self, symbols: Sequence[str], start: datetime, end: datetime
     ) -> pd.DataFrame:
-        raise NotImplementedError(
-            "AlphaVantageProvider fundamentals are not wired; use FMPProvider."
-        )
+        from firm.data.providers.base import FUNDAMENTALS_PUBLICATION_LAG_DAYS
+        from firm.data.providers.constants import ETF_SYMBOLS
+        from firm.data.schemas import FUNDAMENTAL_COLS
+
+        start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
+        frames: list[pd.DataFrame] = []
+        for symbol in symbols:
+            if symbol.upper() in ETF_SYMBOLS:
+                continue
+            try:
+                payload = self._client.get_json(
+                    "/query",
+                    params={
+                        "function": "OVERVIEW",
+                        "symbol": symbol,
+                        "apikey": self._api_key,
+                    },
+                )
+            except ProviderError as exc:
+                log.warning("alphavantage_fundamentals_failed symbol=%s (%s)", symbol, exc)
+                continue
+            if "Information" in payload or "Note" in payload:
+                log.warning(
+                    "alphavantage_fundamentals_unavailable symbol=%s (%s)",
+                    symbol,
+                    payload.get("Information") or payload.get("Note"),
+                )
+                continue
+            quarter = payload.get("LatestQuarter")
+            if not quarter:
+                log.warning("alphavantage_no_fundamentals symbol=%s", symbol)
+                continue
+            period_end = pd.Timestamp(quarter)
+            ts = period_end + pd.Timedelta(days=FUNDAMENTALS_PUBLICATION_LAG_DAYS)
+            if not (start_ts <= ts <= end_ts):
+                continue
+            frames.append(pd.DataFrame([{
+                "date": ts,
+                "symbol": symbol,
+                "market_cap": _av_float(payload.get("MarketCapitalization")),
+                "pe_ratio": _av_float(payload.get("PERatio")),
+                "pb_ratio": _av_float(payload.get("PriceToBookRatio")),
+                "roe": _av_float(payload.get("ReturnOnEquityTTM")),
+                "debt_to_equity": _av_float(payload.get("DebtToEquity")),
+                "revenue": None,
+                "net_income": None,
+                "eps": _av_float(payload.get("EPS")),
+                "dividend_yield": _av_float(payload.get("DividendYield")),
+            }], columns=FUNDAMENTAL_COLS))
+        if not frames:
+            return self.empty_fundamentals()
+        return pd.concat(frames, ignore_index=True).reset_index(drop=True)
 
     def get_news_sentiment(
         self, symbols: Sequence[str], start: datetime, end: datetime
@@ -176,3 +225,12 @@ def _parse_av_time(value: str | None) -> pd.Timestamp:
 def _chunks(items: list, size: int):
     for i in range(0, len(items), size):
         yield items[i : i + size]
+
+
+def _av_float(value: str | None) -> float | None:
+    if value in (None, "", "None", "-"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None

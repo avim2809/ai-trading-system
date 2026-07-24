@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -122,7 +123,14 @@ class LiveTradingEngine:
         # release the lock, since a thread that resumes later could then
         # race with a new cycle over shared state.
         self._cycle_watchdog_seconds = float(config.get("cycle_watchdog_seconds", 1800))
+        self._cycle_hard_timeout_seconds = float(config.get("cycle_hard_timeout_seconds", 900))
         self._watchdog_timer: threading.Timer | None = None
+        # Token for the in-flight cycle worker. Cleared on hard timeout so a
+        # stale thread cannot submit orders after the lock is released.
+        self._active_cycle_token: object | None = None
+        self._cycle_executor = ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix="live-cycle",
+        )
         # Independent of the watchdog timer/alert above: a real incident
         # showed a cycle can hang for 24+ hours with the watchdog's alert
         # never firing (a threading.Timer callback failing silently is its
@@ -175,6 +183,21 @@ class LiveTradingEngine:
     @property
     def cycle_history(self) -> list[CycleResult]:
         return list(self._cycle_history)
+
+    def had_cycle_today(self, timezone: str = "US/Eastern") -> bool:
+        """True when any cycle (including skipped) was recorded for the session date."""
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(timezone)
+        today = datetime.now(tz).date()
+        for result in self._cycle_history:
+            ts = result.timestamp
+            if ts.tzinfo is None:
+                from datetime import timezone as dt_tz
+                ts = ts.replace(tzinfo=dt_tz.utc)
+            if ts.astimezone(tz).date() == today:
+                return True
+        return False
 
     def clear_cycle_history(self) -> int:
         """Wipe the in-memory cycle/order history. Returns the count removed.
@@ -318,10 +341,13 @@ class LiveTradingEngine:
     def _check_daily_limits(
         self, now: datetime, orders: list[dict[str, Any]], prices: dict[str, float]
     ) -> bool:
-        """Track today's trade count/turnover; return True if this cycle's
-        orders would breach the daily cap and should be forced to manual
-        approval instead of blocked outright (keeps an operator in the loop
-        rather than silently dropping signals or silently over-trading).
+        """Return True when daily caps are exceeded **and** orders must be held
+        for manual approval.
+
+        In ``full_auto`` mode the operator has opted out of the approval
+        queue, so a breach still emits a warning alert but returns False so
+        orders proceed to the broker. ``semi_auto`` / manual modes route the
+        whole cycle to the approval queue when limits would be exceeded.
         """
         date_str = now.strftime("%Y-%m-%d")
         if self._daily_date != date_str:
@@ -344,16 +370,31 @@ class LiveTradingEngine:
             or projected_turnover_frac > self._max_daily_turnover
         )
         if breached:
-            self._emit_alert(
-                "daily_limit_breach", "warning",
-                f"Daily limit would be breached (trades {projected_trades}/"
-                f"{self._max_daily_trades}, turnover {projected_turnover_frac:.1%}/"
-                f"{self._max_daily_turnover:.1%}); routing orders to manual approval.",
-            )
-        else:
+            if self._approval_mode == "full_auto":
+                msg = (
+                    f"Daily limit would be breached (trades {projected_trades}/"
+                    f"{self._max_daily_trades}, turnover {projected_turnover_frac:.1%}/"
+                    f"{self._max_daily_turnover:.1%}); full_auto — submitting anyway."
+                )
+            else:
+                msg = (
+                    f"Daily limit would be breached (trades {projected_trades}/"
+                    f"{self._max_daily_trades}, turnover {projected_turnover_frac:.1%}/"
+                    f"{self._max_daily_turnover:.1%}); routing orders to manual approval."
+                )
+            self._emit_alert("daily_limit_breach", "warning", msg)
+        if not breached or self._approval_mode == "full_auto":
             self._daily_trade_count = projected_trades
             self._daily_turnover_value += turnover_value
-        return breached
+        force_manual = breached and self._approval_mode != "full_auto"
+        if breached and self._approval_mode == "full_auto":
+            log.warning(
+                "Daily limit breached but approval_mode=full_auto — submitting anyway "
+                "(trades %d/%d, turnover %.1f%%/%.1f%%)",
+                projected_trades, self._max_daily_trades,
+                projected_turnover_frac * 100, self._max_daily_turnover * 100,
+            )
+        return force_manual
 
     def _emit_alert(
         self, kind: str, severity: str, message: str, **context: Any
@@ -452,12 +493,33 @@ class LiveTradingEngine:
             )
             result.alerts.append(alert)
 
-    def start(self) -> None:
-        """Connect to the broker and validate the account."""
+    def run_on_cycle_worker(self, fn, /, *args, timeout: float = 120, **kwargs):
+        """Run ``fn`` on the dedicated live-cycle / IBKR I/O thread.
+
+        ib_async binds to the thread that called ``connect()``; cycles and
+        order submission must share that thread or qualifyContracts/placeOrder
+        can hang indefinitely with no error.
+        """
+        future = self._cycle_executor.submit(fn, *args, **kwargs)
+        return future.result(timeout=timeout)
+
+    def _connect_broker_on_worker(self) -> None:
         self._broker.connect()
         account = self._broker.get_account()
         log.info("Live engine started – account equity: $%.2f", account.get("equity", 0))
         self._portfolio.cash = account.get("cash", self._portfolio.cash)
+
+    def _disconnect_broker_on_worker(self) -> None:
+        self._broker.disconnect()
+
+    def start(self) -> None:
+        """Connect to the broker and validate the account."""
+        try:
+            self.run_on_cycle_worker(self._connect_broker_on_worker, timeout=120)
+        except FuturesTimeoutError:
+            raise BrokerError(
+                "Broker connect timed out on cycle worker thread"
+            ) from None
         self._running = True
         self._started_at = datetime.now()
 
@@ -465,8 +527,14 @@ class LiveTradingEngine:
         """Disconnect from the broker."""
         self._running = False
         self._started_at = None
+        self._active_cycle_token = None
         try:
-            self._broker.disconnect()
+            self.run_on_cycle_worker(self._disconnect_broker_on_worker, timeout=5)
+        except FuturesTimeoutError:
+            log.warning(
+                "Broker disconnect timed out — cycle worker may be stuck; "
+                "abandoning IB session (service restart may be required)",
+            )
         except Exception:
             log.warning("Error disconnecting broker", exc_info=True)
         log.info("Live engine stopped after %d cycles", self._cycle_count)
@@ -526,145 +594,33 @@ class LiveTradingEngine:
                     self._cycle_history.append(result)
                     return result
 
+            cycle_token = object()
+            self._active_cycle_token = cycle_token
             try:
-                pit_view = self._data_feed.refresh(asof=now)
-
-                prices = self._broker.get_current_prices(self._data_feed._universe)
-
-                discrepancies = sync_portfolio_from_broker(
-                    self._broker, self._portfolio, prices
+                future = self._cycle_executor.submit(
+                    self._run_cycle_work, cycle_token, now, result,
                 )
-                result.discrepancies = discrepancies
-
-                # Surface a reconciliation that ran with an incomplete
-                # in-flight view as an operational alert.
-                if any(d.get("type") == "open_orders_unavailable" for d in discrepancies):
-                    result.alerts.append(self._emit_alert(
-                        "reconciliation_degraded", "warning",
-                        "Open orders unavailable; reconciliation may be incomplete.",
-                    ))
-
-                # Drawdown kill switch: once tripped, stop submitting new orders.
-                self._check_drawdown(result)
-                if self._halted:
-                    result.halted = True
-                    result.error = "halted: drawdown kill switch tripped"
-                    self._cycle_history.append(result)
-                    return result
-
-                # Phase B: reflect on the previous cycle now that its P&L is known.
-                self._maybe_reflect(now)
-
-                context = {
-                    "pit_view": pit_view,
-                    "portfolio": self._portfolio,
-                    "prices": prices,
-                    "memory": self._memory,
-                }
-
-                # Optimal (inverse-covariance) signal combination: mark the
-                # per-strategy book to today's prices and hand its return
-                # history to the researchers. Gated so the confidence-weighted
-                # default incurs no work and no behaviour change.
-                if self._signal_combination_method() == "optimal":
-                    try:
-                        self._attribution.update_daily(now, prices, self._portfolio.nav)
-                        strategy_returns = self._attribution.get_all_strategy_returns()
-                        if strategy_returns:
-                            context["strategy_returns"] = strategy_returns
-                    except Exception:
-                        log.debug(
-                            "optimal signal-combination attribution update failed",
-                            exc_info=True,
-                        )
-
-                orders, blackboard = self._orchestrator.step(context)
-                result.orders_generated = len(orders)
-
-                # Phase A: store this cycle's decision for deferred reflection.
-                proposal = getattr(blackboard, "proposal", None)
-                if proposal is not None:
-                    date_str = now.strftime("%Y-%m-%d")
-                    regime = ""
-                    if hasattr(blackboard, "risk_decision") and blackboard.risk_decision:
-                        regime = "; ".join(getattr(blackboard.risk_decision, "actions", []))
-                    self._memory.store_decision(
-                        date=date_str,
-                        proposal_weights=dict(proposal.targets),
-                        notes=f"cycle={self._cycle_count}; {regime}".strip("; "),
-                        nav_at_decision=self._portfolio.nav,
-                    )
-
-                if not orders:
-                    log.info("Cycle %d: no orders generated", self._cycle_count)
-                    self._cycle_history.append(result)
-                    return result
-
-                # Macro-event blackout: hold orders in a high-impact event window.
-                orders = self._apply_news_guard(orders, now, result)
-                if not orders:
-                    log.info(
-                        "Cycle %d: all orders held by news-guard", self._cycle_count
-                    )
-                    self._cycle_history.append(result)
-                    return result
-
-                daily_limit_breached = self._check_daily_limits(now, orders, prices)
-                if daily_limit_breached:
-                    result.alerts.append(self._alerts[-1])
-                    auto_orders, manual_orders = [], orders
-                else:
-                    auto_orders, manual_orders = self._split_by_approval(orders)
-
-                if auto_orders:
-                    statuses, failed = self._execute_orders(
-                        auto_orders, cycle_id=self._cycle_count
-                    )
-                    result.orders_submitted = len(statuses)
-                    result.order_statuses = [self._status_to_dict(s) for s in statuses]
-                    result.failed_orders = failed
-                    result.orders_failed = len(failed)
-
-                    # Tag submitted trades to their strategy so the optimal
-                    # signal combination can build per-strategy return history.
-                    if self._signal_combination_method() == "optimal":
-                        try:
-                            self._attribution.record_trades(auto_orders, prices)
-                        except Exception:
-                            log.debug(
-                                "optimal signal-combination trade recording failed",
-                                exc_info=True,
-                            )
-
-                if manual_orders:
-                    for strategy, group in self._group_by_strategy(manual_orders).items():
-                        aid = self._approval_queue.add(
-                            orders=group,
-                            blackboard=blackboard,
-                            strategy=strategy,
-                        )
-                        result.orders_queued += len(group)
-                        result.approval_ids.append(aid)
-
-                log.info(
-                    "Cycle %d: %d generated, %d submitted, %d queued, %d failed",
-                    self._cycle_count,
-                    result.orders_generated,
-                    result.orders_submitted,
-                    result.orders_queued,
-                    result.orders_failed,
+                future.result(timeout=self._cycle_hard_timeout_seconds)
+            except FuturesTimeoutError:
+                self._active_cycle_token = None
+                msg = (
+                    f"Cycle {self._cycle_count} hard-timed out after "
+                    f"{self._cycle_hard_timeout_seconds:.0f}s — releasing the cycle "
+                    "lock so future cycles can run. A stale worker thread may "
+                    "still be running in the background."
                 )
-
+                log.error(msg)
+                result.error = (
+                    f"cycle hard timeout after {self._cycle_hard_timeout_seconds:.0f}s"
+                )
+                result.alerts.append(self._emit_alert(
+                    "cycle_hard_timeout", "critical", msg,
+                ))
             except Exception as exc:
                 result.error = str(exc)
-                log.error("Cycle %d failed: %s", self._cycle_count, exc, exc_info=True)
-                # A broker/connectivity failure is operationally distinct from a
-                # logic error — surface it as an alert so an operator is notified.
-                if isinstance(exc, BrokerError):
-                    result.alerts.append(self._emit_alert(
-                        "broker_unavailable", "critical",
-                        f"Broker call failed during cycle: {exc}",
-                    ))
+                log.error(
+                    "Cycle %d failed: %s", self._cycle_count, exc, exc_info=True,
+                )
 
             self._cycle_history.append(result)
             return result
@@ -673,7 +629,160 @@ class LiveTradingEngine:
                 self._watchdog_timer.cancel()
                 self._watchdog_timer = None
             self._current_cycle_started_at = None
+            self._active_cycle_token = None
             self._cycle_lock.release()
+
+    def _cycle_token_active(self, token: object) -> bool:
+        return self._active_cycle_token is token
+
+    def _run_cycle_work(
+        self,
+        token: object,
+        now: datetime,
+        result: CycleResult,
+    ) -> None:
+        """Pipeline body for one cycle (runs on the cycle worker thread)."""
+        if not self._cycle_token_active(token):
+            return
+
+        try:
+            pit_view = self._data_feed.refresh(asof=now)
+
+            prices = self._resolve_cycle_prices(pit_view)
+
+            discrepancies = sync_portfolio_from_broker(
+                self._broker, self._portfolio, prices
+            )
+            result.discrepancies = discrepancies
+
+            if any(d.get("type") == "open_orders_unavailable" for d in discrepancies):
+                result.alerts.append(self._emit_alert(
+                    "reconciliation_degraded", "warning",
+                    "Open orders unavailable; reconciliation may be incomplete.",
+                ))
+
+            self._check_drawdown(result)
+            if self._halted:
+                result.halted = True
+                result.error = "halted: drawdown kill switch tripped"
+                return
+
+            self._maybe_reflect(now)
+
+            if not self._cycle_token_active(token):
+                log.warning(
+                    "Cycle %d abandoned after reflection — skipping pipeline",
+                    self._cycle_count,
+                )
+                return
+
+            context = {
+                "pit_view": pit_view,
+                "portfolio": self._portfolio,
+                "prices": prices,
+                "memory": self._memory,
+            }
+
+            if self._signal_combination_method() == "optimal":
+                try:
+                    self._attribution.update_daily(now, prices, self._portfolio.nav)
+                    strategy_returns = self._attribution.get_all_strategy_returns()
+                    if strategy_returns:
+                        context["strategy_returns"] = strategy_returns
+                except Exception:
+                    log.debug(
+                        "optimal signal-combination attribution update failed",
+                        exc_info=True,
+                    )
+
+            orders, blackboard = self._orchestrator.step(context)
+            result.orders_generated = len(orders)
+
+            proposal = getattr(blackboard, "proposal", None)
+            if proposal is not None:
+                date_str = now.strftime("%Y-%m-%d")
+                regime = ""
+                if hasattr(blackboard, "risk_decision") and blackboard.risk_decision:
+                    regime = "; ".join(getattr(blackboard.risk_decision, "actions", []))
+                self._memory.store_decision(
+                    date=date_str,
+                    proposal_weights=dict(proposal.targets),
+                    notes=f"cycle={self._cycle_count}; {regime}".strip("; "),
+                    nav_at_decision=self._portfolio.nav,
+                )
+
+            if not orders:
+                log.info("Cycle %d: no orders generated", self._cycle_count)
+                return
+
+            if not self._cycle_token_active(token):
+                log.warning(
+                    "Cycle %d abandoned before order routing — dropping %d orders",
+                    self._cycle_count, len(orders),
+                )
+                return
+
+            orders = self._apply_news_guard(orders, now, result)
+            if not orders:
+                log.info(
+                    "Cycle %d: all orders held by news-guard", self._cycle_count
+                )
+                return
+
+            alerts_before = len(self._alerts)
+            force_manual = self._check_daily_limits(now, orders, prices)
+            if len(self._alerts) > alerts_before:
+                result.alerts.append(self._alerts[-1])
+            if force_manual:
+                auto_orders, manual_orders = [], orders
+            else:
+                auto_orders, manual_orders = self._split_by_approval(orders)
+
+            if auto_orders:
+                statuses, failed = self._execute_orders(
+                    auto_orders, cycle_id=self._cycle_count
+                )
+                result.orders_submitted = len(statuses)
+                result.order_statuses = [self._status_to_dict(s) for s in statuses]
+                result.failed_orders = failed
+                result.orders_failed = len(failed)
+
+                if self._signal_combination_method() == "optimal":
+                    try:
+                        self._attribution.record_trades(auto_orders, prices)
+                    except Exception:
+                        log.debug(
+                            "optimal signal-combination trade recording failed",
+                            exc_info=True,
+                        )
+
+            if manual_orders:
+                for strategy, group in self._group_by_strategy(manual_orders).items():
+                    aid = self._approval_queue.add(
+                        orders=group,
+                        blackboard=blackboard,
+                        strategy=strategy,
+                    )
+                    result.orders_queued += len(group)
+                    result.approval_ids.append(aid)
+
+            log.info(
+                "Cycle %d: %d generated, %d submitted, %d queued, %d failed",
+                self._cycle_count,
+                result.orders_generated,
+                result.orders_submitted,
+                result.orders_queued,
+                result.orders_failed,
+            )
+
+        except Exception as exc:
+            result.error = str(exc)
+            log.error("Cycle %d failed: %s", self._cycle_count, exc, exc_info=True)
+            if isinstance(exc, BrokerError):
+                result.alerts.append(self._emit_alert(
+                    "broker_unavailable", "critical",
+                    f"Broker call failed during cycle: {exc}",
+                ))
 
     def _on_cycle_watchdog_timeout(self, cycle_id: int) -> None:
         """Fires if a cycle is still running well past any normal duration.
@@ -690,6 +799,52 @@ class LiveTradingEngine:
             "network call (e.g. a stale broker connection after an IB Gateway restart). "
             "No new cycles can start until this one finishes or the service is restarted.",
         )
+
+    def _resolve_cycle_prices(self, pit_view: Any) -> dict[str, float]:
+        """Prices for sizing and reconciliation within a cycle.
+
+        IBKR's ``reqTickers`` must run on the same thread that called
+        ``connect()``; cycles execute on a worker thread, so we derive
+        marks from the freshly loaded PIT price panel instead (same
+        completed bars the strategies already see).
+        """
+        universe = list(self._data_feed._universe)
+        from firm.brokers.ibkr import IBKRBroker
+
+        if isinstance(self._broker, IBKRBroker):
+            prices: dict[str, float] = {}
+            try:
+                price_df = pit_view.prices(universe, lookback_days=5)
+                if not price_df.empty and "symbol" in price_df.columns:
+                    for sym in universe:
+                        sym_rows = price_df[price_df["symbol"] == sym]
+                        if sym_rows.empty:
+                            continue
+                        row = sym_rows.iloc[-1]
+                        raw = row.get("close")
+                        if raw is None or (isinstance(raw, float) and raw != raw):
+                            raw = row.get("adj_close")
+                        if raw is not None and float(raw) > 0:
+                            prices[sym] = float(raw)
+            except Exception:
+                log.warning("Could not derive IBKR cycle prices from PIT view", exc_info=True)
+            if prices:
+                missing = [s for s in universe if s not in prices]
+                if missing:
+                    log.warning(
+                        "PIT cycle prices missing %d symbol(s): %s",
+                        len(missing), missing[:10],
+                    )
+                log.debug(
+                    "Cycle prices from PIT (IBKR thread-safe): %d/%d symbols",
+                    len(prices), len(universe),
+                )
+                return prices
+            raise BrokerError(
+                "No usable PIT prices for IBKR cycle — refusing reqTickers off worker thread"
+            )
+
+        return self._broker.get_current_prices(universe)
 
     def _maybe_reflect(self, now: datetime) -> None:
         """Trigger deferred LLM reflection on any decisions whose P&L is now known.
@@ -821,10 +976,19 @@ class LiveTradingEngine:
                 )
                 continue
 
+            raw_qty = float(o.get("quantity", abs(o.get("shares", 0))))
+            share_qty = int(round(abs(raw_qty)))
+            if share_qty <= 0:
+                log.debug(
+                    "Skipping dust order %s %s (raw qty %.4f rounds to 0 shares)",
+                    o.get("side"), o.get("symbol"), raw_qty,
+                )
+                continue
+
             req = OrderRequest(
                 symbol=o["symbol"],
                 side=o["side"],
-                quantity=o.get("quantity", abs(o.get("shares", 0))),
+                quantity=share_qty,
                 order_type=o.get("order_type", "market"),
                 limit_price=o.get("limit_price"),
                 strategy=o.get("strategy", "composite"),

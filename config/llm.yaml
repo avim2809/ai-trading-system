@@ -1,5 +1,6 @@
 # Default to a FREE model. Options that cost nothing to run:
 #   groq/llama-3.3-70b-versatile               – free Groq tier, needs a free GROQ_API_KEY
+#   gemini/gemini-2.5-flash                    – Google Gemini, needs GEMINI_API_KEY
 #   openrouter/nvidia/nemotron-3-ultra-550b-a55b:free – free OpenRouter tier, needs OPENROUTER_API_KEY
 #   openrouter/openrouter/free                 – OpenRouter auto-router over whatever :free model fits
 #   ollama/llama3                              – fully local/offline, needs Ollama running
@@ -18,6 +19,7 @@ provider:
   # retries the rest of the list in order before giving up.
   fallback_models:
     - "groq/llama-3.1-8b-instant"
+    - "gemini/gemini-2.5-flash"
     - "openrouter/openai/gpt-oss-20b:free"
     - "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
     - "openrouter/google/gemma-4-31b-it:free"
@@ -26,6 +28,7 @@ provider:
   load_balance: true
   temperature: 0.3
   max_tokens: 2000
+  request_timeout: 90
 
 optimization:
   compression_enabled: true
@@ -55,7 +58,7 @@ rag:
   reranker_model: "rerank-2.5"
   chunk_size: 500
   chunk_overlap: 50
-  reranking: true
+  reranking: false
   default_n_results: 5
   # Prepend a metadata header into embedded text (contextual retrieval).
   # Opt-in: toggling it changes chunk ids, so a re-index is required.
@@ -77,13 +80,27 @@ assistant:
   n_results: 5
 
 agent_modes:
+  # Cost-optimized: only the two analysts with dedicated RAG corpora.
+  # All other agents stay quant (no per-symbol LLM fan-out).
   technical_analyst: "quant"
-  fundamental_analyst: "quant"
+  fundamental_analyst: "llm_enhanced"
   sentiment_analyst: "llm_enhanced"
-  bull_researcher: "llm_enhanced"
-  bear_researcher: "llm_enhanced"
-  debate: "llm_enhanced"
+  bull_researcher: "quant"
+  bear_researcher: "quant"
+  debate: "quant"
   trader: "quant"
   risk: "quant"
+
+# Per-cycle LLM cost controls (see firm.agents.llm.base_llm_agent.LLMAgentMixin).
+enhancement:
+  policy: "live_calls"          # live: cache_only skips uncached calls
+  min_abs_score: 0.2            # skip weak quant signals
+  max_signals_per_agent: 8      # top |score| names per analyst per cycle
+  min_conviction: 0.25
+  max_theses_per_agent: 5
+  max_debate_symbols: 5
+  rag_n_results: 2              # smaller RAG context → fewer LLM tokens
+  enhance_portfolio_review: false
+  enhance_risk_review: false
 
 backtest_policy: "cache_only"

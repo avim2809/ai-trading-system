@@ -59,6 +59,13 @@ def create_app() -> FastAPI:
         task = asyncio.create_task(_auto_start_live())
         yield
         task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        from firm.api.routers.live import shutdown_live_engine
+
+        await asyncio.to_thread(shutdown_live_engine, application)
 
     application = FastAPI(title="AI Trading System", version="0.1.0", lifespan=lifespan)
 

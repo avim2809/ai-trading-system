@@ -19,6 +19,7 @@ from firm.data.providers.massive import MassiveProvider
 
 @pytest.fixture()
 def provider():
+    MassiveProvider._fundamentals_plan_blocked = False
     return MassiveProvider(api_key="test-key")
 
 
@@ -88,3 +89,16 @@ class TestMassiveFundamentalsPublicationLag:
         assert len(df) == 1
         assert pd.Timestamp(df.iloc[0]["date"]) == expected
         assert pd.Timestamp(df.iloc[0]["date"]) > pd.Timestamp(period_end)
+
+
+class TestMassiveFundamentalsPlanGate:
+    @patch("firm.data.providers.massive.requests.get")
+    def test_403_fails_fast_for_remaining_symbols(self, mock_get, provider):
+        mock_get.return_value = MagicMock(
+            status_code=403,
+            ok=False,
+            text='{"status":"NOT_AUTHORIZED","message":"upgrade"}',
+        )
+        df = provider.get_fundamentals(["AAPL", "MSFT", "GOOG"], "2020-01-01", "2027-01-01")
+        assert df.empty
+        assert mock_get.call_count == 1

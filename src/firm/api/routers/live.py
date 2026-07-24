@@ -31,6 +31,36 @@ _engine_lock = threading.Lock()
 _APPROVALS_PATH = "data/approvals.json"
 
 
+def _start_live_scheduler(
+    app,
+    engine,
+    schedule: str,
+    engine_config: dict[str, Any],
+) -> None:
+    """Start the trading scheduler, session catch-up, and fundamentals refresh."""
+    schedule_tz = engine_config.get("schedule_timezone", "US/Eastern")
+    universe = list(engine_config.get("symbols") or [])
+    refresh_hour = int(engine_config.get("fundamentals_refresh_hour", 8))
+    try:
+        from firm.live.fundamentals_refresh import maybe_refresh_fundamentals_cache_on_start
+        from firm.live.scheduler import TradingScheduler, maybe_catch_up_session_cycle
+
+        scheduler = TradingScheduler(
+            engine=engine,
+            schedule=schedule,
+            timezone=schedule_tz,
+            universe=universe,
+            fundamentals_refresh_hour=refresh_hour,
+        )
+        scheduler.start()
+        app.state.live_scheduler = scheduler
+        maybe_refresh_fundamentals_cache_on_start(universe)
+        maybe_catch_up_session_cycle(engine, schedule, timezone=schedule_tz)
+    except ImportError:
+        log.warning("APScheduler not installed; scheduling disabled")
+        app.state.live_scheduler = None
+
+
 # ---------------------------------------------------------------------------
 # Request / Response schemas
 # ---------------------------------------------------------------------------
@@ -181,13 +211,7 @@ def _start_live_engine(
     engine.start()
     app.state.live_engine = engine
 
-    try:
-        scheduler = TradingScheduler(engine=engine, schedule=schedule)
-        scheduler.start()
-        app.state.live_scheduler = scheduler
-    except ImportError:
-        log.warning("APScheduler not installed; scheduling disabled")
-        app.state.live_scheduler = None
+    _start_live_scheduler(app, engine, schedule, engine_config)
 
     return {"status": "started", "broker": broker, "schedule": schedule}
 
@@ -346,18 +370,22 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
 
 @router.post("/stop")
 def live_stop(request: Request) -> dict[str, Any]:
+    shutdown_live_engine(request.app)
+    return {"status": "stopped"}
+
+
+def shutdown_live_engine(app) -> None:
+    """Stop scheduler and engine — used by ``/live/stop`` and app shutdown."""
     with _engine_lock:
-        scheduler = getattr(request.app.state, "live_scheduler", None)
+        scheduler = getattr(app.state, "live_scheduler", None)
         if scheduler is not None:
             scheduler.stop()
-            request.app.state.live_scheduler = None
+            app.state.live_scheduler = None
 
-        engine = getattr(request.app.state, "live_engine", None)
+        engine = getattr(app.state, "live_engine", None)
         if engine is not None:
             engine.stop()
-            request.app.state.live_engine = None
-
-    return {"status": "stopped"}
+            app.state.live_engine = None
 
 
 @router.post("/trigger")
@@ -502,13 +530,23 @@ def get_approval(approval_id: str, request: Request) -> dict[str, Any]:
 
 @router.post("/approvals/{approval_id}/approve")
 def approve_order(approval_id: str, request: Request) -> dict[str, Any]:
+    from concurrent.futures import TimeoutError as FuturesTimeoutError
+
     queue = _get_queue(request)
+    engine = _get_engine(request)
     try:
-        statuses = queue.approve(approval_id)
+        resolved_id = queue.resolve_id(approval_id)
+        # IBKR I/O must run on the same worker thread that called connect().
+        statuses = engine.run_on_cycle_worker(queue.approve, resolved_id, timeout=120)
+    except FuturesTimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="Approval timed out waiting for broker (cycle worker busy?)",
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return {
-        "approval_id": approval_id,
+        "approval_id": resolved_id,
         "status": "approved",
         "orders_submitted": len(statuses),
     }
@@ -659,9 +697,9 @@ def update_live_config(body: ConfigUpdateRequest, request: Request) -> dict[str,
             if old_scheduler is not None:
                 old_scheduler.stop()
             try:
-                new_scheduler = TradingScheduler(engine=engine, schedule=body.schedule)
-                new_scheduler.start()
-                request.app.state.live_scheduler = new_scheduler
+                _start_live_scheduler(
+                    request.app, engine, body.schedule, engine._config,
+                )
             except ImportError:
                 log.warning("APScheduler not installed; scheduling disabled")
                 request.app.state.live_scheduler = None

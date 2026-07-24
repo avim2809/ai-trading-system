@@ -35,6 +35,7 @@ _PROVIDER_DEFAULTS: dict[str, Any] = {
     "load_balance": False,
     "temperature": 0.3,
     "max_tokens": 2000,
+    "request_timeout": 90,
 }
 
 _ASSISTANT_DEFAULTS: dict[str, Any] = {
@@ -42,6 +43,24 @@ _ASSISTANT_DEFAULTS: dict[str, Any] = {
     "prompt_caching": True,   # use Anthropic cache_control when provider is anthropic
     "citations": False,       # use the Claude Citations API
     "n_results": 5,
+}
+
+_ENHANCEMENT_DEFAULTS: dict[str, Any] = {
+    # live_calls — call the provider (subject to caps below).
+    # cache_only — use LLM only when the response is already in llm_cache.db.
+    "policy": "live_calls",
+    # Per-signal agents: skip weak quant scores; keep top-N by |score| per cycle.
+    "min_abs_score": 0.2,
+    "max_signals_per_agent": 8,
+    # Thesis / debate agents: skip low-conviction names; cap debate breadth.
+    "min_conviction": 0.25,
+    "max_theses_per_agent": 5,
+    "max_debate_symbols": 5,
+    # RAG chunks per retrieval (Voyage query-embed cost is 1/call regardless).
+    "rag_n_results": 2,
+    # Portfolio-level agents (off by default — 1 call each when enabled).
+    "enhance_portfolio_review": False,
+    "enhance_risk_review": False,
 }
 
 _OPTIMIZATION_DEFAULTS: dict[str, Any] = {
@@ -94,6 +113,17 @@ def assistant_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 def optimization_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return the ``optimization`` section merged over defaults."""
     return _section(cfg, "optimization", _OPTIMIZATION_DEFAULTS)
+
+
+def enhancement_config(
+    cfg: dict[str, Any] | None = None,
+    overrides: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the ``enhancement`` section merged over defaults and *overrides*."""
+    merged = _section(cfg, "enhancement", _ENHANCEMENT_DEFAULTS)
+    if overrides:
+        merged = {**merged, **overrides}
+    return merged
 
 
 def is_anthropic(model: str) -> bool:

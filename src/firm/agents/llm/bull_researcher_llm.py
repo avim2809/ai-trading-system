@@ -28,7 +28,11 @@ class LLMBullResearcher(BullResearcher, LLMAgentMixin):
         quant_theses = BullResearcher.run(self, ctx, **inputs)
 
         enhanced: list[Thesis] = []
+        enhance_syms = self._thesis_symbols_to_enhance(quant_theses)
         for thesis in quant_theses:
+            if thesis.symbol not in enhance_syms:
+                enhanced.append(thesis)
+                continue
             rag_context = self._retrieve_context(
                 thesis.symbol,
                 f"bullish investment thesis news filings for {thesis.symbol}",

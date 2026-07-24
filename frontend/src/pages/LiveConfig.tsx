@@ -43,8 +43,8 @@ const BROKERS = [
 ]
 
 const SCHEDULES = [
-  { value: 'market_open', label: 'Market Open' },
-  { value: 'market_close', label: 'Market Close' },
+  { value: 'market_open', label: 'Market Open (9:30 ET)' },
+  { value: 'market_close', label: 'Market Close (4:00 ET)' },
   { value: 'every_5_min', label: 'Every 5 Minutes' },
   { value: 'every_15_min', label: 'Every 15 Minutes' },
   { value: 'every_30_min', label: 'Every 30 Minutes' },
@@ -132,8 +132,19 @@ export default function LiveConfig() {
 
   useEffect(() => {
     if (!llmConfig) return
-    setActiveProvider(llmConfig.provider.default_model.split('/')[0] || '')
-    setActiveModel(llmConfig.provider.default_model)
+    const model = llmConfig.provider.default_model
+    const resolved =
+      (llmConfig.provider as LLMConfig['provider'] & { resolved_provider?: string })
+        .resolved_provider
+      ?? llmProviders?.find(
+        (p) =>
+          p.models.includes(model)
+          || p.default_model === model
+          || model.startsWith(`${p.name}/`),
+      )?.name
+      ?? (model.startsWith('gemini/') ? 'gemini' : model.split('/')[0] || '')
+    setActiveProvider(resolved)
+    setActiveModel(model)
     setTemperature(llmConfig.provider.temperature)
     setAgentModes(llmConfig.agent_modes)
     setCacheEnabled(llmConfig.optimization.cache_enabled)
@@ -143,7 +154,7 @@ export default function LiveConfig() {
     if (llmConfig.rag?.embedding_model) {
       setSelectedEmbeddingModel(llmConfig.rag.embedding_model)
     }
-  }, [llmConfig])
+  }, [llmConfig, llmProviders])
 
   useEffect(() => {
     if (!config) return
@@ -629,7 +640,7 @@ export default function LiveConfig() {
                 {(llmProviders ?? [])
                   .filter((p) => p.configured || p.name.toLowerCase() === 'ollama')
                   .map((p) => (
-                    <option key={p.name} value={p.name}>{p.name}</option>
+                    <option key={p.name} value={p.name}>{p.label}</option>
                   ))}
               </select>
             </div>

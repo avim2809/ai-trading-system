@@ -22,7 +22,10 @@ from firm.logging_setup import setup_logging
 log = logging.getLogger("firm.scripts.fetch_data")
 
 # Provider names understood by the CLI; "fallback" is the default.
-_KNOWN_PROVIDERS = {"fallback", "massive", "tiingo", "alphavantage", "fmp"}
+_KNOWN_PROVIDERS = {
+    "fallback", "massive", "tiingo", "alphavantage", "fmp",
+    "finnhub", "edgar", "twelvedata",
+}
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

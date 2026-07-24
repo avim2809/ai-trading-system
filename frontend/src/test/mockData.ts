@@ -101,6 +101,7 @@ export const mockApprovalDetail: ApprovalDetail = {
 
 export const mockLLMProviders: LLMProvider[] = [
   { name: 'groq', label: 'Groq (free tier)', configured: true, models: ['groq/llama-3.3-70b-versatile'], default_model: 'groq/llama-3.3-70b-versatile' },
+  { name: 'gemini', label: 'Google Gemini', configured: false, models: ['gemini/gemini-2.5-flash'], default_model: 'gemini/gemini-2.5-flash' },
   { name: 'anthropic', label: 'Anthropic Claude', configured: false, models: ['anthropic/claude-opus-4-8'], default_model: 'anthropic/claude-opus-4-8' },
 ]
 
