@@ -92,7 +92,9 @@ def test_build_live_providers_ibkr(mock_ibkr, monkeypatch):
     providers = build_live_providers("ibkr_paper")
     assert "prices" in providers
     assert "sentiment" in providers
+    assert isinstance(providers["sentiment"], FallbackProvider)
     assert isinstance(providers["fundamentals"], FallbackProvider)
+    assert providers["sentiment"] is providers["fundamentals"]
     mock_ibkr.assert_called_once()
 
 
@@ -100,8 +102,25 @@ def test_build_live_providers_ibkr(mock_ibkr, monkeypatch):
 def test_build_live_providers_ibkr_no_fundamentals_without_keys(mock_ibkr, monkeypatch):
     monkeypatch.delenv("FMP_API_KEY", raising=False)
     monkeypatch.delenv("MASSIVE_API_KEY", raising=False)
+    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
+    monkeypatch.delenv("TWELVEDATA_API_KEY", raising=False)
+    monkeypatch.delenv("ALPHAVANTAGE_API_KEY", raising=False)
+    monkeypatch.delenv("TIINGO_API_KEY", raising=False)
     providers = build_live_providers("ibkr_paper")
     assert "fundamentals" not in providers
+    assert "sentiment" not in providers
+
+
+@patch("firm.data.providers.ibkr.IBKRProvider")
+def test_build_live_providers_ibkr_sentiment_without_fundamentals_keys(mock_ibkr, monkeypatch):
+    monkeypatch.delenv("FMP_API_KEY", raising=False)
+    monkeypatch.delenv("FINNHUB_API_KEY", raising=False)
+    monkeypatch.setenv("MASSIVE_API_KEY", "test-massive")
+    from firm.data.providers.fallback import FallbackProvider
+
+    providers = build_live_providers("ibkr_paper")
+    assert isinstance(providers["sentiment"], FallbackProvider)
+    assert "fundamentals" in providers
 
 
 def test_build_live_providers_fallback():

@@ -144,10 +144,10 @@ def resolve_live_startup(
 def build_live_providers(broker_type: str) -> dict[str, Any]:
     """Build the provider map expected by :class:`LiveDataFeed`.
 
-    IBKR brokers use IB Gateway for prices + news sentiment; fundamentals
-    use the same Massive → FMP fallback chain as backtests when either API
-    key is set.  All other brokers use :class:`FallbackProvider` for all
-    capabilities.
+    IBKR brokers use IB Gateway for daily OHLCV prices only.  News sentiment
+    uses the Massive → Alpha Vantage → Tiingo fallback chain (same as
+    backtests).  Fundamentals use FMP → Finnhub → … when configured.
+    All other brokers use :class:`FallbackProvider` for all capabilities.
     """
     if broker_type.startswith("ibkr"):
         from firm.data.providers.ibkr import IBKRProvider
@@ -158,15 +158,46 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
         else:
             port = int(os.getenv("IBKR_PORT", "7496"))
         ibkr = IBKRProvider(host=host, port=port, client_id=2)
-        providers: dict[str, Any] = {"prices": ibkr, "sentiment": ibkr}
-        if os.getenv("FMP_API_KEY") or os.getenv("MASSIVE_API_KEY"):
+        providers: dict[str, Any] = {"prices": ibkr}
+
+        sentiment_configured = any(
+            os.getenv(k)
+            for k in ("MASSIVE_API_KEY", "ALPHAVANTAGE_API_KEY", "TIINGO_API_KEY")
+        )
+        fundamentals_configured = any(
+            os.getenv(k)
+            for k in (
+                "FMP_API_KEY",
+                "MASSIVE_API_KEY",
+                "FINNHUB_API_KEY",
+                "TWELVEDATA_API_KEY",
+                "ALPHAVANTAGE_API_KEY",
+            )
+        )
+
+        if sentiment_configured or fundamentals_configured:
             try:
                 from firm.data.providers.fallback import FallbackProvider
 
-                providers["fundamentals"] = FallbackProvider()
-                log.info("IBKR live fundamentals: FMP → Finnhub → EDGAR → … fallback chain")
+                fallback = FallbackProvider()
+                if fundamentals_configured:
+                    providers["fundamentals"] = fallback
+                    log.info(
+                        "IBKR live fundamentals: FMP → Finnhub → EDGAR → … fallback chain"
+                    )
+                if sentiment_configured:
+                    providers["sentiment"] = fallback
+                    log.info(
+                        "IBKR live sentiment: Massive → Alpha Vantage → Tiingo fallback chain"
+                    )
             except Exception as exc:
-                log.warning("Fundamentals fallback provider not available: %s", exc)
+                log.warning("Fallback provider not available: %s", exc)
+
+        if "sentiment" not in providers:
+            log.warning(
+                "No sentiment API key (MASSIVE_API_KEY, ALPHAVANTAGE_API_KEY, or "
+                "TIINGO_API_KEY); sentiment strategy will receive empty data on live"
+            )
         return providers
 
     from firm.data.providers.fallback import FallbackProvider
