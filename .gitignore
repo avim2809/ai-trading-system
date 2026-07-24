@@ -14,7 +14,7 @@ env/
 *.parquet
 data/cache/
 data/vectordb/
-data/llm_cache.db
+data/llm_cache.db*
 data/logs/
 # Runtime state / churn (recreated on demand by the app)
 data/execution_audit.jsonl
