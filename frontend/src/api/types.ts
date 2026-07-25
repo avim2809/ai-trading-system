@@ -279,6 +279,10 @@ export interface OrderRecord {
   status: string
   strategy?: string
   timestamp: string | null
+  /** ``cycle`` = auto-submitted; ``approval`` = manually approved. */
+  source?: 'cycle' | 'approval' | string
+  cycle_id?: number
+  approval_id?: string
 }
 
 export interface CycleRecord {

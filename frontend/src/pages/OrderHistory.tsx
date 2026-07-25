@@ -17,6 +17,25 @@ function rangeMs(key: RangeKey): number {
 
 const formatTime = (iso: string) => formatDateTime(iso, { seconds: true })
 
+function orderRouteLabel(source: string | undefined): { label: string; className: string } {
+  if (source === 'approval') {
+    return {
+      label: 'Approved',
+      className: 'bg-violet-900/50 text-violet-300 border-violet-700',
+    }
+  }
+  if (source === 'cycle') {
+    return {
+      label: 'Auto',
+      className: 'bg-cyan-900/50 text-cyan-300 border-cyan-700',
+    }
+  }
+  return {
+    label: '—',
+    className: 'bg-slate-700 text-slate-400 border-slate-600',
+  }
+}
+
 export default function OrderHistory() {
   const qc = useQueryClient()
   const [range, setRange] = useState<RangeKey>('7d')
@@ -161,6 +180,7 @@ export default function OrderHistory() {
                 <th className="px-4 py-3 text-slate-400 font-medium text-right">Qty</th>
                 <th className="px-4 py-3 text-slate-400 font-medium text-right">Fill Price</th>
                 <th className="px-4 py-3 text-slate-400 font-medium">Status</th>
+                <th className="px-4 py-3 text-slate-400 font-medium">Route</th>
                 <th className="px-4 py-3 text-slate-400 font-medium">Strategy</th>
               </tr>
             </thead>
@@ -182,6 +202,18 @@ export default function OrderHistory() {
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={o.status} />
+                  </td>
+                  <td className="px-4 py-3">
+                    {(() => {
+                      const route = orderRouteLabel(o.source)
+                      return (
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${route.className}`}
+                        >
+                          {route.label}
+                        </span>
+                      )
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-xs text-slate-400">{o.strategy ?? '—'}</td>
                 </tr>

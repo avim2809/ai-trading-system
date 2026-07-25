@@ -85,6 +85,7 @@ class ApprovalQueue:
         return [a for a in self._queue if a.status == "pending"]
 
     def get_all(self) -> list[PendingApproval]:
+        self.expire_stale()
         return list(self._queue)
 
     def get_by_id(self, approval_id: str) -> PendingApproval | None:

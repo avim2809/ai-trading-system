@@ -91,11 +91,13 @@ class LiveTradingEngine:
         approval_mode: str = "semi_auto",
         auto_approve_strategies: list[str] | None = None,
         alert_callback: Any = None,
+        trade_history: Any = None,
     ) -> None:
         self._config = config
         self._broker = broker
         self._data_feed = data_feed
         self._approval_queue = approval_queue
+        self._trade_history = trade_history
         self._approval_mode = approval_mode
         self._auto_approve: set[str] = set(auto_approve_strategies or [])
 
@@ -238,13 +240,34 @@ class LiveTradingEngine:
     def clear_cycle_history(self) -> int:
         """Wipe the in-memory cycle/order history. Returns the count removed.
 
-        This already resets on every service restart (cycle_history is
-        in-memory only) — this method just gives an explicit way to do it
-        without restarting the whole live engine.
+        Also clears persisted trade history when a store is attached.
         """
         count = len(self._cycle_history)
         self._cycle_history = []
+        if self._trade_history is not None:
+            self._trade_history.clear_all()
         return count
+
+    def _persist_cycle_result(self, result: CycleResult) -> None:
+        if self._trade_history is None:
+            return
+        summary = {
+            "cycle_id": result.cycle_id,
+            "timestamp": result.timestamp.isoformat(),
+            "orders_generated": result.orders_generated,
+            "orders_submitted": result.orders_submitted,
+            "orders_queued": result.orders_queued,
+            "orders_failed": result.orders_failed,
+            "skipped": result.skipped,
+            "error": result.error,
+        }
+        self._trade_history.record_cycle(summary)
+        if result.order_statuses:
+            self._trade_history.record_orders(
+                result.order_statuses,
+                cycle_id=result.cycle_id,
+                source="cycle",
+            )
 
     @property
     def alerts(self) -> list[dict[str, Any]]:
@@ -647,6 +670,7 @@ class LiveTradingEngine:
                     result.skipped = True
                     result.error = "skipped: market closed"
                     self._cycle_history.append(result)
+                    self._persist_cycle_result(result)
                     return result
 
             cycle_token = object()
@@ -682,6 +706,7 @@ class LiveTradingEngine:
                 )
 
             self._cycle_history.append(result)
+            self._persist_cycle_result(result)
             return result
         finally:
             if self._watchdog_timer is not None:

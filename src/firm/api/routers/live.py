@@ -30,6 +30,8 @@ _engine_lock = threading.Lock()
 # every test that calls /live/start reads and overwrites live approval
 # history with test data.
 _APPROVALS_PATH = "data/approvals.json"
+_TRADE_HISTORY_ORDERS_PATH = "data/order_history.json"
+_TRADE_HISTORY_CYCLES_PATH = "data/cycle_history.json"
 
 
 def _start_live_scheduler(
@@ -190,6 +192,30 @@ def _get_queue(request: Request):
     return queue
 
 
+def _get_trade_history(app) -> "TradeHistoryStore":
+    from firm.live.trade_history import TradeHistoryStore
+
+    store = getattr(app.state, "trade_history", None)
+    if store is None:
+        store = TradeHistoryStore(
+            orders_path=_TRADE_HISTORY_ORDERS_PATH,
+            cycles_path=_TRADE_HISTORY_CYCLES_PATH,
+        )
+        app.state.trade_history = store
+    return store
+
+
+def _get_approval_queue_readonly(app):
+    """Load persisted approvals without requiring a running live engine."""
+    from firm.live.approval import ApprovalQueue
+
+    queue = getattr(app.state, "approval_queue", None)
+    if queue is None:
+        queue = ApprovalQueue(persist_path=_APPROVALS_PATH)
+        app.state.approval_queue = queue
+    return queue
+
+
 def _start_live_engine(
     app,
     *,
@@ -220,6 +246,8 @@ def _start_live_engine(
     approval_queue = ApprovalQueue(broker=broker_instance, persist_path=_APPROVALS_PATH)
     app.state.approval_queue = approval_queue
 
+    trade_history = _get_trade_history(app)
+
     config = {
         **engine_config,
         "symbols": symbols,
@@ -236,6 +264,7 @@ def _start_live_engine(
         approval_queue=approval_queue,
         approval_mode=approval_mode,
         auto_approve_strategies=auto_approve,
+        trade_history=trade_history,
     )
     engine._broker_type = broker
     engine.start()
@@ -505,6 +534,11 @@ def live_account(request: Request) -> dict[str, Any]:
 
 @router.get("/orders")
 def live_orders(request: Request) -> list[dict[str, Any]]:
+    store = _get_trade_history(request.app)
+    persisted = store.list_orders()
+    if persisted:
+        return persisted
+
     engine = getattr(request.app.state, "live_engine", None)
     if engine is None:
         return []
@@ -517,6 +551,11 @@ def live_orders(request: Request) -> list[dict[str, Any]]:
 
 @router.get("/cycles")
 def live_cycles(request: Request) -> list[dict[str, Any]]:
+    store = _get_trade_history(request.app)
+    persisted = store.list_cycles()
+    if persisted:
+        return persisted
+
     engine = getattr(request.app.state, "live_engine", None)
     if engine is None:
         return []
@@ -542,9 +581,14 @@ def clear_cycles(request: Request) -> dict[str, Any]:
     the dashboard looking like real trading activity.
     """
     engine = getattr(request.app.state, "live_engine", None)
-    if engine is None:
-        return {"cleared": 0}
-    return {"cleared": engine.clear_cycle_history()}
+    if engine is not None:
+        return {"cleared": engine.clear_cycle_history()}
+
+    store = getattr(request.app.state, "trade_history", None)
+    if store is not None:
+        cleared = store.clear_all()
+        return {"cleared": cleared["cycles"]}
+    return {"cleared": 0}
 
 
 @router.get("/alerts")
@@ -566,10 +610,8 @@ def live_alerts(request: Request) -> dict[str, Any]:
 
 @router.get("/approvals")
 def list_approvals(request: Request) -> list[dict[str, Any]]:
-    queue = getattr(request.app.state, "approval_queue", None)
-    if queue is None:
-        return []
-    return [_serialize_approval(a) for a in queue.get_pending()]
+    queue = _get_approval_queue_readonly(request.app)
+    return [_serialize_approval(a) for a in queue.get_all()]
 
 
 @router.delete("/approvals")
@@ -611,6 +653,17 @@ def approve_order(approval_id: str, request: Request) -> dict[str, Any]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+    from firm.live.engine import LiveTradingEngine
+
+    store = _get_trade_history(request.app)
+    if statuses:
+        store.record_orders(
+            [LiveTradingEngine._status_to_dict(s) for s in statuses],
+            source="approval",
+            approval_id=resolved_id,
+        )
+
     return {
         "approval_id": resolved_id,
         "status": "approved",

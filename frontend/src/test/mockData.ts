@@ -68,7 +68,7 @@ export const mockCycles: CycleRecord[] = [
 ]
 
 export const mockOrders: OrderRecord[] = [
-  { order_id: 'o1', symbol: 'AAPL', side: 'buy', quantity: 1, filled_quantity: 1, avg_fill_price: 332.5, status: 'filled', strategy: 'momentum', timestamp: '2026-07-18T19:28:37' },
+  { order_id: 'o1', symbol: 'AAPL', side: 'buy', quantity: 1, filled_quantity: 1, avg_fill_price: 332.5, status: 'filled', strategy: 'momentum', timestamp: '2026-07-18T19:28:37', source: 'cycle' },
 ]
 
 export const mockApprovals: PendingApproval[] = [

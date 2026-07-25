@@ -9,10 +9,20 @@ import OrderHistory from './OrderHistory'
 describe('OrderHistory', () => {
   it('renders orders within the default 7-day range', async () => {
     server.use(http.get('http://localhost/api/live/orders', () => HttpResponse.json([
-      { order_id: 'o1', symbol: 'AAPL', side: 'buy', quantity: 1, filled_quantity: 1, avg_fill_price: 332.5, status: 'filled', strategy: 'momentum', timestamp: new Date().toISOString() },
+      { order_id: 'o1', symbol: 'AAPL', side: 'buy', quantity: 1, filled_quantity: 1, avg_fill_price: 332.5, status: 'filled', strategy: 'momentum', timestamp: new Date().toISOString(), source: 'cycle' },
     ])))
     renderWithProviders(<OrderHistory />)
     await waitFor(() => expect(screen.getByText('AAPL')).toBeInTheDocument())
+    expect(screen.getByText('Auto')).toBeInTheDocument()
+  })
+
+  it('shows Approved route for manually approved orders', async () => {
+    server.use(http.get('http://localhost/api/live/orders', () => HttpResponse.json([
+      { order_id: 'o2', symbol: 'MSFT', side: 'sell', quantity: 2, filled_quantity: 2, avg_fill_price: 420, status: 'filled', strategy: 'trend', timestamp: new Date().toISOString(), source: 'approval' },
+    ])))
+    renderWithProviders(<OrderHistory />)
+    await waitFor(() => expect(screen.getByText('MSFT')).toBeInTheDocument())
+    expect(screen.getByText('Approved')).toBeInTheDocument()
   })
 
   it('filters out orders older than the selected range', async () => {

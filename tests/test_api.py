@@ -388,6 +388,8 @@ class TestLiveConfigRoundTrip:
         monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: MockBroker())
         # Never let tests read/write the real production approvals file.
         monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_ORDERS_PATH", str(tmp_path / "order_history.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
 
     def test_start_applies_strategies_and_risk(self, client):
         resp = client.post("/api/live/start", json={
@@ -505,6 +507,8 @@ class TestLiveClearEndpoints:
         monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: MockBroker())
         # Never let tests read/write the real production approvals file.
         monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_ORDERS_PATH", str(tmp_path / "order_history.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
 
     def _mock_cycle_deps(self, monkeypatch):
         """run_cycle() otherwise builds a real orchestrator + FallbackProvider
@@ -563,3 +567,47 @@ class TestLiveClearEndpoints:
         r = client.delete("/api/live/approvals")
         assert r.status_code == 200
         assert r.json() == {"cleared": 0}
+
+    def test_list_approvals_includes_resolved_history(self, client):
+        client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+        queue = client.app.state.approval_queue
+        aid = queue.add(orders=[{"symbol": "AAPL", "side": "buy", "quantity": 1}], blackboard=None)
+        queue.reject(aid, "test reject")
+
+        resp = client.get("/api/live/approvals")
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert len(rows) == 1
+        assert rows[0]["status"] == "rejected"
+
+        client.post("/api/live/stop")
+
+    def test_orders_persist_after_stop(self, client, monkeypatch):
+        from tests.test_brokers import MockBroker
+
+        self._mock_cycle_deps(monkeypatch)
+        mock_broker = MockBroker()
+        import firm.api.routers.live as live_mod
+
+        monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: mock_broker)
+
+        client.post("/api/live/start", json={
+            "broker": "alpaca_paper",
+            "schedule": "hourly",
+            "approval_mode": "full_auto",
+            "initial_capital": 100_000,
+        })
+        engine = client.app.state.live_engine
+        mock_orch = engine._orchestrator
+
+        mock_orch.step.return_value = (
+            [{"symbol": "AAPL", "side": "buy", "quantity": 1, "strategy": "momentum"}],
+            None,
+        )
+        engine.run_cycle(force=True)
+
+        client.post("/api/live/stop")
+
+        orders = client.get("/api/live/orders").json()
+        assert len(orders) >= 1
+        assert orders[0]["symbol"] == "AAPL"
