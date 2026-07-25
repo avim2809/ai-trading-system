@@ -19,7 +19,8 @@ from firm.data.providers.base import (
     ProviderError,
 )
 from firm.data.providers.constants import ETF_SYMBOLS
-from firm.data.schemas import FUNDAMENTAL_COLS
+from firm.data.providers.sentiment_lexicon import score_headline
+from firm.data.schemas import FUNDAMENTAL_COLS, SENTIMENT_COLS
 
 log = logging.getLogger(__name__)
 
@@ -78,7 +79,55 @@ class FinnhubProvider(DataProvider):
     def get_news_sentiment(
         self, symbols: list[str], start: str, end: str
     ) -> pd.DataFrame:
-        raise NotImplementedError("FinnhubProvider sentiment is not wired; use FallbackProvider.")
+        """Return sentiment rows from Finnhub ``/company-news`` headlines."""
+        start_str = pd.Timestamp(start).strftime("%Y-%m-%d")
+        end_str = pd.Timestamp(end).strftime("%Y-%m-%d")
+        rows: list[dict] = []
+        for sym in symbols:
+            try:
+                articles = self._client.get_json(
+                    "/company-news",
+                    params={
+                        "symbol": sym,
+                        "from": start_str,
+                        "to": end_str,
+                        "token": self._api_key,
+                    },
+                )
+            except ProviderError as exc:
+                log.warning("finnhub_news_failed symbol=%s (%s)", sym, exc)
+                continue
+            if not isinstance(articles, list):
+                log.warning("finnhub_news_unexpected_payload symbol=%s", sym)
+                continue
+            for art in articles:
+                ts = pd.to_datetime(art.get("datetime"), unit="s", errors="coerce")
+                headline = art.get("headline") or art.get("summary") or ""
+                rows.append(
+                    {
+                        "date": ts.date() if not pd.isna(ts) else None,
+                        "symbol": sym.upper(),
+                        "sentiment_score": score_headline(headline),
+                        "news_volume": 1,
+                        "source": art.get("source") or "finnhub",
+                        "headline": headline,
+                    }
+                )
+        if not rows:
+            return pd.DataFrame(columns=SENTIMENT_COLS)
+        df = pd.DataFrame(rows, columns=SENTIMENT_COLS)
+        df = df.dropna(subset=["date"])
+        if df.empty:
+            return pd.DataFrame(columns=SENTIMENT_COLS)
+        return (
+            df.groupby(["date", "symbol"], as_index=False)
+            .agg(
+                sentiment_score=("sentiment_score", "mean"),
+                news_volume=("news_volume", "sum"),
+                source=("source", "first"),
+                headline=("headline", "first"),
+            )[SENTIMENT_COLS]
+        )
 
     def get_corporate_actions(
         self, symbols: list[str], start: str, end: str

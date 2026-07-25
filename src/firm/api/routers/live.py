@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
@@ -37,25 +38,55 @@ def _start_live_scheduler(
     schedule: str,
     engine_config: dict[str, Any],
 ) -> None:
-    """Start the trading scheduler, session catch-up, and fundamentals refresh."""
+    """Start scheduler, fundamentals refresh, and catch-up after warmup."""
     schedule_tz = engine_config.get("schedule_timezone", "US/Eastern")
     universe = list(engine_config.get("symbols") or [])
     refresh_hour = int(engine_config.get("fundamentals_refresh_hour", 8))
     try:
         from firm.live.fundamentals_refresh import maybe_refresh_fundamentals_cache_on_start
+        from firm.live.pipeline_warmup import PipelineWarmupGate, warmup_wait_seconds
         from firm.live.scheduler import TradingScheduler, maybe_catch_up_session_cycle
 
-        scheduler = TradingScheduler(
-            engine=engine,
-            schedule=schedule,
-            timezone=schedule_tz,
-            universe=universe,
-            fundamentals_refresh_hour=refresh_hour,
-        )
-        scheduler.start()
-        app.state.live_scheduler = scheduler
-        maybe_refresh_fundamentals_cache_on_start(universe)
-        maybe_catch_up_session_cycle(engine, schedule, timezone=schedule_tz)
+        gate = getattr(app.state, "pipeline_warmup_gate", None)
+        if gate is None:
+            gate = PipelineWarmupGate()
+            app.state.pipeline_warmup_gate = gate
+
+        warmup_config = dict(getattr(engine, "_config", engine_config))
+        warmup_config.setdefault("strategies", engine_config.get("strategies"))
+        gate.start_background(warmup_config)
+
+        def _boot_scheduler() -> None:
+            if not gate.wait_ready(timeout=warmup_wait_seconds()):
+                log.warning(
+                    "Pipeline warmup did not finish in %.0fs — starting scheduler anyway",
+                    warmup_wait_seconds(),
+                )
+            try:
+                scheduler = TradingScheduler(
+                    engine=engine,
+                    schedule=schedule,
+                    timezone=schedule_tz,
+                    universe=universe,
+                    fundamentals_refresh_hour=refresh_hour,
+                )
+                scheduler.start()
+                app.state.live_scheduler = scheduler
+                maybe_refresh_fundamentals_cache_on_start(universe)
+                maybe_catch_up_session_cycle(
+                    engine,
+                    schedule,
+                    timezone=schedule_tz,
+                    warmup_gate=gate,
+                )
+            except Exception:
+                log.error("Scheduler boot failed", exc_info=True)
+
+        threading.Thread(
+            target=_boot_scheduler,
+            name="live-scheduler-boot",
+            daemon=True,
+        ).start()
     except ImportError:
         log.warning("APScheduler not installed; scheduling disabled")
         app.state.live_scheduler = None
@@ -176,7 +207,6 @@ def _start_live_engine(
     from firm.live.data_feed import LiveDataFeed
     from firm.live.engine import LiveTradingEngine
     from firm.live.provider_utils import build_live_providers, filter_strategies_for_providers
-    from firm.live.scheduler import TradingScheduler
     from firm.llm.config import load_llm_config, provider_config
 
     broker_instance = _create_broker(broker)
@@ -210,8 +240,6 @@ def _start_live_engine(
     engine._broker_type = broker
     engine.start()
     app.state.live_engine = engine
-
-    _start_live_scheduler(app, engine, schedule, engine_config)
 
     return {"status": "started", "broker": broker, "schedule": schedule}
 
@@ -257,6 +285,12 @@ def bootstrap_live_from_yaml(app) -> None:
                 auto_approve=resolved["auto_approve"],
                 engine_config=resolved["engine_config"],
             )
+        _start_live_scheduler(
+            app,
+            app.state.live_engine,
+            resolved["schedule"],
+            resolved["engine_config"],
+        )
     except Exception:
         log.exception(
             "Auto-start from config/live.yaml failed; API will continue "
@@ -355,7 +389,7 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
         if body.kelly_fraction is not None:
             engine_config["kelly_fraction"] = body.kelly_fraction
 
-        return _start_live_engine(
+        result = _start_live_engine(
             request.app,
             broker=resolved["broker"],
             schedule=resolved["schedule"],
@@ -366,6 +400,13 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
             auto_approve=resolved["auto_approve"],
             engine_config=engine_config,
         )
+    _start_live_scheduler(
+        request.app,
+        request.app.state.live_engine,
+        resolved["schedule"],
+        engine_config,
+    )
+    return result
 
 
 @router.post("/stop")
@@ -389,22 +430,47 @@ def shutdown_live_engine(app) -> None:
 
 
 @router.post("/trigger")
-def live_trigger(request: Request, force: bool = False) -> dict[str, Any]:
-    """Run one cycle immediately. ``force=true`` bypasses the market-hours
-    check — for deliberate off-hours testing; scheduled cycles never do."""
+def live_trigger(request: Request, force: bool = False, sync: bool = False):
+    """Queue one cycle immediately (default) or run synchronously (``sync=true``).
+
+    ``force=true`` bypasses the market-hours check — for deliberate off-hours
+    testing; scheduled cycles never do.
+    """
     engine = _get_engine(request)
 
-    result = engine.run_cycle(force=force)
-    return {
-        "cycle_id": result.cycle_id,
-        "timestamp": result.timestamp.isoformat(),
-        "orders_generated": result.orders_generated,
-        "orders_submitted": result.orders_submitted,
-        "orders_queued": result.orders_queued,
-        "orders_failed": result.orders_failed,
-        "skipped": result.skipped,
-        "error": result.error,
-    }
+    if sync:
+        result = engine.run_cycle(force=force)
+        return {
+            "status": "completed",
+            "cycle_id": result.cycle_id,
+            "timestamp": result.timestamp.isoformat(),
+            "orders_generated": result.orders_generated,
+            "orders_submitted": result.orders_submitted,
+            "orders_queued": result.orders_queued,
+            "orders_failed": result.orders_failed,
+            "skipped": result.skipped,
+            "error": result.error,
+        }
+
+    def _run() -> None:
+        try:
+            engine.run_cycle(force=force)
+        except Exception:
+            log.error("Triggered cycle failed", exc_info=True)
+
+    threading.Thread(
+        target=_run,
+        name="live-cycle-trigger",
+        daemon=True,
+    ).start()
+    return JSONResponse(
+        status_code=202,
+        content={
+            "status": "accepted",
+            "message": "Cycle queued on engine worker",
+            "force": force,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -696,13 +762,14 @@ def update_live_config(body: ConfigUpdateRequest, request: Request) -> dict[str,
             old_scheduler = getattr(request.app.state, "live_scheduler", None)
             if old_scheduler is not None:
                 old_scheduler.stop()
-            try:
-                _start_live_scheduler(
-                    request.app, engine, body.schedule, engine._config,
-                )
-            except ImportError:
-                log.warning("APScheduler not installed; scheduling disabled")
-                request.app.state.live_scheduler = None
+            request.app.state.live_scheduler = None
+        try:
+            _start_live_scheduler(
+                request.app, engine, body.schedule, engine._config,
+            )
+        except ImportError:
+            log.warning("APScheduler not installed; scheduling disabled")
+            request.app.state.live_scheduler = None
 
     return {"status": "updated"}
 

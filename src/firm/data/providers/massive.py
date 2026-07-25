@@ -15,6 +15,7 @@ Authentication: API key passed as ``?apiKey=<key>`` query parameter.
 from __future__ import annotations
 
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Any, Sequence
@@ -39,6 +40,9 @@ log = logging.getLogger("firm.data.providers.massive")
 _BASE_URL = "https://api.massive.com"
 _MAX_RETRIES = 3
 _BACKOFF_BASE = 2.0
+_DEFAULT_NEWS_MIN_INTERVAL_SEC = 12.0
+# Module-level pacing for news — free-tier Massive keys are ~5 req/min.
+_last_news_request_at: float = 0.0
 
 _SENTIMENT_MAP: dict[str, float] = {"positive": 1.0, "negative": -1.0, "neutral": 0.0}
 
@@ -78,6 +82,26 @@ class MassiveProvider(DataProvider):
     # ------------------------------------------------------------------
     # Internal HTTP helper
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _news_min_interval_sec() -> float:
+        raw = os.getenv("MASSIVE_NEWS_MIN_INTERVAL_SEC", str(_DEFAULT_NEWS_MIN_INTERVAL_SEC))
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            return _DEFAULT_NEWS_MIN_INTERVAL_SEC
+
+    @classmethod
+    def _wait_for_news_slot(cls) -> None:
+        global _last_news_request_at
+        interval = cls._news_min_interval_sec()
+        if interval <= 0:
+            return
+        now = time.monotonic()
+        elapsed = now - _last_news_request_at
+        if elapsed < interval:
+            time.sleep(interval - elapsed)
+        _last_news_request_at = time.monotonic()
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         all_params = {**(params or {}), "apiKey": self.api_key}
@@ -197,6 +221,7 @@ class MassiveProvider(DataProvider):
         seen: set[str] = set()  # deduplicate articles appearing for multiple tickers
         for sym in symbols:
             try:
+                self._wait_for_news_slot()
                 data = self._get(
                     "/v2/reference/news",
                     params={
@@ -251,8 +276,15 @@ class MassiveProvider(DataProvider):
                                     "headline": headline,
                                 }
                             )
-            except ProviderError:
-                log.exception("massive_news_failed symbol=%s", sym)
+            except ProviderError as exc:
+                log.warning("massive_news_failed symbol=%s (%s)", sym, exc)
+                if "429" in str(exc):
+                    log.warning(
+                        "massive_news_rate_limited — stopping batch after %s "
+                        "(remaining symbols will use cache/fallback)",
+                        sym,
+                    )
+                    break
         if not rows:
             return pd.DataFrame(columns=SENTIMENT_COLS)
         return (

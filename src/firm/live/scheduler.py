@@ -40,6 +40,21 @@ _SESSION_SCHEDULES = frozenset({"market_open", "market_close"})
 DEFAULT_MARKET_TIMEZONE = "US/Eastern"
 
 
+def trading_day_key(at: datetime, timezone: str = DEFAULT_MARKET_TIMEZONE) -> str:
+    """Calendar date for *at* in the trading session timezone (``YYYY-MM-DD``).
+
+    Cycle timestamps are stored as naive UTC; this converts them before
+    bucketing daily trade/turnover limits and decision-memory dates.
+    """
+    from datetime import timezone as dt_tz
+
+    tz = ZoneInfo(timezone)
+    ts = at
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=dt_tz.utc)
+    return ts.astimezone(tz).strftime("%Y-%m-%d")
+
+
 def _pending_approvals_on_disk(path: str | Path) -> bool:
     """True when the persisted approval queue has pending entries."""
     p = Path(path)
@@ -59,6 +74,7 @@ def maybe_catch_up_session_cycle(
     *,
     timezone: str = DEFAULT_MARKET_TIMEZONE,
     approvals_path: str | Path = "data/approvals.json",
+    warmup_gate: Any | None = None,
 ) -> None:
     """Run one cycle now if the service started mid-session without today's run.
 
@@ -68,6 +84,16 @@ def maybe_catch_up_session_cycle(
     """
     if schedule_spec not in _SESSION_SCHEDULES:
         return
+    if warmup_gate is not None and not getattr(warmup_gate, "is_ready", False):
+        from firm.live.pipeline_warmup import warmup_wait_seconds
+
+        log.info("Catch-up waiting for pipeline warmup to finish")
+        if not warmup_gate.wait_ready(timeout=warmup_wait_seconds()):
+            log.warning(
+                "Catch-up cycle skipped — pipeline warmup did not finish in %.0fs",
+                warmup_wait_seconds(),
+            )
+            return
     if _pending_approvals_on_disk(approvals_path):
         log.info(
             "Catch-up cycle skipped — %s has pending approvals awaiting operator",
@@ -75,6 +101,9 @@ def maybe_catch_up_session_cycle(
         )
         return
     if not engine.is_running:
+        return
+    if getattr(engine, "_shutting_down", False):
+        log.info("Catch-up cycle skipped — engine is shutting down")
         return
     if engine.had_cycle_today(timezone=timezone):
         return
@@ -98,6 +127,8 @@ def maybe_catch_up_session_cycle(
 
     def _run() -> None:
         try:
+            if getattr(engine, "_shutting_down", False):
+                return
             engine.run_cycle()
         except Exception:
             log.error("Catch-up cycle failed", exc_info=True)

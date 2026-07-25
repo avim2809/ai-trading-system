@@ -19,6 +19,13 @@ from firm.data.fundamentals_cache import (
     merge_with_cached_fundamentals,
     symbols_missing_fundamentals,
 )
+from firm.data.sentiment_cache import (
+    incremental_days_from_env,
+    load_cached_sentiment_df,
+    merge_with_cached_sentiment,
+    partition_sentiment_fetch,
+    save_sentiment_cache,
+)
 from firm.data.pit_store import PointInTimeDataStore
 from firm.data.providers.base import DataProvider
 
@@ -186,12 +193,61 @@ class LiveDataFeed:
 
         fundamentals = merge_with_cached_fundamentals(fundamentals, cached_fundamentals)
 
+        cached_sentiment = load_cached_sentiment_df()
         sent_prov = self._providers.get("sentiment")
         if sent_prov:
             try:
-                sentiment = sent_prov.get_news_sentiment(self._universe, start, end)
+                plan = partition_sentiment_fetch(
+                    self._universe,
+                    cached_sentiment,
+                    asof,
+                    self._lookback_days,
+                    incremental_days=incremental_days_from_env(),
+                )
+                live_parts: list[pd.DataFrame] = []
+                cold = plan["cold_symbols"]
+                warm = plan["warm_symbols"]
+                if cold:
+                    log.info(
+                        "Sentiment fetch (full window) for %d cold symbol(s)",
+                        len(cold),
+                    )
+                    live_parts.append(
+                        sent_prov.get_news_sentiment(
+                            cold, plan["full_start"], plan["end"],
+                        )
+                    )
+                if warm:
+                    log.info(
+                        "Sentiment fetch (incremental) for %d warm symbol(s)",
+                        len(warm),
+                    )
+                    live_parts.append(
+                        sent_prov.get_news_sentiment(
+                            warm, plan["incremental_start"], plan["end"],
+                        )
+                    )
+                if not cold and not warm:
+                    log.info(
+                        "Sentiment cache fresh for full universe (%d symbols)",
+                        len(self._universe),
+                    )
+                if live_parts:
+                    non_empty = [
+                        df for df in live_parts if df is not None and not df.empty
+                    ]
+                    if non_empty:
+                        sentiment = pd.concat(non_empty, ignore_index=True)
+                sentiment = merge_with_cached_sentiment(sentiment, cached_sentiment)
+                if not sentiment.empty:
+                    sentiment = save_sentiment_cache(
+                        sentiment,
+                        lookback_days=self._lookback_days,
+                        asof=asof,
+                    )
             except (NotImplementedError, Exception):
-                log.debug("Sentiment fetch skipped or failed", exc_info=True)
+                log.warning("Sentiment fetch failed — using cache if available", exc_info=True)
+                sentiment = merge_with_cached_sentiment(pd.DataFrame(), cached_sentiment)
         else:
             log.warning("No 'sentiment' provider configured on this LiveDataFeed")
 

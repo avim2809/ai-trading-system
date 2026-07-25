@@ -10,6 +10,34 @@ from firm.data.providers.finnhub import FinnhubProvider, _metric_payload_to_rows
 
 
 @patch("firm.data.providers.finnhub.RestClient")
+def test_company_news_sentiment(mock_client_cls):
+    mock_client = mock_client_cls.return_value
+    mock_client.get_json.return_value = [
+        {
+            "datetime": 1717200000,
+            "headline": "Apple beats earnings estimates",
+            "source": "Reuters",
+        },
+        {
+            "datetime": 1717200000,
+            "headline": "Apple warns on weak demand",
+            "source": "Reuters",
+        },
+    ]
+    provider = FinnhubProvider(api_key="test", settings=MagicMock(
+        request_timeout_seconds=10, max_retries=1,
+    ))
+    df = provider.get_news_sentiment(["AAPL"], "2024-05-01", "2024-06-01")
+    assert not df.empty
+    assert df.iloc[0]["symbol"] == "AAPL"
+    assert df.iloc[0]["news_volume"] == 2
+    mock_client.get_json.assert_called_once()
+    params = mock_client.get_json.call_args.kwargs["params"]
+    assert params["symbol"] == "AAPL"
+    assert params["from"] == "2024-05-01"
+
+
+@patch("firm.data.providers.finnhub.RestClient")
 def test_metric_quarterly_rows(mock_client_cls):
     mock_client = mock_client_cls.return_value
     mock_client.get_json.return_value = {

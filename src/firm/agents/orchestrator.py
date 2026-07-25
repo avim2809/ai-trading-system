@@ -8,14 +8,25 @@ between steps.
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from typing import Any, Callable, TypeVar
 
 from firm.agents.base import Agent, AgentContext
 from firm.agents.blackboard import Blackboard
 from firm.contracts.models import TradeProposal
 
 log = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+
+class StageTimeoutError(TimeoutError):
+    """Raised when a single pipeline stage exceeds its wall-clock budget."""
+
+
+def _shutdown_executor(pool: ThreadPoolExecutor, *, abandon: bool) -> None:
+    """Tear down a pool without joining abandoned worker threads."""
+    pool.shutdown(wait=not abandon, cancel_futures=abandon)
 
 
 class Orchestrator(Agent):
@@ -46,6 +57,21 @@ class Orchestrator(Agent):
         # If set, abort the bar when any analyst/strategy failed rather than
         # trading on a silently-truncated signal set.
         self._abort_on_degraded: bool = (config or {}).get("abort_on_degraded", False)
+        cfg = config or {}
+        self._analyst_timeout_seconds = self._optional_timeout(
+            cfg.get("analyst_timeout_seconds"),
+        )
+        stage_timeout = cfg.get("orchestrator_stage_timeout_seconds")
+        if stage_timeout is None:
+            stage_timeout = cfg.get("analyst_timeout_seconds")
+        self._stage_timeout_seconds = self._optional_timeout(stage_timeout)
+
+    @staticmethod
+    def _optional_timeout(value: Any) -> float | None:
+        if value is None:
+            return None
+        timeout = float(value)
+        return timeout if timeout > 0 else None
 
     def run(self, ctx: AgentContext, **inputs: Any) -> tuple[list[dict], Blackboard]:
         """ABC-compliant entry point – delegates to :meth:`step`."""
@@ -55,6 +81,80 @@ class Orchestrator(Agent):
             "prices": inputs.get("prices", ctx.config.get("prices", {})),
         }
         return self.step(context)
+
+    def _run_analysts(self, ctx: AgentContext, bb: Blackboard) -> None:
+        if not self.analysts:
+            return
+        workers = min(len(self.analysts), 8)
+        pool = ThreadPoolExecutor(max_workers=workers)
+        abandon = False
+        try:
+            futures = {
+                pool.submit(analyst.run, ctx): analyst for analyst in self.analysts
+            }
+            for future in futures:
+                analyst = futures[future]
+                try:
+                    timeout = self._analyst_timeout_seconds
+                    if timeout is not None:
+                        signal_set = future.result(timeout=timeout)
+                    else:
+                        signal_set = future.result()
+                    bb.signal_sets.append(signal_set)
+                    for err in getattr(analyst, "_last_errors", []) or []:
+                        bb.errors.append({"agent": analyst.name, **err})
+                except FuturesTimeoutError:
+                    abandon = True
+                    msg = (
+                        f"analyst timed out after {self._analyst_timeout_seconds:.0f}s"
+                    )
+                    log.warning("Analyst %s %s", analyst.name, msg)
+                    bb.errors.append({"agent": analyst.name, "error": msg})
+                except Exception as exc:
+                    log.error("Analyst %s failed", analyst.name, exc_info=True)
+                    bb.errors.append({"agent": analyst.name, "error": str(exc)})
+        finally:
+            _shutdown_executor(pool, abandon=abandon)
+
+    def _run_stage(
+        self,
+        stage: str,
+        fn: Callable[..., _T],
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> _T:
+        timeout = self._stage_timeout_seconds
+        if timeout is None:
+            return fn(*args, **kwargs)
+
+        pool = ThreadPoolExecutor(max_workers=1)
+        abandon = False
+        try:
+            future = pool.submit(fn, *args, **kwargs)
+            try:
+                return future.result(timeout=timeout)
+            except FuturesTimeoutError as exc:
+                abandon = True
+                raise StageTimeoutError(
+                    f"{stage} timed out after {timeout:.0f}s"
+                ) from exc
+        finally:
+            _shutdown_executor(pool, abandon=abandon)
+
+    def _record_stage_failure(
+        self,
+        bb: Blackboard,
+        agent: Agent,
+        exc: Exception,
+    ) -> tuple[list[dict], Blackboard] | None:
+        bb.errors.append({"agent": getattr(agent, "name", "?"), "error": str(exc)})
+        bb.degraded = True
+        log.warning("Pipeline degraded at %s: %s", getattr(agent, "name", "?"), exc)
+        if self._abort_on_degraded:
+            log.warning("Aborting bar (abort_on_degraded=True) – returning empty orders")
+            return [], bb
+        return None
 
     def step(self, context: dict[str, Any]) -> tuple[list[dict], Blackboard]:
         """Run the full agent pipeline for one timestep.
@@ -85,19 +185,7 @@ class Orchestrator(Agent):
         )
 
         # 1. Run analysts in parallel, deterministic merge by domain
-        with ThreadPoolExecutor() as pool:
-            futures = {pool.submit(analyst.run, ctx): analyst for analyst in self.analysts}
-            for future in futures:
-                analyst = futures[future]
-                try:
-                    signal_set = future.result()
-                    bb.signal_sets.append(signal_set)
-                    # Surface per-strategy failures the analyst swallowed.
-                    for err in getattr(analyst, "_last_errors", []) or []:
-                        bb.errors.append({"agent": analyst.name, **err})
-                except Exception as exc:
-                    log.error("Analyst %s failed", analyst.name, exc_info=True)
-                    bb.errors.append({"agent": analyst.name, "error": str(exc)})
+        self._run_analysts(ctx, bb)
 
         bb.signal_sets.sort(key=lambda ss: ss.domain)
 
@@ -113,13 +201,43 @@ class Orchestrator(Agent):
             return [], bb
 
         # 2. Bull + bear researchers
-        bull_theses = self.bull.run(ctx, blackboard=bb)
-        bear_theses = self.bear.run(ctx, blackboard=bb)
+        try:
+            bull_theses = self._run_stage(
+                "bull_researcher", self.bull.run, ctx, blackboard=bb,
+            )
+        except StageTimeoutError as exc:
+            early = self._record_stage_failure(bb, self.bull, exc)
+            if early is not None:
+                return early
+            bull_theses = []
+
+        try:
+            bear_theses = self._run_stage(
+                "bear_researcher", self.bear.run, ctx, blackboard=bb,
+            )
+        except StageTimeoutError as exc:
+            early = self._record_stage_failure(bb, self.bear, exc)
+            if early is not None:
+                return early
+            bear_theses = []
+
         bb.theses.extend(bull_theses)
         bb.theses.extend(bear_theses)
 
         # 3. Debate synthesis
-        debate_results = self.debate.run(ctx, bull_theses=bull_theses, bear_theses=bear_theses)
+        try:
+            debate_results = self._run_stage(
+                "debate",
+                self.debate.run,
+                ctx,
+                bull_theses=bull_theses,
+                bear_theses=bear_theses,
+            )
+        except StageTimeoutError as exc:
+            early = self._record_stage_failure(bb, self.debate, exc)
+            if early is not None:
+                return early
+            debate_results = []
         bb.debate_results = debate_results
 
         if not debate_results:
@@ -127,13 +245,40 @@ class Orchestrator(Agent):
             return [], bb
 
         # 4. Trade proposal
-        proposal = self.trader.run(ctx, debate_results=debate_results, blackboard=bb, memory=memory)
+        try:
+            proposal = self._run_stage(
+                "trader",
+                self.trader.run,
+                ctx,
+                debate_results=debate_results,
+                blackboard=bb,
+                memory=memory,
+            )
+        except StageTimeoutError as exc:
+            early = self._record_stage_failure(bb, self.trader, exc)
+            if early is not None:
+                return early
+            return [], bb
         bb.proposal = proposal
 
         # 5. Risk approval loop
         decision = None
         for attempt in range(self._max_risk_retries):
-            decision = self.risk.run(ctx, proposal=proposal, portfolio=portfolio, memory=memory)
+            try:
+                decision = self._run_stage(
+                    "risk",
+                    self.risk.run,
+                    ctx,
+                    proposal=proposal,
+                    portfolio=portfolio,
+                    memory=memory,
+                )
+            except StageTimeoutError as exc:
+                early = self._record_stage_failure(bb, self.risk, exc)
+                if early is not None:
+                    return early
+                log.warning("Risk stage timed out — rejecting proposal")
+                return [], bb
             bb.risk_decision = decision
             if decision.approved:
                 break
@@ -158,13 +303,21 @@ class Orchestrator(Agent):
             return [], bb
 
         # 6. Execution
-        report = self.execution.run(
-            ctx,
-            decision=decision,
-            portfolio=portfolio,
-            prices=prices,
-            per_strategy=proposal.per_strategy,
-        )
+        try:
+            report = self._run_stage(
+                "execution",
+                self.execution.run,
+                ctx,
+                decision=decision,
+                portfolio=portfolio,
+                prices=prices,
+                per_strategy=proposal.per_strategy,
+            )
+        except StageTimeoutError as exc:
+            early = self._record_stage_failure(bb, self.execution, exc)
+            if early is not None:
+                return early
+            return [], bb
         bb.execution_report = report
 
         self._collect_llm_usage(bb)

@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import logging
 import threading
+import weakref
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import thread as _cf_thread
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -22,10 +24,39 @@ from firm.brokers.base import Broker, BrokerError, OrderRequest, OrderStatus
 from firm.live.approval import ApprovalQueue
 from firm.live.data_feed import LiveDataFeed
 from firm.live.portfolio_sync import sync_portfolio_from_broker
+from firm.live.scheduler import DEFAULT_MARKET_TIMEZONE, trading_day_key
 from firm.portfolio.state import PortfolioState
 from firm.runtime import build_orchestrator
 
 log = logging.getLogger(__name__)
+
+
+class _DaemonThreadPoolExecutor(ThreadPoolExecutor):
+    """Single-worker pool whose thread is daemon (won't block process exit)."""
+
+    def _adjust_thread_count(self) -> None:
+        if self._idle_semaphore.acquire(timeout=0):
+            return
+
+        def weakref_cb(_, q=self._work_queue):
+            q.put(None)
+
+        num_threads = len(self._threads)
+        if num_threads < self._max_workers:
+            thread_name = "%s_%d" % (self._thread_name_prefix or self, num_threads)
+            t = threading.Thread(
+                name=thread_name,
+                target=_cf_thread._worker,
+                args=(
+                    weakref.ref(self, weakref_cb),
+                    self._create_worker_context(),
+                    self._work_queue,
+                ),
+                daemon=True,
+            )
+            t.start()
+            self._threads.add(t)
+            _cf_thread._threads_queues[t] = self._work_queue
 
 
 @dataclass
@@ -81,13 +112,17 @@ class LiveTradingEngine:
         self._running = False
         self._started_at: datetime | None = None
 
-        # Daily risk limits — reset each calendar day. Unlike the drawdown
+        # Daily risk limits — reset each trading-session calendar day
+        # (``schedule_timezone``, default US/Eastern). Unlike the drawdown
         # kill switch (which halts permanently), breaching these forces the
         # cycle's orders to manual approval rather than blocking them
         # outright, so an operator stays in control instead of trades
         # silently vanishing.
         self._max_daily_trades = int(config.get("max_daily_trades", 50))
         self._max_daily_turnover = float(config.get("max_daily_turnover", 0.5))
+        self._trading_day_timezone = str(
+            config.get("schedule_timezone", DEFAULT_MARKET_TIMEZONE),
+        )
         self._daily_date: str | None = None
         self._daily_trade_count = 0
         self._daily_turnover_value = 0.0
@@ -128,7 +163,8 @@ class LiveTradingEngine:
         # Token for the in-flight cycle worker. Cleared on hard timeout so a
         # stale thread cannot submit orders after the lock is released.
         self._active_cycle_token: object | None = None
-        self._cycle_executor = ThreadPoolExecutor(
+        self._shutting_down = False
+        self._cycle_executor = _DaemonThreadPoolExecutor(
             max_workers=1, thread_name_prefix="live-cycle",
         )
         # Independent of the watchdog timer/alert above: a real incident
@@ -349,11 +385,15 @@ class LiveTradingEngine:
         orders proceed to the broker. ``semi_auto`` / manual modes route the
         whole cycle to the approval queue when limits would be exceeded.
         """
-        date_str = now.strftime("%Y-%m-%d")
+        date_str = trading_day_key(now, self._trading_day_timezone)
         if self._daily_date != date_str:
             self._daily_date = date_str
             self._daily_trade_count = 0
             self._daily_turnover_value = 0.0
+            log.debug(
+                "Daily limit counters reset for trading day %s (%s)",
+                date_str, self._trading_day_timezone,
+            )
 
         turnover_value = sum(
             abs(o.get("quantity", abs(o.get("shares", 0))) * prices.get(o.get("symbol", ""), 0.0))
@@ -525,9 +565,13 @@ class LiveTradingEngine:
 
     def stop(self) -> None:
         """Disconnect from the broker."""
+        self._shutting_down = True
         self._running = False
         self._started_at = None
         self._active_cycle_token = None
+        if self._watchdog_timer is not None:
+            self._watchdog_timer.cancel()
+            self._watchdog_timer = None
         try:
             self.run_on_cycle_worker(self._disconnect_broker_on_worker, timeout=5)
         except FuturesTimeoutError:
@@ -537,6 +581,9 @@ class LiveTradingEngine:
             )
         except Exception:
             log.warning("Error disconnecting broker", exc_info=True)
+        # Do not block process exit on a hung cycle worker — the thread may
+        # still be running but is daemon and will not pin the process.
+        self._cycle_executor.shutdown(wait=False, cancel_futures=True)
         log.info("Live engine stopped after %d cycles", self._cycle_count)
 
     def run_cycle(self, force: bool = False) -> CycleResult:
@@ -556,6 +603,14 @@ class LiveTradingEngine:
 
         Returns a :class:`CycleResult` summarizing what happened.
         """
+        if self._shutting_down:
+            log.info("run_cycle skipped: engine is shutting down")
+            return CycleResult(
+                cycle_id=self._cycle_count,
+                timestamp=datetime.utcnow(),
+                skipped=True,
+                error="skipped: engine shutting down",
+            )
         if not self._cycle_lock.acquire(blocking=False):
             log.warning("run_cycle skipped: a cycle is already in progress")
             return CycleResult(
@@ -597,6 +652,10 @@ class LiveTradingEngine:
             cycle_token = object()
             self._active_cycle_token = cycle_token
             try:
+                if self._shutting_down:
+                    result.skipped = True
+                    result.error = "skipped: engine shutting down"
+                    return result
                 future = self._cycle_executor.submit(
                     self._run_cycle_work, cycle_token, now, result,
                 )
@@ -700,7 +759,7 @@ class LiveTradingEngine:
 
             proposal = getattr(blackboard, "proposal", None)
             if proposal is not None:
-                date_str = now.strftime("%Y-%m-%d")
+                date_str = trading_day_key(now, self._trading_day_timezone)
                 regime = ""
                 if hasattr(blackboard, "risk_decision") and blackboard.risk_decision:
                     regime = "; ".join(getattr(blackboard.risk_decision, "actions", []))

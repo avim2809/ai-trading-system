@@ -482,11 +482,11 @@ class TestLiveConfigRoundTrip:
         engine = client.app.state.live_engine
         engine._broker._market_open = False
 
-        resp = client.post("/api/live/trigger")
+        resp = client.post("/api/live/trigger?sync=true")
         assert resp.json()["skipped"] is True
         mock_orch.step.assert_not_called()
 
-        resp = client.post("/api/live/trigger?force=true")
+        resp = client.post("/api/live/trigger?sync=true&force=true")
         assert resp.json()["skipped"] is False
 
         client.post("/api/live/stop")

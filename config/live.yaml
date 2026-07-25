@@ -13,6 +13,7 @@ experiment:
 broker: "ibkr_paper"
 schedule: "market_open"
 # Cron timezone for market_open / market_close (US equity RTH).
+# Also buckets daily trade/turnover limits and decision-memory dates.
 schedule_timezone: "US/Eastern"
 # LiveTradingEngine only recognises "full_auto" / "semi_auto" — anything else
 # (e.g. plain "auto") silently falls through to "everything needs approval".
@@ -107,6 +108,12 @@ initial_capital: 1_000_000
 # hung LLM/IBKR call cannot block every future scheduled cycle.
 cycle_hard_timeout_seconds: 900
 cycle_watchdog_seconds: 1800
+# Per-analyst wall-clock cap inside the orchestrator parallel pool.
+analyst_timeout_seconds: 300
+# Bull/bear/debate/trader/risk/execution stage cap (defaults to analyst timeout).
+orchestrator_stage_timeout_seconds: 300
+# Pre-import HMM / RAG stacks before the first catch-up cycle.
+pipeline_warmup: true
 
 # ──────────────────────────────────────────────────────────────
 # Risk — realistic live-account constraints

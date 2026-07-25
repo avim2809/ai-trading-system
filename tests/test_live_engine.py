@@ -7,6 +7,7 @@ avoid real agent pipeline execution.
 from __future__ import annotations
 
 import json
+import threading
 import time
 from datetime import datetime, timedelta
 from typing import Any
@@ -833,6 +834,45 @@ class TestEngineConfigUpdates:
         assert not any(a["kind"] == "daily_limit_breach" for a in result.alerts)
 
 
+class TestTradingDayTimezone:
+    def test_trading_day_key_uses_session_timezone_not_utc(self):
+        from datetime import datetime, timezone as dt_tz
+
+        from firm.live.scheduler import trading_day_key
+
+        # 2026-07-26 03:00 UTC = 2026-07-25 23:00 US/Eastern (EDT)
+        ts = datetime(2026, 7, 26, 3, 0, tzinfo=dt_tz.utc)
+        assert trading_day_key(ts, "US/Eastern") == "2026-07-25"
+        assert trading_day_key(ts.replace(tzinfo=None), "US/Eastern") == "2026-07-25"
+        # Same instant, UTC calendar date would be 2026-07-26
+        assert ts.astimezone(dt_tz.utc).strftime("%Y-%m-%d") == "2026-07-26"
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_daily_limits_reset_on_trading_day_boundary(self, mock_build, engine_components):
+        from datetime import datetime
+
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        engine = LiveTradingEngine(
+            config={**config, "schedule_timezone": "US/Eastern", "max_daily_trades": 100},
+            broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine._daily_date = "2026-07-25"
+        engine._daily_trade_count = 7
+
+        # Still July 25 in US/Eastern — counters must not reset.
+        late_et = datetime(2026, 7, 26, 3, 0)  # naive UTC
+        engine._check_daily_limits(late_et, [], {})
+        assert engine._daily_date == "2026-07-25"
+        assert engine._daily_trade_count == 7
+
+        # US/Eastern midnight passed — new trading day.
+        new_day = datetime(2026, 7, 26, 5, 0)  # 01:00 ET on Jul 26
+        engine._check_daily_limits(new_day, [], {})
+        assert engine._daily_date == "2026-07-26"
+        assert engine._daily_trade_count == 0
+
+
 class TestCycleWatchdog:
     """Regression coverage for a real 34-hour incident: a scheduled cycle
     hung on a stale IBKR connection (after IB Gateway's mandatory daily
@@ -999,6 +1039,42 @@ class TestCycleHardTimeout:
         mock_orch.step.return_value = ([], _make_blackboard())
         result2 = engine.run_cycle()
         assert result2.skipped is False
+
+
+class TestEngineShutdownHardening:
+    @patch("firm.live.engine.build_orchestrator")
+    def test_stop_returns_while_cycle_worker_hung(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        release = threading.Event()
+        mock_build.return_value = MagicMock()
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine.start()
+        engine._cycle_executor.submit(lambda: release.wait(timeout=30))
+        time.sleep(0.1)
+
+        t0 = time.time()
+        engine.stop()
+        elapsed = time.time() - t0
+        release.set()
+
+        assert elapsed < 10
+        assert not engine.is_running
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_run_cycle_skipped_when_shutting_down(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine.start()
+        engine._shutting_down = True
+        result = engine.run_cycle()
+        assert result.skipped is True
+        assert result.error == "skipped: engine shutting down"
 
 
 class TestMarketHoursGate:

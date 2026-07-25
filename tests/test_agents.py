@@ -938,3 +938,74 @@ class TestOrchestrator:
         orders, bb = orch.step({"pit_view": pit_view, "portfolio": None, "prices": {}})
         assert orders == []
         assert bb.degraded is True
+
+    def test_analyst_timeout_records_degraded(self):
+        import time
+
+        from firm.agents.orchestrator import Orchestrator
+
+        slow = MagicMock(spec=Agent)
+        slow.name = "slow_analyst"
+        slow.run.side_effect = lambda *_a, **_k: time.sleep(2) or SignalSet(
+            domain="technical", asof=NOW, signals=[],
+        )
+        fast = MagicMock(spec=Agent)
+        fast.name = "fast_analyst"
+        fast.run.return_value = SignalSet(
+            domain="fundamental", asof=NOW, signals=[_sig("AAPL", "multi_factor", 1.0)],
+        )
+        orch = Orchestrator(
+            analysts=[slow, fast],
+            bull=MagicMock(spec=Agent, **{"name": "bull", "run.return_value": []}),
+            bear=MagicMock(spec=Agent, **{"name": "bear", "run.return_value": []}),
+            debate=MagicMock(spec=Agent, **{"name": "debate", "run.return_value": []}),
+            trader=MagicMock(spec=Agent, **{"name": "trader", "run.return_value": TradeProposal(asof=NOW)}),
+            risk=MagicMock(spec=Agent, **{"name": "risk", "run.return_value": RiskDecision(approved=True)}),
+            execution=MagicMock(spec=Agent, **{"name": "exec", "run.return_value": ExecutionReport()}),
+            config={"analyst_timeout_seconds": 0.2},
+        )
+        pit_view = MagicMock()
+        pit_view.asof = NOW
+        _orders, bb = orch.step({"pit_view": pit_view, "portfolio": None, "prices": {}})
+
+        assert bb.degraded is True
+        assert any(
+            e.get("agent") == "slow_analyst" and "timed out" in e.get("error", "")
+            for e in bb.errors
+        )
+        assert any(ss.domain == "fundamental" for ss in bb.signal_sets)
+
+    def test_stage_timeout_records_degraded(self):
+        import time
+
+        from firm.agents.orchestrator import Orchestrator
+
+        mock_analyst = MagicMock(spec=Agent)
+        mock_analyst.name = "mock_analyst"
+        mock_analyst.run.return_value = SignalSet(
+            domain="technical",
+            asof=NOW,
+            signals=[_sig("AAPL", "momentum", 1.0)],
+        )
+        slow_debate = MagicMock(spec=Agent)
+        slow_debate.name = "debate"
+        slow_debate.run.side_effect = lambda *_a, **_k: time.sleep(2)
+        orch = Orchestrator(
+            analysts=[mock_analyst],
+            bull=MagicMock(spec=Agent, **{"name": "bull", "run.return_value": []}),
+            bear=MagicMock(spec=Agent, **{"name": "bear", "run.return_value": []}),
+            debate=slow_debate,
+            trader=MagicMock(spec=Agent, **{"name": "trader", "run.return_value": TradeProposal(asof=NOW)}),
+            risk=MagicMock(spec=Agent, **{"name": "risk", "run.return_value": RiskDecision(approved=True)}),
+            execution=MagicMock(spec=Agent, **{"name": "exec", "run.return_value": ExecutionReport()}),
+            config={"orchestrator_stage_timeout_seconds": 0.2},
+        )
+        pit_view = MagicMock()
+        pit_view.asof = NOW
+        _orders, bb = orch.step({"pit_view": pit_view, "portfolio": None, "prices": {}})
+
+        assert bb.degraded is True
+        assert any(
+            e.get("agent") == "debate" and "timed out" in e.get("error", "")
+            for e in bb.errors
+        )

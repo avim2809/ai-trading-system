@@ -2,7 +2,7 @@
 
 Priority order (first non-empty result wins):
   prices            Massive → Tiingo → AlphaVantage → FMP
-  news_sentiment    Massive → AlphaVantage → Tiingo
+  news_sentiment    Massive → AlphaVantage → Finnhub
   fundamentals      FMP → Finnhub → EDGAR → Alpha Vantage → Twelve Data → Massive
   corporate_actions Massive → (none)
   universe          FMP → (none)
@@ -72,7 +72,7 @@ class FallbackProvider(DataProvider):
         self._cfg = cfg
 
         self._prices_chain: list[str] = ["massive", "tiingo", "alphavantage", "fmp"]
-        self._sentiment_chain: list[str] = ["massive", "alphavantage", "tiingo"]
+        self._sentiment_chain: list[str] = ["massive", "alphavantage", "finnhub"]
         self._fundamentals_chain: list[str] = [
             "fmp", "finnhub", "edgar", "alphavantage", "twelvedata", "massive",
         ]

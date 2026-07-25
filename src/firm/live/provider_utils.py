@@ -116,6 +116,9 @@ def resolve_live_startup(
         "max_positions",
         "cycle_hard_timeout_seconds",
         "cycle_watchdog_seconds",
+        "analyst_timeout_seconds",
+        "orchestrator_stage_timeout_seconds",
+        "pipeline_warmup",
         "schedule_timezone",
         "fundamentals_refresh_hour",
     ):
@@ -145,7 +148,7 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
     """Build the provider map expected by :class:`LiveDataFeed`.
 
     IBKR brokers use IB Gateway for daily OHLCV prices only.  News sentiment
-    uses the Massive → Alpha Vantage → Tiingo fallback chain (same as
+    uses the Massive → Alpha Vantage → Finnhub fallback chain (same as
     backtests).  Fundamentals use FMP → Finnhub → … when configured.
     All other brokers use :class:`FallbackProvider` for all capabilities.
     """
@@ -162,7 +165,7 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
 
         sentiment_configured = any(
             os.getenv(k)
-            for k in ("MASSIVE_API_KEY", "ALPHAVANTAGE_API_KEY", "TIINGO_API_KEY")
+            for k in ("MASSIVE_API_KEY", "ALPHAVANTAGE_API_KEY", "FINNHUB_API_KEY")
         )
         fundamentals_configured = any(
             os.getenv(k)
@@ -188,7 +191,7 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
                 if sentiment_configured:
                     providers["sentiment"] = fallback
                     log.info(
-                        "IBKR live sentiment: Massive → Alpha Vantage → Tiingo fallback chain"
+                        "IBKR live sentiment: Massive → Alpha Vantage → Finnhub fallback chain"
                     )
             except Exception as exc:
                 log.warning("Fallback provider not available: %s", exc)
@@ -196,7 +199,7 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
         if "sentiment" not in providers:
             log.warning(
                 "No sentiment API key (MASSIVE_API_KEY, ALPHAVANTAGE_API_KEY, or "
-                "TIINGO_API_KEY); sentiment strategy will receive empty data on live"
+                "FINNHUB_API_KEY); sentiment strategy will receive empty data on live"
             )
         return providers
 

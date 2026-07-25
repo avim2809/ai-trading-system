@@ -61,6 +61,28 @@ class TestMassiveRateLimitHandling:
         assert result == {"results": []}
         assert mock_get.call_count == 3
 
+    @patch("firm.data.providers.massive.requests.get")
+    @patch("firm.data.providers.massive.time.sleep")
+    def test_news_waits_between_symbols(self, mock_sleep, mock_get, provider, monkeypatch):
+        monkeypatch.setenv("MASSIVE_NEWS_MIN_INTERVAL_SEC", "1.0")
+        ok = MagicMock(status_code=200, ok=True, json=lambda: {"results": []})
+        mock_get.return_value = ok
+
+        provider.get_news_sentiment(["AAPL", "MSFT"], "2026-01-01", "2026-01-02")
+
+        assert mock_get.call_count == 2
+        assert mock_sleep.call_count >= 1
+
+    @patch("firm.data.providers.massive.requests.get")
+    @patch("firm.data.providers.massive.time.sleep")
+    def test_news_429_stops_batch(self, mock_sleep, mock_get, provider):
+        mock_get.return_value = MagicMock(status_code=429)
+
+        df = provider.get_news_sentiment(["AAPL", "MSFT", "NVDA"], "2026-01-01", "2026-01-02")
+
+        assert df.empty
+        assert mock_get.call_count == 1
+
 
 class TestMassiveFundamentalsPublicationLag:
     """Regression: the ratios endpoint's "date" is the fiscal period-end,
