@@ -1,0 +1,36 @@
+{
+  "run_timestamp": "2026-07-26T09:46:16.160345",
+  "assets": ["Gold", "SP500", "Oil", "EURUSD", "Bitcoin"],
+  "weekly_bars_per_asset": {"Gold": 601, "SP500": 601, "Oil": 601, "EURUSD": 601, "Bitcoin": 601},
+  "pivot_density_per_year": {"Gold": 3.29, "SP500": 3.03, "Oil": 3.29, "EURUSD": 2.34, "Bitcoin": 3.72},
+  "experiment_1": {
+    "per_asset": {
+      "Gold": {"lift_no_gate": 1.001, "lift_with_gate": 1.020, "permutation_p_with_gate": 0.386, "verdict": "FAIL"},
+      "SP500": {"lift_no_gate": 0.890, "lift_with_gate": 0.878, "permutation_p_with_gate": 0.458, "verdict": "FAIL"},
+      "Oil": {"lift_no_gate": 0.990, "lift_with_gate": 0.996, "permutation_p_with_gate": 0.334, "verdict": "FAIL"},
+      "EURUSD": {"lift_no_gate": 0.985, "lift_with_gate": 0.994, "permutation_p_with_gate": 0.392, "verdict": "FAIL"},
+      "Bitcoin": {"lift_no_gate": 0.869, "lift_with_gate": 0.868, "permutation_p_with_gate": 0.648, "verdict": "FAIL"}
+    },
+    "assets_passing": 0,
+    "overall_verdict": "FAIL"
+  },
+  "experiment_2": {
+    "training_window": "2015–2020",
+    "holdout_window": "2020–2026",
+    "per_asset": {
+      "Gold": {"convergence_lift_no_gate": 0.164, "convergence_lift_with_gate": 0.163, "permutation_p_with_gate": 1.0, "verdict": "FAIL"},
+      "SP500": {"convergence_lift_no_gate": 0.552, "convergence_lift_with_gate": 0.529, "permutation_p_with_gate": 0.976, "verdict": "FAIL"},
+      "Oil": {"convergence_lift_no_gate": 0.399, "convergence_lift_with_gate": 0.395, "permutation_p_with_gate": 1.0, "verdict": "FAIL"},
+      "EURUSD": {"convergence_lift_no_gate": 0.378, "convergence_lift_with_gate": 0.333, "permutation_p_with_gate": 1.0, "verdict": "FAIL"},
+      "Bitcoin": {"convergence_lift_no_gate": 0.669, "convergence_lift_with_gate": 0.582, "permutation_p_with_gate": 0.996, "verdict": "FAIL"}
+    },
+    "bitcoin_halving_cycle_lift": 0.421,
+    "assets_passing": 0,
+    "overall_verdict": "FAIL"
+  },
+  "experiment_3": {"ran": false, "reason_skipped": "SKIP EXP 3 — upstream experiments failed"},
+  "final_verdict": {
+    "cycles_have_timing_value_on_commodities": false,
+    "recommended_next_step": "No timing value on any asset class tested; retire Gann cycles research permanently"
+  }
+}

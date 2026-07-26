@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "timestamp": "2026-07-26T02:30:00",
+    "universe": "equities_25",
+    "symbols_count": 25,
+    "train_period": ["2020-01-01", "2022-12-31"],
+    "holdout_period": ["2023-01-01", "2026-06-30"],
+    "n_permutations": 500
+  },
+  "experiment_1": {
+    "hit_rate_in_window": 0.763,
+    "hit_rate_outside": 0.801,
+    "lift": 0.95,
+    "permutation_p": 1.0,
+    "verdict": "FAIL"
+  },
+  "experiment_2": {
+    "holdout_convergence_lift": 1.01,
+    "n_symbols_lift_gt_1_2": 0,
+    "n_symbols": 25,
+    "permutation_p": 1.0,
+    "verdict": "FAIL"
+  }
+}

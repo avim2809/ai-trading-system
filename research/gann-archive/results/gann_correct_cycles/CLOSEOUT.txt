@@ -1,0 +1,49 @@
+Gann Strategy Research Closeout — July 2026
+============================================
+
+Universe: 25 large-cap US equities, 2020-01-02 → 2026-07-20
+Production status: DISABLED in config/live.yaml (10-strategy stack)
+
+DECISION: Retire cycles component permanently on this universe.
+          Do not re-enable Gann for paper trading without new evidence.
+
+Study sequence and results
+--------------------------
+
+1. IC ablation (gann_ic_study.py)
+   - Best variant: angles_swing IC +0.059
+   - cycles_only, sq9_only: negative IC
+   - full_default after retracement flip: negative IC
+
+2. Marginal Sharpe (gann_followup_study.py, holdout 2024-07 → 2026-06)
+   - Baseline 10-strat Sharpe: 0.277
+   - + angles_swing Gann: ΔSharpe −0.026 (hurts despite positive IC)
+   - + legacy Gann: ΔSharpe −0.262
+
+3. Legacy cycle event study (gann_swing_event_study.py)
+   - Verdict: NO TIMING VALUE (convergence ~49% baseline; lift ~0.98)
+
+4. Correct calendar-day implementation (gann_correct_cycles_study.py)
+   Experiment 1 — calendar anniversaries:
+     Hit rate in window 76.3% vs outside 80.1%, lift 0.95, perm p=1.000 → FAIL
+   Experiment 2 — sqrt(P) squaring (holdout 2023-2026):
+     Convergence lift 1.01, 0/25 symbols lift>1.2, perm p=1.000 → FAIL
+
+Code changes applied
+--------------------
+
+gann.py defaults (research reference only; not enabled live):
+  - sub_weights: angles 50%, retracement 50%; sq9/cycles/swing 0%
+  - retracement_mean_revert: true (original mean-reversion sign)
+  - _time_cycles: retained for ablation, documented as retired
+
+Recommended next steps
+----------------------
+
+- Keep Gann disabled in live.yaml
+- If any Gann sub-feature is reused: migrate angles to momentum/trend as
+  "pivot-angle" feature; do not resurrect cycles on US large-cap equities
+- Revisit only on different universe (e.g. commodities) or with confirmation-
+  gate architecture (not standalone alpha)
+
+Full JSON: runs/gann_correct_cycles/results.json
