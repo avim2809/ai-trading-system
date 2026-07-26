@@ -3,7 +3,9 @@
 **Status:** Permanently retired (July 2026)  
 **Verdict:** No detectable systematic timing value on equities, commodities, FX, or crypto.
 
-Experiment scripts and run artefacts were removed after closeout. This document is the sole record.
+Experiment scripts and run artefacts were removed from `main` after closeout. This document is the sole record on the default branch.
+
+**Archived code + results** (for line-level audit): branch `research/gann-archive` — see `research/gann-archive/README.md` on that branch for raw GitHub URLs.
 
 ---
 
