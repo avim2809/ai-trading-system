@@ -87,30 +87,30 @@ def execute_backtest(config: dict) -> BacktestReport:
         prices_df = prices_df[mask]
 
     pit_store = PointInTimeDataStore()
-    pit_store.load(prices=prices_df)
-
+    fund_df = None
     if data_source != "synthetic":
         try:
             from firm.config import get_settings
             from firm.runtime import load_fundamentals
 
             fund_df = load_fundamentals(get_settings())
-            if fund_df is not None:
-                pit_store.load(fundamentals=fund_df)
-                log.info(
-                    "Loaded fundamentals cache: %d rows, %d symbols",
-                    len(fund_df), fund_df["symbol"].nunique(),
-                )
-            else:
-                log.debug(
-                    "No cached fundamentals in backtest; fundamental strategies "
-                    "use degraded logic (see multi_factor / event_driven)"
-                )
         except Exception:
             log.warning(
                 "Fundamentals cache load failed — continuing price-only",
                 exc_info=True,
             )
+
+    pit_store.load(prices=prices_df, fundamentals=fund_df)
+    if fund_df is not None and not fund_df.empty:
+        log.info(
+            "Loaded fundamentals cache: %d rows, %d symbols",
+            len(fund_df), fund_df["symbol"].nunique(),
+        )
+    elif data_source != "synthetic":
+        log.debug(
+            "No cached fundamentals in backtest; fundamental strategies "
+            "use degraded logic (see multi_factor / event_driven)"
+        )
 
     universe = symbols or pit_store.get_universe(datetime.fromisoformat(start_date))
 

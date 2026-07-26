@@ -1,3 +1,7 @@
+# RESEARCH STATUS: Permanently disabled.
+# Verdict: no timing value on equities, commodities, FX, or crypto.
+# See docs/gann_research_closeout.md for methodology and results.
+
 """W.D. Gann composite strategy.
 
 Financial intuition:
@@ -18,7 +22,9 @@ Financial intuition:
        consecutive higher-highs/higher-lows (upswing) vs lower-highs/
        lower-lows (downswing).
     5. **Retracement Levels** – position within Gann's 8-part price
-       grid (0/8 through 8/8); the 4/8 (50 %) level is the key pivot.
+       grid (0/8 through 8/8); default is mean-reversion (high in range
+       scores bearish, low scores bullish). Set ``retracement_mean_revert:
+       false`` for range-momentum / 52-week-high style continuation.
 
 Data inputs:
     OHLC + adjusted-close prices from PitView.prices() with a lookback
@@ -209,11 +215,11 @@ def _time_cycles(
     tolerance: int = 3,
     last_direction: float = 0.0,
 ) -> tuple[float, float]:
-    """Count how many Gann time cycles converge on the current bar.
+    """Legacy fixed-bar cycle convergence (retired from default composite).
 
-    Projects key cycle lengths (30, 60, 90, 120, 144, 180, 270, 360 cal
-    days ≈ bars * 252/365) from each detected pivot.  When multiple
-    cycles cluster near the current bar a reversal is more likely.
+    Empirical event studies (Jul 2026) found no timing value for either this
+    implementation or a calendar-day / sqrt(P) redesign on the live universe.
+    Kept for research ablation only; default ``sub_weights`` sets cycles to 0.
     """
     gann_cycles_bars = [
         int(round(c * 252 / 365)) for c in [30, 60, 90, 120, 144, 180, 270, 360]
@@ -333,9 +339,9 @@ def _retracement_levels(
 ) -> tuple[float, float]:
     """Gann 8-part retracement: score based on position within the grid.
 
-    The 4/8 (50 %) level is the key pivot.  Above 4/8 = bearish pressure,
-    below = bullish opportunity.  Extremes (near 0/8 or 8/8) carry less
-    conviction because they may indicate exhaustion.
+    Default composite applies mean-reversion (high in range bearish, low
+    bullish) via ``retracement_mean_revert`` (default True).  Confidence
+    peaks near 3/8 and 5/8 action zones.
     """
     span = range_high - range_low
     if span <= 0:
@@ -344,8 +350,8 @@ def _retracement_levels(
     position = (current_price - range_low) / span  # 0.0 to 1.0
     position = float(np.clip(position, 0.0, 1.0))
 
-    # Center around 0.5 (the 4/8 pivot); invert so below midpoint = bullish
-    raw = -(position - 0.5) * 2.0  # [-1, +1]; +1 at 0/8, -1 at 8/8
+    # Range-momentum: high position in range = bullish (George & Hwang style).
+    raw = (position - 0.5) * 2.0  # [-1, +1]; -1 at 0/8, +1 at 8/8
 
     # Confidence peaks near 3/8 and 5/8 (the action zones) and fades at extremes
     dist_from_mid = abs(position - 0.5)
@@ -370,17 +376,18 @@ class GannStrategy(BaseStrategy):
         pivot_lookback: int = self.params.get("pivot_lookback", 60)
         pivot_order: int = self.params.get("pivot_order", 5)
         cycle_tolerance: int = self.params.get("cycle_tolerance_days", 3)
-        swing_period: int = self.params.get("swing_period", 2)
+        swing_period: int = self.params.get("swing_period", 4)
         retracement_lookback: int = self.params.get("retracement_lookback", 120)
         trend_filter_lookback: int = self.params.get("trend_filter_lookback", 14)
         trend_filter_threshold: float = self.params.get("trend_filter_threshold", 0.15)
         min_confidence: float = self.params.get("min_confidence", 0.05)
+        retracement_mean_revert: bool = bool(self.params.get("retracement_mean_revert", True))
         default_sub_weights = {
-            "angles": 0.25,
-            "sq9": 0.15,
-            "cycles": 0.15,
-            "swing": 0.25,
-            "retracement": 0.20,
+            "angles": 0.50,
+            "sq9": 0.0,
+            "cycles": 0.0,
+            "swing": 0.0,
+            "retracement": 0.50,
         }
         sub_weights: dict[str, float] = self.params.get("sub_weights", default_sub_weights)
 
@@ -463,6 +470,8 @@ class GannStrategy(BaseStrategy):
             range_high = float(np.max(highs[retrace_start:]))
             range_low = float(np.min(lows[retrace_start:]))
             r_score, r_conf = _retracement_levels(current_price, range_high, range_low)
+            if retracement_mean_revert:
+                r_score = -r_score
 
             # --- Trend-strength filter (risk mitigation) ---
             trend_str = _trend_strength(

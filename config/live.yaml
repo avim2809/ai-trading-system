@@ -1,6 +1,6 @@
 # ──────────────────────────────────────────────────────────────
-#  Paper trading — 10 strategies (gann + ml_prediction disabled:
-#  audit showed ~zero / negative IC on cached 2022-2026 data)
+#  Paper trading — 10 strategies (gann + ml_prediction permanently disabled;
+#  see docs/gann_research_closeout.md)
 #  Monitor live at: http://localhost:8000/live
 # ──────────────────────────────────────────────────────────────
 
@@ -35,7 +35,7 @@ strategies:
     # ml_prediction — disabled: overfit risk on 25-name universe (IC audit)
     - volatility_breakout
     - seasonality
-    # gann — disabled: ~zero forward IC (geometry noise)
+    # gann — permanently disabled; no timing value on any asset class tested
     - regime_hmm
   auto_approve:
     - momentum
