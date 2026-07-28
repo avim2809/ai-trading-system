@@ -11,15 +11,20 @@ concurrency:
 
 jobs:
   backend:
-    name: Backend (ruff + pytest)
+    name: Backend (ruff + pytest + coverage)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
+      # Must track `requires-python` in pyproject.toml — pip refuses to
+      # install the package (and every dependency resolves against the
+      # running interpreter) on an older Python, so a mismatch here doesn't
+      # just risk subtle behaviour differences, it makes `pip install -e .`
+      # fail outright.
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.10"
+          python-version: "3.14"
           cache: pip
           cache-dependency-path: pyproject.toml
 
@@ -31,7 +36,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .venv
-          key: venv-${{ runner.os }}-py3.10-${{ hashFiles('pyproject.toml') }}
+          key: venv-${{ runner.os }}-py3.14-${{ hashFiles('pyproject.toml') }}
 
       # Embedding models pulled by the RAG/LLM tests live here; caching avoids
       # re-downloading them on every run.
@@ -54,11 +59,16 @@ jobs:
       - name: Lint (ruff)
         run: ruff check src tests
 
-      - name: Test (pytest)
-        run: pytest -q
+      # Coverage floor is set a few points below the measured baseline
+      # (~78-79% as of 2026-07) so routine PRs have headroom, while still
+      # catching any drastic regression (e.g. a new module added with no
+      # tests at all). Ratchet this up over time as coverage improves —
+      # don't lower it to make a failing PR pass.
+      - name: Test (pytest + coverage gate)
+        run: pytest -q --cov=firm --cov-report=term-missing --cov-fail-under=75
 
   frontend:
-    name: Frontend (typecheck + build)
+    name: Frontend (vitest + typecheck + build)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -84,6 +94,9 @@ jobs:
       - name: Install
         if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci
+
+      - name: Test (vitest)
+        run: npm run test -- --run
 
       - name: Build (tsc + vite)
         run: npm run build

@@ -1,0 +1,58 @@
+# LLM A/B — llm_enhanced arm (matches production config/llm.yaml agent_modes).
+# Use with the production live.yaml via:
+#   export FIRM_LLM_CONFIG=config/llm_ab_llm.yaml
+# See docs/llm_ab_test_runbook.md.
+
+provider:
+  default_model: "groq/llama-3.3-70b-versatile"
+  fallback_models:
+    - "groq/llama-3.1-8b-instant"
+    - "gemini/gemini-2.5-flash"
+    - "openrouter/openai/gpt-oss-20b:free"
+    - "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
+    - "openrouter/google/gemma-4-31b-it:free"
+    - "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
+    - "openrouter/openrouter/free"
+  load_balance: true
+  temperature: 0.3
+  max_tokens: 2000
+  request_timeout: 90
+
+optimization:
+  compression_enabled: true
+  compression_ratio: 0.5
+  use_llmlingua: false
+  cache_enabled: true
+  cache_db: "data/llm_cache_ab_llm.db"
+  cache_ttl_hours: 168
+
+rag:
+  persist_dir: "data/vectordb"
+  embedding_provider: "voyage"
+  embedding_model: "voyage-finance-2"
+  reranker_provider: "voyage"
+  reranker_model: "rerank-2.5"
+  default_n_results: 5
+
+agent_modes:
+  technical_analyst: "quant"
+  fundamental_analyst: "llm_enhanced"
+  sentiment_analyst: "llm_enhanced"
+  bull_researcher: "quant"
+  bear_researcher: "quant"
+  debate: "quant"
+  trader: "quant"
+  risk: "quant"
+
+enhancement:
+  policy: "live_calls"
+  min_abs_score: 0.2
+  max_signals_per_agent: 8
+  min_conviction: 0.25
+  max_theses_per_agent: 5
+  max_debate_symbols: 5
+  rag_n_results: 2
+  enhance_portfolio_review: false
+  enhance_risk_review: false
+
+backtest_policy: "cache_only"

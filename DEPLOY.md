@@ -246,9 +246,11 @@ Press Ctrl-C when satisfied; systemd will manage it going forward.
 
 Create the two service files:
 
-**`/etc/systemd/system/ib-gateway.service`**
+**`/etc/systemd/system/ibgateway.service`** (name matters — must match
+`deploy/ai-trading.service`'s `After=`/`Wants=ibgateway.service` below, or
+systemd silently won't order/wait for IB Gateway before starting the API)
 ```bash
-sudo tee /etc/systemd/system/ib-gateway.service > /dev/null << EOF
+sudo tee /etc/systemd/system/ibgateway.service > /dev/null << EOF
 [Unit]
 Description=IB Gateway (headless via IBC)
 After=network.target
@@ -302,8 +304,8 @@ FIRM_AUTO_START_LIVE=1    # set to 0 to start live manually from the dashboard
 sudo tee /etc/systemd/system/firm-api.service > /dev/null << EOF
 [Unit]
 Description=AI Trading System API
-After=network.target ib-gateway.service
-Wants=ib-gateway.service
+After=network.target ibgateway.service
+Wants=ibgateway.service
 
 [Service]
 Type=simple

@@ -476,8 +476,11 @@ if [ "$INSTALL_SERVICES" = true ] && command -v systemctl &>/dev/null; then
 
     VENV_UVICORN="$PROJECT_ROOT/.venv/bin/uvicorn"
 
-    # ib-gateway.service
-    sudo tee /etc/systemd/system/ib-gateway.service > /dev/null <<SERVICE
+    # ibgateway.service — name must match deploy/ai-trading.service's
+    # After=/Wants= (no hyphen); a mismatch here means systemd silently
+    # never orders/waits for IB Gateway before starting the API (see
+    # docs/PROJECT_CONTEXT.md "Broker & host failover").
+    sudo tee /etc/systemd/system/ibgateway.service > /dev/null <<SERVICE
 [Unit]
 Description=IB Gateway (headless via IBC)
 After=network.target
@@ -497,14 +500,14 @@ TimeoutStartSec=90
 [Install]
 WantedBy=multi-user.target
 SERVICE
-    ok "Created /etc/systemd/system/ib-gateway.service"
+    ok "Created /etc/systemd/system/ibgateway.service"
 
     # firm-api.service
     sudo tee /etc/systemd/system/firm-api.service > /dev/null <<SERVICE
 [Unit]
 Description=AI Trading System API
-After=network.target ib-gateway.service
-Wants=ib-gateway.service
+After=network.target ibgateway.service
+Wants=ibgateway.service
 
 [Service]
 Type=simple

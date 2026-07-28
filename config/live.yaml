@@ -108,6 +108,13 @@ initial_capital: 1_000_000
 # hung LLM/IBKR call cannot block every future scheduled cycle.
 cycle_hard_timeout_seconds: 900
 cycle_watchdog_seconds: 1800
+# Broker & host failover (see docs/PROJECT_CONTEXT.md "Broker & host
+# failover"). A broker call failing mid-cycle triggers one inline reconnect
+# attempt on the cycle worker thread; after this many *consecutive* cycles
+# still failing despite reconnect attempts, the alert escalates from
+# "broker_unavailable" to the louder "broker_disconnected_sustained" (likely
+# needs a human — IB Gateway down/logged out, or a host issue).
+broker_disconnect_alert_threshold: 3
 # Per-analyst wall-clock cap inside the orchestrator parallel pool.
 analyst_timeout_seconds: 300
 # Bull/bear/debate/trader/risk/execution stage cap (defaults to analyst timeout).
@@ -133,6 +140,29 @@ risk:
   max_sector_pct: 0.25          # 25% sector cap — diversification guardrail
   vol_target: 0.12              # 12% annualised vol target — conservative live baseline
   max_drawdown_pct: 0.15        # 15% per-strategy drawdown before it is sized down
+
+  # ADV/participation-rate liquidity cap: clips the implied trade size (not
+  # the resting position) to this fraction of a symbol's trailing 20-day
+  # average daily dollar volume. 10% is a standard conservative desk limit —
+  # this account is small relative to the mega-cap universe's ADV, so it's
+  # a backstop against illiquid/halted names rather than a routine binding
+  # constraint. See RiskAgent._cap_liquidity.
+  max_participation_pct: 0.10
+  adv_lookback_days: 20
+
+  # Pairwise-correlation concentration cap: same-direction positions with
+  # 60-day return correlation above this threshold have their combined
+  # weight capped, catching cross-sector correlated risk max_sector_pct
+  # misses (e.g. two rate-sensitive names in different GICS sectors).
+  # Unlike the liquidity cap this CAN bind under normal trending regimes
+  # (many large caps correlate >0.75 with broad market beta), so it's
+  # enabled here (pre-launch, no live track record to preserve) but left
+  # off in settings.yaml to keep the already-documented backtest numbers in
+  # docs/portfolio_construction_diagnosis.md comparable. See
+  # RiskAgent._cap_correlated_exposure.
+  correlation_threshold: 0.75
+  max_correlated_pair_pct: 0.25
+  correlation_lookback_days: 60
 
   # GICS-style sector tags for the 25-name universe (enables max_sector_pct).
   sector_map:
@@ -180,7 +210,23 @@ risk:
 # ──────────────────────────────────────────────────────────────
 costs:
   commission_pct: 0.0005        # 0.05% — realistic IBKR tiered rate
-  slippage_pct: 0.0005          # 0.05% — conservative market-impact estimate
+  slippage_pct: 0.0005          # 0.05% — flat baseline slippage (quote/latency noise)
+  spread_pct: 0.0002            # 0.02% — approx. cost of crossing the bid-ask spread
+  # Size/volume-aware market-impact cost, ON TOP of the flat rates above —
+  # those don't scale with order size relative to a name's trading volume,
+  # so a trade that's a large fraction of ADV was priced the same as a tiny
+  # one. Square-root law: impact_pct = market_impact_coefficient *
+  # sqrt(trade_notional / ADV_dollars). 0.005 ~= 0.5% impact at 100% of ADV,
+  # ~0.16% at the risk.max_participation_pct cap below (10% of ADV) — a
+  # conservative starting calibration; tune from realised IBKR fills once
+  # available. See firm.agents._liquidity.sqrt_impact_pct. Shares
+  # risk.adv_lookback_days for its trailing-volume window (same ADV
+  # definition as the liquidity cap below).
+  market_impact_coefficient: 0.005
+  # Short-borrow fees are NOT simulated live: IBKR charges/reports real
+  # borrow costs against the account directly, so there is nothing to
+  # estimate here (unlike the backtest, which has no real broker to charge
+  # it). See firm.config.BacktestConfig.short_borrow_annual_pct.
 
 # ──────────────────────────────────────────────────────────────
 # Macro-event blackout (news-guard) — pre-trade gate
@@ -195,12 +241,65 @@ news_guard:
 
 # ──────────────────────────────────────────────────────────────
 # Signal combination (research stage)
-#   confidence = confidence-weighted mean (default, current behaviour)
-#   optimal    = inverse-covariance weighting (down-weights correlated
-#                strategies); requires per-strategy return history.
+#   confidence = confidence-weighted mean (legacy default)
+#   optimal    = inverse-covariance weighting (down-weights correlated /
+#                poor-performing strategies); requires per-strategy return
+#                history, which live attribution now tracks unconditionally.
+#
+# Set to `optimal` per docs/portfolio_construction_diagnosis.md: a 3-window
+# A/B (2026-07-26) showed `optimal` beat `confidence` on portfolio Sharpe in
+# every tested window (never worse), including one large improvement
+# (0.16 -> 1.00). Falls back to confidence-equivalent weighting automatically
+# when return history is too thin (see agents/research/_combine.py).
 # ──────────────────────────────────────────────────────────────
 signal_combination:
-  method: confidence
+  method: optimal
+
+# ──────────────────────────────────────────────────────────────
+# Generic per-strategy rolling-Sharpe circuit breaker (research/_circuit_breaker.py)
+#   Damps (never fully zeroes) a strategy's raw signal contribution when its
+#   trailing realized Sharpe is persistently and materially negative —
+#   complementary to `optimal` above, which has no notion of edge *sign*.
+#   Motivated by regime_hmm's negative Sharpe in 6/6 diagnostic windows.
+#
+# DISABLED: an A/B with these exact thresholds over the same 3 diagnostic
+# windows found it net *hurt* portfolio Sharpe in all 3 (over-gated several
+# volatile-but-legitimate strategies via a noisy 60-day trailing Sharpe on
+# short windows). Kept here for future calibration/research, not enabled.
+# See docs/portfolio_construction_diagnosis.md.
+# ──────────────────────────────────────────────────────────────
+strategy_circuit_breaker:
+  enabled: false
+  lookback_days: 60
+  min_track_record_days: 20
+  trigger_sharpe: -0.5
+  full_cutoff_sharpe: -1.5
+  damping_floor: 0.25
+
+# ──────────────────────────────────────────────────────────────
+# Regime-conditional strategy multipliers (experimental)
+#   Scales each strategy's raw signal before bull/bear combine based on
+#   the prevailing market regime (Bull/Bear/Chop). Disabled by default —
+#   calibrate via scripts/calibrate_strategy_regime_weights.py before enabling.
+# ──────────────────────────────────────────────────────────────
+strategy_regime_weights:
+  enabled: false
+  benchmark_symbol: SPY
+  lookback_days: 252
+  retrain_frequency: 21
+  weights:
+    Bull:
+      momentum: 1.2
+      trend: 1.2
+      mean_reversion: 0.8
+    Bear:
+      stat_arb: 1.2
+      mean_reversion: 1.1
+      momentum: 0.7
+      trend: 0.7
+    Chop:
+      regime_hmm: 0.5
+      volatility_breakout: 0.8
 
 # ──────────────────────────────────────────────────────────────
 # Portfolio allocation (TraderAgent)

@@ -13,6 +13,7 @@ env/
 .env
 *.parquet
 data/cache/
+!data/cache/README.md
 data/vectordb/
 data/llm_cache.db*
 data/logs/
@@ -20,6 +21,11 @@ data/logs/
 data/execution_audit.jsonl
 data/approvals.json
 data/memory/decisions.jsonl
+data/kill_switch_state.json
+data/live_state.db*
+data/cycle_history.json
+data/order_history.json
+.coverage
 runs/
 .pytest_cache/
 .ruff_cache/

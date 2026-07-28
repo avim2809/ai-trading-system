@@ -10,6 +10,9 @@ WorkingDirectory=/local/store/git/ai-trading-system
 EnvironmentFile=/local/store/git/ai-trading-system/.env
 # firm-api reads config/live.yaml on boot when this is set (see firm.api.routers.live).
 Environment=FIRM_AUTO_START_LIVE=1
+# LLM A/B experiment — arm A (quant-only). Switch to config/llm_ab_llm.yaml for arm B.
+# See docs/llm_ab_test_runbook.md and docs/llm_ab_experiment_log.md.
+Environment=FIRM_LLM_CONFIG=config/llm_ab_quant.yaml
 ExecStart=/local/store/git/ai-trading-system/.venv/bin/firm-api
 Restart=always
 RestartSec=10

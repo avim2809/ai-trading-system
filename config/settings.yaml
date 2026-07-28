@@ -9,6 +9,16 @@ backtest:
   initial_capital: 10_000_000
   commission_pct: 0.001
   slippage_pct: 0.0005
+  spread_pct: 0.0002           # bid-ask spread cost, charged per trade like commission
+  short_borrow_annual_pct: 0.003  # annualized short-borrow fee, charged daily on short notional
+  # Size/volume-aware market-impact cost (square-root law): impact_pct =
+  # market_impact_coefficient * sqrt(trade_notional / ADV_dollars), on top of
+  # the flat commission/slippage/spread rates above. 0.005 means a trade
+  # equal to 100% of a name's ADV costs ~0.5% impact, ~0.16% at 10% of ADV
+  # (RiskAgent's default max_participation_pct cap below) — a conservative
+  # starting calibration; tune from realised fill data when available. See
+  # firm.agents._liquidity.sqrt_impact_pct.
+  market_impact_coefficient: 0.005
   rebalance_frequency: "weekly"
 
 # Alpha strategies wired into the analysts. Leave empty/omit to enable ALL
@@ -23,9 +33,55 @@ allocation_method: conviction_weighted
 kelly_fraction: 0.5
 
 # Research signal combination:
-#   method: confidence (default) | optimal (inverse-covariance weighting)
+#   method: confidence | optimal (inverse-covariance weighting)
+# Default is `optimal` per docs/portfolio_construction_diagnosis.md — a 3-window
+# A/B showed it beats `confidence` on portfolio Sharpe in every tested window.
 signal_combination:
-  method: confidence
+  method: optimal
+
+# Generic per-strategy rolling-Sharpe circuit breaker (see
+# firm.agents.research._circuit_breaker) — damps (never fully zeroes) a
+# strategy's raw signal contribution when its trailing realized Sharpe is
+# persistently and materially negative. Complementary to `optimal` above
+# (which has no notion of a strategy's edge *sign*, only its variance/
+# correlation), and originally motivated by regime_hmm's negative Sharpe in
+# 6/6 diagnostic windows (docs/portfolio_construction_diagnosis.md).
+# DISABLED BY DEFAULT: an A/B with these exact default thresholds over the
+# same 3 diagnostic windows found it net *hurt* portfolio Sharpe in all 3
+# (it over-gated several volatile-but-legitimate strategies on short
+# windows using a noisy 60-day trailing Sharpe) — kept available for further
+# calibration/research (see remediation backlog item
+# `regime-conditional-weighting`), not enabled here.
+strategy_circuit_breaker:
+  enabled: false
+  lookback_days: 60
+  min_track_record_days: 20
+  trigger_sharpe: -0.5
+  full_cutoff_sharpe: -1.5
+  damping_floor: 0.25
+
+# Per-strategy score multipliers conditioned on market regime (off by default).
+# Complements risk.regime_overlay (gross exposure) with pre-combination signal
+# scaling. Example weights below are illustrative starting points from the
+# portfolio-construction diagnosis — calibrate before enabling live.
+strategy_regime_weights:
+  enabled: false
+  benchmark_symbol: SPY
+  lookback_days: 252
+  retrain_frequency: 21
+  weights:
+    Bull:
+      momentum: 1.2
+      trend: 1.2
+      mean_reversion: 0.8
+    Bear:
+      stat_arb: 1.2
+      mean_reversion: 1.1
+      momentum: 0.7
+      trend: 0.7
+    Chop:
+      regime_hmm: 0.5
+      volatility_breakout: 0.8
 
 # Per-strategy params — mirrored in config/live.yaml for IBKR paper runs.
 strategy_params:
@@ -51,6 +107,22 @@ risk:
   max_sector_pct: 0.25          # 25% sector cap
   vol_target: 0.12              # 12% annualised vol target
   max_drawdown_pct: 0.15        # 15% per-strategy drawdown stop
+
+  # ADV/participation-rate liquidity cap — mirrors config/live.yaml so
+  # backtest Sharpe reflects the same constraint that would bind live.
+  # See RiskAgent._cap_liquidity.
+  max_participation_pct: 0.10
+  adv_lookback_days: 20
+
+  # Pairwise-correlation concentration cap (see RiskAgent._cap_correlated_
+  # exposure) is enabled in config/live.yaml but left OFF here by default:
+  # unlike the liquidity cap it can bind under normal trending regimes, and
+  # turning it on would move the backtest Sharpe numbers already recorded
+  # in docs/portfolio_construction_diagnosis.md. Set correlation_threshold
+  # (e.g. 0.75) to enable it for a fresh backtest comparison.
+  # correlation_threshold: 0.75
+  # max_correlated_pair_pct: 0.25
+  # correlation_lookback_days: 60
 
   sector_map:
     AAPL: technology

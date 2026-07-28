@@ -27,6 +27,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-cov",
     "ruff",
     "httpx",
 ]
@@ -84,4 +85,23 @@ filterwarnings = [
     "ignore:Using `httpx` with `starlette.testclient` is deprecated",
     "ignore:SelectableGroups dict interface is deprecated",
     "ignore:hf_xet.download_files",
+    # chromadb's telemetry decorator still calls the stdlib-deprecated
+    # asyncio.iscoroutinefunction (removed in Python 3.16); fixed upstream
+    # (chroma-core/chroma#6740) but not yet released as of chromadb 1.5.9.
+    # Revisit/drop this once we upgrade past the release containing that fix.
+    "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:chromadb",
+    # chromadb logs a legacy-config DeprecationWarning for any embedding
+    # function (e.g. our VoyageEmbeddingFunction) that predates its
+    # `is_legacy` attribute convention; harmless, and not something we can
+    # add to a third-party class.
+    "ignore:legacy embedding function config:DeprecationWarning:chromadb",
+    # hmmlearn (regime_hmm strategy dependency) still assigns ndarray.shape
+    # in place, deprecated under NumPy >=2.5; fix is upstream, not ours.
+    "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:hmmlearn",
+    # seaborn's heatmap/tear-sheet rendering calls Colormap.set_bad(), whose
+    # signature is being deprecated in a future matplotlib; not our call site.
+    "ignore:The set_bad function will be deprecated:PendingDeprecationWarning",
+    # seaborn's categorical boxplot still passes the now-deprecated `vert`
+    # kwarg through to matplotlib's Axes.bxp(); not our call site.
+    "ignore:vert. bool was deprecated:matplotlib.MatplotlibDeprecationWarning",
 ]
