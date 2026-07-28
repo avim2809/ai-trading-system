@@ -7,7 +7,10 @@ const API = 'http://localhost/api'
 // response so tests fail loudly (via setup.ts's onUnhandledRequest:
 // 'error') if a component starts calling something new and unmocked.
 export const handlers = [
-  http.get(`${API}/health`, () => HttpResponse.json({ status: 'ok' })),
+  http.get(`${API}/health`, () => HttpResponse.json({
+    status: 'ok',
+    broker: { type: null, connected: null, live_engine_running: false },
+  })),
   http.get(`${API}/strategies`, () => HttpResponse.json(m.mockStrategies)),
   http.get(`${API}/config/defaults`, () => HttpResponse.json(m.mockConfigDefaults)),
 
@@ -32,6 +35,7 @@ export const handlers = [
   http.get(`${API}/live/cycles`, () => HttpResponse.json(m.mockCycles)),
   http.delete(`${API}/live/cycles`, () => HttpResponse.json({ cleared: m.mockCycles.length })),
   http.get(`${API}/live/alerts`, () => HttpResponse.json(m.mockAlerts)),
+  http.post(`${API}/live/kill-switch/reset`, () => HttpResponse.json({ reset: true, halted: false })),
   http.get(`${API}/live/approvals`, () => HttpResponse.json(m.mockApprovals)),
   http.delete(`${API}/live/approvals`, () => HttpResponse.json({ cleared: m.mockApprovals.length })),
   http.get(`${API}/live/approvals/:id`, () => HttpResponse.json(m.mockApprovalDetail)),

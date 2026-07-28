@@ -38,12 +38,17 @@ export interface RunRequest {
   initial_capital: number
   commission_pct: number
   slippage_pct: number
+  spread_pct?: number
+  short_borrow_annual_pct?: number
+  market_impact_coefficient?: number
   rebalance_frequency: string
   risk_overrides: Record<string, number>
   regime_overlay?: RegimeOverlayConfig
   allocation_method?: string
   kelly_fraction?: number
   signal_combination?: SignalCombinationConfig
+  strategy_circuit_breaker?: StrategyCircuitBreakerConfig
+  strategy_regime_weights?: StrategyRegimeWeightsConfig
   data_source: string
   seed: number
   notes: string
@@ -52,6 +57,33 @@ export interface RunRequest {
 export interface SignalCombinationConfig {
   method: string
   [key: string]: unknown
+}
+
+// Generic per-strategy rolling-Sharpe circuit breaker (see
+// firm.agents.research._circuit_breaker). Disabled by default — an A/B with
+// these exact default thresholds was found to net *hurt* portfolio Sharpe
+// in every tested window (see docs/portfolio_construction_diagnosis.md), so
+// treat this as an experimental/research knob, not a recommended default.
+export interface StrategyCircuitBreakerConfig {
+  enabled: boolean
+  lookback_days?: number
+  min_track_record_days?: number
+  trigger_sharpe?: number
+  full_cutoff_sharpe?: number
+  damping_floor?: number
+}
+
+// Regime-conditional per-strategy score multipliers (see
+// firm.agents.research._regime_weights). Disabled by default — calibrate
+// before enabling live.
+export interface StrategyRegimeWeightsConfig {
+  enabled: boolean
+  benchmark_symbol?: string
+  lookback_days?: number
+  retrain_frequency?: number
+  weights?: Record<string, Record<string, number>>
+  min_multiplier?: number
+  max_multiplier?: number
 }
 
 export interface MonteCarloSummary {
@@ -85,7 +117,11 @@ export interface WalkForwardOverfitting {
   n_folds: number
   probabilistic_sharpe?: number
   deflated_sharpe?: number
+  // Only present when at least one fold ran a genuine multi-candidate
+  // param_grid selection on its train window — PBO needs real competing
+  // trials to mean anything, so it's omitted (not estimated) otherwise.
   pbo?: number
+  pbo_n_folds?: number
   verdict?: string
 }
 
@@ -182,6 +218,15 @@ export interface StepRequest {
   seed: number
 }
 
+export interface HealthResponse {
+  status: string
+  broker: {
+    type: string | null
+    connected: boolean | null
+    live_engine_running: boolean
+  }
+}
+
 export interface ConfigDefaults {
   universe: Record<string, unknown>
   backtest: Record<string, unknown>
@@ -190,6 +235,8 @@ export interface ConfigDefaults {
   allocation_method?: string
   kelly_fraction?: number
   signal_combination?: SignalCombinationConfig
+  strategy_circuit_breaker?: StrategyCircuitBreakerConfig
+  strategy_regime_weights?: StrategyRegimeWeightsConfig
 }
 
 // ── Live Trading Types ──
@@ -225,6 +272,8 @@ export interface LiveStartRequest {
   max_daily_turnover?: number
   news_guard?: LiveConfigNewsGuard
   signal_combination?: SignalCombinationConfig
+  strategy_circuit_breaker?: StrategyCircuitBreakerConfig
+  strategy_regime_weights?: StrategyRegimeWeightsConfig
   allocation_method?: string
   kelly_fraction?: number
 }
@@ -340,6 +389,12 @@ export interface LiveConfigNewsGuard {
   offline: boolean
 }
 
+export interface LiveConfigCosts {
+  commission_pct?: number
+  slippage_pct?: number
+  spread_pct?: number
+}
+
 export interface LiveConfig {
   broker: string
   schedule: string
@@ -350,8 +405,11 @@ export interface LiveConfig {
   universe: LiveConfigUniverse
   news_guard?: LiveConfigNewsGuard
   signal_combination?: SignalCombinationConfig
+  strategy_circuit_breaker?: StrategyCircuitBreakerConfig
+  strategy_regime_weights?: StrategyRegimeWeightsConfig
   allocation_method?: string
   kelly_fraction?: number
+  costs?: LiveConfigCosts
 }
 
 // ── LLM / AI Types ──

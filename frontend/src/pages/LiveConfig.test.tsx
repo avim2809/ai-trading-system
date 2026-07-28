@@ -34,14 +34,15 @@ describe('LiveConfig', () => {
   it('filters the provider dropdown to configured providers only', async () => {
     renderWithProviders(<LiveConfig />)
     await waitFor(() => expect(screen.getByText('Provider & Model')).toBeInTheDocument())
-    const providerSelect = screen.getByDisplayValue('groq/llama-3.3-70b-versatile') // active model preselected
-    void providerSelect
-    // mockLLMProviders: groq is configured:true, anthropic is configured:false.
+    // mockLLMProviders: groq is configured:true, gemini/anthropic are
+    // configured:false — the <option> text is each provider's display
+    // `label`, not its raw `name` (e.g. "Groq (free tier)", not "groq").
     const select = screen.getAllByRole('combobox').find((el) =>
-      Array.from(el.querySelectorAll('option')).some((o) => o.textContent === 'groq'))!
+      Array.from(el.querySelectorAll('option')).some((o) => o.textContent === 'Groq (free tier)'))!
     const optionTexts = Array.from(select.querySelectorAll('option')).map((o) => o.textContent)
-    expect(optionTexts).toContain('groq')
-    expect(optionTexts).not.toContain('anthropic')
+    expect(optionTexts).toContain('Groq (free tier)')
+    expect(optionTexts).not.toContain('Google Gemini')
+    expect(optionTexts).not.toContain('Anthropic Claude')
   })
 
   it('deletes a RAG collection after confirmation', async () => {

@@ -26,6 +26,31 @@ describe('LiveDashboard', () => {
     expect(await screen.findByText(/operational alert/)).toBeInTheDocument()
   })
 
+  it('shows a Reset Kill Switch button when halted, and clearing it re-arms trading', async () => {
+    let resetCalled = false
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json({
+        state: 'running', broker: 'ibkr_paper', broker_connected: true, next_run: null,
+        active_strategies: ['momentum'], approval_mode: 'full_auto', uptime_seconds: 10, last_cycle: null,
+      })),
+      http.get('http://localhost/api/live/alerts', () => HttpResponse.json({
+        halted: true,
+        alerts: [{ timestamp: '2026-07-21T20:02:43', kind: 'drawdown_breach', severity: 'critical', message: 'Drawdown 15% breached kill switch 10%.', cycle_id: 3 }],
+      })),
+      http.post('http://localhost/api/live/kill-switch/reset', () => {
+        resetCalled = true
+        return HttpResponse.json({ reset: true, halted: false })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<LiveDashboard />)
+    expect(await screen.findByText(/Engine halted/i)).toBeInTheDocument()
+
+    const resetButton = screen.getByText('Reset Kill Switch')
+    await user.click(resetButton)
+    await waitFor(() => expect(resetCalled).toBe(true))
+  })
+
   it('shows a stuck-cycle warning when a cycle has run far longer than normal', async () => {
     server.use(
       http.get('http://localhost/api/live/status', () => HttpResponse.json({

@@ -114,6 +114,11 @@ export default function LiveDashboard() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['live-cycles'] }),
   })
 
+  const resetKillSwitchMut = useMutation({
+    mutationFn: () => api.resetKillSwitch(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['live-alerts'] }),
+  })
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -353,12 +358,29 @@ export default function LiveDashboard() {
       {/* Alerts */}
       {alertsData && (alertsData.halted || alertsData.alerts.length > 0) && (
         <div className={`mb-6 rounded-xl border p-4 ${alertsData.halted ? 'bg-red-900/20 border-red-700/50' : 'bg-amber-900/10 border-amber-700/40'}`}>
-          <div className="flex items-center gap-3 mb-2">
-            <span className={`w-2 h-2 rounded-full ${alertsData.halted ? 'bg-red-400 animate-pulse' : 'bg-amber-400'}`} />
-            <span className={`font-medium text-sm ${alertsData.halted ? 'text-red-300' : 'text-amber-300'}`}>
-              {alertsData.halted ? 'Engine halted — drawdown kill switch tripped' : `${alertsData.alerts.length} operational alert${alertsData.alerts.length !== 1 ? 's' : ''}`}
-            </span>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-2">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${alertsData.halted ? 'bg-red-400 animate-pulse' : 'bg-amber-400'}`} />
+              <span className={`font-medium text-sm ${alertsData.halted ? 'text-red-300' : 'text-amber-300'}`}>
+                {alertsData.halted ? 'Engine halted — drawdown kill switch tripped' : `${alertsData.alerts.length} operational alert${alertsData.alerts.length !== 1 ? 's' : ''}`}
+              </span>
+            </div>
+            {alertsData.halted && (
+              <button
+                onClick={() => resetKillSwitchMut.mutate()}
+                disabled={resetKillSwitchMut.isPending}
+                className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg bg-red-600 text-white hover:bg-red-500 disabled:opacity-40 transition-colors flex items-center gap-2"
+              >
+                {resetKillSwitchMut.isPending && <Spinner className="h-3 w-3" />}
+                Reset Kill Switch
+              </button>
+            )}
           </div>
+          {resetKillSwitchMut.error && (
+            <div className="mb-2 text-xs text-red-400">
+              {(resetKillSwitchMut.error as Error).message}
+            </div>
+          )}
           <div className="space-y-1.5 max-h-48 overflow-y-auto">
             {alertsData.alerts.slice(0, 10).map((a, i) => (
               <div key={i} className="text-xs flex items-start gap-2">

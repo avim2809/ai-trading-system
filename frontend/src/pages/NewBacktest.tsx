@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { RunRequest, RegimeOverlayConfig } from '../api/types'
+import type { RunRequest, RegimeOverlayConfig, StrategyCircuitBreakerConfig, StrategyRegimeWeightsConfig } from '../api/types'
 import StrategyConfigForm from '../components/StrategyConfigForm'
 import Spinner from '../components/Spinner'
 
@@ -27,6 +27,9 @@ export default function NewBacktest() {
   const [capital, setCapital] = useState(100000)
   const [commission, setCommission] = useState(0.001)
   const [slippage, setSlippage] = useState(0.0005)
+  const [spread, setSpread] = useState(0.0002)
+  const [shortBorrow, setShortBorrow] = useState(0.003)
+  const [marketImpactCoefficient, setMarketImpactCoefficient] = useState(0.0)
   const [rebalance, setRebalance] = useState('daily')
   const [dataSource, setDataSource] = useState('synthetic')
   const [seed, setSeed] = useState(42)
@@ -36,6 +39,23 @@ export default function NewBacktest() {
   const [allocationMethod, setAllocationMethod] = useState('conviction_weighted')
   const [kellyFraction, setKellyFraction] = useState(0.5)
   const [signalCombination, setSignalCombination] = useState('confidence')
+  const [circuitBreaker, setCircuitBreaker] = useState<StrategyCircuitBreakerConfig>({
+    enabled: false,
+    lookback_days: 60,
+    min_track_record_days: 20,
+    trigger_sharpe: -0.5,
+    full_cutoff_sharpe: -1.5,
+    damping_floor: 0.25,
+  })
+  const [regimeWeights, setRegimeWeights] = useState<StrategyRegimeWeightsConfig>({
+    enabled: false,
+    benchmark_symbol: 'SPY',
+    lookback_days: 252,
+    retrain_frequency: 21,
+    weights: { Bull: {}, Bear: {}, Chop: {} },
+  })
+  const [regimeWeightsJson, setRegimeWeightsJson] = useState('')
+  const [regimeWeightsJsonError, setRegimeWeightsJsonError] = useState<string | null>(null)
   const [regime, setRegime] = useState<RegimeOverlayConfig>({
     enabled: false,
     benchmark_symbol: null,
@@ -45,6 +65,8 @@ export default function NewBacktest() {
   })
 
   const [nSplits, setNSplits] = useState(4)
+  const [paramGridText, setParamGridText] = useState('')
+  const [paramGridError, setParamGridError] = useState<string | null>(null)
 
   // Seed the allocation/combination controls from server defaults once loaded.
   useEffect(() => {
@@ -52,6 +74,13 @@ export default function NewBacktest() {
     if (defaults.allocation_method) setAllocationMethod(defaults.allocation_method)
     if (typeof defaults.kelly_fraction === 'number') setKellyFraction(defaults.kelly_fraction)
     if (defaults.signal_combination?.method) setSignalCombination(defaults.signal_combination.method)
+    if (defaults.strategy_circuit_breaker) {
+      setCircuitBreaker((prev) => ({ ...prev, ...defaults.strategy_circuit_breaker }))
+    }
+    if (defaults.strategy_regime_weights) {
+      setRegimeWeights((prev) => ({ ...prev, ...defaults.strategy_regime_weights }))
+      setRegimeWeightsJson(JSON.stringify(defaults.strategy_regime_weights.weights ?? {}, null, 2))
+    }
   }, [defaults])
 
   const buildRequest = (): RunRequest => {
@@ -68,12 +97,21 @@ export default function NewBacktest() {
       initial_capital: capital,
       commission_pct: commission,
       slippage_pct: slippage,
+      spread_pct: spread,
+      short_borrow_annual_pct: shortBorrow,
+      market_impact_coefficient: marketImpactCoefficient,
       rebalance_frequency: rebalance,
       risk_overrides: riskOverrides,
       regime_overlay: regime,
       allocation_method: allocationMethod,
       kelly_fraction: kellyFraction,
       signal_combination: { method: signalCombination },
+      strategy_circuit_breaker: circuitBreaker,
+      strategy_regime_weights: (() => {
+        if (!regimeWeights.enabled) return { ...regimeWeights, enabled: false }
+        if (!regimeWeightsJson.trim()) return regimeWeights
+        return { ...regimeWeights, weights: JSON.parse(regimeWeightsJson) as Record<string, Record<string, number>> }
+      })(),
       data_source: dataSource,
       seed,
       notes,
@@ -88,7 +126,22 @@ export default function NewBacktest() {
   })
 
   const walkForward = useMutation({
-    mutationFn: () => api.launchWalkForward({ ...buildRequest(), n_splits: nSplits }),
+    mutationFn: () => {
+      let paramGrid: Record<string, unknown>[] | null = null
+      if (paramGridText.trim()) {
+        try {
+          const parsed = JSON.parse(paramGridText)
+          if (!Array.isArray(parsed)) throw new Error('must be a JSON array of override objects')
+          paramGrid = parsed
+          setParamGridError(null)
+        } catch (err) {
+          const msg = `Invalid parameter grid JSON: ${(err as Error).message}`
+          setParamGridError(msg)
+          throw new Error(msg)
+        }
+      }
+      return api.launchWalkForward({ ...buildRequest(), n_splits: nSplits, param_grid: paramGrid })
+    },
   })
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -164,7 +217,7 @@ export default function NewBacktest() {
         {/* Capital & Costs */}
         <section>
           <label className="block text-sm font-medium text-slate-300 mb-2">Capital & Costs</label>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs text-slate-400 mb-1">Initial Capital ($)</label>
               <input
@@ -194,7 +247,45 @@ export default function NewBacktest() {
                 className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
               />
             </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Bid-ask spread (%)</label>
+              <input
+                type="number"
+                step="0.0001"
+                value={spread}
+                onChange={(e) => setSpread(Number(e.target.value))}
+                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Short borrow (annual %)</label>
+              <input
+                type="number"
+                step="0.0001"
+                value={shortBorrow}
+                onChange={(e) => setShortBorrow(Number(e.target.value))}
+                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Market impact coefficient</label>
+              <input
+                type="number"
+                step="0.001"
+                min={0}
+                max={1}
+                value={marketImpactCoefficient}
+                onChange={(e) => setMarketImpactCoefficient(Number(e.target.value))}
+                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              />
+            </div>
           </div>
+          <p className="mt-1 text-xs text-slate-500">
+            Market impact adds a size/volume-aware cost on top of the flat rates above: impact %
+            = coefficient × √(trade notional / trailing ADV dollars). 0 disables it (flat-pct-only
+            costs, the historical default); nonzero values make large orders relative to a name's
+            volume cost proportionally more, not just a bigger absolute amount.
+          </p>
         </section>
 
         {/* Rebalance */}
@@ -275,7 +366,7 @@ export default function NewBacktest() {
           </button>
           {showRisk && (
             <div className="mt-3 grid grid-cols-2 gap-3">
-              {['max_position_pct', 'max_gross_exposure', 'max_net_exposure', 'max_sector_pct', 'vol_target', 'max_drawdown_pct'].map((key) => (
+              {['max_position_pct', 'max_gross_exposure', 'max_net_exposure', 'max_sector_pct', 'vol_target', 'max_drawdown_pct', 'max_participation_pct', 'adv_lookback_days', 'correlation_threshold', 'max_correlated_pair_pct', 'correlation_lookback_days'].map((key) => (
                 <div key={key}>
                   <label className="block text-xs text-slate-400 mb-1">{key}</label>
                   <input
@@ -379,6 +470,153 @@ export default function NewBacktest() {
           )}
         </section>
 
+        {/* Strategy Circuit Breaker */}
+        <section>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={circuitBreaker.enabled}
+              onChange={(e) => setCircuitBreaker((c) => ({ ...c, enabled: e.target.checked }))}
+              className="text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+            />
+            Strategy Circuit Breaker (experimental)
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            Damps a strategy's signal contribution when its trailing realized Sharpe is
+            persistently negative. <span className="text-amber-500">Off by default:</span> a 3-window
+            A/B with these thresholds net hurt portfolio Sharpe (over-gated volatile-but-legitimate
+            strategies) — see docs/portfolio_construction_diagnosis.md. Enable only for further
+            research/calibration on your own data.
+          </p>
+          {circuitBreaker.enabled && (
+            <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Lookback (days)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={circuitBreaker.lookback_days}
+                  onChange={(e) => setCircuitBreaker((c) => ({ ...c, lookback_days: Number(e.target.value) }))}
+                  className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Min track record (days)</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={circuitBreaker.min_track_record_days}
+                  onChange={(e) => setCircuitBreaker((c) => ({ ...c, min_track_record_days: Number(e.target.value) }))}
+                  className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Trigger Sharpe</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={circuitBreaker.trigger_sharpe}
+                  onChange={(e) => setCircuitBreaker((c) => ({ ...c, trigger_sharpe: Number(e.target.value) }))}
+                  className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Full cutoff Sharpe</label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={circuitBreaker.full_cutoff_sharpe}
+                  onChange={(e) => setCircuitBreaker((c) => ({ ...c, full_cutoff_sharpe: Number(e.target.value) }))}
+                  className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Damping floor</label>
+                <input
+                  type="number"
+                  step="0.05"
+                  min={0}
+                  max={1}
+                  value={circuitBreaker.damping_floor}
+                  onChange={(e) => setCircuitBreaker((c) => ({ ...c, damping_floor: Number(e.target.value) }))}
+                  className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                />
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Strategy Regime Weights */}
+        <section>
+          <label className="flex items-center gap-2 text-sm font-medium text-slate-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={regimeWeights.enabled}
+              onChange={(e) => setRegimeWeights((c) => ({ ...c, enabled: e.target.checked }))}
+              className="text-blue-500 focus:ring-blue-500 focus:ring-offset-0"
+            />
+            Strategy Regime Weights (experimental)
+          </label>
+          <p className="mt-1 text-xs text-slate-500">
+            Scales each strategy's raw signal by Bull/Bear/Chop regime before bull/bear combine.
+            Off by default — calibrate with <code className="text-slate-400">scripts/calibrate_strategy_regime_weights.py</code> before enabling.
+          </p>
+          {regimeWeights.enabled && (
+            <div className="mt-3 space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Benchmark</label>
+                  <input
+                    value={regimeWeights.benchmark_symbol ?? 'SPY'}
+                    onChange={(e) => setRegimeWeights((c) => ({ ...c, benchmark_symbol: e.target.value }))}
+                    className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Lookback (days)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={regimeWeights.lookback_days}
+                    onChange={(e) => setRegimeWeights((c) => ({ ...c, lookback_days: Number(e.target.value) }))}
+                    className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Retrain frequency (days)</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={regimeWeights.retrain_frequency}
+                    onChange={(e) => setRegimeWeights((c) => ({ ...c, retrain_frequency: Number(e.target.value) }))}
+                    className="w-full px-3 py-1.5 bg-slate-700 border border-slate-600 rounded-md text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Weights JSON (regime → strategy → multiplier)</label>
+                <textarea
+                  rows={8}
+                  value={regimeWeightsJson}
+                  onChange={(e) => {
+                    setRegimeWeightsJson(e.target.value)
+                    setRegimeWeightsJsonError(null)
+                    try {
+                      JSON.parse(e.target.value)
+                    } catch {
+                      setRegimeWeightsJsonError('Invalid JSON')
+                    }
+                  }}
+                  className="w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-md text-slate-200 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                {regimeWeightsJsonError && (
+                  <p className="text-xs text-red-400 mt-1">{regimeWeightsJsonError}</p>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+
         {/* Data Source */}
         <section>
           <label className="block text-sm font-medium text-slate-300 mb-2">Data Source</label>
@@ -428,6 +666,26 @@ export default function NewBacktest() {
             {(launch.error as Error).message}
           </div>
         )}
+
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">
+            Walk-Forward Parameter Grid <span className="text-slate-600">(optional, JSON array)</span>
+          </label>
+          <textarea
+            value={paramGridText}
+            onChange={(e) => setParamGridText(e.target.value)}
+            rows={2}
+            placeholder='e.g. [{"strategy_params": {"momentum": {"lookback_days": 30}}}, {"strategy_params": {"momentum": {"lookback_days": 60}}}]'
+            className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500 text-xs font-mono resize-none"
+          />
+          <p className="mt-1 text-[11px] text-slate-500">
+            With 2+ candidates, each fold backtests every candidate on its train window, picks the
+            best by Sharpe, and only that winner runs on the test window (genuine train/test
+            optimization). This also unlocks the PBO diagnostic below, computed from the real
+            competing candidates. Leave empty to just replay this config out-of-sample per fold.
+          </p>
+          {paramGridError && <p className="mt-1 text-[11px] text-red-400">{paramGridError}</p>}
+        </div>
 
         <div className="flex items-end gap-4 flex-wrap">
           <button
@@ -518,7 +776,11 @@ export default function NewBacktest() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {typeof walkForward.data.aggregate.overfitting.pbo === 'number' && (
                     <div className="bg-slate-800 rounded-lg px-3 py-2">
-                      <p className="text-[10px] text-slate-500 uppercase">PBO</p>
+                      <p className="text-[10px] text-slate-500 uppercase">
+                        PBO
+                        {typeof walkForward.data.aggregate.overfitting.pbo_n_folds === 'number' &&
+                          ` (${walkForward.data.aggregate.overfitting.pbo_n_folds} folds)`}
+                      </p>
                       <p className="text-base font-mono text-white">
                         {(walkForward.data.aggregate.overfitting.pbo * 100).toFixed(1)}%
                       </p>
@@ -543,7 +805,10 @@ export default function NewBacktest() {
                 </div>
                 <p className="mt-2 text-[11px] text-slate-500">
                   PBO = probability the in-sample-best config underperforms out-of-sample; lower is
-                  better. Deflated/Probabilistic Sharpe adjust for multiple-trial selection bias.
+                  better. Only shown when a parameter grid gave folds real competing candidates to
+                  select between — otherwise there's nothing genuine to compute it from. Deflated/
+                  Probabilistic Sharpe adjust for multiple-trial selection bias (using the grid's
+                  actual trial count when a grid was used).
                 </p>
               </div>
             )}

@@ -1,4 +1,5 @@
 import type {
+  HealthResponse,
   StrategyInfo,
   ConfigDefaults,
   RunSummary,
@@ -45,7 +46,7 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  health: () => fetchJson<{ status: string }>('/health'),
+  health: () => fetchJson<HealthResponse>('/health'),
 
   getStrategies: () => fetchJson<StrategyInfo[]>('/strategies'),
 
@@ -79,7 +80,14 @@ export const api = {
       body: JSON.stringify({ run_ids: ids }),
     }),
 
-  launchWalkForward: (req: Partial<RunRequest> & { n_splits?: number; train_pct?: number }) =>
+  launchWalkForward: (
+    req: Partial<RunRequest> & {
+      n_splits?: number
+      train_pct?: number
+      param_grid?: Record<string, unknown>[] | null
+      selection_metric?: string
+    },
+  ) =>
     fetchJson<WalkForwardResult>('/runs/walk_forward', {
       method: 'POST',
       body: JSON.stringify(req),
@@ -126,6 +134,11 @@ export const api = {
     fetchJson<{ cleared: number }>('/live/approvals', { method: 'DELETE' }),
 
   getAlerts: () => fetchJson<LiveAlertsResponse>('/live/alerts'),
+
+  resetKillSwitch: () =>
+    fetchJson<{ reset: boolean; halted: boolean }>('/live/kill-switch/reset', {
+      method: 'POST',
+    }),
 
   getApprovalDetail: (id: string) =>
     fetchJson<ApprovalDetail>(`/live/approvals/${id}`),

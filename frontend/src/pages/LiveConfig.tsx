@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { LiveConfig, StrategyInfo, LLMConfig, LLMProvider, LLMCacheStats, RAGStats, EmbeddingModelInfo } from '../api/types'
+import type { LiveConfig, StrategyInfo, LLMConfig, LLMProvider, LLMCacheStats, RAGStats, EmbeddingModelInfo, StrategyCircuitBreakerConfig, StrategyRegimeWeightsConfig } from '../api/types'
 import Spinner from '../components/Spinner'
 
 const AGENT_DISPLAY_NAMES: Record<string, string> = {
@@ -89,6 +89,22 @@ export default function LiveConfig() {
   const [allocationMethod, setAllocationMethod] = useState('conviction_weighted')
   const [kellyFraction, setKellyFraction] = useState('0.5')
   const [signalCombination, setSignalCombination] = useState('confidence')
+  const [circuitBreaker, setCircuitBreaker] = useState<StrategyCircuitBreakerConfig>({
+    enabled: false,
+    lookback_days: 60,
+    min_track_record_days: 20,
+    trigger_sharpe: -0.5,
+    full_cutoff_sharpe: -1.5,
+    damping_floor: 0.25,
+  })
+  const [regimeWeights, setRegimeWeights] = useState<StrategyRegimeWeightsConfig>({
+    enabled: false,
+    benchmark_symbol: 'SPY',
+    lookback_days: 252,
+    retrain_frequency: 21,
+    weights: { Bull: {}, Bear: {}, Chop: {} },
+  })
+  const [regimeWeightsJson, setRegimeWeightsJson] = useState('')
 
   // AI / LLM state
   const { data: llmProviders } = useQuery<LLMProvider[]>({
@@ -180,6 +196,13 @@ export default function LiveConfig() {
     setAllocationMethod(config.allocation_method ?? 'conviction_weighted')
     setKellyFraction(String(config.kelly_fraction ?? 0.5))
     setSignalCombination(config.signal_combination?.method ?? 'confidence')
+    if (config.strategy_circuit_breaker) {
+      setCircuitBreaker((prev) => ({ ...prev, ...config.strategy_circuit_breaker }))
+    }
+    if (config.strategy_regime_weights) {
+      setRegimeWeights((prev) => ({ ...prev, ...config.strategy_regime_weights }))
+      setRegimeWeightsJson(JSON.stringify(config.strategy_regime_weights.weights ?? {}, null, 2))
+    }
   }, [config])
 
   const saveMut = useMutation({
@@ -229,6 +252,15 @@ export default function LiveConfig() {
         offline: newsGuardOffline,
       },
       signal_combination: { method: signalCombination },
+      strategy_circuit_breaker: circuitBreaker,
+      strategy_regime_weights: (() => {
+        if (!regimeWeights.enabled) return { ...regimeWeights, enabled: false }
+        let weights = regimeWeights.weights
+        if (regimeWeightsJson.trim()) {
+          weights = JSON.parse(regimeWeightsJson) as Record<string, Record<string, number>>
+        }
+        return { ...regimeWeights, weights }
+      })(),
       allocation_method: allocationMethod,
       kelly_fraction: parseFloat(kellyFraction) || 0.5,
     }
@@ -506,6 +538,26 @@ export default function LiveConfig() {
               <p className="text-xs text-slate-500 mt-1">Fraction of portfolio value</p>
             </div>
           </div>
+          {config?.costs && (
+            config.costs.commission_pct != null ||
+            config.costs.slippage_pct != null ||
+            config.costs.spread_pct != null
+          ) && (
+            <div className="mt-4 pt-4 border-t border-slate-700 flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-400">
+              <span>
+                Commission: <span className="text-slate-200">{((config.costs.commission_pct ?? 0) * 100).toFixed(3)}%</span>
+              </span>
+              <span>
+                Slippage: <span className="text-slate-200">{((config.costs.slippage_pct ?? 0) * 100).toFixed(3)}%</span>
+              </span>
+              {config.costs.spread_pct != null && (
+                <span>
+                  Spread: <span className="text-slate-200">{(config.costs.spread_pct * 100).toFixed(3)}%</span>
+                </span>
+              )}
+              <span className="text-slate-500">(set via config/live.yaml costs: block, not editable here)</span>
+            </div>
+          )}
         </div>
 
         {/* Allocation & Signal Combination */}
@@ -551,6 +603,154 @@ export default function LiveConfig() {
                 <option value="optimal">Optimal (inverse-variance)</option>
               </select>
             </div>
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            Takes effect on the next cycle (rebuilds the research/trader pipeline).
+          </p>
+        </div>
+
+        {/* Strategy Circuit Breaker */}
+        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              type="button"
+              onClick={() => setCircuitBreaker((c) => ({ ...c, enabled: !c.enabled }))}
+              className="flex items-center gap-2 text-xs"
+            >
+              <div className={`w-9 h-5 rounded-full relative transition-colors ${circuitBreaker.enabled ? 'bg-blue-600' : 'bg-slate-600'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${circuitBreaker.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </div>
+            </button>
+            <h3 className="text-sm font-semibold text-slate-300">Strategy Circuit Breaker (experimental)</h3>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">
+            Damps a strategy's signal contribution when its trailing realized Sharpe is
+            persistently negative. <span className="text-amber-500">Off by default:</span> a 3-window
+            A/B with these thresholds net hurt portfolio Sharpe (over-gated volatile-but-legitimate
+            strategies) — see docs/portfolio_construction_diagnosis.md. Enable only for further
+            research/calibration.
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Lookback (days)</label>
+              <input
+                type="number"
+                min="1"
+                disabled={!circuitBreaker.enabled}
+                value={circuitBreaker.lookback_days}
+                onChange={(e) => setCircuitBreaker((c) => ({ ...c, lookback_days: Number(e.target.value) }))}
+                className={inputCls + ' disabled:opacity-40'}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Min track record</label>
+              <input
+                type="number"
+                min="1"
+                disabled={!circuitBreaker.enabled}
+                value={circuitBreaker.min_track_record_days}
+                onChange={(e) => setCircuitBreaker((c) => ({ ...c, min_track_record_days: Number(e.target.value) }))}
+                className={inputCls + ' disabled:opacity-40'}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Trigger Sharpe</label>
+              <input
+                type="number"
+                step="0.1"
+                disabled={!circuitBreaker.enabled}
+                value={circuitBreaker.trigger_sharpe}
+                onChange={(e) => setCircuitBreaker((c) => ({ ...c, trigger_sharpe: Number(e.target.value) }))}
+                className={inputCls + ' disabled:opacity-40'}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Full cutoff Sharpe</label>
+              <input
+                type="number"
+                step="0.1"
+                disabled={!circuitBreaker.enabled}
+                value={circuitBreaker.full_cutoff_sharpe}
+                onChange={(e) => setCircuitBreaker((c) => ({ ...c, full_cutoff_sharpe: Number(e.target.value) }))}
+                className={inputCls + ' disabled:opacity-40'}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Damping floor</label>
+              <input
+                type="number"
+                step="0.05"
+                min="0"
+                max="1"
+                disabled={!circuitBreaker.enabled}
+                value={circuitBreaker.damping_floor}
+                onChange={(e) => setCircuitBreaker((c) => ({ ...c, damping_floor: Number(e.target.value) }))}
+                className={inputCls + ' disabled:opacity-40'}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Strategy Regime Weights */}
+        <div className="bg-slate-800 rounded-xl border border-slate-700 p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <button
+              type="button"
+              onClick={() => setRegimeWeights((c) => ({ ...c, enabled: !c.enabled }))}
+              className="flex items-center gap-2 text-xs"
+            >
+              <div className={`w-9 h-5 rounded-full relative transition-colors ${regimeWeights.enabled ? 'bg-blue-600' : 'bg-slate-600'}`}>
+                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${regimeWeights.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              </div>
+            </button>
+            <h3 className="text-sm font-semibold text-slate-300">Strategy Regime Weights (experimental)</h3>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">
+            Scales each strategy's raw signal by Bull/Bear/Chop regime before bull/bear combine.
+            Off by default — calibrate on historical windows before enabling live.
+          </p>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Benchmark</label>
+              <input
+                disabled={!regimeWeights.enabled}
+                value={regimeWeights.benchmark_symbol ?? 'SPY'}
+                onChange={(e) => setRegimeWeights((c) => ({ ...c, benchmark_symbol: e.target.value }))}
+                className={inputCls + ' disabled:opacity-40'}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Lookback (days)</label>
+              <input
+                type="number"
+                min="1"
+                disabled={!regimeWeights.enabled}
+                value={regimeWeights.lookback_days}
+                onChange={(e) => setRegimeWeights((c) => ({ ...c, lookback_days: Number(e.target.value) }))}
+                className={inputCls + ' disabled:opacity-40'}
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Retrain frequency (days)</label>
+              <input
+                type="number"
+                min="1"
+                disabled={!regimeWeights.enabled}
+                value={regimeWeights.retrain_frequency}
+                onChange={(e) => setRegimeWeights((c) => ({ ...c, retrain_frequency: Number(e.target.value) }))}
+                className={inputCls + ' disabled:opacity-40'}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Weights JSON</label>
+            <textarea
+              rows={6}
+              disabled={!regimeWeights.enabled}
+              value={regimeWeightsJson}
+              onChange={(e) => setRegimeWeightsJson(e.target.value)}
+              className={inputCls + ' font-mono text-xs disabled:opacity-40'}
+            />
           </div>
           <p className="text-xs text-slate-500 mt-2">
             Takes effect on the next cycle (rebuilds the research/trader pipeline).
