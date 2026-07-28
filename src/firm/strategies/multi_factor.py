@@ -248,7 +248,13 @@ class MultiFactorStrategy(BaseStrategy):
                 )
                 .sort_index()
             )
-            daily_ret = pivot.pct_change()
+            # A zero/bad price feeding pct_change()'s division-by-previous
+            # produces +/-inf, which trips a RuntimeWarning inside pandas'
+            # own std() (and, pre-_zscore-hardening, could poison the whole
+            # factor) — guard it the same way the momentum factor's division
+            # is guarded above, rather than relying solely on the downstream
+            # cleanup in _zscore.
+            daily_ret = pivot.replace(0, np.nan).pct_change()
             vol = daily_ret.iloc[-vol_lookback:].std() * np.sqrt(252)
             inv_vol = (1.0 / vol.replace(0, np.nan)).dropna()
             scores["low_vol"] = _zscore(inv_vol)

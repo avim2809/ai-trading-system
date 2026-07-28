@@ -15,7 +15,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
-import pytest
 
 from firm.data.providers import get_provider
 from firm.data.providers.tiingo import TiingoProvider

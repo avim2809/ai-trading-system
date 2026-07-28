@@ -214,6 +214,67 @@ def load_fundamentals(settings: Settings) -> pd.DataFrame | None:
     return None
 
 
+def load_sentiment(settings: Settings) -> pd.DataFrame | None:
+    """Load cached news-sentiment panels when ``fetch-data`` wrote them.
+
+    Primary key: ``combined/sentiment`` (ParquetCache) — the same key
+    ``fetch-data`` and the live ``sentiment_cache`` module populate. Returns
+    ``None`` when absent so callers degrade gracefully; without this, the
+    ``sentiment`` strategy always emits an empty signal list in backtests
+    (``PitView.sentiment()`` has nothing to aggregate), silently diverging
+    from live where the same strategy is fully active.
+    """
+    from firm.data.cache import ParquetCache
+
+    cache = ParquetCache(settings.data.cache_dir)
+    df = cache.get("combined/sentiment")
+    if df is not None and not df.empty:
+        return df
+    return None
+
+
+def load_universe_membership(settings: Settings) -> pd.DataFrame | None:
+    """Load historical index-membership windows for survivorship-aware backtests.
+
+    Schema: :data:`firm.data.schemas.UNIVERSE_COLUMNS` (``index``, ``symbol``,
+    ``added_date``, ``removed_date``). Primary source: ParquetCache key
+    ``combined/universe_membership`` (mirrors ``fetch-data``'s prices/fundamentals
+    layout). Falls back to a plain ``universe_membership.csv`` in the cache dir
+    for hand-placed data. Returns ``None`` when absent so callers degrade to
+    :meth:`firm.data.universe.UniverseResolver.from_static` — see
+    ``build_universe_resolver``.
+    """
+    from firm.data.cache import ParquetCache
+
+    cache = ParquetCache(settings.data.cache_dir)
+    df = cache.get("combined/universe_membership")
+    if df is not None and not df.empty:
+        return df
+
+    csv_path = Path(settings.data.cache_dir) / "universe_membership.csv"
+    if csv_path.exists():
+        return pd.read_csv(csv_path)
+    return None
+
+
+def build_universe_resolver(settings: Settings, fallback_symbols: list[str]):
+    """Build a :class:`~firm.data.universe.UniverseResolver`, preferring real data.
+
+    Thin wrapper combining ``load_universe_membership`` with
+    :func:`firm.data.universe.build_resolver` so callers (CLI, API job runner,
+    live engine) share one code path instead of duplicating the cache lookup +
+    fallback logic.
+    """
+    from firm.data.universe import build_resolver
+
+    try:
+        membership = load_universe_membership(settings)
+    except Exception:
+        log.warning("Universe membership cache load failed — using static fallback", exc_info=True)
+        membership = None
+    return build_resolver(membership, fallback_symbols)
+
+
 _FUNDAMENTALS_SYMBOL_ALIASES: dict[str, str] = {"GOOG": "GOOGL"}
 
 
@@ -248,17 +309,19 @@ def run_backtest_from_config(
     universe: list[str],
 ) -> tuple[BacktestEngine, "BacktestReport"]:  # noqa: F821
     """Setup + run + report in one call.  Used by both CLI and API."""
-    pit_store = PointInTimeDataStore()
-    pit_store.load(prices=prices_df)
-
-    # Fundamentals: same ParquetCache keys as ``fetch-data`` so multi_factor /
-    # event_driven backtests match live when FMP/Massive data is cached.
+    # Fundamentals/sentiment: same ParquetCache keys as ``fetch-data`` so
+    # multi_factor / event_driven / sentiment backtests match live when
+    # FMP/Massive/news data is cached. Loaded *before* pit_store.load() and
+    # passed in a single call — a second load(fundamentals=...) call without
+    # `prices` would raise (prices has no default and each call fully
+    # replaces prior state), silently crashing any real dataset that had
+    # cached fundamentals.
+    fund_df = None
     try:
         from firm.config import get_settings
 
         fund_df = load_fundamentals(get_settings())
         if fund_df is not None:
-            pit_store.load(fundamentals=fund_df)
             log.info(
                 "Loaded fundamentals cache: %d rows, %d symbols",
                 len(fund_df), fund_df["symbol"].nunique(),
@@ -270,6 +333,27 @@ def run_backtest_from_config(
             )
     except Exception:
         log.warning("Fundamentals cache load failed — continuing price-only", exc_info=True)
+
+    sentiment_df = None
+    try:
+        from firm.config import get_settings
+
+        sentiment_df = load_sentiment(get_settings())
+        if sentiment_df is not None:
+            log.info(
+                "Loaded sentiment cache: %d rows, %d symbols",
+                len(sentiment_df), sentiment_df["symbol"].nunique(),
+            )
+        else:
+            log.debug(
+                "No cached sentiment in backtest; the sentiment strategy "
+                "will emit no signals (see firm.strategies.sentiment)"
+            )
+    except Exception:
+        log.warning("Sentiment cache load failed — sentiment strategy will be inactive", exc_info=True)
+
+    pit_store = PointInTimeDataStore()
+    pit_store.load(prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df)
 
     # Optionally load FRED macro data — gracefully skipped when key is absent.
     fred_api_key = config.get("fred_api_key", "")

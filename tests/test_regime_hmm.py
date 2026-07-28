@@ -126,6 +126,37 @@ class TestGaussianRegimeModel:
         with pytest.raises(RegimeUnavailable):
             GaussianRegimeModel(n_states=3).fit(np.zeros((2, 4)))
 
+    def test_separation_wide_gap_is_large(self):
+        # Bull/Bear means are far apart relative to their variance -> a large
+        # separation score (clearly distinguishable states).
+        model = GaussianRegimeModel(n_states=3)
+        means = np.array([[1.0, 0, 0, 0], [-1.0, 0, 0, 0], [0.0, 0, 0, 0]])
+        covars = np.tile(np.eye(4) * 0.01, (3, 1, 1))
+        sep = model._build_separation(means, covars)
+        assert sep[BULL] > 5.0
+        assert sep[BEAR] > 5.0
+
+    def test_separation_thin_gap_is_small(self):
+        # Bull/Chop/Bear means are nearly identical relative to their
+        # variance -> a small separation score (label-switching risk).
+        model = GaussianRegimeModel(n_states=3)
+        means = np.array([[0.001, 0, 0, 0], [-0.001, 0, 0, 0], [0.0, 0, 0, 0]])
+        covars = np.tile(np.eye(4) * 1.0, (3, 1, 1))
+        sep = model._build_separation(means, covars)
+        assert sep[BULL] < 0.01
+        assert sep[BEAR] < 0.01
+
+    def test_separation_populates_regime_state(self):
+        feats = compute_regime_features(make_synthetic_prices(["AAPL"], n_days=400))
+        model = GaussianRegimeModel(n_states=3).fit(feats.values)
+        state = model.classify(feats.values)
+        assert state.separation >= 0.0
+        assert state.separation == model.separation(state.label)
+
+    def test_separation_unknown_label_is_inf(self):
+        model = GaussianRegimeModel(n_states=3)
+        assert model.separation(CHOP) == float("inf")
+
 
 # ---------------------------------------------------------------------------
 # Per-symbol strategy
@@ -196,6 +227,57 @@ class TestRegimeHMMStrategy:
 
         monkeypatch.setattr(GaussianRegimeModel, "fit", boom)
         assert get("regime_hmm")().generate(_view(_store())) == []
+
+    def test_low_separation_damps_bull_bear_signal(self, monkeypatch):
+        """A thin-margin (low-separation) label should be damped toward
+        neutral rather than traded at full confidence, but keep its sign."""
+
+        def fake_classify(self, X):
+            return RegimeState(
+                label=BULL, confidence=0.9, state_idx=0, posterior=[0.9, 0.05, 0.05],
+                separation=0.05,  # far below default min_state_separation=0.5
+            )
+
+        monkeypatch.setattr(GaussianRegimeModel, "classify", fake_classify)
+        strat = get("regime_hmm")(
+            {"min_state_separation": 0.5, "separation_damping_floor": 0.15}
+        )
+        signals = strat.generate(_view(_store()))
+        assert signals
+        for sig in signals:
+            assert sig.meta["separation"] == 0.05
+            assert sig.meta["separation_damping"] == pytest.approx(0.15)
+            # Damped floor (0.15) applied to confidence (0.9), sign preserved.
+            assert sig.score == pytest.approx(0.15 * 0.9)
+
+    def test_high_separation_is_not_damped(self, monkeypatch):
+        def fake_classify(self, X):
+            return RegimeState(
+                label=BEAR, confidence=0.8, state_idx=2, posterior=[0.1, 0.1, 0.8],
+                separation=10.0,  # well above threshold
+            )
+
+        monkeypatch.setattr(GaussianRegimeModel, "classify", fake_classify)
+        strat = get("regime_hmm")({"min_state_separation": 0.5})
+        signals = strat.generate(_view(_store()))
+        assert signals
+        for sig in signals:
+            assert sig.meta["separation_damping"] == pytest.approx(1.0)
+            assert sig.score == pytest.approx(-0.8)
+
+    def test_min_state_separation_disabled_is_noop(self, monkeypatch):
+        def fake_classify(self, X):
+            return RegimeState(
+                label=BULL, confidence=0.7, state_idx=0, posterior=[0.7, 0.2, 0.1],
+                separation=0.0,
+            )
+
+        monkeypatch.setattr(GaussianRegimeModel, "classify", fake_classify)
+        strat = get("regime_hmm")({"min_state_separation": 0.0})
+        signals = strat.generate(_view(_store()))
+        assert signals
+        for sig in signals:
+            assert sig.score == pytest.approx(0.7)
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,26 @@ class BacktestConfig(BaseModel):
     initial_capital: float = 10_000_000
     commission_pct: float = 0.001
     slippage_pct: float = 0.0005
+    # Bid-ask spread cost: an approximation of the cost of crossing the
+    # quoted spread, charged per trade like commission (distinct from
+    # slippage_pct, which approximates price-impact from order size/urgency
+    # rather than the spread itself). See firm.backtest.commissions.
+    spread_pct: float = 0.0002
+    # Annualized cost of borrowing shares to sell short, charged daily on
+    # short notional (see firm.backtest.firm_strategy). 0.3% is a
+    # conservative "general collateral" / easy-to-borrow estimate — real
+    # hard-to-borrow names can run materially higher; this is a portfolio-
+    # wide approximation, not a per-symbol borrow-availability model.
+    short_borrow_annual_pct: float = 0.003
+    # Size/volume-aware market-impact cost (square-root law: impact scales
+    # with sqrt(trade notional / ADV dollars) — see
+    # firm.agents._liquidity.sqrt_impact_pct), on top of the flat
+    # commission/slippage/spread rates above, which don't scale with order
+    # size relative to a name's trading volume. 0.0 disables it (this
+    # Python-level default keeps every existing direct-construction/test
+    # backtest unchanged); config/settings.yaml opts in with a conservative
+    # calibration for real runs.
+    market_impact_coefficient: float = 0.0
     rebalance_frequency: str = "weekly"
 
 
@@ -40,6 +60,15 @@ class RiskConfig(BaseModel):
     max_sector_pct: float = 0.25
     vol_target: float = 0.15
     max_drawdown_pct: float = 0.20
+    # Optional ADV/participation-rate liquidity cap (None = disabled). See
+    # firm.agents.risk.RiskAgent._cap_liquidity.
+    max_participation_pct: float | None = None
+    adv_lookback_days: int = 20
+    # Optional pairwise-correlation concentration cap (None = disabled). See
+    # firm.agents.risk.RiskAgent._cap_correlated_exposure.
+    correlation_threshold: float | None = None
+    max_correlated_pair_pct: float = 0.25
+    correlation_lookback_days: int = 60
     # Optional HMM market-regime exposure overlay (off unless ``enabled: true``).
     # See firm.agents.risk.RiskAgent and firm.regime.detector.MarketRegimeDetector.
     regime_overlay: dict[str, Any] = {}
@@ -81,6 +110,12 @@ class Settings(BaseSettings):
     kelly_fraction: float = 0.5
     # Research signal combination: {"method": "confidence"|"optimal"}.
     signal_combination: dict[str, Any] = Field(default_factory=dict)
+    # Generic per-strategy rolling-Sharpe circuit breaker (off unless
+    # ``enabled: true``). See firm.agents.research._circuit_breaker.
+    strategy_circuit_breaker: dict[str, Any] = Field(default_factory=dict)
+    # Per-strategy score multipliers conditioned on market regime (off unless
+    # ``enabled: true``). See firm.agents.research._regime_weights.
+    strategy_regime_weights: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

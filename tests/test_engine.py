@@ -294,6 +294,69 @@ class TestShouldRebalance:
 # 5. BacktestEngine.setup
 # ======================================================================
 
+class TestDynamicUniverseResolution:
+    """FirmStrategy must narrow the strategy-visible universe to whoever the
+    pit_store's resolver says is *actually* a member on each rebalance date
+    (point-in-time survivorship correctness), while still marking-to-market
+    every loaded feed regardless of current membership."""
+
+    def _make_recording_orchestrator(self):
+        orch = MagicMock()
+        seen: list[list[str]] = []
+
+        def _step(context):
+            seen.append(context["pit_view"].universe)
+            return [], MagicMock()
+
+        orch.step.side_effect = _step
+        orch.config = {}
+        return orch, seen
+
+    def test_universe_narrows_and_widens_across_a_membership_change(self):
+        from firm.data.universe import UniverseResolver
+
+        df = _synthetic_prices(["ALWAYS", "LATE_JOINER"], days=40, start="2023-01-02")
+        store = _make_pit_store(df)
+        # LATE_JOINER's feed is loaded (present in df/universe) but it isn't
+        # a real member until roughly the midpoint of the 40-day window.
+        joins_on = df["date"].sort_values().unique()[20]
+        constituents = pd.DataFrame({
+            "symbol": ["ALWAYS", "LATE_JOINER"],
+            "added_date": [pd.NaT, joins_on],
+            "removed_date": [pd.NaT, pd.NaT],
+        })
+        store.set_universe_resolver(UniverseResolver(constituents))
+
+        orch, seen = self._make_recording_orchestrator()
+        config = {"initial_capital": 100_000, "rebalance_frequency": "daily"}
+        engine = BacktestEngine(config)
+        engine.setup(df, store, orch, ["ALWAYS", "LATE_JOINER"])
+        engine.run()
+
+        assert seen, "orchestrator.step was never called"
+        early_universes = seen[:15]
+        later_universes = seen[-5:]
+        assert all("LATE_JOINER" not in u for u in early_universes)
+        assert all("LATE_JOINER" in u for u in later_universes)
+        # The always-active member is never excluded.
+        assert all("ALWAYS" in u for u in seen)
+
+    def test_no_resolver_installed_sees_full_universe_throughout(self):
+        """No resolver installed (the common case) must behave exactly as
+        before: every rebalance sees the full, unchanging universe."""
+        df = _synthetic_prices(["AAPL", "MSFT"], days=15, start="2023-01-02")
+        store = _make_pit_store(df)
+
+        orch, seen = self._make_recording_orchestrator()
+        config = {"initial_capital": 100_000, "rebalance_frequency": "daily"}
+        engine = BacktestEngine(config)
+        engine.setup(df, store, orch, ["AAPL", "MSFT"])
+        engine.run()
+
+        assert seen
+        assert all(set(u) == {"AAPL", "MSFT"} for u in seen)
+
+
 class TestBacktestEngineSetup:
     """Verify that engine setup wires components without errors."""
 

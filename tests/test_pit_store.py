@@ -89,6 +89,56 @@ class TestGetPrices:
         s.set_universe_resolver(UniverseResolver(constituents))
         assert s.get_universe(datetime(2020, 1, 2)) == ["AAPL"]
 
+    def test_get_universe_union_uses_resolver_symbols_between(self) -> None:
+        """The feed-loading superset must include a name that joins mid-
+        window even though it wasn't a member on the start date."""
+        from firm.data.universe import UniverseResolver
+
+        prices = pd.DataFrame({
+            "date": pd.to_datetime(["2020-01-01"] * 3),
+            "symbol": ["AAPL", "LATE_JOINER", "GONE_EARLY"],
+            "close": [1.0, 2.0, 3.0],
+        })
+        s = PointInTimeDataStore()
+        s.load(prices)
+        constituents = pd.DataFrame({
+            "symbol": ["AAPL", "LATE_JOINER", "GONE_EARLY"],
+            "added_date": [pd.NaT, pd.Timestamp("2020-06-01"), pd.NaT],
+            "removed_date": [pd.NaT, pd.NaT, pd.Timestamp("2020-02-01")],
+        })
+        s.set_universe_resolver(UniverseResolver(constituents))
+
+        # A single-date snapshot at the start would miss LATE_JOINER and
+        # still include GONE_EARLY at the end snapshot would miss it too.
+        union = s.get_universe_union(datetime(2020, 1, 1), datetime(2020, 12, 31))
+        assert set(union) == {"AAPL", "LATE_JOINER", "GONE_EARLY"}
+        assert s.get_universe(datetime(2020, 1, 1)) == ["AAPL", "GONE_EARLY"]
+
+    def test_get_universe_union_degrades_without_symbols_between(self) -> None:
+        """A resolver that's just a plain callable (no symbols_between)
+        degrades to the union of the start/end snapshots."""
+        prices = pd.DataFrame({
+            "date": pd.to_datetime(["2020-01-01", "2020-01-01"]),
+            "symbol": ["AAPL", "MSFT"],
+            "close": [1.0, 2.0],
+        })
+        s = PointInTimeDataStore()
+        s.load(prices)
+        s.set_universe_resolver(lambda asof: ["AAPL"] if asof.year == 2020 else ["MSFT"])
+        union = s.get_universe_union(datetime(2020, 6, 1), datetime(2021, 6, 1))
+        assert set(union) == {"AAPL", "MSFT"}
+
+    def test_get_universe_union_no_resolver_falls_back_to_loaded_prices(self) -> None:
+        prices = pd.DataFrame({
+            "date": pd.to_datetime(["2020-01-01", "2020-01-01"]),
+            "symbol": ["AAPL", "MSFT"],
+            "close": [1.0, 2.0],
+        })
+        s = PointInTimeDataStore()
+        s.load(prices)
+        union = s.get_universe_union(datetime(2020, 1, 1), datetime(2020, 12, 31))
+        assert set(union) == {"AAPL", "MSFT"}
+
 
 class TestGetFundamentals:
     def test_returns_recent_snapshots_not_just_one(self, store: PointInTimeDataStore) -> None:

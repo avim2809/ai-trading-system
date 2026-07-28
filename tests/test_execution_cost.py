@@ -40,3 +40,32 @@ class TestPreTradeCost:
         # Matches the prior aggregate formulation: notional * (comm + slip).
         total_notional = sum(o["notional"] for o in report.fills)
         assert abs(report.costs - total_notional * (0.001 + 0.0005)) < 1e-9
+
+    def test_spread_cost_is_included_in_estimate(self):
+        agent = ExecutionAgent({
+            "commission_pct": 0.001, "slippage_pct": 0.0005, "spread_pct": 0.0002,
+        })
+        ctx = AgentContext(now=NOW, config={"initial_capital": 1_000_000})
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.1})
+
+        report = agent.run(ctx, decision=decision, prices={"AAPL": 100.0})
+
+        order = report.fills[0]
+        notional = order["notional"]
+        assert order["est_spread"] == notional * 0.0002
+        assert order["est_cost"] == (
+            order["est_commission"] + order["est_slippage"] + order["est_spread"]
+        )
+
+    def test_spread_defaults_to_zero_when_unconfigured(self):
+        """Backward compatibility: agents built without spread_pct in config
+        (older configs / tests) must behave exactly as before."""
+        agent = ExecutionAgent({"commission_pct": 0.001, "slippage_pct": 0.0005})
+        ctx = AgentContext(now=NOW, config={"initial_capital": 1_000_000})
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.1})
+
+        report = agent.run(ctx, decision=decision, prices={"AAPL": 100.0})
+
+        order = report.fills[0]
+        assert order["est_spread"] == 0.0
+        assert order["est_cost"] == order["est_commission"] + order["est_slippage"]

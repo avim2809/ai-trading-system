@@ -89,8 +89,67 @@ class UniverseResolver:
         """
         return self.symbols_asof(asof)
 
+    def symbols_between(
+        self, start: datetime, end: datetime, index: str | None = None
+    ) -> list[str]:
+        """Union of every symbol that was a member at *any point* within
+        ``[start, end]`` — the superset a backtest needs to load data feeds
+        for, since a name that joins mid-window (e.g. an IPO/index addition
+        after ``start``) still needs its feed loaded even though
+        :meth:`symbols_asof` at ``start`` alone wouldn't include it yet.
+
+        A membership window ``[added_date, removed_date)`` overlaps
+        ``[start, end]`` when ``added_date <= end`` (or unknown) and
+        ``removed_date > start`` (or still open) — the same logic as
+        :meth:`symbols_asof` but tested against the whole window instead of
+        a single instant.
+        """
+        start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
+        df = self._df
+        if index is not None:
+            df = df[df[schemas.COL_INDEX] == index]
+        added = df[schemas.COL_ADDED_DATE]
+        removed = df[schemas.COL_REMOVED_DATE]
+        mask = (added.isna() | (added <= end_ts)) & (removed.isna() | (removed > start_ts))
+        members = df.loc[mask, schemas.COL_SYMBOL].astype(str).unique().tolist()
+        return sorted(members)
+
     def delisted_between(self, start: datetime, end: datetime) -> list[str]:
         """Symbols removed from the index within ``[start, end]`` (audit helper)."""
         removed = self._df[schemas.COL_REMOVED_DATE]
         mask = removed.between(pd.Timestamp(start), pd.Timestamp(end))
         return sorted(self._df.loc[mask, schemas.COL_SYMBOL].astype(str).unique().tolist())
+
+
+def build_resolver(
+    membership: pd.DataFrame | None,
+    fallback_symbols: Sequence[str],
+) -> "UniverseResolver":
+    """Build a resolver from real membership data, degrading to a static list.
+
+    When *membership* is a non-empty frame conforming to
+    :data:`firm.data.schemas.UNIVERSE_COLUMNS` it is used directly and delisted
+    names remain tradable up to their removal date — the actual survivorship-bias
+    fix. Without real membership data this degrades to
+    :meth:`UniverseResolver.from_static`, which treats every symbol in
+    *fallback_symbols* as always-active for the whole backtest window; that mode
+    keeps the resolver hook consistently wired (so real data can be dropped in
+    later without further code changes) but does **not** by itself eliminate
+    survivorship bias — see the ``pit-universe-membership`` follow-up, which also
+    needs engine-level support for symbols entering/leaving the tradable set
+    mid-backtest.
+    """
+    if membership is not None and not membership.empty:
+        log.info(
+            "Universe resolver: using real membership data (%d rows, %d symbols)",
+            len(membership), membership[schemas.COL_SYMBOL].nunique(),
+        )
+        return UniverseResolver(membership)
+    log.warning(
+        "Universe resolver: no historical index-membership data found — falling "
+        "back to a static, always-active symbol list (%d symbols). Survivorship "
+        "bias is NOT corrected in this mode; see the pit-universe-membership "
+        "follow-up task.",
+        len(fallback_symbols),
+    )
+    return UniverseResolver.from_static(fallback_symbols)

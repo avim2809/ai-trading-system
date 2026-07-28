@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from firm.eval.overfitting import (
     cscv_pbo,
@@ -88,3 +89,46 @@ class TestWalkForward:
 
     def test_too_few_folds_empty(self):
         assert walk_forward_overfitting([np.array([0.1, 0.2, 0.3])]) == {}
+
+    def test_no_trial_data_omits_pbo_and_dsr_equals_psr(self):
+        """Without genuine competing-candidate data, PBO can't be computed
+        (there's nothing to run CSCV over) and DSR must degrade to plain PSR
+        — treating sequential OOS folds of one fixed config as if they were
+        independent trials would misrepresent how many configs were tried."""
+        rng = np.random.default_rng(6)
+        folds = [rng.normal(0.001, 0.01, size=60) for _ in range(5)]
+        result = walk_forward_overfitting(folds)
+        assert "pbo" not in result
+        assert result["deflated_sharpe"] == pytest.approx(
+            result["probabilistic_sharpe"]
+        )
+
+    def test_genuine_trial_data_produces_pbo(self):
+        """With a real per-fold parameter grid, PBO is computed from each
+        fold's own (candidates x train-periods) matrix, not from the OOS
+        fold-to-fold spread."""
+        rng = np.random.default_rng(7)
+        oos_folds = [rng.normal(0.001, 0.01, size=40) for _ in range(4)]
+        # Each fold "trained" 3 candidates over a 60-period train window.
+        trial_returns = [
+            [rng.normal(0.0005, 0.01, size=60) for _ in range(3)] for _ in range(4)
+        ]
+        result = walk_forward_overfitting(oos_folds, fold_trial_returns=trial_returns)
+        assert "pbo" in result
+        assert 0.0 <= result["pbo"] <= 1.0
+        assert result["pbo_n_folds"] == 4
+
+    def test_genuine_trial_data_feeds_dsr_trial_count(self):
+        """DSR's trial penalty should reflect the real number of candidates
+        tried (n_folds * candidates_per_fold), not the fold count alone."""
+        rng = np.random.default_rng(8)
+        oos_folds = [rng.normal(0.001, 0.01, size=40) for _ in range(4)]
+        many_trials = [
+            [rng.normal(0.0005, 0.01, size=60) for _ in range(10)] for _ in range(4)
+        ]
+        few_trials = [
+            [rng.normal(0.0005, 0.01, size=60) for _ in range(1)] for _ in range(4)
+        ]
+        many_result = walk_forward_overfitting(oos_folds, fold_trial_returns=many_trials)
+        few_result = walk_forward_overfitting(oos_folds, fold_trial_returns=few_trials)
+        assert many_result["deflated_sharpe"] <= few_result["deflated_sharpe"] + 1e-9

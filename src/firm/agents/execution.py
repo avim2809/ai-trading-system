@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from firm.agents._liquidity import estimate_adv_dollars, sqrt_impact_pct
 from firm.agents.base import Agent, AgentContext
 from firm.contracts.models import ExecutionReport, RiskDecision
 
@@ -26,15 +27,52 @@ class ExecutionAgent(Agent):
         cfg = config or {}
         self.commission_pct: float = cfg.get("commission_pct", 0.001)
         self.slippage_pct: float = cfg.get("slippage_pct", 0.0005)
+        # Bid-ask spread cost — approximates the cost of crossing the quoted
+        # spread, on top of commission/slippage. Short-borrow fees are NOT
+        # estimated here: IBKR charges/reports real borrow costs against the
+        # live account directly (see config/live.yaml costs: block).
+        self.spread_pct: float = cfg.get("spread_pct", 0.0)
+        # Size/volume-aware market-impact term, on top of the flat commission
+        # + slippage + spread rates above. Those are flat percentages of
+        # notional regardless of order size relative to the name's trading
+        # volume — realistic for a small trade, but understate cost for a
+        # large one and overstate it for a tiny one. This adds a
+        # participation-rate-scaled term (see firm.agents._liquidity.
+        # sqrt_impact_pct) using the same ADV lookback/definition as
+        # RiskAgent's liquidity cap (``adv_lookback_days``, shared top-level
+        # config key). 0.0 (Python-level default) disables it entirely;
+        # config/live.yaml and config/settings.yaml opt in with a
+        # conservative calibration.
+        self.market_impact_coefficient: float = cfg.get("market_impact_coefficient", 0.0)
+        self.adv_lookback_days: int = int(cfg.get("adv_lookback_days", 20))
 
     def run(self, ctx: AgentContext, **inputs: Any) -> ExecutionReport:
         decision: RiskDecision = inputs["decision"]
         portfolio = inputs.get("portfolio")
         prices: dict[str, float] = inputs.get("prices", {})
         per_strategy: dict[str, dict[str, float]] = inputs.get("per_strategy", {})
+        attribution = inputs.get("attribution")
 
         target_weights = decision.adjusted_targets
         symbol_strategy = self._dominant_strategy_by_symbol(per_strategy)
+        # This cycle's per-strategy attribution only covers symbols present in
+        # the new target weights — a symbol being closed out entirely (held
+        # today, absent from `targets`) has no entry here even though it was
+        # opened by a specific strategy. Fall back to whichever strategy
+        # currently holds the largest position in that symbol so exit trades
+        # stay traceable instead of collapsing into "composite".
+        if attribution is not None:
+            held_strategy = attribution.dominant_strategy_by_symbol()
+            missing = 0
+            for sym in held_strategy:
+                if sym not in symbol_strategy:
+                    symbol_strategy[sym] = held_strategy[sym]
+                    missing += 1
+            if missing:
+                log.debug(
+                    "Attributed %d closing/held symbol(s) to strategy via "
+                    "held-position fallback", missing,
+                )
 
         if portfolio is not None and prices:
             current_weights = portfolio.get_weights(prices)
@@ -67,6 +105,14 @@ class ExecutionAgent(Agent):
             quantity = abs(dollar_amount / price)
             side = "buy" if dollar_amount > 0 else "sell"
 
+            if sym not in symbol_strategy:
+                log.warning(
+                    "No strategy attribution for %s order in %s (no current-cycle "
+                    "signal and no held position) — falling back to 'composite'; "
+                    "P&L for this trade will not be traceable to a strategy",
+                    side, sym,
+                )
+
             # Pre-trade transaction-cost estimate per order, using the same
             # commission + slippage model as the backtest. Surfacing it per
             # order (not just in aggregate) lets the live approval/routing
@@ -74,6 +120,8 @@ class ExecutionAgent(Agent):
             notional = abs(dollar_amount)
             est_commission = notional * self.commission_pct
             est_slippage = notional * self.slippage_pct
+            est_spread = notional * self.spread_pct
+            est_impact = self._estimate_impact_cost(ctx, sym, notional)
 
             orders.append(
                 {
@@ -89,7 +137,9 @@ class ExecutionAgent(Agent):
                     "strategy": symbol_strategy.get(sym, "composite"),
                     "est_commission": est_commission,
                     "est_slippage": est_slippage,
-                    "est_cost": est_commission + est_slippage,
+                    "est_spread": est_spread,
+                    "est_impact": est_impact,
+                    "est_cost": est_commission + est_slippage + est_spread + est_impact,
                 }
             )
             turnover += abs(diff_w)
@@ -99,6 +149,27 @@ class ExecutionAgent(Agent):
         costs = sum(o["est_cost"] for o in orders)
 
         return ExecutionReport(fills=orders, turnover=turnover, costs=costs)
+
+    def _estimate_impact_cost(self, ctx: AgentContext, symbol: str, notional: float) -> float:
+        """Size/volume-aware market-impact cost estimate for one order.
+
+        Returns ``0.0`` (no-op, matching pre-existing flat-pct-only
+        behaviour) whenever the model is disabled (``market_impact_coefficient
+        <= 0``), ``ctx.pit_view`` isn't wired up, or ADV data isn't
+        available — never raises, since a missing/thin data provider must
+        degrade the cost estimate, not block order generation.
+        """
+        if self.market_impact_coefficient <= 0 or notional <= 0:
+            return 0.0
+        pit_view = getattr(ctx, "pit_view", None)
+        if pit_view is None:
+            return 0.0
+        adv_dollars = estimate_adv_dollars(pit_view, symbol, self.adv_lookback_days)
+        if not adv_dollars:
+            return 0.0
+        participation = notional / adv_dollars
+        impact_pct = sqrt_impact_pct(participation, self.market_impact_coefficient)
+        return notional * impact_pct
 
     @staticmethod
     def _dominant_strategy_by_symbol(

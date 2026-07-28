@@ -234,23 +234,40 @@ def _period_sharpe(returns: np.ndarray) -> float:
     return float(r.mean() / sd)
 
 
-def walk_forward_overfitting(fold_returns: list[np.ndarray]) -> dict:
+def walk_forward_overfitting(
+    fold_returns: list[np.ndarray],
+    fold_trial_returns: list[list[np.ndarray]] | None = None,
+) -> dict:
     """Overfitting read across walk-forward out-of-sample folds.
 
-    Each element of ``fold_returns`` is one fold's OOS per-period return series.
-    Treating the folds as pseudo-trials, this computes:
+    Each element of ``fold_returns`` is one fold's OOS (test-window) per-period
+    return series for the config that was actually selected and traded that
+    fold — this always feeds ``probabilistic_sharpe`` (a plain PSR read of the
+    realised OOS track record needs no notion of "trials" at all).
 
-    - ``pbo`` — CSCV over a matrix whose columns are the folds truncated to the
-      shortest fold length (a coarse robustness signal; folds are the same
-      config across time, not competing parameter sets, so read it as a
-      "does OOS rank stay stable" heuristic). Omitted when there are too few
-      folds/rows.
-    - ``deflated_sharpe`` — PSR of the pooled OOS returns against a benchmark
-      inflated by the spread of per-fold Sharpes (selection across folds).
-    - ``probabilistic_sharpe`` — PSR of the pooled OOS returns vs zero.
-    - ``verdict`` — plain-English pass/fail combining PBO and DSR.
+    ``fold_trial_returns``, when given, is the *genuine* trial data: for each
+    fold, the per-period **train-window** return series of every candidate
+    configuration that was actually backtested and compared before selecting
+    the winner (e.g. a walk-forward parameter grid). This is what makes
+    ``pbo``/``deflated_sharpe`` meaningful in the Bailey/López de Prado sense —
+    CSCV and the trial-count penalty are both defined over *competing
+    configurations evaluated on the same period*, not over sequential
+    out-of-sample folds of a single fixed config. Consequently:
 
-    Returns an empty dict when there is not enough data to say anything.
+    - ``pbo`` is the mean, across folds with >=2 candidates and enough
+      train-window rows, of a CSCV-PBO computed on that fold's own
+      (candidates x train-periods) returns matrix. Omitted entirely when no
+      fold has genuine multi-candidate trial data — a fabricated PBO from
+      folds-as-trials would silently misrepresent what was actually tested.
+    - ``deflated_sharpe`` benchmarks the pooled OOS Sharpe against every
+      candidate's train Sharpe, across every fold — the true count and spread
+      of configurations tried. With no genuine trial data (``fold_trial_returns``
+      omitted, or every fold ran a single candidate), there is truly only one
+      trial and DSR correctly degrades to plain PSR rather than penalising for
+      trials that were never tried.
+    - ``verdict`` — plain-English pass/fail combining PBO (when available) and DSR.
+
+    Returns an empty dict when there is not enough OOS data to say anything.
     """
     series = [np.asarray(f, dtype=float) for f in fold_returns]
     series = [s[np.isfinite(s)] for s in series if len(s) >= 2]
@@ -267,22 +284,46 @@ def walk_forward_overfitting(fold_returns: list[np.ndarray]) -> dict:
         return {}
 
     pooled = np.concatenate(series)
-    trial_sharpes = np.array([_period_sharpe(s) for s in series], dtype=float)
+
+    trial_sharpes: list[float] = []
+    fold_pbos: list[float] = []
+    n_trial_folds = 0
+    for fold_trials in (fold_trial_returns or []):
+        trial_series = [np.asarray(t, dtype=float) for t in fold_trials]
+        trial_series = [t[np.isfinite(t)] for t in trial_series if len(t) >= 2]
+        if not trial_series:
+            continue
+        n_trial_folds += 1
+        # Every candidate genuinely backtested on this fold's train window is
+        # a real trial and counts toward DSR's penalty, even a lone one (no
+        # selection took place, but it was still one configuration tried).
+        trial_sharpes.extend(_period_sharpe(t) for t in trial_series)
+        # PBO strictly needs >=2 competing candidates to rank against each
+        # other within a CSCV split.
+        if len(trial_series) < 2:
+            continue
+        min_len = min(len(t) for t in trial_series)
+        if min_len < 8:
+            continue
+        n_partitions = max(4, min(8, min_len // 2))
+        matrix = np.column_stack([t[:min_len] for t in trial_series])
+        fold_pbos.append(cscv_pbo(matrix, n_partitions=n_partitions))
 
     result: dict = {
         "n_folds": len(series),
         "probabilistic_sharpe": probabilistic_sharpe(pooled, 0.0),
-        "deflated_sharpe": deflated_sharpe(pooled, trial_sharpes),
+        "deflated_sharpe": deflated_sharpe(
+            pooled, np.array(trial_sharpes, dtype=float)
+        ),
     }
-
-    # PBO needs a rectangular matrix: truncate every fold to the shortest length
-    # and stack as columns. Require enough rows for at least an S=4 CSCV split.
-    min_len = min(len(s) for s in series)
-    if len(series) >= 4 and min_len >= 8:
-        n_partitions = min(8, (min_len // 2) * 2 // 2 * 2)
-        n_partitions = max(4, min(n_partitions, min_len // 2))
-        matrix = np.column_stack([s[:min_len] for s in series])
-        result["pbo"] = cscv_pbo(matrix, n_partitions=n_partitions)
+    if fold_pbos:
+        result["pbo"] = float(np.mean(fold_pbos))
+        result["pbo_n_folds"] = len(fold_pbos)
+    log.debug(
+        "walk_forward_overfitting: %d/%d folds had genuine multi-candidate "
+        "trial data (%d contributed a within-fold PBO); %d trial Sharpes feed DSR",
+        n_trial_folds, len(fold_returns), len(fold_pbos), len(trial_sharpes),
+    )
 
     result["verdict"] = verdict(
         pbo=result.get("pbo"), dsr=result.get("deflated_sharpe")

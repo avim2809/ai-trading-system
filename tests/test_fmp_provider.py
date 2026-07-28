@@ -26,7 +26,9 @@ def provider():
 
 
 class TestFMPFundamentalsPublicationLag:
-    def test_date_is_shifted_forward_by_the_publication_lag(self, provider):
+    def test_date_is_shifted_forward_by_the_publication_lag_when_no_filling_date(self, provider):
+        """No `fillingDate` on the matched income record (e.g. it didn't
+        match any ratios record) must fall back to the heuristic."""
         period_end = "2025-12-31"
         ratios_response = [{
             "date": period_end, "fiscalYear": 2025, "period": "Q4",
@@ -52,6 +54,37 @@ class TestFMPFundamentalsPublicationLag:
         assert len(df) == 1
         assert pd.Timestamp(df.iloc[0]["date"]) == expected
         assert pd.Timestamp(df.iloc[0]["date"]) > pd.Timestamp(period_end)
+
+    def test_uses_real_filling_date_when_available(self, provider):
+        """FMP's income-statement endpoint exposes the real SEC
+        `fillingDate` — prefer it over the period-end+lag heuristic."""
+        period_end = "2025-12-31"
+        filling_date = "2026-01-20"  # well under the 45-day heuristic
+        ratios_response = [{
+            "date": period_end, "fiscalYear": 2025, "period": "Q4",
+            "priceToEarningsRatio": 20.0, "priceToBookRatio": 3.0,
+            "returnOnEquity": 0.15, "debtToEquityRatio": 0.5,
+            "dividendYield": 0.01,
+        }]
+        income_response = [{
+            "fiscalYear": 2025, "period": "Q4", "revenue": 1e9,
+            "netIncome": 1e8, "eps": 2.0, "fillingDate": filling_date,
+        }]
+        metrics_response = [{"fiscalYear": 2025, "period": "Q4", "marketCap": 1e10}]
+
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(
+            side_effect=lambda path, **_: {
+                "/stable/income-statement": income_response,
+                "/stable/key-metrics": metrics_response,
+                "/stable/ratios": ratios_response,
+            }[path]
+        )
+
+        df = provider.get_fundamentals(["AAPL"], "2020-01-01", "2027-01-01")
+
+        assert len(df) == 1
+        assert pd.Timestamp(df.iloc[0]["date"]) == pd.Timestamp(filling_date)
 
     def test_402_subscription_limit_logs_warning_not_exception(self, provider, caplog):
         provider._client = MagicMock()

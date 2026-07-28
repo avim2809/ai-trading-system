@@ -321,6 +321,82 @@ class TestExperimentRunner:
         assert len(sharpe["values"]) == 3
         assert sharpe["min"] <= sharpe["mean"] <= sharpe["max"]
 
+    def test_walk_forward_no_grid_skips_train_and_matches_legacy_shape(
+        self, tmp_runs_dir, sample_config
+    ):
+        """Default (no param_grid) behaviour is unchanged: no
+        walk_forward_selection.json, notes don't mention candidate selection."""
+        runner = ExperimentRunner(registry=RunRegistry(base_dir=tmp_runs_dir))
+        runs = runner.run_walk_forward(sample_config, n_splits=2, train_pct=0.7)
+
+        assert len(runs) == 2
+        for run in runs:
+            assert run.status == "completed"
+            assert "selected on train" not in run.notes
+            assert not (Path(run.artifacts_dir) / "walk_forward_selection.json").exists()
+
+    def test_walk_forward_with_param_grid_selects_on_train(
+        self, tmp_runs_dir, sample_config
+    ):
+        """A real param_grid makes each fold genuinely optimize: every
+        candidate is backtested on the train window and the winner (not the
+        base config) is what's actually run on the test window."""
+        runner = ExperimentRunner(registry=RunRegistry(base_dir=tmp_runs_dir))
+        param_grid = [
+            {"strategy_params": {"momentum": {"lookback_months": 6}}},
+            {"strategy_params": {"momentum": {"lookback_months": 12}}},
+        ]
+        runs = runner.run_walk_forward(
+            sample_config, n_splits=2, train_pct=0.7, param_grid=param_grid
+        )
+
+        assert len(runs) == 2
+        for run in runs:
+            assert run.status == "completed"
+            assert "selected on train" in run.notes
+
+            selection_path = Path(run.artifacts_dir) / "walk_forward_selection.json"
+            assert selection_path.exists()
+            selection = json.loads(selection_path.read_text(encoding="utf-8"))
+            assert selection["selection_metric"] == "sharpe_ratio"
+            assert selection["selected_index"] in (0, 1)
+            assert len(selection["trials"]) == 2
+            assert len(selection["train_returns_by_trial"]) == 2
+
+            # The fold's config must reflect the *winning* candidate's
+            # override, not just the base config verbatim.
+            winner = param_grid[selection["selected_index"]]
+            assert (
+                run.config["strategy_params"]["momentum"]["lookback_months"]
+                == winner["strategy_params"]["momentum"]["lookback_months"]
+            )
+
+    def test_aggregate_walk_forward_with_param_grid_uses_genuine_trials(
+        self, tmp_runs_dir, sample_config
+    ):
+        """With a real grid, the overfitting block is computed from genuine
+        per-fold competing candidates (persisted train_returns_by_trial),
+        not the old folds-as-pseudo-trials heuristic."""
+        runner = ExperimentRunner(registry=RunRegistry(base_dir=tmp_runs_dir))
+        param_grid = [
+            {"strategy_params": {"momentum": {"lookback_months": 6}}},
+            {"strategy_params": {"momentum": {"lookback_months": 12}}},
+            {"strategy_params": {"momentum": {"lookback_months": 9}}},
+        ]
+        runs = runner.run_walk_forward(
+            sample_config, n_splits=2, train_pct=0.7, param_grid=param_grid
+        )
+        agg = runner.aggregate_walk_forward(runs)
+
+        assert "overfitting" in agg
+        of = agg["overfitting"]
+        assert "deflated_sharpe" in of
+        assert "probabilistic_sharpe" in of
+        # Enough train-window rows/candidates should yield a genuine PBO.
+        if "pbo" in of:
+            assert 0.0 <= of["pbo"] <= 1.0
+            assert of["pbo_n_folds"] >= 1
+
     def test_aggregate_walk_forward_empty(self):
         agg = ExperimentRunner.aggregate_walk_forward([])
         assert agg["n_folds"] == 0
@@ -358,6 +434,53 @@ class TestExperimentRunner:
         assert of["n_folds"] == 5
         assert "deflated_sharpe" in of
         assert of["deflated_sharpe"] <= of["probabilistic_sharpe"] + 1e-9
+
+    def test_aggregate_walk_forward_reads_selection_json_for_pbo(self, tmp_path):
+        """A fold with a walk_forward_selection.json (genuine multi-candidate
+        train trials) contributes a real PBO; one without contributes only to
+        the pooled OOS PSR/DSR baseline."""
+        from datetime import datetime
+
+        runs = []
+        for i in range(4):
+            art = tmp_path / f"fold{i}"
+            art.mkdir()
+            nav = [100_000.0]
+            for _ in range(40):
+                nav.append(nav[-1] * (1 + 0.001))
+            (art / "equity.json").write_text(
+                json.dumps({"dates": [], "values": nav}), encoding="utf-8"
+            )
+            if i < 2:
+                rng = np.random.default_rng(i)
+                (art / "walk_forward_selection.json").write_text(
+                    json.dumps({
+                        "selection_metric": "sharpe_ratio",
+                        "selected_index": 0,
+                        "trials": [],
+                        "train_returns_by_trial": [
+                            rng.normal(0.0005, 0.01, size=30).tolist()
+                            for _ in range(3)
+                        ],
+                    }),
+                    encoding="utf-8",
+                )
+            runs.append(
+                ExperimentRun(
+                    run_id=f"r{i}",
+                    config={},
+                    config_hash="x",
+                    start_time=datetime.now(),
+                    status="completed",
+                    metrics={"sharpe_ratio": 1.0},
+                    artifacts_dir=str(art),
+                )
+            )
+
+        agg = ExperimentRunner.aggregate_walk_forward(runs)
+        of = agg["overfitting"]
+        assert "pbo" in of
+        assert of["pbo_n_folds"] == 2
 
     def test_in_sample_oos_config_splitting(self, tmp_runs_dir, sample_config):
         runner = ExperimentRunner(registry=RunRegistry(base_dir=tmp_runs_dir))

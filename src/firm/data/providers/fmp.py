@@ -20,9 +20,9 @@ import pandas as pd
 from firm.config import Settings, get_settings
 from firm.data.providers._rest import RestClient
 from firm.data.providers.base import (
-    FUNDAMENTALS_PUBLICATION_LAG_DAYS,
     DataProvider,
     ProviderError,
+    resolve_filing_date,
 )
 from firm.data.schemas import FUNDAMENTAL_COLS, PRICE_COLS
 from firm.logging_setup import get_logger
@@ -152,12 +152,18 @@ class FMPProvider(DataProvider):
                     if not date_raw:
                         continue
                     period_end = pd.Timestamp(date_raw).normalize()
-                    ts = period_end + pd.Timedelta(days=FUNDAMENTALS_PUBLICATION_LAG_DAYS)
-                    if not (start_ts <= ts <= end_ts):
-                        continue
                     key = (rec.get("fiscalYear"), rec.get("period"))
                     inc = income_map.get(key, {})
                     met = metrics_map.get(key, {})
+                    # income-statement carries the real SEC filing date
+                    # (`fillingDate`) for this period; the ratios endpoint
+                    # itself doesn't expose one. Falls back to the
+                    # period-end+lag heuristic when unmatched/unavailable.
+                    ts = resolve_filing_date(
+                        period_end, inc.get("fillingDate"), symbol=symbol,
+                    )
+                    if not (start_ts <= ts <= end_ts):
+                        continue
                     frames.append(
                         pd.DataFrame(
                             [

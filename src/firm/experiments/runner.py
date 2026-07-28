@@ -113,6 +113,8 @@ class ExperimentRunner:
             "strategy_params", "regime_overlay", "agent_modes",
             "llm_config", "universe_symbols",
             "allocation_method", "kelly_fraction", "signal_combination",
+            "strategy_circuit_breaker",
+            "strategy_regime_weights",
         ):
             if key in config:
                 flat[key] = config[key]
@@ -155,12 +157,31 @@ class ExperimentRunner:
         n_splits: int = 5,
         train_pct: float = 0.7,
         seed: int = 42,
+        param_grid: list[dict[str, Any]] | None = None,
+        selection_metric: str = "sharpe_ratio",
     ) -> list[ExperimentRun]:
         """Run walk-forward analysis.
 
-        Splits the date range into n_splits windows.
-        For each window: train on train_pct, test on remaining.
-        Returns list of ExperimentRun for each fold.
+        Splits the date range into n_splits windows (train on train_pct,
+        test on the remainder). When *param_grid* names two or more candidate
+        config overrides, each fold performs genuine train->select->test
+        optimization: every candidate is backtested over that fold's **train**
+        window, the one with the best in-sample *selection_metric* (default
+        ``sharpe_ratio``) is picked, and *that* candidate — not the input
+        *config* verbatim — is what actually runs on the **test** window.
+        Without a grid (the default), the train window is never touched and
+        each fold simply backtests *config* unchanged over the test window,
+        exactly as before — a plain sequential out-of-sample replay, not an
+        optimization (there is nothing to optimize with a single candidate).
+
+        Every fold with a genuine multi-candidate selection gets a
+        ``walk_forward_selection.json`` written into its artifacts dir
+        (candidates tried, the winner, and each candidate's train-window
+        per-period returns) — :meth:`_walk_forward_overfitting` reads these
+        to compute PBO/DSR from real competing trials instead of the old
+        heuristic of treating sequential OOS folds as pseudo-trials.
+
+        Returns list of ExperimentRun for each fold (the *test*-window run).
         """
         backtest_cfg = config.get("backtest", {})
         start_date = backtest_cfg.get("start_date", "2018-01-01")
@@ -169,13 +190,25 @@ class ExperimentRunner:
         splits = self._compute_walk_forward_splits(
             start_date, end_date, n_splits, train_pct
         )
+        candidates = param_grid or [{}]
+        log.info(
+            "run_walk_forward: %d folds x %d candidate(s) (selection_metric=%s)",
+            len(splits), len(candidates), selection_metric,
+        )
 
         runs: list[ExperimentRun] = []
         for i, (train_start, train_end, test_start, test_end) in enumerate(
             splits
         ):
+            selected_override: dict[str, Any] = candidates[0]
+            selection: dict[str, Any] | None = None
+            if len(candidates) > 1:
+                selected_override, selection = self._select_candidate_on_train(
+                    config, candidates, train_start, train_end, selection_metric,
+                )
+
             fold_config = {
-                **config,
+                **self._merge_override(config, selected_override),
                 "backtest": {
                     **backtest_cfg,
                     "start_date": test_start,
@@ -187,14 +220,141 @@ class ExperimentRunner:
                     "train_end": train_end,
                     "test_start": test_start,
                     "test_end": test_end,
+                    **(
+                        {"selected_candidate": selection["selected_index"]}
+                        if selection
+                        else {}
+                    ),
                 },
             }
-            fold_run = self.run(
-                fold_config, seed=seed, notes=f"walk-forward fold {i}"
-            )
+            notes = f"walk-forward fold {i}"
+            if selection is not None:
+                notes += (
+                    f" (candidate {selection['selected_index']}/{len(candidates)}"
+                    " selected on train)"
+                )
+            fold_run = self.run(fold_config, seed=seed, notes=notes)
+            if selection is not None:
+                self._save_walk_forward_selection(fold_run, selection)
             runs.append(fold_run)
 
         return runs
+
+    @staticmethod
+    def _merge_override(base: dict, override: dict) -> dict:
+        """Shallow-merge *override* onto *base*, deep-merging ``strategy_params``
+        one level (per-strategy dicts) so a grid candidate can override a
+        single strategy's single param without clobbering every other
+        strategy's settings or that strategy's other params.
+        """
+        if not override:
+            return dict(base)
+        merged = {**base, **override}
+        base_sp = base.get("strategy_params")
+        override_sp = override.get("strategy_params")
+        if isinstance(base_sp, dict) and isinstance(override_sp, dict):
+            sp = {**base_sp}
+            for strat, params in override_sp.items():
+                if isinstance(params, dict) and isinstance(sp.get(strat), dict):
+                    sp[strat] = {**sp[strat], **params}
+                else:
+                    sp[strat] = params
+            merged["strategy_params"] = sp
+        return merged
+
+    def _select_candidate_on_train(
+        self,
+        config: dict,
+        candidates: list[dict[str, Any]],
+        train_start: str,
+        train_end: str,
+        selection_metric: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Backtest every candidate override over the train window and return
+        ``(winning_override, selection_record)``.
+
+        ``selection_record`` captures every candidate's train-window metric
+        value and per-period returns — the latter is what lets
+        :meth:`_walk_forward_overfitting` compute genuine trial-based
+        PBO/DSR instead of misusing OOS folds as pseudo-trials.
+        """
+        from firm.backtest.run import execute_backtest
+
+        backtest_cfg = config.get("backtest", {})
+        trials: list[dict[str, Any]] = []
+        for idx, override in enumerate(candidates):
+            train_config = self._flatten_config({
+                **self._merge_override(config, override),
+                "backtest": {
+                    **backtest_cfg, "start_date": train_start, "end_date": train_end,
+                },
+            })
+            metric_value: float | None = None
+            returns: list[float] = []
+            try:
+                report = execute_backtest(train_config)
+                metric_value = report.portfolio_summary().get(selection_metric)
+                if not report.returns.empty:
+                    returns = [float(v) for v in report.returns.tolist()]
+            except Exception:
+                log.warning(
+                    "walk-forward: candidate %d/%d failed on train window "
+                    "%s..%s; scoring as unusable",
+                    idx, len(candidates), train_start, train_end, exc_info=True,
+                )
+            trials.append({
+                "index": idx,
+                "override": override,
+                "metric_value": metric_value,
+                "train_returns": returns,
+            })
+            log.debug(
+                "walk-forward train candidate %d/%d %s=%s (train %s..%s)",
+                idx, len(candidates), selection_metric, metric_value,
+                train_start, train_end,
+            )
+
+        def _score(t: dict[str, Any]) -> float:
+            v = t["metric_value"]
+            return float(v) if isinstance(v, (int, float)) and np.isfinite(v) else float("-inf")
+
+        best = max(trials, key=_score)
+        if _score(best) == float("-inf"):
+            log.warning(
+                "walk-forward: every candidate failed or produced no usable "
+                "%s on train window %s..%s; defaulting to candidate 0 rather "
+                "than silently picking an arbitrary one",
+                selection_metric, train_start, train_end,
+            )
+            best = trials[0]
+        log.info(
+            "walk-forward: selected candidate %d/%d (train %s=%s) for train "
+            "window %s..%s, to run on the test window",
+            best["index"], len(candidates), selection_metric,
+            best["metric_value"], train_start, train_end,
+        )
+
+        selection = {
+            "selection_metric": selection_metric,
+            "selected_index": best["index"],
+            "train_start": train_start,
+            "train_end": train_end,
+            "trials": [
+                {
+                    "index": t["index"],
+                    "override": t["override"],
+                    "metric_value": t["metric_value"],
+                }
+                for t in trials
+            ],
+            "train_returns_by_trial": [t["train_returns"] for t in trials],
+        }
+        return best["override"], selection
+
+    @staticmethod
+    def _save_walk_forward_selection(run: ExperimentRun, selection: dict[str, Any]) -> None:
+        path = Path(run.artifacts_dir) / "walk_forward_selection.json"
+        path.write_text(json.dumps(selection, indent=2, default=str), encoding="utf-8")
 
     def run_in_sample_oos(
         self, config: dict, split_date: str, seed: int = 42
@@ -274,14 +434,21 @@ class ExperimentRunner:
 
         Reads ``equity.json`` from each fold's artifacts dir, converts the NAV
         curve to per-period returns, and delegates to
-        :func:`firm.eval.overfitting.walk_forward_overfitting`. Degrades to an
-        empty dict if the equity artifacts are missing or too short.
+        :func:`firm.eval.overfitting.walk_forward_overfitting` for the pooled
+        OOS PSR. When a fold also has a ``walk_forward_selection.json`` (i.e.
+        :meth:`run_walk_forward` was given a real ``param_grid``), that fold's
+        genuine per-candidate train-window returns are passed through too, so
+        PBO/DSR are computed from real competing trials rather than treating
+        sequential OOS folds as pseudo-trials. Degrades to an empty dict if
+        the equity artifacts are missing or too short.
         """
         from firm.eval.overfitting import walk_forward_overfitting
 
         fold_returns: list[list[float]] = []
+        fold_trial_returns: list[list[list[float]]] = []
         for r in runs:
-            equity_path = Path(r.artifacts_dir) / "equity.json"
+            art_dir = Path(r.artifacts_dir)
+            equity_path = art_dir / "equity.json"
             if not equity_path.exists():
                 log.debug(
                     "overfitting: fold %s has no equity.json; skipping",
@@ -304,12 +471,35 @@ class ExperimentRunner:
                 for i in range(1, len(values))
                 if values[i - 1] > 0
             ]
-            if len(rets) >= 2:
-                fold_returns.append(rets)
+            if len(rets) < 2:
+                continue
+            fold_returns.append(rets)
+
+            selection_path = art_dir / "walk_forward_selection.json"
+            if not selection_path.exists():
+                continue
+            try:
+                selection = json.loads(selection_path.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                log.warning(
+                    "overfitting: could not read %s (%s); fold's train "
+                    "trials omitted from PBO/DSR",
+                    selection_path, exc,
+                )
+                continue
+            trial_returns = selection.get("train_returns_by_trial") or []
+            if trial_returns:
+                fold_trial_returns.append(trial_returns)
 
         if len(fold_returns) < 2:
             return {}
-        return walk_forward_overfitting([np.asarray(f) for f in fold_returns])
+        return walk_forward_overfitting(
+            [np.asarray(f) for f in fold_returns],
+            fold_trial_returns=(
+                [[np.asarray(t) for t in fold] for fold in fold_trial_returns]
+                or None
+            ),
+        )
 
     @staticmethod
     def _compute_walk_forward_splits(

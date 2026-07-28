@@ -401,6 +401,7 @@ class TestTrend:
             elif sig.meta["direction"] < 0:
                 assert sig.score < 0
 
+class TestMeanReversion:
     def test_generate(self, pit_view):
         strat = get("mean_reversion")()
         signals = strat.generate(pit_view)

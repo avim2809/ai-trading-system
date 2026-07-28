@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
+from typing import Any
 
 import pandas as pd
 
@@ -14,22 +16,60 @@ from firm.data.schemas import (
     UNIVERSE_COLUMNS,
 )
 
+log = logging.getLogger(__name__)
+
 
 class ProviderError(Exception):
     """Raised when a data-provider operation fails."""
 
 
-# Shared across every fundamentals provider (fmp.py, massive.py): vendor
-# "date" fields for ratios/financials endpoints are the fiscal PERIOD-END
-# date, not the actual filing/announcement date — a real look-ahead bug for
-# any strategy trusting date <= asof (multi_factor's value/quality factors
-# in particular). SEC deadlines are 40-45 days for a 10-Q (accelerated
-# filers) and up to 90 days for a 10-K; 45 days is a conservative estimate
-# covering the common case without needing to distinguish quarterly from
-# annual reports. Mirrors the same fix already applied to macro data (see
-# fred.py's _PUBLICATION_LAG_DAYS) — shift the date forward so the PIT
-# store's date <= asof filter can't see a report before it would exist.
+# Shared across every fundamentals provider (fmp.py, massive.py, finnhub.py,
+# twelvedata.py, alphavantage.py): vendor "date" fields for ratios/financials
+# endpoints are the fiscal PERIOD-END date, not the actual filing/announcement
+# date — a real look-ahead bug for any strategy trusting date <= asof
+# (multi_factor's value/quality factors in particular). SEC deadlines are
+# 40-45 days for a 10-Q (accelerated filers) and up to 90 days for a 10-K; 45
+# days is a conservative estimate covering the common case without needing to
+# distinguish quarterly from annual reports. Mirrors the same fix already
+# applied to macro data (see fred.py's _PUBLICATION_LAG_DAYS) — shift the date
+# forward so the PIT store's date <= asof filter can't see a report before it
+# would exist.
+#
+# This is only a *fallback*: providers that expose the real filing date
+# (SEC EDGAR's `filed` field, FMP's `fillingDate`) should use
+# `resolve_filing_date()` below to prefer the genuine date instead.
 FUNDAMENTALS_PUBLICATION_LAG_DAYS = 45
+
+
+def resolve_filing_date(
+    period_end: Any,
+    filed: Any = None,
+    *,
+    symbol: str = "",
+) -> pd.Timestamp:
+    """Point-in-time-correct timestamp for a fundamentals row.
+
+    Prefers *filed* — the actual date the filing hit the wire (SEC EDGAR's
+    ``filed`` field, FMP's ``fillingDate``, etc.) — over the
+    ``period_end + FUNDAMENTALS_PUBLICATION_LAG_DAYS`` heuristic. The
+    heuristic is only an *estimate* of when a filing became public: some
+    accelerated filers report well under 45 days after period end, while
+    some — especially small caps or late 10-K filers — take longer, so
+    using the real date avoids both under- and over-estimating knowability
+    when a provider actually supplies it. Falls back to the heuristic
+    (logging at debug — this is routine for providers that don't expose a
+    real filing date, not an error) when *filed* is missing or unparseable.
+    """
+    if filed:
+        try:
+            return pd.Timestamp(str(filed)[:10])
+        except (ValueError, TypeError) as exc:
+            log.debug(
+                "Unparseable filing date %r for symbol=%s period=%s; "
+                "falling back to %dd heuristic (%s)",
+                filed, symbol, period_end, FUNDAMENTALS_PUBLICATION_LAG_DAYS, exc,
+            )
+    return pd.Timestamp(period_end) + pd.Timedelta(days=FUNDAMENTALS_PUBLICATION_LAG_DAYS)
 
 
 class DataProvider(ABC):

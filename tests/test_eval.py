@@ -297,6 +297,25 @@ class TestPerformanceAttribution:
         df = attr.get_factor_attribution()
         assert df.empty
 
+    def test_dominant_strategy_by_symbol(self):
+        attr = self._make_attribution()
+        mapping = attr.dominant_strategy_by_symbol()
+        assert mapping == {"AAPL": "momentum", "GOOG": "value"}
+
+    def test_dominant_strategy_by_symbol_picks_largest_holding(self):
+        attr = PerformanceAttribution()
+        attr.record_trades(
+            [
+                {"symbol": "AAPL", "shares": 10, "price": 100.0, "strategy": "momentum"},
+                {"symbol": "AAPL", "shares": 40, "price": 100.0, "strategy": "trend"},
+            ],
+            {"AAPL": 100.0},
+        )
+        assert attr.dominant_strategy_by_symbol() == {"AAPL": "trend"}
+
+    def test_dominant_strategy_by_symbol_empty_when_no_trades(self):
+        assert PerformanceAttribution().dominant_strategy_by_symbol() == {}
+
     def test_factor_attribution_with_data(self):
         attr = self._make_attribution()
         attr.set_factor_exposures("momentum", {"market": 0.8, "size": 0.3})

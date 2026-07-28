@@ -66,7 +66,8 @@ class BacktestEngine:
         self.cerebro.broker.setcash(initial_capital)
 
         commission_pct = self.config.get("commission_pct", 0.001)
-        commission = PercentageCommission(commission=commission_pct)
+        spread_pct = self.config.get("spread_pct", 0.0)
+        commission = PercentageCommission(commission=commission_pct, spread_pct=spread_pct)
         self.cerebro.broker.addcommissioninfo(commission)
 
         # Slippage is applied at the broker via backtrader's native API rather
@@ -109,6 +110,10 @@ class BacktestEngine:
             attribution=attribution,
             commission_pct=commission_pct,
             slippage_pct=slippage_pct,
+            spread_pct=spread_pct,
+            short_borrow_annual_pct=self.config.get("short_borrow_annual_pct", 0.0),
+            market_impact_coefficient=self.config.get("market_impact_coefficient", 0.0),
+            adv_lookback_days=int(self.config.get("adv_lookback_days", 20)),
             memory=memory,
             llm_config=llm_config,
             start_date=self.config.get("start_date"),
@@ -131,6 +136,12 @@ class BacktestEngine:
             len(feeds),
             f"{initial_capital:,.0f}",
             self.config.get("rebalance_frequency", "weekly"),
+        )
+        log.info(
+            "Cost model: commission=%.4f%%, slippage=%.4f%%, spread=%.4f%%, "
+            "short_borrow_annual=%.4f%%",
+            commission_pct * 100, slippage_pct * 100, spread_pct * 100,
+            self.config.get("short_borrow_annual_pct", 0.0) * 100,
         )
 
     def run(self) -> list:
@@ -237,6 +248,30 @@ class BacktestEngine:
         snapshots = []
         if self._portfolio_state is not None:
             snapshots = self._portfolio_state.history
+        if not snapshots and len(values) >= 1:
+            # PortfolioState.record_snapshot() is only ever called from the
+            # live-trading path (firm.live.portfolio_sync); nothing in the
+            # backtest/FirmStrategy loop calls it, so self._portfolio_state
+            # never accumulates history here. Without this fallback the
+            # equity curve (build_equity_data), final_nav/period reporting,
+            # and any OOS-return reconstruction from NAV values are all
+            # silently empty for every backtest. Build lightweight NAV-only
+            # snapshots from the same detailed-returns curve that already
+            # feeds report.returns — holdings/weights/per-strategy P&L aren't
+            # recoverable from this source, but attribution.summary() covers
+            # per-strategy detail separately, so only the equity-curve/NAV
+            # consumers actually need this.
+            from firm.contracts.models import PortfolioSnapshot
+
+            snapshots = [
+                PortfolioSnapshot(asof=pd.Timestamp(d).to_pydatetime(), nav=float(v))
+                for d, v in zip(dates, values)
+            ]
+            log.debug(
+                "generate_report: portfolio_state had no snapshot history; "
+                "built %d NAV-only snapshots from detailed_returns instead",
+                len(snapshots),
+            )
 
         return _Report(
             returns=daily_returns,

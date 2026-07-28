@@ -14,7 +14,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
-import pytest
 
 from firm.data.schemas import PRICE_COLS
 from firm.scripts import fetch_data

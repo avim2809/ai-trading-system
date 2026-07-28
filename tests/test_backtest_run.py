@@ -39,6 +39,7 @@ class _FakeBareReport:
     def __init__(self):
         self.returns = pd.Series(dtype=float)
         self.benchmark_returns = pd.Series(dtype=float)
+        self.snapshots = []
 
 
 class _FakeEngine:
@@ -290,6 +291,9 @@ class TestExecuteBacktestLoadsFundamentals:
             def get_universe(self, asof):
                 return ["AAPL"]
 
+            def set_universe_resolver(self, resolver):
+                pass
+
         config = {
             "data_source": "cache",
             "start_date": "2024-01-01",
@@ -338,5 +342,179 @@ class TestExecuteBacktestLoadsFundamentals:
             execute_backtest(config)
 
         load_fund.assert_not_called()
-        assert all("fundamentals" not in call for call in load_calls)
+        # pit_store.load() is always called with a `fundamentals` kwarg (it's
+        # a named parameter of that call, not conditionally included) — the
+        # actual behaviour under test is that no fundamentals *data* was
+        # loaded for a synthetic backtest, i.e. the value is None.
+        assert all(call.get("fundamentals") is None for call in load_calls)
+
+
+class TestExecuteBacktestLoadsSentiment:
+    def test_cache_backtest_loads_sentiment_into_pit_store(self):
+        sentiment_df = pd.DataFrame({
+            "date": ["2024-01-01"], "symbol": ["AAPL"],
+            "sentiment_score": [0.5], "news_volume": [5],
+        })
+        load_calls: list[dict] = []
+
+        class FakePitStore:
+            def load(self, **kwargs):
+                load_calls.append(kwargs)
+
+            def get_universe(self, asof):
+                return ["AAPL"]
+
+            def set_universe_resolver(self, resolver):
+                pass
+
+        config = {
+            "data_source": "cache",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "universe_symbols": ["AAPL"],
+            "strategies": ["sentiment"],
+            "warmup_days": 0,
+        }
+
+        with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
+             patch("firm.runtime.load_fundamentals", return_value=None), \
+             patch("firm.runtime.load_sentiment", return_value=sentiment_df), \
+             patch("firm.config.get_settings"), \
+             patch("firm.backtest.run.PointInTimeDataStore", FakePitStore), \
+             patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            execute_backtest(config)
+
+        assert any(
+            "sentiment" in call and call["sentiment"] is sentiment_df
+            for call in load_calls
+        )
+
+    def test_synthetic_backtest_does_not_load_sentiment(self):
+        load_calls: list[dict] = []
+
+        class FakePitStore:
+            def load(self, **kwargs):
+                load_calls.append(kwargs)
+
+            def get_universe(self, asof):
+                return ["AAPL"]
+
+        config = {
+            "data_source": "synthetic",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "universe_symbols": ["AAPL"],
+            "strategies": ["sentiment"],
+        }
+
+        with patch("firm.runtime.load_sentiment") as load_sent, \
+             patch("firm.backtest.run.PointInTimeDataStore", FakePitStore), \
+             patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            execute_backtest(config)
+
+        load_sent.assert_not_called()
+        assert all(call.get("sentiment") is None for call in load_calls)
+
+
+class TestExecuteBacktestWiresUniverseResolver:
+    """Regression coverage for wiring UniverseResolver into execute_backtest.
+
+    A resolver should always be installed for real-data runs so
+    ``pit_store.get_universe`` is survivorship-aware rather than falling back
+    to "whatever symbols happen to have price data" — and it must actually be
+    consulted (not just installed) when no explicit ``universe_symbols`` is
+    configured.
+    """
+
+    def test_resolver_installed_for_cache_backtests(self):
+        installed: list = []
+
+        class FakePitStore:
+            def load(self, **kwargs):
+                pass
+
+            def get_universe(self, asof):
+                return ["AAPL"]
+
+            def set_universe_resolver(self, resolver):
+                installed.append(resolver)
+
+        config = {
+            "data_source": "cache",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "universe_symbols": ["AAPL"],
+            "strategies": ["momentum"],
+            "warmup_days": 0,
+        }
+        with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
+             patch("firm.config.get_settings"), \
+             patch("firm.backtest.run.PointInTimeDataStore", FakePitStore), \
+             patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            execute_backtest(config)
+
+        assert len(installed) == 1
+
+    def test_resolver_is_consulted_when_no_explicit_universe_symbols(self):
+        """Without an explicit universe_symbols override, execute_backtest
+        must ask the (resolver-backed) pit_store for the union of universe
+        membership across the whole backtest window rather than silently
+        using an empty/undefined symbol list or only a single snapshot."""
+        get_universe_union_calls: list = []
+
+        class FakePitStore:
+            def load(self, **kwargs):
+                pass
+
+            def get_universe(self, asof):
+                return ["AAPL"]
+
+            def get_universe_union(self, start, end):
+                get_universe_union_calls.append((start, end))
+                return ["AAPL"]
+
+            def set_universe_resolver(self, resolver):
+                pass
+
+        config = {
+            "data_source": "cache",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "strategies": ["momentum"],
+            "warmup_days": 0,
+        }
+        with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
+             patch("firm.config.get_settings"), \
+             patch("firm.backtest.run.PointInTimeDataStore", FakePitStore), \
+             patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            execute_backtest(config)
+
+        assert len(get_universe_union_calls) == 1
+
+    def test_no_resolver_installed_for_synthetic_backtests(self):
+        class FakePitStore:
+            def load(self, **kwargs):
+                pass
+
+            def get_universe(self, asof):
+                return ["AAPL"]
+
+            def set_universe_resolver(self, resolver):
+                raise AssertionError("synthetic backtests should not install a resolver")
+
+        config = {
+            "data_source": "synthetic",
+            "start_date": "2024-01-01",
+            "end_date": "2024-03-01",
+            "universe_symbols": ["AAPL"],
+            "strategies": ["momentum"],
+        }
+        with patch("firm.backtest.run.PointInTimeDataStore", FakePitStore), \
+             patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
+             patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
+            execute_backtest(config)  # must not raise
 

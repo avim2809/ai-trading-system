@@ -30,8 +30,6 @@ Risk notes:
 
 from __future__ import annotations
 
-import numpy as np
-
 from firm.contracts.models import Signal
 from firm.strategies.base import BaseStrategy, PitView
 from firm.strategies.registry import register

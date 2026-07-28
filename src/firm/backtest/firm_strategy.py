@@ -14,6 +14,8 @@ import pandas as pd
 
 import backtrader as bt
 
+from firm.agents._liquidity import estimate_adv_dollars, sqrt_impact_pct
+from firm.backtest.commissions import PercentageCommission
 from firm.data.pit_store import PointInTimeDataStore
 
 log = logging.getLogger(__name__)
@@ -89,6 +91,13 @@ class FirmStrategy(bt.Strategy):
         ("attribution", None),  # PerformanceAttribution instance (optional)
         ("commission_pct", 0.001),  # per-trade commission rate
         ("slippage_pct", 0.0005),  # per-trade slippage rate
+        ("spread_pct", 0.0),  # per-trade bid-ask spread cost rate (folded into commission)
+        ("short_borrow_annual_pct", 0.0),  # annualized borrow fee on short notional, accrued daily
+        # Size/volume-aware market-impact cost (square-root law), on top of
+        # the flat rates above. 0.0 disables it. See
+        # firm.agents._liquidity.sqrt_impact_pct and _apply_market_impact.
+        ("market_impact_coefficient", 0.0),
+        ("adv_lookback_days", 20),  # trailing window for the ADV used above
         ("memory", None),   # TradingMemoryLog instance (optional)
         ("llm_config", None),  # LLM config dict for reflection calls (optional)
         # First date real trading/evaluation may begin (ISO string, optional).
@@ -123,11 +132,16 @@ class FirmStrategy(bt.Strategy):
         if self._eval_start is not None and current_dt.date() < self._eval_start:
             return
 
+        # Mark-to-market every loaded feed, not just the (possibly narrower,
+        # point-in-time-resolved) active universe below — a position in a
+        # name that has since left the universe (e.g. delisted) still needs
+        # a price for NAV/weight/borrow-cost purposes until it's unwound.
         prices: dict[str, float] = {}
-        for sym in self.p.universe:
-            data = self._data_map.get(sym)
-            if data is not None and len(data) > 0:
+        for sym, data in self._data_map.items():
+            if len(data) > 0:
                 prices[sym] = data.close[0]
+
+        self._accrue_short_borrow_cost(current_dt)
 
         # Mark-to-market per-strategy holdings every bar (not just rebalance
         # bars) so the attribution return series has the same daily
@@ -139,7 +153,7 @@ class FirmStrategy(bt.Strategy):
             return
 
         pit_view = PitViewAdapter(
-            self.p.pit_store, current_dt, self.p.universe
+            self.p.pit_store, current_dt, self._active_universe(current_dt)
         )
 
         # Reflect on the previous decision now that its P&L is known.
@@ -150,18 +164,17 @@ class FirmStrategy(bt.Strategy):
             "portfolio": self.p.portfolio_state,
             "prices": prices,
             "memory": self.p.memory,
+            "attribution": self.p.attribution,
         }
 
-        # Feed per-strategy return history to the optimal (inverse-covariance)
-        # signal combination. Gated on the config method so the confidence-
-        # weighted default pays no cost. Early bars have thin history and the
-        # combiner falls back to the confidence-weighted mean per symbol.
+        # Feed per-strategy return history into the context unconditionally
+        # (cheap — bounded by strategy count, not universe size). Used by the
+        # optimal (inverse-covariance) signal combination *and* the generic
+        # per-strategy circuit breaker (see agents.research._circuit_breaker),
+        # both of which need it regardless of which combination method is
+        # active. Early bars have thin history and both degrade gracefully.
         if self.p.attribution is not None:
-            combo = (getattr(self.p.orchestrator, "config", {}) or {}).get(
-                "signal_combination"
-            ) or {}
-            if combo.get("method") == "optimal":
-                context["strategy_returns"] = self.p.attribution.get_all_strategy_returns()
+            context["strategy_returns"] = self.p.attribution.get_all_strategy_returns()
 
         try:
             orders, blackboard = self.p.orchestrator.step(context)
@@ -187,6 +200,14 @@ class FirmStrategy(bt.Strategy):
             # before this same symbol's next rebalance could overwrite it.
             data.info = {"strategy": order_dict.get("strategy", "composite")}
             qty = order_dict.get("shares", order_dict.get("quantity", 0))
+            # Refresh this symbol's commission scheme with today's size/
+            # volume-aware impact estimate *before* submitting the order, so
+            # backtrader's real fill (not just the secondary book below)
+            # reflects it — stashed on the order dict so the mirror below
+            # uses the exact same figure rather than recomputing it.
+            order_dict["_impact_pct"] = self._apply_market_impact(
+                symbol, order_dict.get("notional", 0.0), pit_view,
+            )
             if qty > 0:
                 self.buy(data=data, size=qty)
             elif qty < 0:
@@ -195,8 +216,17 @@ class FirmStrategy(bt.Strategy):
         if self.p.portfolio_state is not None and orders:
             # Mirror the broker's transaction costs in the secondary book so
             # attribution/NAV snapshots stay consistent with headline metrics.
-            cost_rate = self.p.commission_pct + self.p.slippage_pct
-            cost = sum(o.get("notional", 0.0) for o in orders) * cost_rate
+            # Must match PercentageCommission's effective rate per order
+            # (commission + spread + this order's market-impact estimate,
+            # see _apply_market_impact) plus the flat slippage rate applied
+            # separately via set_slippage_perc.
+            cost = sum(
+                o.get("notional", 0.0) * (
+                    self.p.commission_pct + self.p.spread_pct
+                    + self.p.slippage_pct + o.get("_impact_pct", 0.0)
+                )
+                for o in orders
+            )
             self.p.portfolio_state.update(orders, prices, cost=cost)
 
         if self.p.attribution is not None and orders:
@@ -218,6 +248,120 @@ class FirmStrategy(bt.Strategy):
                 self._prev_rebalance_nav = nav
 
         self._last_rebalance = current_dt
+
+    def _apply_market_impact(self, symbol: str, notional: float, pit_view: PitViewAdapter) -> float:
+        """Refresh *symbol*'s commission scheme with today's size/volume-
+        aware market-impact estimate, so backtrader's real fill price (not
+        just the secondary ``PortfolioState`` book) reflects it.
+
+        Backtrader commission schemes are per-data-feed
+        (``broker.addcommissioninfo(comminfo, name=symbol)``) and looked up
+        fresh at every fill — replacing *symbol*'s scheme here, immediately
+        before submitting this rebalance's order for it, is a point-in-time-
+        safe way to make the very next fill reflect today's participation
+        rate (trade notional / trailing ADV) without a custom slippage
+        engine. Returns the impact_pct actually applied (``0.0`` when the
+        model is disabled or ADV data is unavailable) so the caller can
+        mirror the identical figure into the secondary book instead of
+        risking the two diverging.
+        """
+        if self.p.market_impact_coefficient <= 0:
+            # Model disabled: never touch this symbol's commission info, so
+            # it stays on the single shared default set once in
+            # BacktestEngine.setup() — identical to pre-impact-model
+            # behaviour.
+            return 0.0
+
+        impact_pct = 0.0
+        if notional > 0:
+            adv_dollars = estimate_adv_dollars(pit_view, symbol, self.p.adv_lookback_days)
+            if adv_dollars:
+                participation = notional / adv_dollars
+                impact_pct = sqrt_impact_pct(participation, self.p.market_impact_coefficient)
+
+        # Always refresh (even to impact_pct=0.0) once the model is enabled —
+        # otherwise a symbol that traded large once and small/illiquid-data
+        # the next time would keep the stale, larger impact rate baked into
+        # its per-symbol commission scheme indefinitely.
+        comm = PercentageCommission(
+            commission=self.p.commission_pct,
+            spread_pct=self.p.spread_pct + impact_pct,
+        )
+        self.broker.addcommissioninfo(comm, name=symbol)
+        if impact_pct > 0:
+            log.debug(
+                "Market impact: %s notional=$%.0f -> impact=%.4f%% "
+                "(effective commission scheme updated)",
+                symbol, notional, impact_pct * 100,
+            )
+        return impact_pct
+
+    def _active_universe(self, current_dt: datetime) -> list[str]:
+        """Point-in-time tradable subset of ``self.p.universe`` for *current_dt*.
+
+        ``self.p.universe`` is the full superset of symbols with a data feed
+        loaded (every name that was ever a member across the whole backtest
+        window — see ``execute_backtest``'s ``get_universe_union``); this
+        narrows it to whoever the ``pit_store``'s survivorship-aware
+        resolver (if one is installed) says is *actually* a member on this
+        date, so strategies never generate fresh signals for a name before
+        it joins or after it's delisted. Intersected with ``self._data_map``
+        as a safety net against a resolver naming a symbol with no loaded
+        feed. Degrades to the full superset when nothing narrows it (no
+        resolver installed, or a resolver — e.g. the static fallback — that
+        returns the same list at every date, which is the common
+        no-real-membership-data case and an exact no-op here).
+        """
+        if self.p.pit_store is None:
+            return self.p.universe
+        try:
+            resolved = self.p.pit_store.get_universe(current_dt)
+        except Exception:
+            log.warning(
+                "Universe resolution failed at %s; using the full feed "
+                "superset for this cycle",
+                current_dt, exc_info=True,
+            )
+            return self.p.universe
+        if not resolved:
+            return self.p.universe
+        active = [s for s in resolved if s in self._data_map]
+        return active or self.p.universe
+
+    def _accrue_short_borrow_cost(self, current_dt: datetime) -> None:
+        """Debit a daily borrow fee on short positions' notional value.
+
+        Unlike commission/slippage (charged once per trade), stock-borrow
+        fees are a *holding-period* cost that accrues every day a short
+        position is open — ignoring it materially overstates the returns of
+        any short-heavy strategy (stat_arb, mean_reversion long/short,
+        etc.). Applied every bar (not just rebalance bars) via
+        ``broker.add_cash`` so it flows straight into the same NAV backtrader
+        reports through ``broker.getvalue()``.
+
+        Approximation: the annual rate is spread evenly over 252 trading
+        days (consistent with this codebase's other annualization
+        conventions), not actual calendar days held — real borrow fees
+        accrue over weekends/holidays too, and per-symbol hard-to-borrow
+        rates can run well above this single portfolio-wide rate.
+        """
+        if not self.p.short_borrow_annual_pct:
+            return
+        short_notional = 0.0
+        for data in self._data_map.values():
+            if len(data) == 0:
+                continue
+            position = self.getposition(data)
+            if position.size < 0:
+                short_notional += abs(position.size) * data.close[0]
+        if short_notional <= 0:
+            return
+        daily_cost = short_notional * self.p.short_borrow_annual_pct / 252
+        self.broker.add_cash(-daily_cost)
+        log.debug(
+            "Short borrow cost accrued: $%.2f on $%.2f short notional at %s",
+            daily_cost, short_notional, current_dt.date(),
+        )
 
     def _should_rebalance(self, dt: datetime) -> bool:
         """Check whether we should rebalance on this bar."""

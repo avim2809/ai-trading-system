@@ -14,6 +14,8 @@ from firm.agents.analysts import (
     combine_signals_by_symbol,
     combine_signals_optimal,
 )
+from firm.agents.research._circuit_breaker import apply_circuit_breaker
+from firm.agents.research._regime_weights import apply_strategy_regime_weights
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +33,17 @@ def net_scores_for_blackboard(
     optimal inverse-covariance combination is used instead — it down-weights
     correlated/redundant strategies. It degrades to the confidence-weighted
     mean per symbol whenever history is too thin.
+
+    Before either combination runs, an opt-in per-strategy circuit breaker
+    (``config['strategy_circuit_breaker']``, disabled by default — see
+    :mod:`firm.agents.research._circuit_breaker`) damps the raw score of any
+    strategy with a persistently, materially negative trailing Sharpe. An
+    opt-in per-strategy regime-conditional multiplier
+    (``config['strategy_regime_weights']``, disabled by default — see
+    :mod:`firm.agents.research._regime_weights`) scales raw scores by market
+    regime before combination. Both are independent of and complementary to
+    ``optimal``'s inverse-covariance weighting, which has no notion of a
+    strategy's edge sign or regime fit.
     """
     signals = [
         sig
@@ -41,9 +54,16 @@ def net_scores_for_blackboard(
         return {}
 
     cfg = config or {}
+    strategy_returns = getattr(ctx, "strategy_returns", None)
+    signals = apply_circuit_breaker(
+        signals, strategy_returns, cfg.get("strategy_circuit_breaker")
+    )
+    signals = apply_strategy_regime_weights(
+        signals, getattr(ctx, "market_regime", None), cfg.get("strategy_regime_weights"),
+    )
+
     combo = cfg.get("signal_combination") or {}
     method = combo.get("method", "confidence")
-    strategy_returns = getattr(ctx, "strategy_returns", None)
 
     if method == "optimal" and strategy_returns:
         log.debug(

@@ -204,3 +204,32 @@ class PointInTimeDataStore:
             .unique()
             .tolist()
         )
+
+    def get_universe_union(self, start: datetime, end: datetime) -> list[str]:
+        """Union of tradable symbols across ``[start, end]`` — the superset a
+        backtest needs to load data feeds for when the tradable set can
+        change mid-window (a name added to the index after ``start`` still
+        needs its feed loaded, even though :meth:`get_universe` at ``start``
+        alone wouldn't include it yet).
+
+        Uses the resolver's own ``symbols_between`` when it has one (e.g.
+        :meth:`firm.data.universe.UniverseResolver.symbols_between`, which
+        correctly captures a name that joins *and* leaves entirely within the
+        window). A resolver installed as a plain callable (no
+        ``symbols_between``) degrades to the union of the start/end
+        snapshots — this can miss a name whose entire membership window falls
+        strictly between ``start`` and ``end``, which is a much narrower gap
+        than not resolving membership changes at all.
+        """
+        resolver = self._universe_resolver
+        if resolver is not None and hasattr(resolver, "symbols_between"):
+            return list(resolver.symbols_between(start, end))
+        if resolver is not None:
+            log.debug(
+                "get_universe_union: resolver has no symbols_between; "
+                "degrading to union of start/end snapshots (may miss a "
+                "name whose membership window falls entirely inside "
+                "[%s, %s])",
+                start, end,
+            )
+        return sorted(set(self.get_universe(start)) | set(self.get_universe(end)))

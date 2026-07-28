@@ -16,7 +16,13 @@ from pathlib import Path
 
 from firm.config import get_settings
 from firm.data.pit_store import PointInTimeDataStore
-from firm.runtime import build_orchestrator, load_fundamentals, load_prices
+from firm.runtime import (
+    build_orchestrator,
+    build_universe_resolver,
+    load_fundamentals,
+    load_prices,
+    load_sentiment,
+)
 
 
 log = logging.getLogger(__name__)
@@ -54,18 +60,39 @@ def main() -> None:
     prices_df = load_prices(settings)
 
     log.info("Determining universe")
-    pit_store = PointInTimeDataStore()
-    pit_store.load(prices=prices_df)
     fund_df = load_fundamentals(settings)
     if fund_df is not None:
-        pit_store.load(fundamentals=fund_df)
         log.info(
             "Loaded fundamentals cache: %d rows, %d symbols",
             len(fund_df), fund_df["symbol"].nunique(),
         )
+    sentiment_df = load_sentiment(settings)
+    if sentiment_df is not None:
+        log.info(
+            "Loaded sentiment cache: %d rows, %d symbols",
+            len(sentiment_df), sentiment_df["symbol"].nunique(),
+        )
+    else:
+        log.debug(
+            "No cached sentiment for this backtest; the sentiment strategy "
+            "will emit no signals (see firm.strategies.sentiment)"
+        )
+
+    # A single load() call — passing fundamentals/sentiment to a *second*
+    # call without `prices` would raise (prices has no default and each
+    # call fully replaces prior state), which silently meant any real
+    # dataset with cached fundamentals crashed this CLI entry point outright.
+    pit_store = PointInTimeDataStore()
+    pit_store.load(prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df)
 
     start_dt = datetime.fromisoformat(settings.backtest.start_date)
-    universe = pit_store.get_universe(start_dt)
+    end_dt = datetime.fromisoformat(settings.backtest.end_date)
+    fallback_symbols = sorted(prices_df["symbol"].astype(str).unique().tolist())
+    pit_store.set_universe_resolver(build_universe_resolver(settings, fallback_symbols))
+    # Union across the whole window (not just a start_date snapshot) so a
+    # symbol added to the index mid-backtest still gets its feed loaded;
+    # FirmStrategy resolves the actually-active subset every rebalance.
+    universe = pit_store.get_universe_union(start_dt, end_dt)
     if not universe:
         log.error("Empty universe — nothing to backtest")
         sys.exit(1)

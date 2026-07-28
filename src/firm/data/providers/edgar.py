@@ -11,16 +11,16 @@ import logging
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, NamedTuple, Sequence
 
 import pandas as pd
 
 from firm.config import Settings, get_settings
 from firm.data.providers._rest import RestClient
 from firm.data.providers.base import (
-    FUNDAMENTALS_PUBLICATION_LAG_DAYS,
     DataProvider,
     ProviderError,
+    resolve_filing_date,
 )
 from firm.data.providers.constants import ETF_SYMBOLS
 from firm.data.schemas import FUNDAMENTAL_COLS
@@ -181,20 +181,37 @@ def _companyfacts_to_rows(
     )
     rows: list[dict[str, Any]] = []
     for period_end in periods:
-        ts = pd.Timestamp(period_end) + pd.Timedelta(days=FUNDAMENTALS_PUBLICATION_LAG_DAYS)
-        if not (start_ts <= ts <= end_ts):
-            continue
         rev = revenue.get(period_end)
         ni = net_income.get(period_end)
         eps_v = eps.get(period_end)
         eq = equity.get(period_end)
         liab = liabilities.get(period_end)
+
+        # Each concept's fact entry carries its own SEC `filed` date (the
+        # date the filing actually hit EDGAR); take the latest across every
+        # concept contributing to this period so the row is only considered
+        # knowable once *all* of its fields were actually public — a 10-K/A
+        # restating just one line item shouldn't make the whole row appear
+        # earlier than its real availability.
+        filed_dates = [
+            v.filed for v in (rev, ni, eps_v, eq, liab) if v is not None and v.filed
+        ]
+        filed = max(filed_dates) if filed_dates else None
+        ts = resolve_filing_date(period_end, filed, symbol=symbol)
+        if not (start_ts <= ts <= end_ts):
+            continue
+
+        rev_val = rev.val if rev else None
+        ni_val = ni.val if ni else None
+        eps_val = eps_v.val if eps_v else None
+        eq_val = eq.val if eq else None
+        liab_val = liab.val if liab else None
         debt_to_equity = None
-        if eq and eq != 0 and liab is not None:
-            debt_to_equity = float(liab) / float(eq)
+        if eq_val and eq_val != 0 and liab_val is not None:
+            debt_to_equity = float(liab_val) / float(eq_val)
         roe = None
-        if eq and eq != 0 and ni is not None:
-            roe = float(ni) / float(eq)
+        if eq_val and eq_val != 0 and ni_val is not None:
+            roe = float(ni_val) / float(eq_val)
         rows.append({
             "date": ts,
             "symbol": symbol,
@@ -203,12 +220,17 @@ def _companyfacts_to_rows(
             "pb_ratio": None,
             "roe": roe,
             "debt_to_equity": debt_to_equity,
-            "revenue": rev,
-            "net_income": ni,
-            "eps": eps_v,
+            "revenue": rev_val,
+            "net_income": ni_val,
+            "eps": eps_val,
             "dividend_yield": None,
         })
     return rows
+
+
+class _FactValue(NamedTuple):
+    val: float
+    filed: str | None
 
 
 def _series_by_period(
@@ -216,8 +238,11 @@ def _series_by_period(
     tags: tuple[str, ...],
     *,
     unit: str,
-) -> dict[str, float]:
-    out: dict[str, float] = {}
+) -> dict[str, _FactValue]:
+    """Maps each reported period-end to its value *and* real SEC filing date
+    (the ``filed`` field on each XBRL fact entry), so callers can use the
+    genuine disclosure date instead of the period-end+lag-days heuristic."""
+    out: dict[str, _FactValue] = {}
     for tag in tags:
         units = (facts.get(tag) or {}).get("units") or {}
         entries = units.get(unit) or []
@@ -232,7 +257,8 @@ def _series_by_period(
             if form not in ("10-K", "10-Q", "10-K/A", "10-Q/A"):
                 continue
             key = str(end)[:10]
-            out[key] = float(val)
+            filed = entry.get("filed")
+            out[key] = _FactValue(float(val), str(filed)[:10] if filed else None)
         if out:
             break
     return out

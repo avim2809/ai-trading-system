@@ -16,14 +16,21 @@ import pandas as pd
 from firm.backtest.engine import BacktestEngine
 from firm.data.pit_store import PointInTimeDataStore
 from firm.eval.reports import BacktestReport
-from firm.runtime import build_orchestrator
+from firm.runtime import build_orchestrator, build_universe_resolver
 
 log = logging.getLogger(__name__)
 
 # Backtest-section keys consumed by BacktestEngine.
 _BT_FIELDS = frozenset({
     "start_date", "end_date", "initial_capital",
-    "commission_pct", "slippage_pct", "rebalance_frequency",
+    "commission_pct", "slippage_pct", "spread_pct", "short_borrow_annual_pct",
+    "market_impact_coefficient",
+    # Not a "cost" field itself, but the market-impact model above needs the
+    # same trailing-volume window as RiskAgent's ADV/participation-rate
+    # liquidity cap (config/settings.yaml risk.adv_lookback_days) so both
+    # agree on what "ADV" means for a given symbol/date.
+    "adv_lookback_days",
+    "rebalance_frequency",
 })
 
 
@@ -88,6 +95,7 @@ def execute_backtest(config: dict) -> BacktestReport:
 
     pit_store = PointInTimeDataStore()
     fund_df = None
+    sentiment_df = None
     if data_source != "synthetic":
         try:
             from firm.config import get_settings
@@ -99,8 +107,18 @@ def execute_backtest(config: dict) -> BacktestReport:
                 "Fundamentals cache load failed — continuing price-only",
                 exc_info=True,
             )
+        try:
+            from firm.config import get_settings
+            from firm.runtime import load_sentiment
 
-    pit_store.load(prices=prices_df, fundamentals=fund_df)
+            sentiment_df = load_sentiment(get_settings())
+        except Exception:
+            log.warning(
+                "Sentiment cache load failed — sentiment strategy will be inactive",
+                exc_info=True,
+            )
+
+    pit_store.load(prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df)
     if fund_df is not None and not fund_df.empty:
         log.info(
             "Loaded fundamentals cache: %d rows, %d symbols",
@@ -111,8 +129,30 @@ def execute_backtest(config: dict) -> BacktestReport:
             "No cached fundamentals in backtest; fundamental strategies "
             "use degraded logic (see multi_factor / event_driven)"
         )
+    if sentiment_df is not None and not sentiment_df.empty:
+        log.info(
+            "Loaded sentiment cache: %d rows, %d symbols",
+            len(sentiment_df), sentiment_df["symbol"].nunique(),
+        )
+    elif data_source != "synthetic":
+        log.debug(
+            "No cached sentiment in backtest; the sentiment strategy will "
+            "emit no signals (see firm.strategies.sentiment)"
+        )
 
-    universe = symbols or pit_store.get_universe(datetime.fromisoformat(start_date))
+    if data_source != "synthetic":
+        from firm.config import get_settings
+
+        fallback_symbols = symbols or sorted(prices_df["symbol"].astype(str).unique().tolist())
+        pit_store.set_universe_resolver(build_universe_resolver(get_settings(), fallback_symbols))
+
+    # Union across the whole window, not just a start_date snapshot — a
+    # symbol that joins the index mid-backtest still needs its feed loaded
+    # even though it wasn't a member on day one. FirmStrategy resolves the
+    # actually-active point-in-time subset of this superset every rebalance.
+    universe = symbols or pit_store.get_universe_union(
+        datetime.fromisoformat(start_date), datetime.fromisoformat(end_date)
+    )
 
     orchestrator = build_orchestrator(config)
 
@@ -122,16 +162,31 @@ def execute_backtest(config: dict) -> BacktestReport:
     engine.run()
     report = engine.generate_report()
 
-    if data_source != "synthetic":
-        # Trading/snapshots already can't start before start_date (the
-        # engine-level gate), but the raw return series still runs from
-        # whatever the first loaded bar is — trim it back to the actual
-        # evaluation window before it reaches any metric computation.
-        start_ts = pd.Timestamp(start_date)
-        if not report.returns.empty:
-            report.returns = report.returns[report.returns.index >= start_ts]
-        if not report.benchmark_returns.empty:
-            report.benchmark_returns = report.benchmark_returns[report.benchmark_returns.index >= start_ts]
+    # Trading already can't start before start_date (the engine-level gate),
+    # but the raw return/snapshot series still spans however much warmup
+    # history was loaded ahead of it: `warmup_days` of cached history for
+    # real data, or the extra ~252-day lookback pad baked into `n_days`
+    # above for synthetic data. Left untrimmed, that block of flat,
+    # zero-return "no positions yet" days dilutes every downstream metric
+    # (Sharpe/vol/etc. computed over more zero-return periods than were
+    # actually requested) before it reaches metric computation — trim both
+    # branches to the actual [start_date, end_date] evaluation window.
+    start_ts = pd.Timestamp(start_date)
+    end_ts = pd.Timestamp(end_date)
+    if not report.returns.empty:
+        report.returns = report.returns[
+            (report.returns.index >= start_ts) & (report.returns.index <= end_ts)
+        ]
+    if not report.benchmark_returns.empty:
+        report.benchmark_returns = report.benchmark_returns[
+            (report.benchmark_returns.index >= start_ts)
+            & (report.benchmark_returns.index <= end_ts)
+        ]
+    if report.snapshots:
+        report.snapshots = [
+            s for s in report.snapshots
+            if start_ts <= pd.Timestamp(s.asof) <= end_ts
+        ]
 
     return report
 
