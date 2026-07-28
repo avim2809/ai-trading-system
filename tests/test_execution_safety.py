@@ -72,6 +72,33 @@ class TestGuardOrder:
         assert audit.read_text().strip()
 
 
+class TestRequireStop:
+    def test_missing_stop_blocks_by_default(self, tmp_path):
+        order = Order(symbol="SPY", side="buy", qty=10, price=100.0)  # no stop
+        res = guard_order(order, _profile(), audit=tmp_path / "a.jsonl")
+        assert res["routed"] == "blocked"
+        assert any("stop" in b.lower() for b in res["breaches"])
+
+    def test_missing_stop_allowed_when_require_stop_false(self, tmp_path):
+        """The live engine rebalances to target weights and never attaches
+        a protective stop to an order — require_stop=False is how it opts
+        out of a check that doesn't apply to that trading style."""
+        profile = _profile()
+        profile.require_stop = False
+        order = Order(symbol="SPY", side="buy", qty=10, price=100.0)
+        res = guard_order(order, profile, audit=tmp_path / "a.jsonl")
+        assert res["routed"] != "blocked"
+
+    def test_other_breaches_still_enforced_when_require_stop_false(self, tmp_path):
+        profile = _profile()
+        profile.require_stop = False
+        # Not on the allowlist (["SPY"]) — must still block despite require_stop=False.
+        order = Order(symbol="TSLA", side="buy", qty=10, price=100.0)
+        res = guard_order(order, profile, audit=tmp_path / "a.jsonl")
+        assert res["routed"] == "blocked"
+        assert any("allowlist" in b for b in res["breaches"])
+
+
 class TestLiveSubmissionGate:
     def test_paper_broker_always_allowed(self, monkeypatch, tmp_path):
         monkeypatch.delenv("FIRM_ALLOW_TRADING", raising=False)

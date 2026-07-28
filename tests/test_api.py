@@ -6,6 +6,7 @@ with synthetic data, requiring no API keys or cached market files.
 
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
@@ -47,6 +48,83 @@ class TestMeta:
         r = client.get("/api/health")
         assert r.status_code == 200
         assert r.json()["status"] == "ok"
+
+    def test_health_no_live_engine_reports_broker_not_applicable(self, client):
+        body = client.get("/api/health").json()
+        assert body["broker"]["live_engine_running"] is False
+        assert body["broker"]["connected"] is None
+        assert body["broker"]["type"] is None
+
+
+class TestSectorMapHardFail:
+    """Missing risk.sector_map must refuse to start live trading, not just
+    warn per cycle — see RiskAgent.run()'s "Sector concentration cap NOT
+    enforced" warning, which is silent enough to go unnoticed for weeks in
+    an unattended live deployment.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _mock_broker(self, monkeypatch, tmp_path):
+        import firm.api.routers.live as live_mod
+        from tests.test_brokers import MockBroker
+
+        monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: MockBroker())
+        monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_ORDERS_PATH", str(tmp_path / "order_history.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
+        monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
+        monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
+
+    def test_start_rejected_when_sector_map_overridden_to_empty(self, client):
+        resp = client.post("/api/live/start", json={
+            "broker": "alpaca_paper",
+            "schedule": "hourly",
+            "risk_overrides": {"sector_map": {}},
+        })
+        assert resp.status_code == 400, resp.text
+        assert "sector_map" in resp.json()["detail"]
+        assert client.get("/api/live/status").json()["state"] == "stopped"
+
+    def test_start_succeeds_with_sector_map_from_live_yaml(self, client):
+        # config/live.yaml ships a populated sector_map for its default
+        # universe, so a normal start (no overrides) must not regress.
+        resp = client.post("/api/live/start", json={
+            "broker": "alpaca_paper",
+            "schedule": "hourly",
+        })
+        assert resp.status_code == 200, resp.text
+        client.post("/api/live/stop")
+
+
+class TestHealthBrokerConnectivity:
+    @pytest.fixture(autouse=True)
+    def _mock_broker(self, monkeypatch, tmp_path):
+        import firm.api.routers.live as live_mod
+        from tests.test_brokers import MockBroker
+
+        monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: MockBroker())
+        monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_ORDERS_PATH", str(tmp_path / "order_history.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
+        monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
+        monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
+
+    def test_health_reflects_ibkr_connectivity_when_running(self, client):
+        client.post("/api/live/start", json={"broker": "ibkr_paper", "schedule": "hourly"})
+
+        body = client.get("/api/health").json()
+        assert body["status"] == "ok"  # process itself stays healthy either way
+        assert body["broker"]["live_engine_running"] is True
+        assert body["broker"]["type"] == "ibkr_paper"
+        assert body["broker"]["connected"] is True
+
+        engine = client.app.state.live_engine
+        engine._broker._connected = False
+        body = client.get("/api/health").json()
+        assert body["status"] == "ok"
+        assert body["broker"]["connected"] is False
+
+        client.post("/api/live/stop")
 
 
 # ------------------------------------------------------------------
@@ -119,9 +197,17 @@ class TestRuns:
         run_id = r.json()["run_id"]
         assert run_id
 
+        # A synthetic 2-strategy/2-year backtest completes in ~5s when the
+        # machine is otherwise idle, but JobManager serialises all runs
+        # behind one lock and this suite's other tests (walk-forward folds,
+        # HMM fits, etc.) can leave it CPU-starved when the full suite runs
+        # under parallel/concurrent load — 120 * 0.5s = 60s was measured to
+        # be too tight under that contention (pre-existing flake, tracked as
+        # fix-preexisting-test-failures). 240 * 0.5s = 120s gives real
+        # headroom while still returning immediately once the run finishes.
         terminal_statuses = {"completed", "failed"}
         status = "pending"
-        for _ in range(120):
+        for _ in range(240):
             time.sleep(0.5)
             detail = client.get(f"/api/runs/{run_id}").json()
             status = detail["status"]
@@ -148,6 +234,34 @@ class TestRuns:
 
     def test_launch_and_poll(self, client):
         self._launch_and_wait(client)
+
+    def test_cost_overrides_reach_the_stored_run_config(self, client):
+        """Regression: spread_pct/short_borrow_annual_pct must flow from
+        RunRequest through to the config actually handed to the backtest
+        engine, not just live in the request schema."""
+        r = client.post("/api/runs", json={
+            "strategies": ["momentum"],
+            "data_source": "synthetic",
+            "spread_pct": 0.0009,
+            "short_borrow_annual_pct": 0.05,
+        })
+        assert r.status_code == 200
+        run_id = r.json()["run_id"]
+
+        detail = client.get(f"/api/runs/{run_id}").json()
+        assert detail["config"]["spread_pct"] == 0.0009
+        assert detail["config"]["short_borrow_annual_pct"] == 0.05
+
+    def test_cost_overrides_default_to_settings_yaml_values(self, client):
+        r = client.post("/api/runs", json={
+            "strategies": ["momentum"], "data_source": "synthetic",
+        })
+        assert r.status_code == 200
+        run_id = r.json()["run_id"]
+
+        detail = client.get(f"/api/runs/{run_id}").json()
+        assert detail["config"]["spread_pct"] == 0.0002
+        assert detail["config"]["short_borrow_annual_pct"] == 0.003
 
     def test_report_after_completion(self, client):
         run_id = self._launch_and_wait(client)
@@ -390,6 +504,8 @@ class TestLiveConfigRoundTrip:
         monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
         monkeypatch.setattr(live_mod, "_TRADE_HISTORY_ORDERS_PATH", str(tmp_path / "order_history.json"))
         monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
+        monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
+        monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
 
     def test_start_applies_strategies_and_risk(self, client):
         resp = client.post("/api/live/start", json={
@@ -509,6 +625,8 @@ class TestLiveClearEndpoints:
         monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
         monkeypatch.setattr(live_mod, "_TRADE_HISTORY_ORDERS_PATH", str(tmp_path / "order_history.json"))
         monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
+        monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
+        monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
 
     def _mock_cycle_deps(self, monkeypatch):
         """run_cycle() otherwise builds a real orchestrator + FallbackProvider
@@ -611,3 +729,80 @@ class TestLiveClearEndpoints:
         orders = client.get("/api/live/orders").json()
         assert len(orders) >= 1
         assert orders[0]["symbol"] == "AAPL"
+
+
+class TestKillSwitchResetEndpoint:
+    @pytest.fixture(autouse=True)
+    def _mock_broker(self, monkeypatch, tmp_path):
+        import firm.api.routers.live as live_mod
+        from tests.test_brokers import MockBroker
+
+        monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: MockBroker(initial_cash=50_000))
+        monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_ORDERS_PATH", str(tmp_path / "order_history.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
+        monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
+        monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
+
+    def _mock_cycle_deps(self, monkeypatch):
+        from unittest.mock import MagicMock
+
+        import pandas as pd
+
+        import firm.data.providers.fallback as fallback_mod
+        import firm.live.engine as engine_mod
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (
+            [{"symbol": "AAPL", "side": "buy", "quantity": 1, "strategy": "momentum"}],
+            None,
+        )
+        monkeypatch.setattr(engine_mod, "build_orchestrator", lambda config: mock_orch)
+
+        mock_provider = MagicMock()
+        mock_provider.get_prices.return_value = pd.DataFrame()
+        mock_provider.get_fundamentals.return_value = pd.DataFrame()
+        mock_provider.get_news_sentiment.return_value = pd.DataFrame()
+        monkeypatch.setattr(fallback_mod, "FallbackProvider", lambda *a, **k: mock_provider)
+
+    def test_reset_no_engine_returns_400(self, client):
+        resp = client.post("/api/live/kill-switch/reset")
+        assert resp.status_code == 400
+
+    def test_reset_when_not_halted_is_a_noop(self, client, monkeypatch):
+        self._mock_cycle_deps(monkeypatch)
+        client.post("/api/live/start", json={
+            "broker": "alpaca_paper", "schedule": "hourly",
+            "approval_mode": "full_auto", "initial_capital": 100_000,
+        })
+        resp = client.post("/api/live/kill-switch/reset")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["reset"] is False
+        assert body["halted"] is False
+        client.post("/api/live/stop")
+
+    def test_reset_after_trip_rearms_and_persists(self, client, monkeypatch, tmp_path):
+        self._mock_cycle_deps(monkeypatch)
+        client.post("/api/live/start", json={
+            "broker": "alpaca_paper", "schedule": "hourly",
+            "approval_mode": "full_auto", "initial_capital": 100_000,
+            "kill_switch_drawdown": 0.1,
+        })
+        engine = client.app.state.live_engine
+        engine.run_cycle(force=True)
+        assert engine.halted is True
+        assert client.get("/api/live/alerts").json()["halted"] is True
+
+        resp = client.post("/api/live/kill-switch/reset")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["reset"] is True
+        assert body["halted"] is False
+        assert client.get("/api/live/alerts").json()["halted"] is False
+
+        state_path = tmp_path / "kill_switch_state.json"
+        assert state_path.exists()
+        assert json.loads(state_path.read_text())["halted"] is False
+
+        client.post("/api/live/stop")

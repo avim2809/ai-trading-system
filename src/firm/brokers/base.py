@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
+
+from firm.time_utils import utcnow
+
+log = logging.getLogger(__name__)
 
 
 class BrokerError(Exception):
@@ -41,7 +46,7 @@ class OrderStatus:
     filled_quantity: float = 0.0
     avg_fill_price: float = 0.0
     status: Literal["pending", "filled", "partial", "cancelled", "rejected"] = "pending"
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=utcnow)
 
 
 @dataclass
@@ -69,6 +74,28 @@ class Broker(ABC):
     @abstractmethod
     def is_connected(self) -> bool:
         """Return True if the broker connection is active."""
+
+    def reconnect(self) -> None:
+        """Tear down and re-establish the connection.
+
+        Concrete default (not abstract) so every broker gets mid-session
+        recovery for free without each implementation duplicating the same
+        disconnect-then-connect dance: this is what
+        ``LiveTradingEngine`` calls when a cycle's first broker call raises
+        ``BrokerError`` (e.g. IB Gateway dropped the socket, or its
+        mandatory daily restart happened mid-session — see
+        ``docs/PROJECT_CONTEXT.md`` "Broker & host failover"). ``disconnect()``
+        failures are swallowed (the connection may already be dead — that's
+        exactly why we're here) but a failing ``connect()`` propagates so the
+        caller knows the reconnect attempt itself failed. Brokers with
+        different reconnect semantics (e.g. refreshing an OAuth token instead
+        of a full re-handshake) may override this.
+        """
+        try:
+            self.disconnect()
+        except Exception as exc:
+            log.debug("Broker disconnect during reconnect failed (%s); proceeding to connect() anyway", exc)
+        self.connect()
 
     @abstractmethod
     def get_account(self) -> dict:

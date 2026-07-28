@@ -52,11 +52,18 @@ class JobManager:
         n_splits: int = 5,
         train_pct: float = 0.7,
         seed: int = 42,
+        param_grid: list[dict] | None = None,
+        selection_metric: str = "sharpe_ratio",
     ) -> dict:
         """Run a walk-forward analysis to completion and return its summary.
 
         Each fold is registered as a normal run (so it appears in the
         dashboard) and executed under ``self._lock`` to serialise Cerebro.
+        With a ``param_grid`` of >=2 candidates, every fold additionally runs
+        each candidate on its train window first to select the one that runs
+        on the test window — this multiplies total runtime by roughly
+        ``len(param_grid)`` per fold, since this endpoint blocks until the
+        whole analysis (all folds x all candidates) completes.
         Returns ``{"fold_ids", "aggregate"}``.
         """
         from firm.experiments.runner import ExperimentRunner
@@ -64,7 +71,12 @@ class JobManager:
         with self._lock:
             runner = ExperimentRunner(registry=self.registry)
             runs = runner.run_walk_forward(
-                config, n_splits=n_splits, train_pct=train_pct, seed=seed
+                config,
+                n_splits=n_splits,
+                train_pct=train_pct,
+                seed=seed,
+                param_grid=param_grid,
+                selection_metric=selection_metric,
             )
             aggregate = runner.aggregate_walk_forward(runs)
         return {"fold_ids": [r.run_id for r in runs], "aggregate": aggregate}

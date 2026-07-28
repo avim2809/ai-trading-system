@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+from typing import Any
 
 import pandas as pd
 
@@ -120,6 +121,29 @@ class PerformanceAttribution:
             result[strategy] = compute_all_metrics(series)
         return result
 
+    def dominant_strategy_by_symbol(self) -> dict[str, str]:
+        """Map each symbol currently held to the strategy with the largest
+        absolute cumulative share position in it.
+
+        Used as a fallback attribution source for orders that close out a
+        position entirely (the symbol is no longer in the current cycle's
+        target weights, so it has no *this-cycle* per-strategy attribution
+        from :class:`~firm.agents.trader.TraderAgent`). Without this,
+        every exit trade was silently tagged ``"composite"`` regardless of
+        which strategy actually opened the position — a real traceability
+        gap, since ``"composite"`` then absorbed a large, uncharacterized
+        share of P&L (mostly turnover/exit trades) in attribution reports.
+        """
+        best: dict[str, tuple[float, str]] = {}
+        for strategy, sym_shares in self._strategy_holdings.items():
+            for sym, shares in sym_shares.items():
+                contribution = abs(shares)
+                if contribution <= 0:
+                    continue
+                if sym not in best or contribution > best[sym][0]:
+                    best[sym] = (contribution, strategy)
+        return {sym: strategy for sym, (_, strategy) in best.items()}
+
     def get_factor_attribution(self) -> pd.DataFrame:
         """Factor-level P&L breakdown.
 
@@ -152,3 +176,63 @@ class PerformanceAttribution:
     @property
     def strategies(self) -> list[str]:
         return list(self._strategy_returns.keys())
+
+    # ------------------------------------------------------------------
+    # Durable persistence (see firm.live.state_store.LiveStateStore)
+    # ------------------------------------------------------------------
+
+    def export_state(self) -> dict[str, Any]:
+        """Serialize all attribution history to a JSON-safe dict.
+
+        Restart continuity matters here specifically because the ``optimal``
+        signal-combination method needs several cycles of per-strategy
+        return history before its inverse-covariance weighting is usable —
+        without persistence, every restart silently falls back to the
+        confidence-weighted mean until history reaccumulates (see
+        ``LiveTradingEngine.__init__``).
+        """
+        return {
+            "trade_log": list(self._trade_log),
+            "strategy_returns": {
+                k: list(v) for k, v in self._strategy_returns.items()
+            },
+            "strategy_dates": {
+                k: [d.isoformat() for d in v]
+                for k, v in self._strategy_dates.items()
+            },
+            "strategy_holdings": {
+                k: dict(v) for k, v in self._strategy_holdings.items()
+            },
+            "prev_prices": dict(self._prev_prices),
+            "factor_exposures": {
+                k: dict(v) for k, v in self._factor_exposures.items()
+            },
+        }
+
+    def restore_state(self, state: dict[str, Any]) -> None:
+        """Restore attribution history persisted via :meth:`export_state`.
+
+        Missing/malformed keys are tolerated (best-effort partial restore)
+        since the input is always an on-disk blob written by a possibly
+        older version of this class, not a value under this call's control.
+        """
+        self._trade_log = list(state.get("trade_log") or [])
+        self._strategy_returns = defaultdict(
+            list,
+            {k: list(v) for k, v in (state.get("strategy_returns") or {}).items()},
+        )
+        self._strategy_dates = defaultdict(
+            list,
+            {
+                k: [datetime.fromisoformat(d) for d in v]
+                for k, v in (state.get("strategy_dates") or {}).items()
+            },
+        )
+        self._strategy_holdings = defaultdict(
+            dict,
+            {k: dict(v) for k, v in (state.get("strategy_holdings") or {}).items()},
+        )
+        self._prev_prices = dict(state.get("prev_prices") or {})
+        self._factor_exposures = {
+            k: dict(v) for k, v in (state.get("factor_exposures") or {}).items()
+        }

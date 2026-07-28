@@ -28,6 +28,7 @@ from firm.data.sentiment_cache import (
 )
 from firm.data.pit_store import PointInTimeDataStore
 from firm.data.providers.base import DataProvider
+from firm.time_utils import utcnow
 
 log = logging.getLogger(__name__)
 
@@ -119,6 +120,31 @@ class LiveDataFeed:
         # of live-vs-backtest skew.  Completed bars are picked up next session.
         self._exclude_forming_bar = exclude_forming_bar
         self._pit_store = PointInTimeDataStore()
+        self._universe_resolver = self._build_universe_resolver()
+
+    def _build_universe_resolver(self):
+        """Install a survivorship-aware resolver on the PIT store, when possible.
+
+        Live trading always targets *today's* symbol list, so this is more a
+        consistency/audit hook than a survivorship-bias fix (that's inherently a
+        backtest concern) — but wiring it here means real membership data (once
+        acquired; see the ``pit-universe-membership`` follow-up) also validates
+        the live universe without further code changes.
+        """
+        try:
+            from firm.config import get_settings
+            from firm.runtime import build_universe_resolver
+
+            return build_universe_resolver(get_settings(), self._universe)
+        except Exception:
+            log.warning(
+                "Live universe resolver setup failed — continuing with the "
+                "configured symbol list only",
+                exc_info=True,
+            )
+            from firm.data.universe import UniverseResolver
+
+            return UniverseResolver.from_static(self._universe)
 
     def refresh(self, asof: datetime | None = None) -> LivePitViewAdapter:
         """Fetch latest data from providers and return a PitView.
@@ -129,7 +155,11 @@ class LiveDataFeed:
         Returns:
             A :class:`LivePitViewAdapter` bound to the refreshed PIT store.
         """
-        asof = asof or datetime.utcnow()
+        # Naive UTC, not tz-aware: this flows straight into
+        # PointInTimeDataStore.get_prices/get_fundamentals/get_sentiment,
+        # which compare it against tz-naive `date` columns loaded via
+        # pd.to_datetime — an aware value here would raise on that compare.
+        asof = asof or utcnow()
         end = asof.strftime("%Y-%m-%d")
         start = (asof - timedelta(days=self._lookback_days)).strftime("%Y-%m-%d")
 
@@ -142,7 +172,13 @@ class LiveDataFeed:
             try:
                 prices = price_prov.get_prices(self._universe, start, end)
                 if self._exclude_forming_bar and not prices.empty and "date" in prices.columns:
-                    today = pd.Timestamp(asof).normalize()
+                    today = pd.Timestamp(asof)
+                    if today.tz is not None:
+                        # Defensive: price data columns are tz-naive, so an
+                        # aware asof (e.g. an explicit caller-supplied one)
+                        # would otherwise raise on this comparison.
+                        today = today.tz_localize(None)
+                    today = today.normalize()
                     prices = prices[pd.to_datetime(prices["date"]).dt.normalize() < today]
                 log.info("Fetched %d price rows for %d symbols", len(prices), len(self._universe))
             except Exception:
@@ -252,6 +288,7 @@ class LiveDataFeed:
             log.warning("No 'sentiment' provider configured on this LiveDataFeed")
 
         self._pit_store = PointInTimeDataStore()
+        self._pit_store.set_universe_resolver(self._universe_resolver)
         self._pit_store.load(
             prices=prices,
             fundamentals=fundamentals if not fundamentals.empty else None,

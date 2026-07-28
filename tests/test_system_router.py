@@ -155,8 +155,6 @@ class TestServiceControl:
         ]
 
     def test_uses_sudo_when_not_root(self, client, monkeypatch):
-        import firm.api.routers.system as system_mod
-
         monkeypatch.setattr("os.geteuid", lambda: 1000, raising=False)
 
         r = client.post("/api/system/restart")

@@ -10,11 +10,14 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+if TYPE_CHECKING:
+    from firm.live.trade_history import TradeHistoryStore
 
 log = logging.getLogger(__name__)
 
@@ -32,6 +35,8 @@ _engine_lock = threading.Lock()
 _APPROVALS_PATH = "data/approvals.json"
 _TRADE_HISTORY_ORDERS_PATH = "data/order_history.json"
 _TRADE_HISTORY_CYCLES_PATH = "data/cycle_history.json"
+_KILL_SWITCH_STATE_PATH = "data/kill_switch_state.json"
+_STATE_DB_PATH = "data/live_state.db"
 
 
 def _start_live_scheduler(
@@ -126,6 +131,13 @@ class StartRequest(BaseModel):
     # research signal combination, and TraderAgent allocation method.
     news_guard: dict[str, Any] | None = None
     signal_combination: dict[str, Any] | None = None
+    # Generic per-strategy rolling-Sharpe circuit breaker (off unless
+    # ``enabled: true``). See firm.agents.research._circuit_breaker and
+    # docs/portfolio_construction_diagnosis.md — disabled by default because
+    # naive default thresholds were found to over-gate volatile-but-
+    # legitimate strategies and net hurt Sharpe in the tested windows.
+    strategy_circuit_breaker: dict[str, Any] | None = None
+    strategy_regime_weights: dict[str, Any] | None = None
     allocation_method: str | None = None
     kelly_fraction: float | None = None
 
@@ -166,6 +178,8 @@ class ConfigUpdateRequest(BaseModel):
     strategy_params: dict[str, dict[str, Any]] | None = None
     news_guard: ConfigUpdateNewsGuard | None = None
     signal_combination: dict[str, Any] | None = None
+    strategy_circuit_breaker: dict[str, Any] | None = None
+    strategy_regime_weights: dict[str, Any] | None = None
     allocation_method: str | None = None
     kelly_fraction: float | None = None
 
@@ -232,8 +246,27 @@ def _start_live_engine(
     from firm.live.approval import ApprovalQueue
     from firm.live.data_feed import LiveDataFeed
     from firm.live.engine import LiveTradingEngine
+    from firm.live.notifications import build_alert_callback
     from firm.live.provider_utils import build_live_providers, filter_strategies_for_providers
     from firm.llm.config import load_llm_config, provider_config
+
+    if not engine_config.get("sector_map"):
+        # RiskAgent treats a missing sector_map as "cap skipped" and merely
+        # logs a warning per cycle — acceptable for a one-off backtest, but
+        # live trading runs unattended for weeks, so a documented hard
+        # control (max_sector_pct) silently never firing is a real capital
+        # risk, not a cosmetic gap. Fail startup instead of degrading.
+        log.error(
+            "Refusing to start live trading: no risk.sector_map configured "
+            "in config/live.yaml — the max_sector_pct concentration cap "
+            "would silently never be enforced"
+        )
+        raise ValueError(
+            "Missing risk.sector_map in config/live.yaml: the sector "
+            "concentration cap (max_sector_pct) cannot be enforced without "
+            "it. Add a sector_map entry for every symbol in the live "
+            "universe before starting live trading."
+        )
 
     broker_instance = _create_broker(broker)
     live_providers = build_live_providers(broker)
@@ -265,8 +298,16 @@ def _start_live_engine(
         approval_mode=approval_mode,
         auto_approve_strategies=auto_approve,
         trade_history=trade_history,
+        alert_callback=build_alert_callback(),
+        kill_switch_state_path=_KILL_SWITCH_STATE_PATH,
+        state_db_path=_STATE_DB_PATH,
     )
     engine._broker_type = broker
+    # Set synchronously so GET /live/config reflects the requested schedule
+    # immediately, rather than the scheduler's own _schedule_spec, which is
+    # only assigned once the background warmup-then-boot thread
+    # (_start_live_scheduler) finishes — that can lag start-up by seconds.
+    engine._schedule = schedule
     engine.start()
     app.state.live_engine = engine
 
@@ -413,22 +454,29 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
             engine_config["news_guard"] = body.news_guard
         if body.signal_combination is not None:
             engine_config["signal_combination"] = body.signal_combination
+        if body.strategy_circuit_breaker is not None:
+            engine_config["strategy_circuit_breaker"] = body.strategy_circuit_breaker
+        if body.strategy_regime_weights is not None:
+            engine_config["strategy_regime_weights"] = body.strategy_regime_weights
         if body.allocation_method is not None:
             engine_config["allocation_method"] = body.allocation_method
         if body.kelly_fraction is not None:
             engine_config["kelly_fraction"] = body.kelly_fraction
 
-        result = _start_live_engine(
-            request.app,
-            broker=resolved["broker"],
-            schedule=resolved["schedule"],
-            approval_mode=resolved["approval_mode"],
-            symbols=resolved["symbols"],
-            strategies=resolved["strategies"],
-            strategy_params=resolved["strategy_params"],
-            auto_approve=resolved["auto_approve"],
-            engine_config=engine_config,
-        )
+        try:
+            result = _start_live_engine(
+                request.app,
+                broker=resolved["broker"],
+                schedule=resolved["schedule"],
+                approval_mode=resolved["approval_mode"],
+                symbols=resolved["symbols"],
+                strategies=resolved["strategies"],
+                strategy_params=resolved["strategy_params"],
+                auto_approve=resolved["auto_approve"],
+                engine_config=engine_config,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     _start_live_scheduler(
         request.app,
         request.app.state.live_engine,
@@ -604,6 +652,24 @@ def live_alerts(request: Request) -> dict[str, Any]:
     }
 
 
+@router.post("/kill-switch/reset")
+def reset_kill_switch(request: Request) -> dict[str, Any]:
+    """Manually clear the drawdown kill switch and re-arm trading.
+
+    Deliberately requires an explicit operator call — the engine never
+    un-halts itself. Halt state (and this reset) persists across process
+    restarts via ``data/kill_switch_state.json``, so this is also the only
+    way to resume trading after a halt survives a restart.
+    """
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        raise HTTPException(status_code=400, detail="Live engine is not running")
+    if not engine.halted:
+        return {"halted": False, "reset": False, "message": "Kill switch was not tripped"}
+    result = engine.reset_kill_switch()
+    return {"reset": True, **result}
+
+
 # ---------------------------------------------------------------------------
 # Approvals
 # ---------------------------------------------------------------------------
@@ -685,6 +751,18 @@ def reject_order(approval_id: str, body: RejectRequest, request: Request) -> dic
 # Config
 # ---------------------------------------------------------------------------
 
+def _execution_costs(engine: Any) -> dict[str, float]:
+    """Effective commission/slippage rates on the engine's ExecutionAgent."""
+    execution = getattr(getattr(engine, "_orchestrator", None), "execution", None)
+    if execution is None:
+        return {}
+    return {
+        "commission_pct": execution.commission_pct,
+        "slippage_pct": execution.slippage_pct,
+        "spread_pct": execution.spread_pct,
+    }
+
+
 @router.get("/config")
 def get_live_config(request: Request) -> dict[str, Any]:
     engine = getattr(request.app.state, "live_engine", None)
@@ -724,10 +802,17 @@ def get_live_config(request: Request) -> dict[str, Any]:
             "signal_combination": yaml_defaults.get(
                 "signal_combination", {"method": "confidence"}
             ),
+            "strategy_circuit_breaker": yaml_defaults.get(
+                "strategy_circuit_breaker", {"enabled": False}
+            ),
+            "strategy_regime_weights": yaml_defaults.get(
+                "strategy_regime_weights", {"enabled": False}
+            ),
             "allocation_method": yaml_defaults.get(
                 "allocation_method", "conviction_weighted"
             ),
             "kelly_fraction": float(yaml_defaults.get("kelly_fraction", 0.5)),
+            "costs": dict(yaml_defaults.get("costs") or {}),
         }
 
     auto = sorted(engine._auto_approve) if hasattr(engine, "_auto_approve") else []
@@ -739,7 +824,12 @@ def get_live_config(request: Request) -> dict[str, Any]:
 
     return {
         "broker": getattr(engine, "_broker_type", "alpaca_paper"),
-        "schedule": scheduler._schedule_spec if scheduler else "market_open",
+        # Prefer the last requested schedule (set synchronously on
+        # start/update) over the live scheduler's own _schedule_spec, which
+        # only becomes accurate once its background boot thread finishes —
+        # see the comment in _start_live_engine.
+        "schedule": getattr(engine, "_schedule", None)
+        or (scheduler._schedule_spec if scheduler else "market_open"),
         "approval_mode": getattr(engine, "_approval_mode", "semi_auto"),
         "strategies": {
             "enabled": enabled,
@@ -761,19 +851,29 @@ def get_live_config(request: Request) -> dict[str, Any]:
             getattr(engine, "_config", {}).get("signal_combination")
             or {"method": "confidence"}
         ),
+        "strategy_circuit_breaker": dict(
+            getattr(engine, "_config", {}).get("strategy_circuit_breaker")
+            or {"enabled": False}
+        ),
+        "strategy_regime_weights": dict(
+            getattr(engine, "_config", {}).get("strategy_regime_weights")
+            or {"enabled": False}
+        ),
         "allocation_method": getattr(engine, "_config", {}).get(
             "allocation_method", "conviction_weighted"
         ),
         "kelly_fraction": float(
             getattr(engine, "_config", {}).get("kelly_fraction", 0.5)
         ),
+        # Effective rates on the running ExecutionAgent — reflects whatever
+        # config/live.yaml's costs: block resolved to at startup, not just
+        # the raw file (so this stays correct even if that ever diverges).
+        "costs": _execution_costs(engine),
     }
 
 
 @router.put("/config")
 def update_live_config(body: ConfigUpdateRequest, request: Request) -> dict[str, Any]:
-    from firm.live.scheduler import TradingScheduler
-
     engine = getattr(request.app.state, "live_engine", None)
     if engine is None:
         raise HTTPException(status_code=400, detail="Engine not started")
@@ -804,6 +904,10 @@ def update_live_config(body: ConfigUpdateRequest, request: Request) -> dict[str,
         )
     if body.signal_combination is not None:
         engine.update_signal_combination(body.signal_combination)
+    if body.strategy_circuit_breaker is not None:
+        engine.update_strategy_circuit_breaker(body.strategy_circuit_breaker)
+    if body.strategy_regime_weights is not None:
+        engine.update_strategy_regime_weights(body.strategy_regime_weights)
     if body.allocation_method is not None or body.kelly_fraction is not None:
         engine.update_allocation(
             allocation_method=body.allocation_method,
@@ -811,6 +915,10 @@ def update_live_config(body: ConfigUpdateRequest, request: Request) -> dict[str,
         )
 
     if body.schedule is not None:
+        # Set synchronously — see _start_live_engine's comment — so GET
+        # /live/config reports the new schedule right away instead of
+        # racing the background scheduler-boot thread started below.
+        engine._schedule = body.schedule
         with _engine_lock:
             old_scheduler = getattr(request.app.state, "live_scheduler", None)
             if old_scheduler is not None:

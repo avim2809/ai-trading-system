@@ -28,6 +28,7 @@ from firm.live.data_feed import LiveDataFeed, LivePitViewAdapter
 from firm.live.engine import CycleResult, LiveTradingEngine
 from firm.live.portfolio_sync import sync_portfolio_from_broker
 from firm.portfolio.state import PortfolioState
+from firm.time_utils import utcnow
 
 # Re-use MockBroker from test_brokers
 from tests.test_brokers import MockBroker
@@ -38,7 +39,7 @@ from tests.test_brokers import MockBroker
 # ---------------------------------------------------------------------------
 
 def _make_blackboard(asof: datetime | None = None) -> Blackboard:
-    bb = Blackboard(asof=asof or datetime.utcnow())
+    bb = Blackboard(asof=asof or utcnow())
     bb.proposal = TradeProposal(
         asof=bb.asof,
         targets={"AAPL": 0.05, "MSFT": 0.05},
@@ -143,7 +144,7 @@ class TestApprovalQueue:
 
         # Manually backdate the expiry so it's already past
         approval = queue.get_by_id(aid)
-        approval.expires_at = datetime.utcnow() - timedelta(seconds=5)
+        approval.expires_at = utcnow() - timedelta(seconds=5)
 
         expired = queue.expire_stale()
         assert expired == 1
@@ -200,8 +201,8 @@ class TestPendingApproval:
     def test_is_expired(self):
         a = PendingApproval(
             approval_id="test",
-            created_at=datetime.utcnow() - timedelta(hours=2),
-            expires_at=datetime.utcnow() - timedelta(hours=1),
+            created_at=utcnow() - timedelta(hours=2),
+            expires_at=utcnow() - timedelta(hours=1),
             orders=[],
             blackboard_snapshot={},
         )
@@ -210,8 +211,8 @@ class TestPendingApproval:
     def test_not_expired(self):
         a = PendingApproval(
             approval_id="test",
-            created_at=datetime.utcnow(),
-            expires_at=datetime.utcnow() + timedelta(hours=1),
+            created_at=utcnow(),
+            expires_at=utcnow() + timedelta(hours=1),
             orders=[],
             blackboard_snapshot={},
         )
@@ -435,7 +436,7 @@ class TestLiveTradingEngine:
         broker, feed, queue, config = engine_components
 
         mock_orch = MagicMock()
-        mock_orch.step.return_value = ([], Blackboard(asof=datetime.utcnow()))
+        mock_orch.step.return_value = ([], Blackboard(asof=utcnow()))
         mock_build.return_value = mock_orch
 
         engine = self._make_engine(broker, feed, queue, config)
@@ -487,6 +488,86 @@ class TestLiveTradingEngine:
         assert any(a["kind"] == "drawdown_breach" for a in engine.alerts)
 
     @patch("firm.live.engine.build_orchestrator")
+    def test_drawdown_kill_switch_persists_and_survives_restart(self, mock_build, tmp_path):
+        state_path = tmp_path / "kill_switch_state.json"
+        broker = MockBroker(initial_cash=50_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1}
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            kill_switch_state_path=state_path,
+        )
+        engine.start()
+        engine.run_cycle()
+        assert engine.halted is True
+        assert state_path.exists()
+        saved = json.loads(state_path.read_text())
+        assert saved["halted"] is True
+        assert "reason" in saved
+
+        # A fresh engine instance (simulating a process restart) pointed at
+        # the same state file must come up already halted.
+        engine2 = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            kill_switch_state_path=state_path,
+        )
+        assert engine2.halted is True
+
+    def test_kill_switch_state_not_persisted_by_default(self, tmp_path):
+        # Default construction (no kill_switch_state_path) must not touch
+        # disk at all — every other test in this module relies on this.
+        broker = MockBroker(initial_cash=100_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000}
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        assert engine._kill_switch_state_path is None
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_reset_kill_switch_rearms_trading(self, mock_build, tmp_path):
+        state_path = tmp_path / "kill_switch_state.json"
+        broker = MockBroker(initial_cash=50_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1}
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            kill_switch_state_path=state_path,
+        )
+        engine.start()
+        engine.run_cycle()
+        assert engine.halted is True
+
+        result = engine.reset_kill_switch()
+        assert result["halted"] is False
+        assert engine.halted is False
+        saved = json.loads(state_path.read_text())
+        assert saved["halted"] is False
+        assert any(a["kind"] == "kill_switch_reset" for a in engine.alerts)
+
+        # Re-armed: a subsequent cycle can submit orders again (nav hasn't
+        # moved further, so the new peak == current nav means no immediate
+        # re-trip).
+        result2 = engine.run_cycle()
+        assert result2.halted is False
+
+    @patch("firm.live.engine.build_orchestrator")
     def test_alert_callback_invoked(self, mock_build):
         received: list[dict] = []
         broker = MockBroker(initial_cash=50_000)
@@ -536,7 +617,7 @@ class TestLiveTradingEngine:
         broker, feed, queue, config = engine_components
 
         mock_orch = MagicMock()
-        mock_orch.step.return_value = ([], Blackboard(asof=datetime.utcnow()))
+        mock_orch.step.return_value = ([], Blackboard(asof=utcnow()))
         mock_build.return_value = mock_orch
 
         engine = self._make_engine(broker, feed, queue, config)
@@ -555,7 +636,7 @@ class TestLiveTradingEngine:
         broker, feed, queue, config = engine_components
 
         mock_orch = MagicMock()
-        mock_orch.step.return_value = ([], Blackboard(asof=datetime.utcnow()))
+        mock_orch.step.return_value = ([], Blackboard(asof=utcnow()))
         mock_build.return_value = mock_orch
 
         engine = self._make_engine(broker, feed, queue, config)
@@ -607,6 +688,140 @@ class TestLiveTradingEngine:
         assert statuses[0].status == "filled"
 
         assert broker.get_position("AAPL") is not None
+
+
+class TestOrdersToFillsAttributionWiring:
+    """Coverage for LiveTradingEngine._orders_to_fills, the defensive
+    normalizer between order dicts (``side`` + unsigned ``quantity``) and
+    the signed-``shares`` fill format PerformanceAttribution.record_trades
+    expects. Real ExecutionAgent-produced orders already carry ``shares``,
+    but a bare mocked orchestrator (as used throughout this test module)
+    does not — without this normalizer, record_trades() would silently
+    KeyError (swallowed by a broad except) and record nothing."""
+
+    def test_orders_to_fills_signs_shares_by_side(self):
+        orders = [
+            {"symbol": "AAPL", "side": "buy", "quantity": 10, "price": 150.0, "strategy": "momentum"},
+            {"symbol": "MSFT", "side": "sell", "quantity": 5, "price": 300.0, "strategy": "trend"},
+        ]
+        fills = LiveTradingEngine._orders_to_fills(orders)
+        assert fills[0] == {"symbol": "AAPL", "shares": 10.0, "price": 150.0, "strategy": "momentum"}
+        assert fills[1] == {"symbol": "MSFT", "shares": -5.0, "price": 300.0, "strategy": "trend"}
+
+    def test_orders_to_fills_defaults_missing_strategy_to_composite(self):
+        fills = LiveTradingEngine._orders_to_fills(
+            [{"symbol": "AAPL", "side": "buy", "quantity": 1, "price": 100.0}]
+        )
+        assert fills[0]["strategy"] == "composite"
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_full_auto_cycle_populates_attribution_strategy_holdings(
+        self, mock_build, engine_components,
+    ):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+        )
+        engine.start()
+        engine.run_cycle()
+
+        assert engine._attribution.trade_log, (
+            "record_trades() must succeed (not be silently swallowed) so "
+            "live trade attribution is actually recorded"
+        )
+        holdings = engine._attribution._strategy_holdings
+        assert holdings.get("momentum", {}).get("AAPL") == 10.0
+        assert holdings.get("trend", {}).get("MSFT") == 5.0
+
+
+class TestDurableLiveState:
+    """SQLite-backed persistence of portfolio history + attribution state
+    (firm.live.state_store.LiveStateStore), wired via LiveTradingEngine's
+    optional ``state_db_path``."""
+
+    def _make_engine(self, broker, feed, queue, config, **kwargs):
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, **kwargs,
+        )
+
+    def test_disabled_by_default_no_disk_access(self, engine_components):
+        broker, feed, queue, config = engine_components
+        engine = self._make_engine(broker, feed, queue, config)
+        assert engine._state_store is None
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_portfolio_history_and_attribution_persist_across_restart(
+        self, mock_build, tmp_path,
+    ):
+        db_path = tmp_path / "live_state.db"
+        broker = MockBroker(initial_cash=100_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000}
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            state_db_path=db_path,
+        )
+        engine.start()
+        engine.run_cycle()
+        engine.run_cycle()
+
+        assert db_path.exists()
+        assert len(engine.portfolio.history) == 2
+        assert "momentum" in engine._attribution.strategies
+
+        engine.stop()
+
+        # A fresh engine instance (simulating a process restart) pointed at
+        # the same database must come up with the prior run's NAV history
+        # and attribution state already restored — cash/holdings are still
+        # (correctly) re-seeded from the broker, not from this database.
+        engine2 = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            state_db_path=db_path,
+        )
+        assert len(engine2.portfolio.history) == 2
+        assert "momentum" in engine2._attribution.strategies
+        assert engine2._attribution.trade_log == engine._attribution.trade_log
+
+    def test_no_state_db_path_never_creates_file(self, tmp_path, engine_components):
+        broker, feed, queue, config = engine_components
+        would_be_path = tmp_path / "should_not_exist.db"
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+        engine.stop()
+        assert not would_be_path.exists()
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_missing_state_db_starts_clean_without_error(self, mock_build, tmp_path):
+        # First-run case: state_db_path is configured but the file doesn't
+        # exist yet — must not raise, and must start with empty history.
+        db_path = tmp_path / "fresh_live_state.db"
+        broker = MockBroker(initial_cash=100_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000}
+        mock_build.return_value = MagicMock()
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, state_db_path=db_path,
+        )
+        assert engine.portfolio.history == []
+        assert engine._attribution.strategies == []
 
 
 class TestReflectionPersistence:
@@ -988,28 +1203,18 @@ class TestMarketSessionSync:
         with patch("firm.live.engine.build_orchestrator", return_value=MagicMock()):
             engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
         engine._cycle_history.append(
-            CycleResult(cycle_id=1, timestamp=datetime.utcnow())
+            CycleResult(cycle_id=1, timestamp=utcnow())
         )
         assert engine.had_cycle_today() is True
 
-    @patch("firm.live.engine.build_orchestrator")
-    def test_catch_up_starts_cycle_when_market_open(self, mock_build, engine_components):
-        from firm.live.scheduler import maybe_catch_up_session_cycle
-
-        broker, feed, queue, config = engine_components
-        broker._market_open = True
-        mock_orch = MagicMock()
-        mock_orch.step.return_value = ([], _make_blackboard())
-        mock_build.return_value = mock_orch
-
-        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
-        engine.start()
-        maybe_catch_up_session_cycle(engine, "market_open", timezone="US/Eastern")
-
-        deadline = time.time() + 5.0
-        while time.time() < deadline and not engine.had_cycle_today():
-            time.sleep(0.05)
-        assert engine.had_cycle_today()
+    # NOTE: a test_catch_up_starts_cycle_when_market_open test used to live
+    # here, exercising maybe_catch_up_session_cycle() against a real
+    # LiveTradingEngine via a timed 5s poll loop for engine.had_cycle_today().
+    # It was flaky under CI load (racing a background daemon thread against
+    # the poll deadline) and has been replaced by deterministic,
+    # threading.Event-based coverage of the same function in
+    # tests/test_scheduler.py (see test_starts_catch_up_cycle_when_market_open),
+    # which uses a duck-typed mock engine instead of a full one.
 
 
 class TestCycleHardTimeout:
@@ -1304,7 +1509,7 @@ class TestLiveEngineHardening:
 
 class TestCycleResult:
     def test_defaults(self):
-        r = CycleResult(cycle_id=1, timestamp=datetime.utcnow())
+        r = CycleResult(cycle_id=1, timestamp=utcnow())
         assert r.orders_generated == 0
         assert r.error is None
         assert r.approval_ids == []
@@ -1335,7 +1540,7 @@ class TestNewsGuardGate:
             tmp_path=tmp_path,
             news_guard={"enabled": True, "offline": True},
         )
-        result = CycleResult(cycle_id=1, timestamp=datetime.utcnow())
+        result = CycleResult(cycle_id=1, timestamp=utcnow())
         # 18:05 UTC on FOMC day is inside the bundled-CSV blackout window.
         at = datetime(2026, 7, 29, 18, 5)
         allowed = engine._apply_news_guard(
@@ -1349,7 +1554,7 @@ class TestNewsGuardGate:
             tmp_path=tmp_path,
             news_guard={"enabled": True, "offline": True},
         )
-        result = CycleResult(cycle_id=1, timestamp=datetime.utcnow())
+        result = CycleResult(cycle_id=1, timestamp=utcnow())
         at = datetime(2026, 7, 20, 12, 0)  # no event nearby
         orders = [{"symbol": "SPY", "side": "buy", "quantity": 1}]
         assert engine._apply_news_guard(orders, at, result) == orders
@@ -1359,10 +1564,67 @@ class TestNewsGuardGate:
             tmp_path=tmp_path,
             news_guard={"enabled": False},
         )
-        result = CycleResult(cycle_id=1, timestamp=datetime.utcnow())
+        result = CycleResult(cycle_id=1, timestamp=utcnow())
         at = datetime(2026, 7, 29, 18, 5)
         orders = [{"symbol": "SPY", "side": "buy", "quantity": 1}]
         assert engine._apply_news_guard(orders, at, result) == orders
+
+    def test_calendar_totally_unavailable_fails_closed(self, tmp_path):
+        """If the calendar can't be loaded at all (live fetch AND the
+        bundled CSV both failed), every order must be held — approving
+        them blind would defeat the entire point of the gate."""
+        engine = self._engine(
+            tmp_path=tmp_path,
+            news_guard={"enabled": True, "offline": False},
+        )
+        result = CycleResult(cycle_id=1, timestamp=utcnow())
+        at = datetime(2026, 7, 29, 18, 5)
+        orders = [
+            {"symbol": "SPY", "side": "buy", "quantity": 1},
+            {"symbol": "QQQ", "side": "sell", "quantity": 2},
+        ]
+        with patch("firm.live.news_guard.load_events", side_effect=RuntimeError("disk full")):
+            allowed = engine._apply_news_guard(orders, at, result)
+        assert allowed == []
+        alerts = [a for a in result.alerts if a["kind"] == "news_guard_calendar_unavailable"]
+        assert len(alerts) == 1
+        assert alerts[0]["severity"] == "critical"
+        assert "disk full" in alerts[0]["message"]
+
+    def test_live_fetch_failure_falling_back_to_csv_raises_stale_alert(self, tmp_path):
+        from firm.live import news_guard as ng
+
+        engine = self._engine(
+            tmp_path=tmp_path,
+            news_guard={"enabled": True, "offline": False},
+        )
+        result = CycleResult(cycle_id=1, timestamp=utcnow())
+        at = datetime(2026, 7, 20, 12, 0)  # quiet window in the bundled CSV
+        orders = [{"symbol": "SPY", "side": "buy", "quantity": 1}]
+        # offline=False but load_events still lands on the bundled CSV, as it
+        # genuinely would after a real live-fetch failure (real CSV events,
+        # not a mock, so the quiet-window decision below is meaningful —
+        # only the source label is what load_events would already produce).
+        csv_events = ng.load_from_csv()
+        with patch("firm.live.news_guard.load_events", return_value=(csv_events, "bundled-csv")):
+            allowed = engine._apply_news_guard(orders, at, result)
+        assert allowed == orders  # quiet window — not held
+        stale_alerts = [a for a in result.alerts if a["kind"] == "news_guard_stale_calendar"]
+        assert len(stale_alerts) == 1
+        assert stale_alerts[0]["severity"] == "warning"
+
+    def test_deliberate_offline_mode_does_not_raise_stale_alert(self, tmp_path):
+        """offline=True is an intentional configuration, not a degradation —
+        alerting every cycle for it would just be noise."""
+        engine = self._engine(
+            tmp_path=tmp_path,
+            news_guard={"enabled": True, "offline": True},
+        )
+        result = CycleResult(cycle_id=1, timestamp=utcnow())
+        at = datetime(2026, 7, 20, 12, 0)
+        orders = [{"symbol": "SPY", "side": "buy", "quantity": 1}]
+        engine._apply_news_guard(orders, at, result)
+        assert not any(a["kind"] == "news_guard_stale_calendar" for a in result.alerts)
 
 
 # ---------------------------------------------------------------------------
@@ -1412,3 +1674,336 @@ class TestExecutionSafetyGate:
         statuses, failed = engine._execute_orders(_make_orders())
         assert len(statuses) == 2
         assert failed == []
+
+
+# ---------------------------------------------------------------------------
+# guard_order/RiskProfile hard-cap gate in _execute_orders
+# ---------------------------------------------------------------------------
+
+class TestOrderRiskCapGate:
+    @patch("firm.live.engine.build_orchestrator")
+    def _engine(self, mock_build, tmp_path, universe=("AAPL", "MSFT"), max_position_pct=None):
+        mock_build.return_value = MagicMock()
+        broker = MockBroker()
+        broker.connect()
+        feed = LiveDataFeed(providers={}, universe=list(universe))
+        queue = ApprovalQueue(broker=broker)
+        config = {
+            "initial_capital": 100_000,
+            "memory_log_path": str(tmp_path / "decisions.jsonl"),
+        }
+        if max_position_pct is not None:
+            config["max_position_pct"] = max_position_pct
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine._broker_type = "ibkr_paper"
+        return engine, broker
+
+    def test_no_config_cap_is_a_noop(self, tmp_path, monkeypatch):
+        """Default (unconfigured) max_position_pct must not block orders
+        that every other existing test already exercises without a cap."""
+        monkeypatch.setenv("FIRM_EXECUTION_AUDIT", str(tmp_path / "audit.jsonl"))
+        engine, broker = self._engine(tmp_path=tmp_path)
+        statuses, failed = engine._execute_orders(_make_orders())
+        assert len(statuses) == 2
+        assert failed == []
+
+    def test_order_for_symbol_outside_universe_is_blocked(self, tmp_path, monkeypatch):
+        """Defense-in-depth: an order for a symbol the engine wasn't even
+        configured to trade must never reach the broker, regardless of how
+        it got produced upstream."""
+        monkeypatch.setenv("FIRM_EXECUTION_AUDIT", str(tmp_path / "audit.jsonl"))
+        engine, broker = self._engine(tmp_path=tmp_path, universe=["AAPL"])
+        orders = [
+            {"symbol": "AAPL", "side": "buy", "quantity": 10, "price": 150.0, "strategy": "momentum"},
+            {"symbol": "TSLA", "side": "buy", "quantity": 5, "price": 300.0, "strategy": "momentum"},
+        ]
+        statuses, failed = engine._execute_orders(orders)
+        assert len(statuses) == 1
+        assert statuses[0].symbol == "AAPL"
+        assert len(failed) == 1
+        assert failed[0]["symbol"] == "TSLA"
+        assert "allowlist" in failed[0]["error"]
+        assert any(a["kind"] == "order_risk_cap_blocked" for a in engine.alerts)
+
+    def test_order_exceeding_notional_cap_is_blocked(self, tmp_path, monkeypatch):
+        """A per-trade cap derived from RiskAgent's own max_position_pct
+        (doubled for a legitimate full-position flip — see engine.py) must
+        catch an order far outside anything the portfolio construction
+        pipeline would ever legitimately produce."""
+        monkeypatch.setenv("FIRM_EXECUTION_AUDIT", str(tmp_path / "audit.jsonl"))
+        # cap = 2 * 0.01 * 100_000 = 2_000; this order's notional is 50_000.
+        engine, broker = self._engine(tmp_path=tmp_path, max_position_pct=0.01)
+        orders = [{"symbol": "AAPL", "side": "buy", "quantity": 100, "price": 500.0, "strategy": "momentum"}]
+        statuses, failed = engine._execute_orders(orders)
+        assert statuses == []
+        assert len(failed) == 1
+        assert "notional" in failed[0]["error"].lower()
+        assert any(a["kind"] == "order_risk_cap_blocked" for a in engine.alerts)
+
+    def test_order_within_notional_cap_still_submits(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FIRM_EXECUTION_AUDIT", str(tmp_path / "audit.jsonl"))
+        # cap = 2 * 0.5 * 100_000 = 100_000; this order's notional is 1_500.
+        engine, broker = self._engine(tmp_path=tmp_path, max_position_pct=0.5)
+        statuses, failed = engine._execute_orders(_make_orders())
+        assert len(statuses) == 2
+        assert failed == []
+
+    def test_missing_stop_does_not_block_orders(self, tmp_path, monkeypatch):
+        """This engine rebalances to target weights — orders never carry a
+        protective-stop field — so the RiskProfile gate must run with
+        require_stop=False, not the CLI/discretionary skill's stricter
+        default (which would block every single order)."""
+        monkeypatch.setenv("FIRM_EXECUTION_AUDIT", str(tmp_path / "audit.jsonl"))
+        engine, broker = self._engine(tmp_path=tmp_path)
+        orders = _make_orders()
+        assert all("stop" not in o for o in orders)
+        statuses, failed = engine._execute_orders(orders)
+        assert len(statuses) == 2
+        assert failed == []
+
+    def test_blocked_order_is_audited(self, tmp_path, monkeypatch):
+        import json
+
+        audit_path = tmp_path / "audit.jsonl"
+        monkeypatch.setenv("FIRM_EXECUTION_AUDIT", str(audit_path))
+        engine, broker = self._engine(tmp_path=tmp_path, universe=["AAPL"])
+        orders = [{"symbol": "TSLA", "side": "buy", "quantity": 5, "price": 300.0, "strategy": "momentum"}]
+        engine._execute_orders(orders)
+        records = [json.loads(line) for line in audit_path.read_text().splitlines()]
+        assert any(r.get("decision") == "blocked" and r.get("symbol") == "TSLA" for r in records)
+
+
+class TestBrokerReconnect:
+    """Coverage for mid-session broker disconnect/reconnect handling — see
+    docs/PROJECT_CONTEXT.md 'Broker & host failover'."""
+
+    @pytest.fixture()
+    def engine_components(self, tmp_path):
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
+        return broker, feed, queue, config
+
+    def _make_engine(self, broker, feed, queue, config, **kwargs):
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, **kwargs,
+        )
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_reconnect_is_attempted_and_succeeds_inline(self, mock_build, engine_components):
+        """A broker whose reconnect() call succeeds must not escalate to the
+        sustained-disconnect alert — a single dropped socket should just
+        self-heal within the same cycle's error handling."""
+        broker, feed, queue, config = engine_components
+
+        class DropsOnceBroker(MockBroker):
+            def __init__(self):
+                super().__init__()
+                self.reconnect_calls = 0
+
+            def get_current_prices(self, symbols):
+                raise BrokerError("connection reset by peer")
+
+            def reconnect(self):
+                self.reconnect_calls += 1
+                super().reconnect()
+
+        broker = DropsOnceBroker()
+        mock_build.return_value = MagicMock()
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+        result = engine.run_cycle()
+
+        assert broker.reconnect_calls == 1
+        assert any(a["kind"] == "broker_unavailable" for a in result.alerts)
+        assert not any(a["kind"] == "broker_disconnected_sustained" for a in result.alerts)
+        # reconnected=True must be recorded on the alert context.
+        alert = next(a for a in result.alerts if a["kind"] == "broker_unavailable")
+        assert alert["reconnected"] is True
+        assert alert["consecutive_failures"] == 1
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_sustained_disconnect_escalates_past_threshold(self, mock_build, engine_components):
+        """When reconnect() itself keeps failing (e.g. IB Gateway is
+        actually down, not just a dropped socket), consecutive cycles must
+        escalate to a distinct, louder alert past the threshold — this is
+        the "needs a human" signal the runbook tells operators to watch
+        for."""
+        broker, feed, queue, config = engine_components
+        config = {**config, "broker_disconnect_alert_threshold": 2}
+
+        class AlwaysDownBroker(MockBroker):
+            def get_current_prices(self, symbols):
+                raise BrokerError("no route to host")
+
+            def reconnect(self):
+                raise BrokerError("IB Gateway not reachable")
+
+        broker = AlwaysDownBroker()
+        mock_build.return_value = MagicMock()
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+
+        result1 = engine.run_cycle()
+        assert any(a["kind"] == "broker_unavailable" for a in result1.alerts)
+        assert not any(a["kind"] == "broker_disconnected_sustained" for a in result1.alerts)
+
+        result2 = engine.run_cycle()
+        assert any(a["kind"] == "broker_disconnected_sustained" for a in result2.alerts)
+        sustained = next(a for a in result2.alerts if a["kind"] == "broker_disconnected_sustained")
+        assert sustained["severity"] == "critical"
+        assert sustained["consecutive_failures"] == 2
+        assert sustained["reconnected"] is False
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_recovery_emits_reconnected_alert_and_resets_counter(self, mock_build, engine_components):
+        """Once a cycle's broker calls actually succeed again, the engine
+        must announce recovery and reset the failure counter — otherwise a
+        transient blip would falsely count toward a later, unrelated
+        outage's sustained-disconnect threshold."""
+        broker, feed, queue, config = engine_components
+        config = {**config, "broker_disconnect_alert_threshold": 5}
+
+        state = {"down": True}
+
+        class FlakyThenHealthyBroker(MockBroker):
+            def get_current_prices(self, symbols):
+                if state["down"]:
+                    raise BrokerError("temporarily unavailable")
+                return super().get_current_prices(symbols)
+
+            def reconnect(self):
+                raise BrokerError("still down")
+
+        broker = FlakyThenHealthyBroker()
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+
+        down_result = engine.run_cycle()
+        assert down_result.error is not None
+        assert engine._consecutive_broker_failures == 1
+
+        state["down"] = False
+        up_result = engine.run_cycle()
+        assert up_result.error is None
+        assert engine._consecutive_broker_failures == 0
+        assert any(a["kind"] == "broker_reconnected" for a in up_result.alerts)
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_default_broker_reconnect_calls_disconnect_then_connect(self, mock_build, engine_components):
+        """The Broker ABC's default reconnect() (used by IBKRBroker/
+        AlpacaBroker, which don't override it) must tear down and
+        re-establish the connection rather than being a no-op."""
+        broker, feed, queue, config = engine_components
+        calls: list[str] = []
+        broker.disconnect = lambda: calls.append("disconnect")  # type: ignore[method-assign]
+        broker.connect = lambda: calls.append("connect")  # type: ignore[method-assign]
+
+        broker.reconnect()
+
+        assert calls == ["disconnect", "connect"]
+
+    def test_default_broker_reconnect_survives_disconnect_failure(self, engine_components):
+        """A broker whose connection is already dead may raise from
+        disconnect() itself (e.g. the socket is gone) — reconnect() must
+        still proceed to connect() rather than propagating that error."""
+        broker, _feed, _queue, _config = engine_components
+        broker.disconnect = MagicMock(side_effect=RuntimeError("socket already closed"))  # type: ignore[method-assign]
+        connected = {"value": False}
+
+        def _connect():
+            connected["value"] = True
+
+        broker.connect = _connect  # type: ignore[method-assign]
+
+        broker.reconnect()
+
+        assert connected["value"] is True
+
+
+# ---------------------------------------------------------------------------
+# Strategy circuit breaker config update (rebuild-on-change knob)
+# ---------------------------------------------------------------------------
+
+class TestUpdateStrategyCircuitBreaker:
+    @patch("firm.live.engine.build_orchestrator")
+    def _engine(self, mock_build, tmp_path):
+        mock_build.return_value = MagicMock()
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {
+            "initial_capital": 100_000,
+            "memory_log_path": str(tmp_path / "decisions.jsonl"),
+        }
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+
+    def test_updates_config_and_rebuilds_orchestrator(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path)
+        original_orchestrator = engine._orchestrator
+
+        with patch("firm.live.engine.build_orchestrator") as mock_build:
+            rebuilt = MagicMock()
+            mock_build.return_value = rebuilt
+            engine.update_strategy_circuit_breaker({"enabled": True, "trigger_sharpe": -0.3})
+
+        assert engine._config["strategy_circuit_breaker"] == {
+            "enabled": True, "trigger_sharpe": -0.3,
+        }
+        assert engine._orchestrator is rebuilt
+        assert engine._orchestrator is not original_orchestrator
+
+    def test_default_config_has_no_circuit_breaker_key(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path)
+        assert "strategy_circuit_breaker" not in engine._config
+
+
+class TestUpdateStrategyRegimeWeights:
+    @patch("firm.live.engine.build_orchestrator")
+    def _engine(self, mock_build, tmp_path):
+        mock_build.return_value = MagicMock()
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {
+            "initial_capital": 100_000,
+            "memory_log_path": str(tmp_path / "decisions.jsonl"),
+        }
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+
+    def test_updates_config_and_rebuilds_orchestrator(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path)
+        original_orchestrator = engine._orchestrator
+
+        with patch("firm.live.engine.build_orchestrator") as mock_build:
+            rebuilt = MagicMock()
+            mock_build.return_value = rebuilt
+            engine.update_strategy_regime_weights({
+                "enabled": True,
+                "weights": {"Bull": {"momentum": 1.2}},
+            })
+
+        assert engine._config["strategy_regime_weights"] == {
+            "enabled": True,
+            "weights": {"Bull": {"momentum": 1.2}},
+        }
+        assert engine._orchestrator is rebuilt
+        assert engine._orchestrator is not original_orchestrator
+
+    def test_default_config_has_no_regime_weights_key(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path)
+        assert "strategy_regime_weights" not in engine._config

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import csv
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -164,6 +165,17 @@ def load_from_csv(path: Path = BUNDLED_CSV) -> list[Event]:
     return out
 
 
+def bundled_csv_age_hours(path: Path = BUNDLED_CSV) -> Optional[float]:
+    """Age of the bundled offline calendar file in hours, or ``None`` if it
+    can't be stat'd (missing/permissions) — used to size how stale a
+    live-calendar-fetch-failure fallback is for the engine's alert."""
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None
+    return (time.time() - mtime) / 3600.0
+
+
 def load_events(offline: bool = False) -> tuple[list[Event], str]:
     """Return (events, source). Falls back to the bundled CSV on any failure."""
     if not offline:
@@ -185,9 +197,11 @@ def load_events(offline: bool = False) -> tuple[list[Event], str]:
                 "falling back to bundled offline calendar", exc,
             )
     events = load_from_csv()
+    age_hours = bundled_csv_age_hours()
     log.info(
-        "news-guard: loaded %d events from bundled offline calendar (%s)",
+        "news-guard: loaded %d events from bundled offline calendar (%s, age=%s)",
         len(events), BUNDLED_CSV,
+        f"{age_hours:.1f}h" if age_hours is not None else "unknown",
     )
     return events, "bundled-csv"
 

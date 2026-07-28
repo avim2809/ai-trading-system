@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from firm.brokers.base import (
@@ -13,6 +12,7 @@ from firm.brokers.base import (
     OrderRequest,
     OrderStatus,
 )
+from firm.time_utils import utcnow
 
 log = logging.getLogger(__name__)
 
@@ -259,5 +259,5 @@ class AlpacaBroker(Broker):
             filled_quantity=float(order.filled_qty) if order.filled_qty else 0.0,
             avg_fill_price=float(order.filled_avg_price) if order.filled_avg_price else 0.0,
             status=mapped,
-            timestamp=order.submitted_at or datetime.utcnow(),
+            timestamp=order.submitted_at or utcnow(),
         )

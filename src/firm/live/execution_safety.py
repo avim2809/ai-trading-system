@@ -14,7 +14,12 @@ the live path. Every decision is appended to an immutable audit JSONL.
 Ported from the external trading-suite ``execution-safety`` skill and adapted to
 firm's live engine: the environment flag is namespaced ``FIRM_ALLOW_TRADING``
 and the engine calls :func:`guard_live_submission` as a systemd-friendly hard
-gate that sits *on top of* the existing approval queue. Standard library only.
+gate that sits *on top of* the existing approval queue. It also runs every
+order through :func:`guard_order` (with ``live=False`` — actual live/paper
+routing is :func:`guard_live_submission`'s job, not duplicated here) so the
+:class:`RiskProfile` symbol-allowlist and max-position-notional caps act as a
+final, independently-auditable check on the broker-bound order, one level
+below the RiskAgent's portfolio-level weight caps. Standard library only.
 """
 
 from __future__ import annotations
@@ -74,6 +79,14 @@ class RiskProfile:
     max_position_notional: float = 50_000.0
     min_stop_atr_mult: float = 1.0
     symbol_allowlist: list[str] = field(default_factory=list)
+    # A per-trade protective stop is the CLI/discretionary-trading skill's
+    # original risk-sizing primitive; the live engine instead rebalances to
+    # portfolio target weights (no per-order stop concept) and manages risk
+    # via RiskAgent position/sector/correlation/liquidity caps plus the
+    # engine's drawdown kill-switch. Set False there so "no stop attached"
+    # doesn't block every single rebalancing order; CLI/manual callers keep
+    # the stricter default.
+    require_stop: bool = True
 
     @classmethod
     def from_json(cls, path: str | Path) -> "RiskProfile":
@@ -148,7 +161,8 @@ def check_risk_limits(order: Order, profile: RiskProfile) -> list[str]:
 
     risk_amt = order.derived_risk_amount()
     if order.stop is None:
-        breaches.append("No protective stop attached.")
+        if profile.require_stop:
+            breaches.append("No protective stop attached.")
     elif order.atr is not None and order.price:
         stop_dist = abs(order.price - order.stop)
         min_dist = profile.min_stop_atr_mult * order.atr

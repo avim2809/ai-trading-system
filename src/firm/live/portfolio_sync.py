@@ -8,11 +8,11 @@ to ensure the internal book matches the broker's ground truth.  Discrepancies
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 from typing import Any
 
 from firm.brokers.base import Broker, BrokerPosition
 from firm.portfolio.state import PortfolioState
+from firm.time_utils import utcnow
 
 log = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ def sync_portfolio_from_broker(
     portfolio.holdings = {s: q for s, q in portfolio.holdings.items() if q != 0}
 
     if prices:
-        portfolio.record_snapshot(datetime.utcnow(), prices)
+        portfolio.record_snapshot(utcnow(), prices)
 
     return discrepancies
 

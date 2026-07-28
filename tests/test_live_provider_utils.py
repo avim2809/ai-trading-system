@@ -7,7 +7,6 @@ from unittest.mock import MagicMock, patch
 
 from firm.data.providers.ibkr import IBKRProvider
 from firm.live.provider_utils import (
-    FUNDAMENTAL_DEPENDENT_STRATEGIES,
     build_live_providers,
     filter_strategies_for_providers,
     fundamentals_available,
@@ -81,6 +80,58 @@ def test_resolve_live_startup_uses_yaml_universe_and_risk():
     assert resolved["engine_config"].get("kill_switch_drawdown") == 0.08
     assert resolved["engine_config"].get("max_position_pct") == 0.05
     assert resolved["strategy_params"]["stat_arb"]["require_cointegration"] is True
+    # config/live.yaml's costs: block must reach ExecutionAgent's flat
+    # commission_pct/slippage_pct/spread_pct keys, not be silently dropped.
+    assert resolved["engine_config"].get("commission_pct") == 0.0005
+    assert resolved["engine_config"].get("slippage_pct") == 0.0005
+    assert resolved["engine_config"].get("spread_pct") == 0.0002
+    assert resolved["engine_config"].get("market_impact_coefficient") == 0.005
+    # Broker failover: config/live.yaml's broker_disconnect_alert_threshold
+    # must reach the engine config (see docs/PROJECT_CONTEXT.md "Broker &
+    # host failover").
+    assert resolved["engine_config"].get("broker_disconnect_alert_threshold") == 3
+    # Generic per-strategy circuit breaker config must reach the engine
+    # config too (disabled by default — see docs/portfolio_construction_diagnosis.md).
+    cb = resolved["engine_config"].get("strategy_circuit_breaker")
+    assert cb is not None
+    assert cb.get("enabled") is False
+    rw = resolved["engine_config"].get("strategy_regime_weights")
+    assert rw is not None
+    assert rw.get("enabled") is False
+
+
+def test_resolve_live_startup_costs_from_yaml_are_flattened():
+    from unittest.mock import patch as _patch
+
+    from firm.live.provider_utils import resolve_live_startup
+
+    fake_yaml = {
+        "risk": {"max_position_pct": 0.05},
+        "costs": {
+            "commission_pct": 0.0012, "slippage_pct": 0.0007, "spread_pct": 0.0003,
+            "market_impact_coefficient": 0.008,
+        },
+    }
+    with _patch("firm.live.provider_utils.load_live_yaml_defaults", return_value=fake_yaml):
+        resolved = resolve_live_startup()
+    assert resolved["engine_config"]["commission_pct"] == 0.0012
+    assert resolved["engine_config"]["slippage_pct"] == 0.0007
+    assert resolved["engine_config"]["spread_pct"] == 0.0003
+    assert resolved["engine_config"]["market_impact_coefficient"] == 0.008
+
+
+def test_resolve_live_startup_costs_absent_from_yaml_leaves_execution_agent_defaults():
+    from unittest.mock import patch as _patch
+
+    from firm.live.provider_utils import resolve_live_startup
+
+    fake_yaml = {"risk": {"max_position_pct": 0.05}}
+    with _patch("firm.live.provider_utils.load_live_yaml_defaults", return_value=fake_yaml):
+        resolved = resolve_live_startup()
+    assert "commission_pct" not in resolved["engine_config"]
+    assert "slippage_pct" not in resolved["engine_config"]
+    assert "spread_pct" not in resolved["engine_config"]
+    assert "market_impact_coefficient" not in resolved["engine_config"]
 
 
 @patch("firm.data.providers.ibkr.IBKRProvider")

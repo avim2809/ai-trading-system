@@ -17,6 +17,7 @@ from typing import Any, Literal
 
 from firm.api.serializers import serialize_blackboard
 from firm.brokers.base import Broker, OrderRequest, OrderStatus
+from firm.time_utils import utcnow
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class PendingApproval:
     strategy: str = ""
 
     def is_expired(self) -> bool:
-        return self.status == "pending" and datetime.utcnow() > self.expires_at
+        return self.status == "pending" and utcnow() > self.expires_at
 
 
 class ApprovalQueue:
@@ -66,7 +67,7 @@ class ApprovalQueue:
         strategy: str = "",
     ) -> str:
         """Enqueue orders for approval.  Returns the approval_id."""
-        now = datetime.utcnow()
+        now = utcnow()
         approval = PendingApproval(
             approval_id=uuid.uuid4().hex[:12],
             created_at=now,

@@ -15,6 +15,7 @@ from firm.brokers.base import (
     OrderRequest,
     OrderStatus,
 )
+from firm.time_utils import utcnow
 
 log = logging.getLogger(__name__)
 
@@ -305,7 +306,7 @@ class IBKRBroker(Broker):
                 "Could not resolve exchange timezone %r; falling back to UTC "
                 "for market-hours check", cd.timeZoneId, exc_info=True,
             )
-            now = datetime.utcnow()
+            now = utcnow()
         now_str = now.strftime("%Y%m%d:%H%M")
         today_str = now.strftime("%Y%m%d")
         found_today = False
@@ -373,5 +374,5 @@ class IBKRBroker(Broker):
             filled_quantity=fill_qty,
             avg_fill_price=avg_price,
             status=mapped,
-            timestamp=datetime.utcnow(),
+            timestamp=utcnow(),
         )

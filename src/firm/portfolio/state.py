@@ -126,3 +126,17 @@ class PortfolioState:
     @property
     def history(self) -> list[PortfolioSnapshot]:
         return list(self._history)
+
+    def restore_history(self, snapshots: list[PortfolioSnapshot]) -> None:
+        """Replace in-memory NAV/equity-curve history with persisted snapshots.
+
+        Used on process restart (see ``firm.live.state_store.LiveStateStore``)
+        to restore continuity of the equity curve and per-strategy P&L
+        history built up in a previous run. Deliberately does not touch
+        ``cash``/``holdings``/``_strategy_ledger`` — those are always
+        re-derived from the broker (the actual source of truth) on the next
+        :func:`firm.live.portfolio_sync.sync_portfolio_from_broker` call, so
+        restoring them here from a possibly-stale snapshot could reintroduce
+        exactly the discrepancy that reconciliation exists to catch.
+        """
+        self._history = list(snapshots)

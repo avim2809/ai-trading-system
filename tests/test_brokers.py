@@ -6,7 +6,6 @@ Uses a MockBroker that implements the Broker ABC without any real connections.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
 from typing import Any
 
 import pytest
@@ -18,6 +17,7 @@ from firm.brokers.base import (
     OrderRequest,
     OrderStatus,
 )
+from firm.time_utils import utcnow
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +121,7 @@ class MockBroker(Broker):
             filled_quantity=order.quantity,
             avg_fill_price=price,
             status="filled",
-            timestamp=datetime.utcnow(),
+            timestamp=utcnow(),
         )
         self._orders[oid] = status
         return status

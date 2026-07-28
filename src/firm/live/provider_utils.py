@@ -21,11 +21,22 @@ FUNDAMENTAL_DEPENDENT_STRATEGIES: frozenset[str] = frozenset(
 )
 
 
+def _live_yaml_path() -> Path:
+    """Resolve live config path (``FIRM_LIVE_CONFIG`` overrides default)."""
+    override = os.getenv("FIRM_LIVE_CONFIG", "").strip()
+    if override:
+        return Path(override)
+    return _LIVE_YAML
+
+
 def load_live_yaml_defaults() -> dict[str, Any]:
-    """Return parsed ``config/live.yaml`` (empty dict if missing)."""
-    if not _LIVE_YAML.exists():
+    """Return parsed live YAML (``config/live.yaml`` or ``FIRM_LIVE_CONFIG``)."""
+    path = _live_yaml_path()
+    if not path.exists():
+        if path != _LIVE_YAML:
+            log.warning("FIRM_LIVE_CONFIG path does not exist: %s", path)
         return {}
-    with open(_LIVE_YAML) as f:
+    with open(path) as f:
         return yaml.safe_load(f) or {}
 
 
@@ -105,17 +116,39 @@ def resolve_live_startup(
         risk.update(risk_overrides)
     engine_config.update(risk)
 
+    # Transaction costs. ``config/live.yaml`` documents this block as "must
+    # match your actual broker schedule", but ExecutionAgent reads flat
+    # top-level ``commission_pct``/``slippage_pct`` keys (same convention as
+    # the backtest config), not a nested ``costs:`` block — so without this
+    # merge the live-tuned IBKR-realistic rates were silently ignored and
+    # ExecutionAgent fell back to its hardcoded defaults (0.1%/0.05%)
+    # regardless of what operators configured here.
+    costs = yaml_cfg.get("costs") or {}
+    if "commission_pct" in costs:
+        engine_config.setdefault("commission_pct", costs["commission_pct"])
+    if "slippage_pct" in costs:
+        engine_config.setdefault("slippage_pct", costs["slippage_pct"])
+    if "spread_pct" in costs:
+        engine_config.setdefault("spread_pct", costs["spread_pct"])
+    if "market_impact_coefficient" in costs:
+        engine_config.setdefault(
+            "market_impact_coefficient", costs["market_impact_coefficient"]
+        )
+
     # Optional behavioural knobs from live.yaml → engine/orchestrator config.
     # All default OFF/unchanged when absent (news-guard, optimal signal
     # combination, Kelly sizing), so live behaviour is unchanged until enabled.
     for key in (
         "news_guard",
         "signal_combination",
+        "strategy_circuit_breaker",
+        "strategy_regime_weights",
         "allocation_method",
         "kelly_fraction",
         "max_positions",
         "cycle_hard_timeout_seconds",
         "cycle_watchdog_seconds",
+        "broker_disconnect_alert_threshold",
         "analyst_timeout_seconds",
         "orchestrator_stage_timeout_seconds",
         "pipeline_warmup",

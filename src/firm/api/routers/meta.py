@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+import logging
+
+from fastapi import APIRouter, Request
+
+log = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -59,8 +63,49 @@ STRATEGY_INFO: dict[str, dict[str, str]] = {
 
 
 @router.get("/health")
-def health():
-    return {"status": "ok"}
+def health(request: Request):
+    """Liveness/readiness probe.
+
+    ``status`` always reflects the API process itself — it stays ``"ok"``
+    even when the live engine's broker is disconnected, so a transient IBKR
+    outage (e.g. IB Gateway's mandatory daily restart) can't trip an
+    infra-level auto-restart of the whole API process and take down
+    approvals/dashboards/backtests along with it. Broker connectivity is
+    surfaced as its own field for monitoring/alerting to consume instead.
+    ``broker.connected`` is a fast local state read (``is_connected()``
+    never makes a network call — see ``IBKRBroker.is_connected``), so this
+    endpoint stays cheap enough to poll frequently.
+    """
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None or not getattr(engine, "is_running", False):
+        return {
+            "status": "ok",
+            "broker": {"type": None, "connected": None, "live_engine_running": False},
+        }
+
+    broker = getattr(engine, "_broker", None)
+    connected = None
+    if broker is not None:
+        try:
+            connected = broker.is_connected()
+        except Exception:
+            log.warning("Broker is_connected() check failed", exc_info=True)
+            connected = False
+
+    broker_type = getattr(engine, "_broker_type", "")
+    if connected is False:
+        log.warning(
+            "Health check: live engine running but broker %r is disconnected",
+            broker_type,
+        )
+    return {
+        "status": "ok",
+        "broker": {
+            "type": broker_type or None,
+            "connected": connected,
+            "live_engine_running": True,
+        },
+    }
 
 
 @router.get("/strategies")
@@ -95,4 +140,6 @@ def config_defaults():
         "allocation_method": settings.allocation_method,
         "kelly_fraction": settings.kelly_fraction,
         "signal_combination": settings.signal_combination or {"method": "confidence"},
+        "strategy_circuit_breaker": settings.strategy_circuit_breaker or {"enabled": False},
+        "strategy_regime_weights": settings.strategy_regime_weights or {"enabled": False},
     }

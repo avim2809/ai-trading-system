@@ -10,6 +10,7 @@ Replaces BacktestEngine for real-time operation.  Each cycle:
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import weakref
@@ -17,7 +18,8 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from concurrent.futures import thread as _cf_thread
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from firm.brokers.base import Broker, BrokerError, OrderRequest, OrderStatus
@@ -25,8 +27,10 @@ from firm.live.approval import ApprovalQueue
 from firm.live.data_feed import LiveDataFeed
 from firm.live.portfolio_sync import sync_portfolio_from_broker
 from firm.live.scheduler import DEFAULT_MARKET_TIMEZONE, trading_day_key
+from firm.live.state_store import LiveStateStore
 from firm.portfolio.state import PortfolioState
 from firm.runtime import build_orchestrator
+from firm.time_utils import utcnow
 
 log = logging.getLogger(__name__)
 
@@ -92,6 +96,8 @@ class LiveTradingEngine:
         auto_approve_strategies: list[str] | None = None,
         alert_callback: Any = None,
         trade_history: Any = None,
+        kill_switch_state_path: str | Path | None = None,
+        state_db_path: str | Path | None = None,
     ) -> None:
         self._config = config
         self._broker = broker
@@ -122,6 +128,13 @@ class LiveTradingEngine:
         # silently vanishing.
         self._max_daily_trades = int(config.get("max_daily_trades", 50))
         self._max_daily_turnover = float(config.get("max_daily_turnover", 0.5))
+        # Per-order hard notional cap for the execution_safety.guard_order gate
+        # below — reuses RiskAgent's own single-position cap (config/live.yaml
+        # risk.max_position_pct) so the final pre-submission check can never be
+        # looser than the portfolio-construction limit it's backstopping.
+        # 1.0 (no key configured) makes the cap a no-op rather than fabricating
+        # a number nothing upstream agreed to.
+        self._max_position_pct = float(config.get("max_position_pct", 1.0))
         self._trading_day_timezone = str(
             config.get("schedule_timezone", DEFAULT_MARKET_TIMEZONE),
         )
@@ -162,6 +175,19 @@ class LiveTradingEngine:
         self._cycle_watchdog_seconds = float(config.get("cycle_watchdog_seconds", 1800))
         self._cycle_hard_timeout_seconds = float(config.get("cycle_hard_timeout_seconds", 900))
         self._watchdog_timer: threading.Timer | None = None
+        # Broker disconnect/reconnect tracking (see docs/PROJECT_CONTEXT.md
+        # "Broker & host failover"). A single dropped socket shouldn't need a
+        # human — the very first broker call each cycle (portfolio sync) is
+        # attempted-reconnected inline on the same worker thread ib_async is
+        # bound to. Consecutive failures despite reconnect attempts escalate
+        # to a distinct, louder alert past this threshold so IB Gateway's
+        # occasional multi-cycle outages (e.g. its mandatory daily restart
+        # overlapping a cycle) get a human's attention instead of just
+        # quietly logging "broker_unavailable" forever.
+        self._consecutive_broker_failures = 0
+        self._broker_disconnect_alert_threshold = int(
+            config.get("broker_disconnect_alert_threshold", 3)
+        )
         # Token for the in-flight cycle worker. Cleared on hard timeout so a
         # stale thread cannot submit orders after the lock is released.
         self._active_cycle_token: object | None = None
@@ -198,6 +224,30 @@ class LiveTradingEngine:
             config.get("kill_switch_drawdown", config.get("max_drawdown_pct", 1.0))
         )
         self._halted = False
+        # Durable halt state: without this, a process restart after a
+        # drawdown trip silently un-halts the engine (in-memory ``_halted``
+        # resets to False) and a scheduled cycle can resume trading a
+        # blown-up account with no operator ever having made that decision.
+        # ``None`` (the default, used by all tests and any direct
+        # construction) means no persistence at all — opt-in via the API
+        # router, which points this at a real file for production use.
+        self._kill_switch_state_path = (
+            Path(kill_switch_state_path) if kill_switch_state_path else None
+        )
+        self._load_kill_switch_state()
+        # Durable portfolio-history/attribution state (SQLite). Separate
+        # opt-in from kill_switch_state_path: ``None`` (default, all tests
+        # and direct construction) keeps engines fully disk-free; the API
+        # router points this at a real file for production use, same as the
+        # kill-switch JSON path above. Unlike the kill switch, losing this
+        # state on restart is not a safety issue (the broker remains the
+        # source of truth for cash/holdings), only a continuity one — the
+        # equity curve and the ``optimal`` signal-combination's per-strategy
+        # return history reset to empty without it.
+        self._state_store = (
+            LiveStateStore(state_db_path) if state_db_path else None
+        )
+        self._load_persisted_state()
         # Serialises cycles so a manual/API trigger cannot run concurrently
         # with a scheduled one (which, combined with no broker idempotency,
         # would double-submit real orders).
@@ -212,7 +262,7 @@ class LiveTradingEngine:
         """Seconds the in-progress cycle has been running, or None if idle."""
         if self._current_cycle_started_at is None:
             return None
-        return (datetime.utcnow() - self._current_cycle_started_at).total_seconds()
+        return (utcnow() - self._current_cycle_started_at).total_seconds()
 
     @property
     def portfolio(self) -> PortfolioState:
@@ -224,15 +274,14 @@ class LiveTradingEngine:
 
     def had_cycle_today(self, timezone: str = "US/Eastern") -> bool:
         """True when any cycle (including skipped) was recorded for the session date."""
+        from datetime import timezone as dt_timezone
         from zoneinfo import ZoneInfo
 
         tz = ZoneInfo(timezone)
         today = datetime.now(tz).date()
         for result in self._cycle_history:
-            ts = result.timestamp
-            if ts.tzinfo is None:
-                from datetime import timezone as dt_tz
-                ts = ts.replace(tzinfo=dt_tz.utc)
+            # CycleResult.timestamp is always naive UTC (see firm.time_utils.utcnow).
+            ts = result.timestamp.replace(tzinfo=dt_timezone.utc)
             if ts.astimezone(tz).date() == today:
                 return True
         return False
@@ -249,6 +298,7 @@ class LiveTradingEngine:
         return count
 
     def _persist_cycle_result(self, result: CycleResult) -> None:
+        self._persist_live_state()
         if self._trade_history is None:
             return
         summary = {
@@ -365,6 +415,41 @@ class LiveTradingEngine:
         combo = self._config.get("signal_combination") or {}
         return str(combo.get("method", "confidence"))
 
+    def update_strategy_circuit_breaker(self, strategy_circuit_breaker: dict[str, Any]) -> None:
+        """Update the per-strategy rolling-Sharpe circuit breaker and rebuild
+        the pipeline (see ``firm.agents.research._circuit_breaker``).
+
+        Disabled by default (``{"enabled": false}``) — see
+        ``docs/portfolio_construction_diagnosis.md`` for why the naive
+        default thresholds were found to net *hurt* backtested Sharpe and
+        should not be enabled without further calibration/validation.
+        """
+        self._config = {
+            **self._config,
+            "strategy_circuit_breaker": dict(strategy_circuit_breaker),
+        }
+        self._orchestrator = build_orchestrator(self._config)
+        log.info(
+            "Live engine strategy_circuit_breaker updated: %s", strategy_circuit_breaker
+        )
+
+    def update_strategy_regime_weights(self, strategy_regime_weights: dict[str, Any]) -> None:
+        """Update regime-conditional strategy weight multipliers and rebuild
+        the pipeline (see ``firm.agents.research._regime_weights``).
+
+        Disabled by default (``{"enabled": false}``) — calibrate on historical
+        windows before enabling live.
+        """
+        self._config = {
+            **self._config,
+            "strategy_regime_weights": dict(strategy_regime_weights),
+        }
+        self._orchestrator = build_orchestrator(self._config)
+        log.info(
+            "Live engine strategy_regime_weights updated: enabled=%s",
+            bool(strategy_regime_weights.get("enabled")),
+        )
+
     def update_allocation(
         self,
         allocation_method: str | None = None,
@@ -468,7 +553,7 @@ class LiveTradingEngine:
         guarded. Alerts are also attached to the current cycle result.
         """
         alert = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
             "kind": kind,
             "severity": severity,
             "message": message,
@@ -497,20 +582,57 @@ class LiveTradingEngine:
         from this cycle (they are re-generated next cycle once the window
         passes) and each is surfaced as a warning alert. No-op when the gate is
         disabled (the default).
+
+        Fails CLOSED, not open: if the calendar can't be loaded at all (live
+        fetch AND the bundled CSV both failed), every order is held — a
+        critical ``news_guard_calendar_unavailable`` alert — rather than
+        approved blind. A live-fetch failure that still lands on the bundled
+        CSV succeeds (as before) but raises a ``news_guard_stale_calendar``
+        warning alert, since a static offline calendar can silently miss an
+        event scheduled after it was last updated.
         """
         if not self._news_guard_enabled or not orders:
             return orders
-
-        from datetime import timezone
 
         from firm.live import news_guard as ng
 
         at = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
         try:
             events, source = ng.load_events(offline=self._news_guard_offline)
-        except Exception as exc:  # never let the calendar break the cycle
-            log.warning("news-guard calendar load failed: %s", exc)
-            return orders
+        except Exception as exc:
+            # The whole point of this gate is "don't trade blind into a
+            # macro-event window"; if we can't tell where the events are
+            # (live fetch AND the bundled CSV both failed — load_events
+            # itself already falls back to the CSV on a live-fetch
+            # failure), the safe default is to hold every order this
+            # cycle, not to silently wave them all through.
+            log.error(
+                "news-guard calendar totally unavailable (%s) — failing "
+                "CLOSED: holding all %d order(s) this cycle rather than "
+                "trading blind through a possible blackout window.",
+                exc, len(orders),
+            )
+            alert = self._emit_alert(
+                "news_guard_calendar_unavailable", "critical",
+                f"news-guard calendar unavailable ({exc}) — all {len(orders)} "
+                "order(s) held this cycle; will retry next cycle.",
+            )
+            result.alerts.append(alert)
+            return []
+
+        if source == "bundled-csv" and not self._news_guard_offline:
+            # Only the live-fetch-failed path lands here with offline=False
+            # (a deliberately configured offline=True is expected, not a
+            # degradation, and would otherwise alert every single cycle).
+            age_hours = ng.bundled_csv_age_hours()
+            age_desc = f"{age_hours:.1f}h old" if age_hours is not None else "age unknown"
+            alert = self._emit_alert(
+                "news_guard_stale_calendar", "warning",
+                "news-guard live calendar fetch failed — falling back to the "
+                f"bundled offline calendar ({age_desc}); blackout decisions may "
+                "miss events scheduled after it was last updated.",
+            )
+            result.alerts.append(alert)
 
         allowed: list[dict[str, Any]] = []
         for o in orders:
@@ -555,6 +677,171 @@ class LiveTradingEngine:
                 peak_equity=round(self._peak_equity, 2),
             )
             result.alerts.append(alert)
+            self._persist_kill_switch_state(
+                reason=alert["message"], drawdown=drawdown, nav=nav,
+            )
+        elif self._kill_switch_state_path is not None:
+            # Keep peak-equity tracking durable even while not halted, so a
+            # restart mid-drawdown (but before the trip threshold) doesn't
+            # reset the high-water mark and understate a subsequent breach.
+            self._persist_kill_switch_state(halted=False)
+
+    def _load_kill_switch_state(self) -> None:
+        """Restore ``_halted``/``_peak_equity`` from disk, if persisted.
+
+        No-op when persistence is disabled (default) or the file doesn't
+        exist yet (first run). Corrupt/unreadable state fails safe by
+        leaving the in-memory defaults (not halted) rather than crashing
+        engine construction — but logs loudly since a lost halt is a real
+        safety regression, not a routine fallback.
+        """
+        if self._kill_switch_state_path is None:
+            return
+        path = self._kill_switch_state_path
+        if not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            log.warning(
+                "Failed to read kill-switch state from %s — starting "
+                "un-halted; verify manually that this is safe", path,
+                exc_info=True,
+            )
+            return
+        self._halted = bool(data.get("halted", False))
+        if "peak_equity" in data:
+            self._peak_equity = max(self._peak_equity, float(data["peak_equity"]))
+        if self._halted:
+            log.warning(
+                "Restored HALTED kill-switch state from %s (reason=%s, "
+                "tripped_at=%s) — engine will refuse new orders until "
+                "reset_kill_switch() is called", path,
+                data.get("reason"), data.get("tripped_at"),
+            )
+        else:
+            log.info("Restored kill-switch state from %s (not halted)", path)
+
+    def _persist_kill_switch_state(
+        self,
+        *,
+        halted: bool | None = None,
+        reason: str | None = None,
+        drawdown: float | None = None,
+        nav: float | None = None,
+    ) -> None:
+        if self._kill_switch_state_path is None:
+            return
+        data: dict[str, Any] = {
+            "halted": self._halted if halted is None else halted,
+            "peak_equity": round(self._peak_equity, 2),
+        }
+        if reason is not None:
+            data["reason"] = reason
+            data["tripped_at"] = utcnow().isoformat()
+        if drawdown is not None:
+            data["drawdown"] = round(drawdown, 6)
+        if nav is not None:
+            data["nav_at_trip"] = round(nav, 2)
+        try:
+            self._kill_switch_state_path.parent.mkdir(parents=True, exist_ok=True)
+            self._kill_switch_state_path.write_text(json.dumps(data, indent=2))
+        except Exception:
+            log.warning(
+                "Failed to persist kill-switch state to %s",
+                self._kill_switch_state_path, exc_info=True,
+            )
+
+    def _load_persisted_state(self) -> None:
+        """Restore portfolio history + attribution state from a previous run.
+
+        No-op when persistence is disabled (default) or nothing was
+        persisted yet. Best-effort: a corrupt/unreadable blob logs a warning
+        and leaves the fresh in-memory defaults rather than failing engine
+        construction — unlike the kill switch, this state is a continuity
+        nicety (the broker remains authoritative for cash/holdings), not a
+        safety control.
+        """
+        if self._state_store is None:
+            return
+        try:
+            history = self._state_store.load_portfolio_history()
+            if history:
+                self._portfolio.restore_history(history)
+                log.info(
+                    "Restored %d persisted portfolio snapshots from %s",
+                    len(history), self._state_store.db_path,
+                )
+        except Exception:
+            log.warning("Failed to restore persisted portfolio history", exc_info=True)
+        try:
+            attribution_state = self._state_store.load_attribution_state()
+            if attribution_state:
+                self._attribution.restore_state(attribution_state)
+                log.info(
+                    "Restored persisted attribution state for strategies: %s",
+                    list(attribution_state.get("strategy_returns", {}).keys()),
+                )
+        except Exception:
+            log.warning("Failed to restore persisted attribution state", exc_info=True)
+
+    def _persist_live_state(self) -> None:
+        """Save portfolio history + attribution state after a cycle.
+
+        Called from :meth:`_persist_cycle_result` (i.e. after every cycle
+        attempt, including skipped/errored ones) so a crash mid-cycle loses
+        at most the in-flight cycle, not the accumulated history. Also
+        mirrors the current kill-switch state into the same database — the
+        JSON file at ``_kill_switch_state_path`` remains the mechanism this
+        engine actually reads on startup (see ``_load_kill_switch_state``);
+        this is purely an additional durable copy for operators/tools that
+        query one database instead of scattered files.
+        """
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save_portfolio_history(self._portfolio.history)
+        except Exception:
+            log.warning("Failed to persist portfolio history", exc_info=True)
+        try:
+            self._state_store.save_attribution_state(self._attribution.export_state())
+        except Exception:
+            log.warning("Failed to persist attribution state", exc_info=True)
+        try:
+            self._state_store.save_kill_switch({
+                "halted": self._halted,
+                "peak_equity": round(self._peak_equity, 2),
+            })
+        except Exception:
+            log.debug("Failed to mirror kill-switch state to state store", exc_info=True)
+
+    def reset_kill_switch(self) -> dict[str, Any]:
+        """Clear the drawdown kill switch and re-arm trading.
+
+        This is a deliberate operator action (e.g. via
+        ``POST /api/live/kill-switch/reset``), not something the engine ever
+        does on its own — the whole point of the switch is that trading stays
+        halted until a human confirms it's safe to resume. Resets the
+        high-water mark to current NAV so the drawdown calculation restarts
+        from here rather than immediately re-tripping against the pre-halt
+        peak.
+        """
+        was_halted = self._halted
+        self._halted = False
+        self._peak_equity = self._portfolio.nav
+        self._persist_kill_switch_state(halted=False)
+        alert = self._emit_alert(
+            "kill_switch_reset",
+            "warning",
+            "Kill switch manually reset by operator; trading re-armed.",
+            was_halted=was_halted,
+            new_peak_equity=round(self._peak_equity, 2),
+        )
+        log.warning(
+            "Kill switch reset (was_halted=%s); new peak equity=$%.2f",
+            was_halted, self._peak_equity,
+        )
+        return {"halted": self._halted, "peak_equity": self._peak_equity, "alert": alert}
 
     def run_on_cycle_worker(self, fn, /, *args, timeout: float = 120, **kwargs):
         """Run ``fn`` on the dedicated live-cycle / IBKR I/O thread.
@@ -607,6 +894,12 @@ class LiveTradingEngine:
         # Do not block process exit on a hung cycle worker — the thread may
         # still be running but is daemon and will not pin the process.
         self._cycle_executor.shutdown(wait=False, cancel_futures=True)
+        if self._state_store is not None:
+            try:
+                self._persist_live_state()
+                self._state_store.close()
+            except Exception:
+                log.warning("Error closing live state store", exc_info=True)
         log.info("Live engine stopped after %d cycles", self._cycle_count)
 
     def run_cycle(self, force: bool = False) -> CycleResult:
@@ -630,7 +923,7 @@ class LiveTradingEngine:
             log.info("run_cycle skipped: engine is shutting down")
             return CycleResult(
                 cycle_id=self._cycle_count,
-                timestamp=datetime.utcnow(),
+                timestamp=utcnow(),
                 skipped=True,
                 error="skipped: engine shutting down",
             )
@@ -638,13 +931,13 @@ class LiveTradingEngine:
             log.warning("run_cycle skipped: a cycle is already in progress")
             return CycleResult(
                 cycle_id=self._cycle_count,
-                timestamp=datetime.utcnow(),
+                timestamp=utcnow(),
                 skipped=True,
                 error="cycle already in progress",
             )
         try:
             self._cycle_count += 1
-            now = datetime.utcnow()
+            now = utcnow()
             self._current_cycle_started_at = now
             result = CycleResult(cycle_id=self._cycle_count, timestamp=now)
 
@@ -739,6 +1032,22 @@ class LiveTradingEngine:
             )
             result.discrepancies = discrepancies
 
+            if self._consecutive_broker_failures:
+                # This is the first broker call in the cycle (reconciliation) —
+                # reaching here without raising proves connectivity is back,
+                # whether that's thanks to _try_broker_reconnect() below or IB
+                # Gateway/the network recovering on its own between cycles.
+                log.warning(
+                    "Broker connectivity restored after %d failed cycle(s)",
+                    self._consecutive_broker_failures,
+                )
+                result.alerts.append(self._emit_alert(
+                    "broker_reconnected", "warning",
+                    f"Broker connectivity restored after "
+                    f"{self._consecutive_broker_failures} failed cycle(s).",
+                ))
+                self._consecutive_broker_failures = 0
+
             if any(d.get("type") == "open_orders_unavailable" for d in discrepancies):
                 result.alerts.append(self._emit_alert(
                     "reconciliation_degraded", "warning",
@@ -765,19 +1074,29 @@ class LiveTradingEngine:
                 "portfolio": self._portfolio,
                 "prices": prices,
                 "memory": self._memory,
+                "attribution": self._attribution,
             }
 
-            if self._signal_combination_method() == "optimal":
-                try:
-                    self._attribution.update_daily(now, prices, self._portfolio.nav)
-                    strategy_returns = self._attribution.get_all_strategy_returns()
-                    if strategy_returns:
-                        context["strategy_returns"] = strategy_returns
-                except Exception:
-                    log.debug(
-                        "optimal signal-combination attribution update failed",
-                        exc_info=True,
-                    )
+            # Mark-to-market attribution daily regardless of signal-combination
+            # method — this used to run only under `optimal` (to feed its
+            # inverse-covariance weighting), which meant the `confidence`
+            # method (the live default) never populated per-strategy holdings,
+            # so the execution agent had no fallback for attributing exit
+            # trades and they collapsed into "composite". Tracking is cheap
+            # relative to a trading cycle and keeps every fill traceable.
+            try:
+                self._attribution.update_daily(now, prices, self._portfolio.nav)
+                # Fed unconditionally (not just under `optimal`): the generic
+                # per-strategy circuit breaker (agents.research._circuit_breaker)
+                # needs trailing return history regardless of combination
+                # method, same rationale as the attribution tracking above.
+                strategy_returns = self._attribution.get_all_strategy_returns()
+                if strategy_returns:
+                    context["strategy_returns"] = strategy_returns
+            except Exception:
+                log.debug(
+                    "attribution daily update failed", exc_info=True,
+                )
 
             orders, blackboard = self._orchestrator.step(context)
             result.orders_generated = len(orders)
@@ -831,14 +1150,14 @@ class LiveTradingEngine:
                 result.failed_orders = failed
                 result.orders_failed = len(failed)
 
-                if self._signal_combination_method() == "optimal":
-                    try:
-                        self._attribution.record_trades(auto_orders, prices)
-                    except Exception:
-                        log.debug(
-                            "optimal signal-combination trade recording failed",
-                            exc_info=True,
-                        )
+                try:
+                    self._attribution.record_trades(
+                        self._orders_to_fills(auto_orders), prices,
+                    )
+                except Exception:
+                    log.debug(
+                        "attribution trade recording failed", exc_info=True,
+                    )
 
             if manual_orders:
                 for strategy, group in self._group_by_strategy(manual_orders).items():
@@ -863,10 +1182,57 @@ class LiveTradingEngine:
             result.error = str(exc)
             log.error("Cycle %d failed: %s", self._cycle_count, exc, exc_info=True)
             if isinstance(exc, BrokerError):
+                self._consecutive_broker_failures += 1
+                reconnected = self._try_broker_reconnect()
+                message = f"Broker call failed during cycle: {exc}"
+                if reconnected:
+                    message += (
+                        " — reconnected successfully; the next cycle should "
+                        "resume normally."
+                    )
+                    alert_kind = "broker_unavailable"
+                elif self._consecutive_broker_failures >= self._broker_disconnect_alert_threshold:
+                    alert_kind = "broker_disconnected_sustained"
+                    message = (
+                        f"Broker has failed {self._consecutive_broker_failures} "
+                        f"consecutive cycle(s) and automatic reconnect did not "
+                        f"succeed: {exc}. Likely needs manual intervention "
+                        "(check IB Gateway is running/logged in, or restart "
+                        "ai-trading.service) — see docs/PROJECT_CONTEXT.md "
+                        "'Broker & host failover'."
+                    )
+                else:
+                    alert_kind = "broker_unavailable"
                 result.alerts.append(self._emit_alert(
-                    "broker_unavailable", "critical",
-                    f"Broker call failed during cycle: {exc}",
+                    alert_kind, "critical", message,
+                    consecutive_failures=self._consecutive_broker_failures,
+                    reconnected=reconnected,
                 ))
+
+    def _try_broker_reconnect(self) -> bool:
+        """Attempt one inline reconnect after a cycle's broker call failed.
+
+        Runs on the cycle worker thread (the same thread ``_run_cycle_work``
+        itself executes on, which is also the thread ib_async's ``IB``
+        instance is bound to — no ``run_on_cycle_worker`` hop needed). A
+        single dropped socket then self-heals within the same cycle's error
+        handling instead of requiring a full service restart; a still-down
+        IB Gateway just fails again here and the caller's consecutive-failure
+        counter keeps climbing toward the sustained-disconnect alert.
+        """
+        try:
+            self._broker.reconnect()
+        except Exception as exc:
+            log.warning(
+                "Broker reconnect attempt failed (consecutive failures=%d): %s",
+                self._consecutive_broker_failures, exc,
+            )
+            return False
+        log.info(
+            "Broker reconnected after %d consecutive failure(s)",
+            self._consecutive_broker_failures,
+        )
+        return True
 
     def _on_cycle_watchdog_timeout(self, cycle_id: int) -> None:
         """Fires if a cycle is still running well past any normal duration.
@@ -1041,11 +1407,48 @@ class LiveTradingEngine:
         deterministic ``client_order_id`` so the broker can deduplicate a
         re-submission of the same cycle's order.
         """
-        from firm.live.execution_safety import guard_live_submission
+        from firm.live.execution_safety import Order, RiskProfile, guard_live_submission, guard_order
+
+        # Final, independently-auditable hard cap right before the broker
+        # call — a backstop against a bug anywhere upstream (RiskAgent,
+        # ExecutionAgent sizing, a stale NAV read, ...) producing an
+        # oversized or off-universe order, not a replacement for those
+        # portfolio-level checks. require_stop=False: this engine rebalances
+        # to target weights, it has no per-order protective-stop concept.
+        # check_risk_limits compares against the *trade's* notional, not the
+        # resulting position's — a full flip from -max_position_pct to
+        # +max_position_pct in one cycle is a legitimate rebalance and trades
+        # ~2x the single-position cap, so the cap here is doubled to avoid
+        # blocking that case while still catching a genuinely runaway order.
+        risk_profile = RiskProfile(
+            account_equity=self._portfolio.nav,
+            max_position_notional=2.0 * self._max_position_pct * self._portfolio.nav,
+            symbol_allowlist=self._data_feed._universe,
+            require_stop=False,
+        )
 
         statuses: list[OrderStatus] = []
         failed: list[dict[str, Any]] = []
         for o in orders:
+            safety_order = Order(
+                symbol=o["symbol"], side=o["side"],
+                qty=float(o.get("quantity", abs(o.get("shares", 0)))),
+                order_type=o.get("order_type", "market"),
+                price=float(o.get("price", 0.0)),
+            )
+            # live=False deliberately: guard_order's job here is purely the
+            # RiskProfile hard-cap check (symbol allowlist + max notional).
+            # Live-vs-paper routing is guard_live_submission's job below —
+            # doing it in both places would double-audit the same decision.
+            risk_gate = guard_order(safety_order, risk_profile, live=False)
+            if risk_gate["routed"] == "blocked":
+                failed.append({**o, "error": risk_gate["reason"]})
+                self._emit_alert(
+                    "order_risk_cap_blocked", "critical", risk_gate["reason"],
+                    symbol=o.get("symbol"), audit_id=risk_gate["audit_id"],
+                )
+                continue
+
             # Hard env lock: a live broker must have FIRM_ALLOW_TRADING=1 set in
             # the service environment or the order is blocked (never silently
             # downgraded) and audited. Paper brokers pass straight through.
@@ -1087,6 +1490,34 @@ class LiveTradingEngine:
                 log.error("Failed to submit order for %s", req.symbol, exc_info=True)
                 failed.append({**o, "error": str(exc)})
         return statuses, failed
+
+    @staticmethod
+    def _orders_to_fills(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Normalize order dicts into the signed-``shares`` fill format
+        :meth:`PerformanceAttribution.record_trades` expects.
+
+        ``firm.agents.execution.ExecutionAgent`` already emits both a signed
+        ``shares`` field and an unsigned ``quantity`` + ``side`` pair on
+        every real order, so this is a no-op in the normal pipeline.  It
+        exists as a defensive normalization for any other order source
+        (a custom/mocked orchestrator, a future execution path) that only
+        supplies ``side`` + ``quantity`` — previously that shape hit a
+        ``KeyError`` inside ``record_trades`` on the missing ``shares`` key,
+        silently swallowed by a broad ``except Exception`` and logged at
+        debug, so per-strategy attribution quietly recorded nothing for that
+        order.
+        """
+        fills = []
+        for o in orders:
+            qty = float(o.get("quantity", abs(o.get("shares", 0))))
+            sign = -1.0 if o.get("side") == "sell" else 1.0
+            fills.append({
+                "symbol": o["symbol"],
+                "shares": sign * qty,
+                "price": float(o.get("price", 0.0)),
+                "strategy": o.get("strategy", "composite"),
+            })
+        return fills
 
     @staticmethod
     def _status_to_dict(s: OrderStatus) -> dict[str, Any]:
