@@ -49,18 +49,10 @@ class TestRequest(BaseModel):
 # ── helpers ─────────────────────────────────────────────────────────
 
 def _load_llm_config() -> dict[str, Any]:
-    """Load config/llm.yaml if it exists, else return defaults."""
-    try:
-        import yaml
-        if _CONFIG_PATH.exists():
-            return yaml.safe_load(_CONFIG_PATH.read_text()) or {}
-    except Exception:
-        log.warning("llm_config_load_failed path=%s — using hardcoded defaults", _CONFIG_PATH, exc_info=True)
-    return {
-        "provider": {"default_model": "groq/llama-3.3-70b-versatile", "temperature": 0.3},
-        "agent_modes": {},
-        "optimization": {"cache_enabled": True, "compression_enabled": True},
-    }
+    """Load LLM YAML (respects ``FIRM_LLM_CONFIG`` via ``firm.llm.config``)."""
+    from firm.llm.config import load_llm_config
+
+    return load_llm_config()
 
 
 def _save_llm_config(cfg: dict[str, Any]) -> None:

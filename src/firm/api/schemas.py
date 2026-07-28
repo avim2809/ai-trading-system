@@ -16,6 +16,9 @@ class RunRequest(BaseModel):
     initial_capital: float = Field(default=10_000_000, gt=0)
     commission_pct: float = Field(default=0.001, ge=0, lt=1)
     slippage_pct: float = Field(default=0.0005, ge=0, lt=1)
+    spread_pct: float = Field(default=0.0002, ge=0, lt=1)
+    short_borrow_annual_pct: float = Field(default=0.003, ge=0, lt=1)
+    market_impact_coefficient: float = Field(default=0.0, ge=0, lt=1)
     rebalance_frequency: str = "weekly"
     risk_overrides: dict[str, float] = {}
     # Optional HMM market-regime exposure overlay; merged over the settings
@@ -28,6 +31,17 @@ class RunRequest(BaseModel):
     allocation_method: str | None = None
     kelly_fraction: float | None = None
     signal_combination: dict | None = None
+    # Optional generic per-strategy rolling-Sharpe circuit breaker (off unless
+    # ``enabled: true``); merged over the settings default so partial
+    # overrides work. See firm.agents.research._circuit_breaker. Disabled by
+    # default: docs/portfolio_construction_diagnosis.md found naive default
+    # thresholds over-gate volatile-but-legitimate strategies on short
+    # windows and net *hurt* portfolio Sharpe — opt in deliberately and
+    # validate on your own data before relying on it.
+    strategy_circuit_breaker: dict | None = None
+    # Optional per-strategy regime-conditional score multipliers (off unless
+    # ``enabled: true``). See firm.agents.research._regime_weights.
+    strategy_regime_weights: dict | None = None
     data_source: str = "synthetic"
     seed: int = 42
     notes: str = ""
@@ -61,6 +75,16 @@ class WalkForwardRequest(RunRequest):
 
     n_splits: int = Field(default=5, ge=2, le=20)
     train_pct: float = Field(default=0.7, gt=0.0, lt=1.0)
+    # Optional parameter grid for genuine train->select->test walk-forward
+    # optimization: each entry is a partial config override (e.g.
+    # {"strategy_params": {"momentum": {"lookback_days": 60}}}) backtested
+    # on every fold's train window; the best-by-selection_metric candidate is
+    # the one actually run on that fold's test window. Omitted/empty means
+    # every fold just replays the base request unchanged on the test window
+    # (a plain sequential OOS check, not an optimization — there's nothing
+    # to select between with fewer than 2 candidates).
+    param_grid: list[dict] | None = Field(default=None, max_length=25)
+    selection_metric: str = "sharpe_ratio"
 
 
 class RunSummary(BaseModel):

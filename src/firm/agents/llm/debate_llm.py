@@ -9,6 +9,7 @@ from firm.agents.base import AgentContext
 from firm.agents.llm.base_llm_agent import LLMAgentMixin
 from firm.agents.research.debate import DebateAgent
 from firm.contracts.models import DebateResult
+from firm.llm.schemas import DebateEnhancementResponse, parse_llm_response
 
 log = logging.getLogger(__name__)
 
@@ -56,14 +57,23 @@ class LLMDebateAgent(DebateAgent, LLMAgentMixin):
                 '{"net_conviction": float (-1 to 1), "reasoning": "..."}'
             )
             try:
-                result = self._call_llm(
+                raw = self._call_llm(
                     "You are an investment committee synthesising opposing views.",
                     prompt,
                     json_mode=True,
                 )
+                parsed = parse_llm_response(
+                    DebateEnhancementResponse, raw, context=dr.symbol,
+                )
+                if parsed is None:
+                    enhanced.append(dr)
+                    continue
+                net_conviction = self._bounded_net_conviction(
+                    dr.symbol, parsed.net_conviction, dr.net_conviction,
+                )
                 enhanced.append(DebateResult(
                     symbol=dr.symbol,
-                    net_conviction=float(result.get("net_conviction", dr.net_conviction)),
+                    net_conviction=net_conviction,
                     bull_thesis=dr.bull_thesis,
                     bear_thesis=dr.bear_thesis,
                 ))

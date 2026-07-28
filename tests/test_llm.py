@@ -87,6 +87,12 @@ def _build_fake_llm_module():
     provider_mod.LLMService = MockLLMService  # type: ignore[attr-defined]
     compression_mod = types.ModuleType("firm.llm.compression")
     config_mod = types.ModuleType("firm.llm.config")
+    exceptions_mod = types.ModuleType("firm.llm.exceptions")
+
+    class LLMEnhancementSkipped(Exception):
+        pass
+
+    exceptions_mod.LLMEnhancementSkipped = LLMEnhancementSkipped  # type: ignore[attr-defined]
 
     class FakeCompressor:
         def __init__(self, target_ratio=0.5, use_llmlingua=False):
@@ -121,6 +127,7 @@ def _build_fake_llm_module():
         "firm.llm.provider": provider_mod,
         "firm.llm.compression": compression_mod,
         "firm.llm.config": config_mod,
+        "firm.llm.exceptions": exceptions_mod,
     }
 
 
@@ -365,6 +372,18 @@ class TestLLMBullResearcher:
         assert len(theses) >= 1
         assert theses[0].side == "bull"
 
+    def test_out_of_bounds_conviction_is_clamped(self, mock_llm_modules):
+        from firm.agents.llm.bull_researcher_llm import LLMBullResearcher
+
+        bb = Blackboard(asof=NOW)
+        bb.signal_sets.append(_make_signal_set("technical", [_sig("AAPL", "momentum", 1.5)]))
+        agent = LLMBullResearcher()
+        agent._llm = MockLLMService()
+        agent._call_llm = lambda s, u, json_mode=False: {"conviction": 4.2, "rationale": "overconfident"}
+
+        theses = agent.run(AgentContext(now=NOW), blackboard=bb)
+        assert all(0.0 <= t.conviction <= 1.0 for t in theses)
+
 
 # ══════════════════════════════════════════════════════════════════════
 # LLM-Enhanced Bear Researcher
@@ -382,6 +401,18 @@ class TestLLMBearResearcher:
         assert isinstance(theses, list)
         for t in theses:
             assert t.side == "bear"
+
+    def test_out_of_bounds_conviction_is_clamped(self, mock_llm_modules):
+        from firm.agents.llm.bear_researcher_llm import LLMBearResearcher
+
+        bb = Blackboard(asof=NOW)
+        bb.signal_sets.append(_make_signal_set("technical", [_sig("GOOG", "momentum", -1.0)]))
+        agent = LLMBearResearcher()
+        agent._llm = MockLLMService()
+        agent._call_llm = lambda s, u, json_mode=False: {"conviction": -2.0, "rationale": "invalid"}
+
+        theses = agent.run(AgentContext(now=NOW), blackboard=bb)
+        assert all(0.0 <= t.conviction <= 1.0 for t in theses)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -403,6 +434,18 @@ class TestLLMDebate:
         results = agent.run(ctx, bull_theses=bull, bear_theses=bear)
         assert isinstance(results, list)
         assert all(isinstance(r, DebateResult) for r in results)
+
+    def test_out_of_bounds_net_conviction_is_clamped(self, mock_llm_modules):
+        from firm.agents.llm.debate_llm import LLMDebateAgent
+
+        bull = [Thesis(side="bull", symbol="AAPL", conviction=0.8, rationale="strong", supporting=["momentum"])]
+        bear = [Thesis(side="bear", symbol="AAPL", conviction=0.3, rationale="minor", supporting=["sentiment"])]
+        agent = LLMDebateAgent()
+        agent._llm = MockLLMService()
+        agent._call_llm = lambda s, u, json_mode=False: {"net_conviction": 7.5, "reasoning": "hallucinated"}
+
+        results = agent.run(AgentContext(now=NOW), bull_theses=bull, bear_theses=bear)
+        assert all(-1.0 <= r.net_conviction <= 1.0 for r in results)
 
 
 # ══════════════════════════════════════════════════════════════════════

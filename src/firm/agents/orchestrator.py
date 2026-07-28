@@ -65,6 +65,23 @@ class Orchestrator(Agent):
         if stage_timeout is None:
             stage_timeout = cfg.get("analyst_timeout_seconds")
         self._stage_timeout_seconds = self._optional_timeout(stage_timeout)
+        self._regime_weights_detector = None
+
+    def _resolve_market_regime(self, pit_view) -> Any | None:
+        """Detect market regime when ``strategy_regime_weights`` is enabled."""
+        cfg = (self.config or {}).get("strategy_regime_weights") or {}
+        if not cfg.get("enabled"):
+            return None
+        if self._regime_weights_detector is None:
+            from firm.regime.detector import MarketRegimeDetector
+
+            self._regime_weights_detector = MarketRegimeDetector(
+                n_states=int(cfg.get("n_states", 3)),
+                lookback_days=int(cfg.get("lookback_days", 252)),
+                retrain_frequency=int(cfg.get("retrain_frequency", 21)),
+                benchmark_symbol=cfg.get("benchmark_symbol"),
+            )
+        return self._regime_weights_detector.detect(pit_view)
 
     @staticmethod
     def _optional_timeout(value: Any) -> float | None:
@@ -174,14 +191,17 @@ class Orchestrator(Agent):
         portfolio = context.get("portfolio")
         prices: dict[str, float] = context.get("prices", {})
         memory = context.get("memory")
+        attribution = context.get("attribution")
 
         bb = Blackboard(asof=pit_view.asof)
+        market_regime = self._resolve_market_regime(pit_view)
         ctx = AgentContext(
             now=pit_view.asof,
             pit_view=pit_view,
             portfolio=portfolio,
             config=self.config,
             strategy_returns=context.get("strategy_returns"),
+            market_regime=market_regime,
         )
 
         # 1. Run analysts in parallel, deterministic merge by domain
@@ -312,6 +332,7 @@ class Orchestrator(Agent):
                 portfolio=portfolio,
                 prices=prices,
                 per_strategy=proposal.per_strategy,
+                attribution=attribution,
             )
         except StageTimeoutError as exc:
             early = self._record_stage_failure(bb, self.execution, exc)

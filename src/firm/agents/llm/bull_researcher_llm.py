@@ -9,6 +9,7 @@ from firm.agents.base import AgentContext
 from firm.agents.llm.base_llm_agent import LLMAgentMixin
 from firm.agents.research.bull import BullResearcher
 from firm.contracts.models import Thesis
+from firm.llm.schemas import ThesisEnhancementResponse, parse_llm_response
 
 log = logging.getLogger(__name__)
 
@@ -52,16 +53,25 @@ class LLMBullResearcher(BullResearcher, LLMAgentMixin):
                 '{"conviction": float (0 to 1), "rationale": "..."}'
             )
             try:
-                result = self._call_llm(
+                raw = self._call_llm(
                     "You are a buy-side equity research analyst building a bull case.",
                     prompt,
                     json_mode=True,
                 )
+                parsed = parse_llm_response(
+                    ThesisEnhancementResponse, raw, context=f"bull/{thesis.symbol}",
+                )
+                if parsed is None:
+                    enhanced.append(thesis)
+                    continue
+                conviction = self._bounded_conviction(
+                    thesis.symbol, "bull", parsed.conviction, thesis.conviction,
+                )
                 enhanced.append(Thesis(
                     side="bull",
                     symbol=thesis.symbol,
-                    conviction=float(result.get("conviction", thesis.conviction)),
-                    rationale=result.get("rationale", thesis.rationale),
+                    conviction=conviction,
+                    rationale=parsed.rationale or thesis.rationale,
                     supporting=list(thesis.supporting),
                 ))
             except Exception:

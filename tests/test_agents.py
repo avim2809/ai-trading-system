@@ -595,6 +595,208 @@ class TestRiskManager:
         decision = risk.run(AgentContext(now=NOW), proposal=proposal)
         assert any("sector" in a.lower() for a in decision.actions)
 
+    def test_position_clip_is_logged(self, caplog):
+        """Every clip/scale/veto decision must be traceable via stdlib logging,
+        not just surfaced in the returned violations/actions lists."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={"max_position_pct": 0.05})
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.09})
+        with caplog.at_level("WARNING", logger="firm.agents.risk"):
+            decision = risk.run(AgentContext(now=NOW), proposal=proposal)
+
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.05)
+        assert any("AAPL" in r.message and "clip" in r.message.lower() for r in caplog.records)
+
+    def test_veto_decision_is_logged_at_warning(self, caplog):
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={
+            "max_position_pct": 0.01,
+            "veto_threshold": 0.05,
+        })
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.5, "MSFT": -0.5})
+        with caplog.at_level("WARNING", logger="firm.agents.risk"):
+            decision = risk.run(AgentContext(now=NOW), proposal=proposal)
+
+        assert not decision.approved
+        assert any("VETO" in r.message for r in caplog.records)
+
+    def test_drawdown_breaker_is_logged(self, caplog):
+        from firm.agents.risk import RiskAgent
+        from firm.portfolio.state import PortfolioState
+
+        risk = RiskAgent(config={"max_position_pct": 1.0, "max_drawdown_pct": 0.10})
+        portfolio = PortfolioState(initial_capital=100_000)
+        portfolio._history = [
+            PortfolioSnapshot(asof=NOW, nav=100_000, cash=100_000),
+            PortfolioSnapshot(asof=NOW, nav=80_000, cash=80_000),  # 20% dd
+        ]
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.10})
+        with caplog.at_level("WARNING", logger="firm.agents.risk"):
+            decision = risk.run(AgentContext(now=NOW), proposal=proposal, portfolio=portfolio)
+
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.05)
+        assert any("drawdown" in r.message.lower() for r in caplog.records)
+
+    def test_liquidity_check_clips_trade_exceeding_adv_participation(self, caplog):
+        """A target weight implying a trade > max_participation_pct of ADV
+        must be clipped, even though it's well within the per-name cap."""
+        from firm.agents.risk import RiskAgent
+
+        class _ThinPitView:
+            asof = NOW
+            universe = ["THIN"]
+
+            def prices(self, symbols=None, lookback_days=20):
+                import pandas as pd
+                # $1/share * 1,000 shares/day = $1,000 ADV.
+                return pd.DataFrame({
+                    "symbol": ["THIN"] * 5,
+                    "close": [1.0] * 5,
+                    "volume": [1_000] * 5,
+                })
+
+        class _Portfolio:
+            nav = 100_000.0
+
+            def get_weights(self, prices):
+                return {}
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "max_participation_pct": 0.10,
+        })
+        # Target 1% of $100k NAV = $1,000 trade vs $1,000 ADV -> 100%
+        # participation, way past the 10% cap.
+        proposal = TradeProposal(asof=NOW, targets={"THIN": 0.01})
+        ctx = AgentContext(now=NOW, pit_view=_ThinPitView())
+        with caplog.at_level("WARNING", logger="firm.agents.risk"):
+            decision = risk.run(ctx, proposal=proposal, portfolio=_Portfolio())
+
+        assert decision.adjusted_targets["THIN"] < 0.01
+        implied_trade = decision.adjusted_targets["THIN"] * 100_000.0
+        assert implied_trade <= 100.0 + 1e-6  # 10% of $1,000 ADV
+        assert any("ADV" in r.message for r in caplog.records)
+
+    def test_liquidity_check_noop_without_pit_view(self):
+        """No pit_view (most backtests/tests) means the check can't run — it
+        must not raise or otherwise block the proposal."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={"max_position_pct": 1.0, "max_participation_pct": 0.10})
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.05})
+        decision = risk.run(AgentContext(now=NOW), proposal=proposal)
+        assert decision.approved
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.05)
+
+    def test_liquidity_check_disabled_by_default(self):
+        """max_participation_pct is opt-in; omitting it must not change
+        existing behaviour even with a pit_view present."""
+        from firm.agents.risk import RiskAgent
+
+        class _ThinPitView:
+            asof = NOW
+            universe = ["THIN"]
+
+            def prices(self, symbols=None, lookback_days=20):
+                import pandas as pd
+                return pd.DataFrame({
+                    "symbol": ["THIN"], "close": [1.0], "volume": [1_000],
+                })
+
+        risk = RiskAgent(config={"max_position_pct": 1.0})
+        proposal = TradeProposal(asof=NOW, targets={"THIN": 0.5})
+        ctx = AgentContext(now=NOW, pit_view=_ThinPitView())
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["THIN"] == pytest.approx(0.5)
+
+    @staticmethod
+    def _correlated_pit_view(n_days: int = 30):
+        """Two symbols (A, B) that move in lockstep (rho ~= 1.0) and a
+        third (C) with independent, uncorrelated returns."""
+        import pandas as pd
+
+        dates = pd.bdate_range("2023-01-01", periods=n_days)
+        rows = []
+        price_a, price_c = 100.0, 100.0
+        rng_returns = [0.01, -0.02, 0.015, -0.005, 0.02] * (n_days // 5 + 1)
+        for i, d in enumerate(dates):
+            ret_a = rng_returns[i]
+            ret_c = rng_returns[(i + 2) % len(rng_returns)] * -1.0
+            price_a *= 1 + ret_a
+            price_c *= 1 + ret_c
+            for sym, price in (("A", price_a), ("B", price_a), ("C", price_c)):
+                rows.append({"date": d, "symbol": sym, "close": price, "volume": 1_000_000})
+        return pd.DataFrame(rows)
+
+    def test_correlated_pair_is_scaled_down(self, caplog):
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["A", "B", "C"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._correlated_pit_view()
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "correlation_threshold": 0.9,
+            "max_correlated_pair_pct": 0.10,
+        })
+        # A and B are identical (rho=1.0, same direction) with combined
+        # weight 0.30 > the 0.10 cap; C is uncorrelated and untouched.
+        proposal = TradeProposal(asof=NOW, targets={"A": 0.15, "B": 0.15, "C": 0.15})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        with caplog.at_level("WARNING", logger="firm.agents.risk"):
+            decision = risk.run(ctx, proposal=proposal)
+
+        combined_ab = abs(decision.adjusted_targets["A"]) + abs(decision.adjusted_targets["B"])
+        assert combined_ab <= 0.10 + 1e-6
+        assert decision.adjusted_targets["C"] == pytest.approx(0.15)
+        assert any("correlated" in r.message.lower() for r in caplog.records)
+
+    def test_offsetting_correlated_pair_is_not_capped(self):
+        """A long/short pair in correlated names is a hedge, not
+        concentration, and must not be scaled down."""
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["A", "B"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._correlated_pit_view()
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "correlation_threshold": 0.9,
+            "max_correlated_pair_pct": 0.10,
+        })
+        proposal = TradeProposal(asof=NOW, targets={"A": 0.15, "B": -0.15})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["A"] == pytest.approx(0.15)
+        assert decision.adjusted_targets["B"] == pytest.approx(-0.15)
+
+    def test_correlation_check_disabled_by_default(self):
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["A", "B"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._correlated_pit_view()
+
+        risk = RiskAgent(config={"max_position_pct": 1.0, "max_net_exposure": 1.0})
+        proposal = TradeProposal(asof=NOW, targets={"A": 0.3, "B": 0.3})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["A"] == pytest.approx(0.3)
+        assert decision.adjusted_targets["B"] == pytest.approx(0.3)
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Execution Agent
@@ -709,6 +911,62 @@ class TestExecution:
         by_sym = {o["symbol"]: o for o in report.fills}
         assert by_sym["AAPL"]["strategy"] == "momentum"
         assert by_sym["MSFT"]["strategy"] == "trend"
+
+    def test_closing_order_attributed_via_held_position_not_composite(self):
+        """Regression: a symbol dropped entirely from this cycle's targets
+        (fully closed) has no *this-cycle* per_strategy entry, but should
+        still be attributed to whichever strategy currently holds the
+        position (via PerformanceAttribution), not silently dumped into
+        'composite'."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.attribution import PerformanceAttribution
+        from firm.portfolio.state import PortfolioState
+
+        attribution = PerformanceAttribution()
+        # Seed prior holdings as if 'momentum' opened the AAPL position.
+        attribution.record_trades(
+            [{"symbol": "AAPL", "shares": 100, "price": 100.0, "strategy": "momentum"}],
+            {"AAPL": 100.0},
+        )
+
+        execution = ExecutionAgent()
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 100}
+        prices = {"AAPL": 150.0}
+        # AAPL fully closed this cycle: absent from targets and per_strategy.
+        decision = RiskDecision(approved=True, adjusted_targets={})
+        report = execution.run(
+            AgentContext(now=NOW),
+            decision=decision,
+            portfolio=portfolio,
+            prices=prices,
+            per_strategy={},
+            attribution=attribution,
+        )
+        by_sym = {o["symbol"]: o for o in report.fills}
+        assert by_sym["AAPL"]["side"] == "sell"
+        assert by_sym["AAPL"]["strategy"] == "momentum"
+
+    def test_closing_order_falls_back_to_composite_when_untraceable(self):
+        """Without attribution history (or with no matching held position),
+        an untraceable close still falls back to 'composite' rather than
+        raising — but this should be the rare/last-resort path."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent()
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 100}
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={})
+        report = execution.run(
+            AgentContext(now=NOW),
+            decision=decision,
+            portfolio=portfolio,
+            prices=prices,
+        )
+        by_sym = {o["symbol"]: o for o in report.fills}
+        assert by_sym["AAPL"]["strategy"] == "composite"
 
     def test_portfolio_nav_marks_to_market(self):
         """Regression: nav must value holdings at price, not sum share counts."""

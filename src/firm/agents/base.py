@@ -32,6 +32,9 @@ class AgentContext:
             used by the optimal (inverse-covariance) signal combination to
             down-weight correlated/redundant strategies. ``None`` (the default)
             makes the researchers fall back to the confidence-weighted mean.
+        market_regime: Optional :class:`~firm.regime.model.RegimeState` from
+            the market-level HMM detector, set by the orchestrator when
+            ``strategy_regime_weights`` is enabled.
     """
 
     now: datetime
@@ -39,6 +42,7 @@ class AgentContext:
     portfolio: "PortfolioState | None" = None
     config: dict[str, Any] = field(default_factory=dict)
     strategy_returns: dict[str, Any] | None = None
+    market_regime: Any | None = None
 
 
 class Agent(ABC):

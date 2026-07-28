@@ -9,6 +9,7 @@ from firm.agents.base import AgentContext
 from firm.agents.llm.base_llm_agent import LLMAgentMixin
 from firm.agents.risk import RiskAgent
 from firm.contracts.models import RiskDecision
+from firm.llm.schemas import RiskReviewResponse, parse_llm_response
 
 log = logging.getLogger(__name__)
 
@@ -70,22 +71,26 @@ class LLMRiskAgent(RiskAgent, LLMAgentMixin):
             '{"additional_violations": ["..."], "additional_actions": ["..."], "override_approval": null or bool}'
         )
         try:
-            result = self._call_llm(
+            raw = self._call_llm(
                 "You are a risk manager assessing non-quantitative risks.",
                 prompt,
                 json_mode=True,
             )
-            extra_violations = result.get("additional_violations", [])
-            extra_actions = result.get("additional_actions", [])
-            override = result.get("override_approval")
+            parsed = parse_llm_response(RiskReviewResponse, raw, context=", ".join(symbols))
+            if parsed is None:
+                return quant_decision
 
             merged_violations = list(quant_decision.violations) + [
-                f"[LLM] {v}" for v in extra_violations if isinstance(v, str)
+                f"[LLM] {v}" for v in parsed.additional_violations
             ]
             merged_actions = list(quant_decision.actions) + [
-                f"[LLM] {a}" for a in extra_actions if isinstance(a, str)
+                f"[LLM] {a}" for a in parsed.additional_actions
             ]
-            approved = override if isinstance(override, bool) else quant_decision.approved
+            approved = (
+                parsed.override_approval
+                if parsed.override_approval is not None
+                else quant_decision.approved
+            )
 
             return RiskDecision(
                 approved=approved,

@@ -166,6 +166,116 @@ class LLMAgentMixin:
             )
             return text[:3000]
 
+    def _bounded_override(
+        self,
+        symbol: str,
+        strategy: str,
+        raw_score: Any,
+        raw_confidence: Any,
+        fallback_score: float,
+        fallback_confidence: float,
+    ) -> tuple[float, float]:
+        """Coerce+clamp an LLM-proposed (score, confidence) override to its
+        documented range, falling back to the quant value on bad input.
+
+        The enhancement prompts all ask for ``score`` in [-1, 1] and
+        ``confidence`` in [0, 1], but nothing enforces that an LLM actually
+        honours it — a hallucinated or malformed value (e.g. score=4.0,
+        confidence=-0.2, or a non-numeric string) would otherwise flow
+        straight into the z-scored signal the rest of the pipeline assumes
+        is bounded, silently distorting cross-sectional ranking and
+        downstream position sizing. Out-of-range/invalid values are clamped
+        (not just logged) so a single bad LLM response can never dominate
+        the cross-section; callers should still re-run
+        :func:`firm.agents.analysts.zscore_signals` afterwards so the
+        clamp doesn't leave the sole z-score invariant violated for the
+        rest of the group.
+        """
+        try:
+            score = float(raw_score)
+            if score != score:  # NaN
+                raise ValueError("NaN score")
+        except (TypeError, ValueError):
+            log.warning(
+                "LLM returned non-numeric score for %s/%s (%r) — using quant score",
+                symbol, strategy, raw_score,
+            )
+            score = fallback_score
+        try:
+            confidence = float(raw_confidence)
+            if confidence != confidence:  # NaN
+                raise ValueError("NaN confidence")
+        except (TypeError, ValueError):
+            log.warning(
+                "LLM returned non-numeric confidence for %s/%s (%r) — using quant confidence",
+                symbol, strategy, raw_confidence,
+            )
+            confidence = fallback_confidence
+
+        clamped_score = max(-1.0, min(1.0, score))
+        clamped_confidence = max(0.0, min(1.0, confidence))
+        if clamped_score != score or clamped_confidence != confidence:
+            log.warning(
+                "LLM override out of bounds for %s/%s: score=%s->%s confidence=%s->%s "
+                "(clamped to documented [-1,1]/[0,1] ranges)",
+                symbol, strategy, score, clamped_score, confidence, clamped_confidence,
+            )
+        return clamped_score, clamped_confidence
+
+    def _bounded_conviction(
+        self, symbol: str, side: str, raw_conviction: Any, fallback: float,
+    ) -> float:
+        """Coerce+clamp an LLM-proposed thesis conviction to [0, 1].
+
+        Same rationale as :meth:`_bounded_override`: the prompt documents
+        the range but nothing enforces it, and an out-of-range conviction
+        feeds straight into the bull/bear debate's net-conviction math.
+        """
+        try:
+            conviction = float(raw_conviction)
+            if conviction != conviction:  # NaN
+                raise ValueError("NaN conviction")
+        except (TypeError, ValueError):
+            log.warning(
+                "LLM returned non-numeric conviction for %s thesis on %s (%r) — "
+                "using quant conviction", side, symbol, raw_conviction,
+            )
+            conviction = fallback
+        clamped = max(0.0, min(1.0, conviction))
+        if clamped != conviction:
+            log.warning(
+                "LLM conviction out of bounds for %s thesis on %s: %s->%s "
+                "(clamped to documented [0,1] range)",
+                side, symbol, conviction, clamped,
+            )
+        return clamped
+
+    def _bounded_net_conviction(
+        self, symbol: str, raw_value: Any, fallback: float,
+    ) -> float:
+        """Coerce+clamp an LLM-proposed debate net_conviction to [-1, 1].
+
+        Same rationale as :meth:`_bounded_override`/:meth:`_bounded_conviction`.
+        """
+        try:
+            value = float(raw_value)
+            if value != value:  # NaN
+                raise ValueError("NaN net_conviction")
+        except (TypeError, ValueError):
+            log.warning(
+                "LLM returned non-numeric net_conviction for %s (%r) — using quant value",
+                symbol, raw_value,
+            )
+            value = fallback
+        clamped = max(-1.0, min(1.0, value))
+        if clamped != value:
+            log.warning(
+                "LLM net_conviction out of bounds for %s: %s->%s "
+                "(clamped to documented [-1,1] range)",
+                symbol, value, clamped,
+            )
+        return clamped
+
     def _call_llm(
         self,
         system: str,

@@ -185,6 +185,9 @@ def launch_run(req: RunRequest):
         "initial_capital": req.initial_capital,
         "commission_pct": req.commission_pct,
         "slippage_pct": req.slippage_pct,
+        "spread_pct": req.spread_pct,
+        "short_borrow_annual_pct": req.short_borrow_annual_pct,
+        "market_impact_coefficient": req.market_impact_coefficient,
         "rebalance_frequency": req.rebalance_frequency,
         "strategies": req.strategies,
         "strategy_params": req.strategy_params,
@@ -194,6 +197,12 @@ def launch_run(req: RunRequest):
             else settings.kelly_fraction
         ),
         "signal_combination": req.signal_combination or settings.signal_combination,
+        "strategy_circuit_breaker": (
+            req.strategy_circuit_breaker or settings.strategy_circuit_breaker
+        ),
+        "strategy_regime_weights": (
+            req.strategy_regime_weights or settings.strategy_regime_weights
+        ),
         "data_source": req.data_source,
         "seed": req.seed,
         **req.risk_overrides,
@@ -203,6 +212,11 @@ def launch_run(req: RunRequest):
         config["regime_overlay"] = {
             **config.get("regime_overlay", {}),
             **req.regime_overlay,
+        }
+    if req.strategy_circuit_breaker is not None:
+        config["strategy_circuit_breaker"] = {
+            **config.get("strategy_circuit_breaker", {}),
+            **req.strategy_circuit_breaker,
         }
     if req.universe_symbols:
         config["universe_symbols"] = req.universe_symbols
@@ -233,6 +247,9 @@ def launch_walk_forward(req: WalkForwardRequest):
             "initial_capital": req.initial_capital,
             "commission_pct": req.commission_pct,
             "slippage_pct": req.slippage_pct,
+            "spread_pct": req.spread_pct,
+            "short_borrow_annual_pct": req.short_borrow_annual_pct,
+            "market_impact_coefficient": req.market_impact_coefficient,
             "rebalance_frequency": req.rebalance_frequency,
         },
         "strategies": {"enabled": req.strategies},
@@ -243,6 +260,12 @@ def launch_walk_forward(req: WalkForwardRequest):
             else settings.kelly_fraction
         ),
         "signal_combination": req.signal_combination or settings.signal_combination,
+        "strategy_circuit_breaker": (
+            req.strategy_circuit_breaker or settings.strategy_circuit_breaker
+        ),
+        "strategy_regime_weights": (
+            req.strategy_regime_weights or settings.strategy_regime_weights
+        ),
         "data_source": req.data_source,
         "seed": req.seed,
         "risk": {**settings.risk.model_dump(), **req.risk_overrides},
@@ -253,5 +276,10 @@ def launch_walk_forward(req: WalkForwardRequest):
         config["universe_symbols"] = req.universe_symbols
 
     return jm.run_walk_forward_sync(
-        config, n_splits=req.n_splits, train_pct=req.train_pct, seed=req.seed
+        config,
+        n_splits=req.n_splits,
+        train_pct=req.train_pct,
+        seed=req.seed,
+        param_grid=req.param_grid,
+        selection_metric=req.selection_metric,
     )

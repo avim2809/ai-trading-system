@@ -9,6 +9,7 @@ from firm.agents.base import AgentContext
 from firm.agents.llm.base_llm_agent import LLMAgentMixin
 from firm.agents.trader import TraderAgent
 from firm.contracts.models import TradeProposal
+from firm.llm.schemas import PortfolioReviewResponse, parse_llm_response
 
 log = logging.getLogger(__name__)
 
@@ -59,18 +60,18 @@ class LLMTraderAgent(TraderAgent, LLMAgentMixin):
             '{"adjusted_targets": {"SYMBOL": weight, ...}, "notes": "..."}'
         )
         try:
-            result = self._call_llm(
+            raw = self._call_llm(
                 "You are a portfolio manager reviewing a trade proposal.",
                 prompt,
                 json_mode=True,
             )
-            adjusted = result.get("adjusted_targets")
-            if isinstance(adjusted, dict) and adjusted:
+            parsed = parse_llm_response(PortfolioReviewResponse, raw, context="portfolio review")
+            if parsed is not None and parsed.adjusted_targets:
                 return TradeProposal(
                     asof=quant_proposal.asof,
-                    targets={k: float(v) for k, v in adjusted.items()},
+                    targets=parsed.adjusted_targets,
                     per_strategy=quant_proposal.per_strategy,
-                    notes=result.get("notes", quant_proposal.notes),
+                    notes=parsed.notes or quant_proposal.notes,
                 )
         except Exception:
             log.warning("LLM trader review failed, using quant proposal", exc_info=True)

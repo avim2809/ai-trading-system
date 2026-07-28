@@ -8,8 +8,14 @@ missing section yields documented defaults rather than raising.
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 from typing import Any
+
+import yaml
+
+log = logging.getLogger(__name__)
 
 _CONFIG_PATH = Path("config/llm.yaml")
 
@@ -77,15 +83,25 @@ _OPTIMIZATION_DEFAULTS: dict[str, Any] = {
 }
 
 
+def _resolve_config_path(path: str | Path | None = None) -> Path:
+    if path is not None:
+        return Path(path)
+    override = os.getenv("FIRM_LLM_CONFIG", "").strip()
+    if override:
+        return Path(override)
+    return _CONFIG_PATH
+
+
 def load_llm_config(path: str | Path | None = None) -> dict[str, Any]:
-    """Load ``config/llm.yaml`` (or *path*), returning ``{}`` on any failure."""
-    cfg_path = Path(path) if path else _CONFIG_PATH
+    """Load LLM YAML (``config/llm.yaml`` or ``FIRM_LLM_CONFIG``)."""
+    cfg_path = _resolve_config_path(path)
     try:
-        import yaml
         if cfg_path.exists():
             return yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
+        if cfg_path != _CONFIG_PATH:
+            log.warning("FIRM_LLM_CONFIG path does not exist: %s", cfg_path)
     except Exception:
-        pass
+        log.warning("Failed to load LLM config from %s", cfg_path, exc_info=True)
     return {}
 
 
