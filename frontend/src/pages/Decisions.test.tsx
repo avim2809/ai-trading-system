@@ -27,4 +27,28 @@ describe('Decisions', () => {
     renderWithProviders(<Decisions />)
     await waitFor(() => expect(screen.getByText(/Awaiting outcome/)).toBeInTheDocument())
   })
+
+  it('renders the lessons-learned digest panel', async () => {
+    renderWithProviders(<Decisions />)
+    await waitFor(() => expect(screen.getByText('Lessons Learned')).toBeInTheDocument())
+    expect(screen.getByText(/3 reflected decisions/)).toBeInTheDocument()
+    expect(screen.getByText('Trust the signal in trending regimes')).toBeInTheDocument()
+  })
+
+  it('splits a structured reflection into what-worked / what-failed columns', async () => {
+    server.use(http.get('http://localhost/api/memory/decisions', () => HttpResponse.json([
+      {
+        date: '2026-07-23', status: 'reflected', proposal_weights: { AAPL: 0.05 },
+        notes: '', nav_at_decision: 1000000, raw_return: 0.01, benchmark_return: 0.0,
+        reflection: 'CORRECT. What worked: thesis held Lesson: trust the signal',
+        verdict: 'correct', what_worked: 'thesis held', what_failed: '', lesson: 'trust the signal',
+      },
+    ])))
+    renderWithProviders(<Decisions />)
+    await waitFor(() => expect(screen.getByText('What worked')).toBeInTheDocument())
+    expect(screen.getByText("What didn't")).toBeInTheDocument()
+    expect(screen.getByText('thesis held')).toBeInTheDocument()
+    expect(screen.getByText('trust the signal')).toBeInTheDocument()
+    expect(screen.getByText('correct')).toBeInTheDocument()
+  })
 })

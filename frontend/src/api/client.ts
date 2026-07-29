@@ -28,6 +28,7 @@ import type {
   LogTailResponse,
   LiveAlertsResponse,
   DecisionEntry,
+  LessonsDigest,
   SystemResources,
 } from './types'
 
@@ -113,7 +114,7 @@ export const api = {
     fetchJson<{ status: string }>('/live/stop', { method: 'POST' }),
 
   triggerCycle: () =>
-    fetchJson<{ cycle_id: string }>('/live/trigger', { method: 'POST' }),
+    fetchJson<{ cycle_id: number }>('/live/trigger', { method: 'POST' }),
 
   getPositions: () => fetchJson<BrokerPosition[]>('/live/positions'),
 
@@ -221,6 +222,9 @@ export const api = {
 
   getDecisions: (limit = 50) =>
     fetchJson<DecisionEntry[]>(`/memory/decisions?limit=${limit}`),
+
+  getLessons: (limit = 10) =>
+    fetchJson<LessonsDigest>(`/memory/lessons?limit=${limit}`),
 
   // ── System Resources ──
 

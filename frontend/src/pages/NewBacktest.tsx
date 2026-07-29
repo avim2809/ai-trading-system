@@ -30,6 +30,7 @@ export default function NewBacktest() {
   const [spread, setSpread] = useState(0.0002)
   const [shortBorrow, setShortBorrow] = useState(0.003)
   const [marketImpactCoefficient, setMarketImpactCoefficient] = useState(0.0)
+  const [marketImpactCrossover, setMarketImpactCrossover] = useState('')
   const [rebalance, setRebalance] = useState('daily')
   const [dataSource, setDataSource] = useState('synthetic')
   const [seed, setSeed] = useState(42)
@@ -100,6 +101,7 @@ export default function NewBacktest() {
       spread_pct: spread,
       short_borrow_annual_pct: shortBorrow,
       market_impact_coefficient: marketImpactCoefficient,
+      market_impact_crossover_participation: marketImpactCrossover === '' ? null : Number(marketImpactCrossover),
       rebalance_frequency: rebalance,
       risk_overrides: riskOverrides,
       regime_overlay: regime,
@@ -279,12 +281,30 @@ export default function NewBacktest() {
                 className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
               />
             </div>
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">
+                Impact crossover participation (experimental)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min={0}
+                max={1}
+                placeholder="disabled (pure sqrt law)"
+                value={marketImpactCrossover}
+                onChange={(e) => setMarketImpactCrossover(e.target.value)}
+                className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+              />
+            </div>
           </div>
           <p className="mt-1 text-xs text-slate-500">
             Market impact adds a size/volume-aware cost on top of the flat rates above: impact %
             = coefficient × √(trade notional / trailing ADV dollars). 0 disables it (flat-pct-only
             costs, the historical default); nonzero values make large orders relative to a name's
-            volume cost proportionally more, not just a bigger absolute amount.
+            volume cost proportionally more, not just a bigger absolute amount. Below the crossover
+            participation rate (if set), impact scales linearly instead of by square root —
+            empirical work shows small orders are closer to linear, so a pure sqrt law can overstate
+            their cost; leave blank to keep the pure sqrt law at every size.
           </p>
         </section>
 
@@ -345,6 +365,7 @@ export default function NewBacktest() {
               >
                 <option value="confidence">Confidence-Weighted</option>
                 <option value="optimal">Optimal (inverse-variance)</option>
+                <option value="hrp">HRP (hierarchical risk parity, experimental)</option>
               </select>
             </div>
           </div>

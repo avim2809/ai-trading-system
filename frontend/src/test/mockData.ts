@@ -6,6 +6,7 @@
 import type {
   StrategyInfo, ConfigDefaults, RunSummary, LiveStatus, LiveConfig, LiveAlertsResponse,
   BrokerPosition, AccountInfo, CycleRecord, PendingApproval, ApprovalDetail, DecisionEntry,
+  LessonsDigest,
   LLMProvider, LLMConfig, LLMCacheStats, RAGStats, EmbeddingModelInfo, LogTailResponse,
   BlackboardView, OrderRecord, SystemResources,
 } from '../api/types'
@@ -37,7 +38,7 @@ export const mockLiveStatusRunning: LiveStatus = {
   next_run: '2026-07-22T09:35:00-04:00',
   active_strategies: ['momentum', 'trend', 'multi_factor'],
   approval_mode: 'full_auto', uptime_seconds: 3600,
-  last_cycle: { cycle_id: '1', timestamp: '2026-07-21T19:49:04.066971', orders_generated: 20 },
+  last_cycle: { cycle_id: 1, timestamp: '2026-07-21T19:49:04.066971', orders_generated: 20 },
   cycle_running_seconds: null,
 }
 
@@ -64,7 +65,7 @@ export const mockAccount: AccountInfo = {
 }
 
 export const mockCycles: CycleRecord[] = [
-  { cycle_id: '1', timestamp: '2026-07-21T19:49:04.066971', orders_generated: 20, orders_submitted: 0, orders_queued: 20, error: null },
+  { cycle_id: 1, timestamp: '2026-07-21T19:49:04.066971', orders_generated: 20, orders_submitted: 0, orders_queued: 20, error: null },
 ]
 
 export const mockOrders: OrderRecord[] = [
@@ -153,3 +154,9 @@ export const mockDecisions: DecisionEntry[] = [
     reflection: 'The directional call was correct; AAPL outperformed the benchmark.',
   },
 ]
+
+export const mockLessons: LessonsDigest = {
+  total: 3,
+  counts: { correct: 2, incorrect: 1, partial: 0, unknown: 0 },
+  recent_lessons: ['Trust the signal in trending regimes', 'Wait for confirmation before sizing up'],
+}

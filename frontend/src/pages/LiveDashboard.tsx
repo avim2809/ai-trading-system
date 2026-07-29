@@ -503,7 +503,7 @@ export default function LiveDashboard() {
             {cycles.map((c) => (
               <div key={c.cycle_id} className="bg-slate-900/50 border border-slate-700/50 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-mono text-xs text-slate-400">{c.cycle_id.slice(0, 8)}</span>
+                  <span className="font-mono text-xs text-slate-400">#{c.cycle_id}</span>
                   <StatusBadge status={c.error ? 'failed' : 'completed'} />
                 </div>
                 <p className="text-xs text-slate-400">{formatTime(c.timestamp)}</p>

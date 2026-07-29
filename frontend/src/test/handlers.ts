@@ -68,6 +68,7 @@ export const handlers = [
   http.get(`${API}/logs/tail`, () => HttpResponse.json(m.mockLogTail)),
 
   http.get(`${API}/memory/decisions`, () => HttpResponse.json(m.mockDecisions)),
+  http.get(`${API}/memory/lessons`, () => HttpResponse.json(m.mockLessons)),
 
   http.get(`${API}/system/resources`, () => HttpResponse.json(m.mockSystemResources)),
   http.post(`${API}/system/restart`, () => HttpResponse.json({ status: 'restarting' })),

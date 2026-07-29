@@ -41,6 +41,7 @@ export interface RunRequest {
   spread_pct?: number
   short_borrow_annual_pct?: number
   market_impact_coefficient?: number
+  market_impact_crossover_participation?: number | null
   rebalance_frequency: string
   risk_overrides: Record<string, number>
   regime_overlay?: RegimeOverlayConfig
@@ -242,7 +243,7 @@ export interface ConfigDefaults {
 // ── Live Trading Types ──
 
 export interface LastCycle {
-  cycle_id: string
+  cycle_id: number
   timestamp: string
   orders_generated: number
 }
@@ -301,6 +302,20 @@ export interface DecisionEntry {
   raw_return: number | null
   benchmark_return: number | null
   reflection: string | null
+  /** Structured reflection fields (added alongside `reflection`, which stays
+   * as a rendered fallback for older entries / older prompt-injection
+   * consumers). `verdict` is null until reflected; "unknown" means the LLM
+   * reflection call failed and only the unstructured fallback exists. */
+  verdict?: 'correct' | 'incorrect' | 'partial' | 'unknown' | null
+  what_worked?: string | null
+  what_failed?: string | null
+  lesson?: string | null
+}
+
+export interface LessonsDigest {
+  total: number
+  counts: { correct: number; incorrect: number; partial: number; unknown: number }
+  recent_lessons: string[]
 }
 
 export interface BrokerPosition {
@@ -335,7 +350,7 @@ export interface OrderRecord {
 }
 
 export interface CycleRecord {
-  cycle_id: string
+  cycle_id: number
   timestamp: string
   orders_generated: number
   orders_submitted: number

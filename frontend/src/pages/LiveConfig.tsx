@@ -601,6 +601,7 @@ export default function LiveConfig() {
               >
                 <option value="confidence">Confidence-Weighted</option>
                 <option value="optimal">Optimal (inverse-variance)</option>
+                <option value="hrp">HRP (hierarchical risk parity, experimental)</option>
               </select>
             </div>
           </div>
