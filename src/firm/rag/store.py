@@ -20,6 +20,30 @@ def _asof_str(asof: Any) -> str:
     return str(asof)[:10]
 
 
+def _doc_available_by(metadata: dict[str, Any], asof_str: str) -> bool:
+    """True iff *metadata*'s ``date`` is at-or-before ``asof_str``.
+
+    Fails closed on anything that isn't a real ISO date. Plain
+    ``metadata.get("date", UNKNOWN_DATE)`` only substitutes the sentinel
+    when the key is entirely *missing* — a doc whose metadata explicitly
+    carries ``"date": None`` (a malformed/legacy record that bypassed
+    :func:`firm.rag.dates.normalize_date`) still slips through as ``None``
+    and crashes the ``>`` comparison instead of being excluded. Treating a
+    missing/``None``/malformed date the same as :data:`UNKNOWN_DATE` (always
+    in the future, so always excluded) is the correct fail-closed behaviour:
+    a doc of unknown vintage must never be silently treated as available,
+    since that is exactly the look-ahead leak this filter exists to prevent.
+    """
+    date = metadata.get("date") or UNKNOWN_DATE
+    try:
+        return str(date)[:10] <= asof_str
+    except Exception:
+        log.warning(
+            "RAG asof filter: malformed date metadata %r treated as unavailable", date
+        )
+        return False
+
+
 class VectorStore:
     """Persistent ChromaDB vector store with pluggable embeddings (Voyage / local ST)."""
 
@@ -173,7 +197,7 @@ class VectorStore:
         if results and results["ids"] and results["ids"][0]:
             for i, doc_id in enumerate(results["ids"][0]):
                 metadata = results["metadatas"][0][i] if results["metadatas"] else {}
-                if asof_str is not None and metadata.get("date", UNKNOWN_DATE) > asof_str:
+                if asof_str is not None and not _doc_available_by(metadata, asof_str):
                     continue
                 docs.append(RetrievedDoc(
                     doc_id=doc_id,

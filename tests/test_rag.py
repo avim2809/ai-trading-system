@@ -145,6 +145,29 @@ class TestStoreDateFilter:
         ids = {d.doc_id for d in results}
         assert ids == {"past"}, "future-dated and undated docs must be excluded"
 
+    def test_asof_excludes_explicit_none_date_without_crashing(self):
+        """A doc whose metadata explicitly carries ``"date": None`` (a
+        malformed/legacy record that bypassed normalize_date) must be
+        excluded like any other unknown-vintage doc, not crash the whole
+        query. ``metadata.get("date", UNKNOWN_DATE)`` only substitutes the
+        sentinel when the key is *missing* — an explicit ``None`` value
+        used to slip through and raise ``TypeError`` on the ``>`` compare."""
+        from firm.rag.store import VectorStore
+
+        collection = _FakeChromaCollection(
+            ids=["past", "none-date"],
+            documents=["past doc", "malformed doc"],
+            metadatas=[{"date": "2023-01-01"}, {"date": None}],
+            distances=[0.1, 0.1],
+        )
+        store = _FakeChromaStore(collection)
+        asof = datetime(2023, 6, 1)
+
+        results = VectorStore.query(store, "news", "q", n_results=5, asof=asof)
+
+        ids = {d.doc_id for d in results}
+        assert ids == {"past"}, "explicit-None-date doc must be excluded, not crash"
+
     def test_no_asof_returns_everything(self):
         from firm.rag.store import VectorStore
 

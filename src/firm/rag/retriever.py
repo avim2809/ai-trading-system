@@ -18,7 +18,7 @@ import re
 from typing import Any
 
 from firm.rag.models import RetrievedDoc
-from firm.rag.store import VectorStore
+from firm.rag.store import VectorStore, _asof_str, _doc_available_by
 
 log = logging.getLogger(__name__)
 
@@ -27,12 +27,6 @@ _RRF_K = 60  # Reciprocal Rank Fusion constant (standard default).
 
 def _tokenize(text: str) -> list[str]:
     return re.findall(r"[a-z0-9]+", (text or "").lower())
-
-
-def _asof_str(asof: Any) -> str:
-    if hasattr(asof, "strftime"):
-        return asof.strftime("%Y-%m-%d")
-    return str(asof)[:10]
 
 
 class RAGRetriever:
@@ -202,15 +196,19 @@ class RAGRetriever:
         doc_types: list[str] | None,
         asof: Any,
     ) -> bool:
-        """Replicate the dense channel's where/asof filtering for BM25 hits."""
+        """Replicate the dense channel's where/asof filtering for BM25 hits.
+
+        Shares :func:`firm.rag.store._doc_available_by` with the dense
+        channel's own asof check, so both channels fail closed identically
+        on a missing/``None``/malformed ``date`` instead of maintaining two
+        subtly different implementations.
+        """
         if symbols and metadata.get("symbol") not in symbols:
             return False
         if doc_types and metadata.get("doc_type") not in doc_types:
             return False
-        if asof is not None:
-            date = metadata.get("date")
-            if date is None or str(date)[:10] > _asof_str(asof):
-                return False
+        if asof is not None and not _doc_available_by(metadata, _asof_str(asof)):
+            return False
         return True
 
     @staticmethod

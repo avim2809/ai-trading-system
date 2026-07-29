@@ -96,6 +96,16 @@ class TestHybridRetrieval:
         assert RAGRetriever._passes_filters(meta, None, None, asof) is False
         assert RAGRetriever._passes_filters({"date": "2023-01-01"}, None, None, asof) is True
 
+    def test_passes_filters_excludes_missing_or_malformed_dates(self):
+        """Missing, explicit-None, and non-string dates must all be treated
+        as unknown vintage (excluded), not crash — same fail-closed
+        behaviour as the dense channel's firm.rag.store._doc_available_by,
+        which both channels now share."""
+        asof = datetime(2023, 6, 1)
+        assert RAGRetriever._passes_filters({}, None, None, asof) is False
+        assert RAGRetriever._passes_filters({"date": None}, None, None, asof) is False
+        assert RAGRetriever._passes_filters({"date": ""}, None, None, asof) is False
+
     def test_passes_filters_symbol_and_type(self):
         meta = {"symbol": "AAPL", "doc_type": "news"}
         assert RAGRetriever._passes_filters(meta, ["AAPL"], ["news"], None) is True
