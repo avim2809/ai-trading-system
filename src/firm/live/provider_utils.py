@@ -134,6 +134,11 @@ def resolve_live_startup(
         engine_config.setdefault(
             "market_impact_coefficient", costs["market_impact_coefficient"]
         )
+    if "market_impact_crossover_participation" in costs:
+        engine_config.setdefault(
+            "market_impact_crossover_participation",
+            costs["market_impact_crossover_participation"],
+        )
 
     # Optional behavioural knobs from live.yaml → engine/orchestrator config.
     # All default OFF/unchanged when absent (news-guard, optimal signal

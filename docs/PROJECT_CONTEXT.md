@@ -732,3 +732,5 @@ confirmed with real money on the line, not just simulated.
 - [formal_pbo_audit.md](formal_pbo_audit.md) — First walk-forward PBO audit results
 - [strategy_regime_weights_calibration.md](strategy_regime_weights_calibration.md) — Regime weight A/B (v1/v2)
 - [llm_ab_test_runbook.md](llm_ab_test_runbook.md) — Quant vs LLM paper experiment procedure
+- [llm_lookahead_audit.md](llm_lookahead_audit.md) — RAG point-in-time audit + a dense-channel crash-on-None-date fix
+- [regime_ensemble_scoping.md](regime_ensemble_scoping.md) — scoped-not-implemented research spike for a less noisy regime detector
