@@ -40,6 +40,45 @@ class TestPBO:
     def test_too_small_returns_uninformative(self):
         assert cscv_pbo(np.zeros((3, 1))) == 0.5
 
+    def test_embargo_zero_matches_default(self):
+        """``embargo_pct=0.0`` must reproduce the un-embargoed split exactly
+        — every existing caller/test relies on this being a strict no-op."""
+        rng = np.random.default_rng(0)
+        matrix = np.hstack(
+            [rng.normal(0.002, 0.01, size=(240, 1)), rng.normal(0, 0.01, size=(240, 9))]
+        )
+        assert cscv_pbo(matrix, n_partitions=8, embargo_pct=0.0) == cscv_pbo(
+            matrix, n_partitions=8
+        )
+
+    def test_embargo_purges_boundary_leakage(self):
+        """A trial column with a leak spike concentrated at every block's
+        edge (simulating serial-correlation bleed from the adjacent
+        in-sample block) should be scored differently once the embargo
+        purges those boundary rows from the out-of-sample side."""
+        rng = np.random.default_rng(42)
+        rows_per_block, n_blocks = 20, 6
+        T = rows_per_block * n_blocks
+        genuine = rng.normal(0.0015, 0.01, size=T)
+        noise = rng.normal(0.0, 0.01, size=(T, 5))
+        leak_rows = 4
+        for b in range(1, n_blocks):
+            start = b * rows_per_block
+            noise[start : start + leak_rows, 0] += 0.15
+        matrix = np.column_stack([genuine, noise])
+
+        pbo_no_embargo = cscv_pbo(matrix, n_partitions=n_blocks, embargo_pct=0.0)
+        pbo_embargo = cscv_pbo(matrix, n_partitions=n_blocks, embargo_pct=0.2)
+        assert pbo_no_embargo != pbo_embargo
+
+    def test_embargo_full_purge_returns_uninformative(self):
+        """An embargo large enough to purge every split's entire OOS block
+        (S=2: the two blocks are always mutually adjacent) leaves nothing to
+        rank against — must degrade to the uninformative 0.5, not error."""
+        rng = np.random.default_rng(1)
+        matrix = rng.normal(0, 0.01, size=(20, 3))
+        assert cscv_pbo(matrix, n_partitions=2, embargo_pct=1.0) == 0.5
+
 
 class TestSharpeStats:
     def test_genuine_drift_high_psr(self):

@@ -295,6 +295,33 @@ class TestExperimentRunner:
             assert train_end < test_start
             assert test_start <= test_end
 
+    def test_walk_forward_split_embargo_days(self):
+        """``embargo_days`` (default 1, matching prior hard-coded behaviour)
+        controls the calendar gap between train_end and test_start."""
+        default_splits = ExperimentRunner._compute_walk_forward_splits(
+            "2020-01-01", "2022-12-31", n_splits=3, train_pct=0.7
+        )
+        explicit_default_splits = ExperimentRunner._compute_walk_forward_splits(
+            "2020-01-01", "2022-12-31", n_splits=3, train_pct=0.7, embargo_days=1
+        )
+        assert default_splits == explicit_default_splits
+
+        no_gap_splits = ExperimentRunner._compute_walk_forward_splits(
+            "2020-01-01", "2022-12-31", n_splits=3, train_pct=0.7, embargo_days=0
+        )
+        for (_, train_end, test_start, _), (_, d_train_end, d_test_start, _) in zip(
+            no_gap_splits, default_splits
+        ):
+            assert train_end == d_train_end
+            assert test_start == train_end  # no embargo -> back-to-back
+            assert d_test_start > test_start  # default (1 day) leaves a gap
+
+        wide_splits = ExperimentRunner._compute_walk_forward_splits(
+            "2020-01-01", "2022-12-31", n_splits=3, train_pct=0.7, embargo_days=5
+        )
+        for (_, train_end, test_start, test_end) in wide_splits:
+            assert train_end < test_start <= test_end
+
     def test_walk_forward_runs(self, tmp_runs_dir, sample_config):
         runner = ExperimentRunner(registry=RunRegistry(base_dir=tmp_runs_dir))
         runs = runner.run_walk_forward(sample_config, n_splits=3, train_pct=0.7)

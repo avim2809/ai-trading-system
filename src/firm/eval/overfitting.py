@@ -17,7 +17,10 @@ of trying many configurations?
 - :func:`probabilistic_sharpe` — the same probability without the trial penalty.
 
 Ported from the external trading-suite ``pbo-deflated-sharpe`` skill; the six
-core functions are used verbatim, adapted only for firm's package layout.
+core functions reproduce that skill's math exactly when called with their
+defaults. :func:`cscv_pbo` additionally accepts an opt-in ``embargo_pct`` to
+purge boundary rows between in-sample/out-of-sample blocks (see its
+docstring) — a extension beyond the ported skill, not part of the original.
 """
 
 from __future__ import annotations
@@ -93,7 +96,7 @@ def _sharpe_cols(matrix: np.ndarray) -> np.ndarray:
     return np.divide(mean, sd, out=np.zeros_like(mean), where=sd > 0)
 
 
-def cscv_pbo(matrix: np.ndarray, n_partitions: int = 8) -> float:
+def cscv_pbo(matrix: np.ndarray, n_partitions: int = 8, embargo_pct: float = 0.0) -> float:
     """Probability of Backtest Overfitting via combinatorially-symmetric CV.
 
     Parameters
@@ -103,6 +106,18 @@ def cscv_pbo(matrix: np.ndarray, n_partitions: int = 8) -> float:
     n_partitions:
         Number of balanced blocks to split the timeline into (``S`` in the
         paper). Needs ``T >= 2 * n_partitions`` rows and ``N >= 2`` columns.
+    embargo_pct:
+        Fraction (``[0, 1)``) of a block's rows to purge from the edge of any
+        out-of-sample block that sits directly adjacent (in the original,
+        contiguous time order) to an in-sample block for that split. The
+        blocks below are plain contiguous time slices with no gap between
+        them, so a config that looks good purely because of serial
+        correlation bleeding across the IS/OOS boundary would otherwise
+        inflate both the in-sample ranking and its neighbouring OOS Sharpe.
+        This is an embargo in the López de Prado sense, adapted from
+        overlapping-label purging to plain contiguous blocks. ``0.0``
+        (default) reproduces the original CSCV split exactly — every
+        existing caller/test is unaffected.
 
     Returns
     -------
@@ -120,11 +135,27 @@ def cscv_pbo(matrix: np.ndarray, n_partitions: int = 8) -> float:
     rows = T // S
     M = M[: rows * S]
     chunks = [M[k * rows : (k + 1) * rows] for k in range(S)]
+    embargo_rows = math.ceil(embargo_pct * rows) if embargo_pct > 0 else 0
     allset = set(range(S))
     lambdas = []
     for comb in combinations(range(S), S // 2):
+        comb_set = set(comb)
         IS = np.vstack([chunks[k] for k in comb])
-        OOS = np.vstack([chunks[k] for k in allset - set(comb)])
+        oos_blocks = []
+        for k in sorted(allset - comb_set):
+            block = chunks[k]
+            if embargo_rows:
+                start = embargo_rows if (k - 1) in comb_set else 0
+                end = embargo_rows if (k + 1) in comb_set else 0
+                block = block[start : len(block) - end] if start + end < len(block) else block[0:0]
+            if len(block):
+                oos_blocks.append(block)
+        if not oos_blocks:
+            # Embargo purged this split's OOS data entirely (only possible
+            # with a very large embargo_pct relative to n_partitions) —
+            # skip it rather than ranking against an empty OOS set.
+            continue
+        OOS = np.vstack(oos_blocks)
         nstar = int(np.argmax(_sharpe_cols(IS)))
         oos = _sharpe_cols(OOS)
         order = oos.argsort()
@@ -132,6 +163,8 @@ def cscv_pbo(matrix: np.ndarray, n_partitions: int = 8) -> float:
         ranks[order] = np.arange(1, N + 1)
         w = min(max(ranks[nstar] / (N + 1), 1e-6), 1 - 1e-6)
         lambdas.append(math.log(w / (1 - w)))
+    if not lambdas:
+        return 0.5
     return float((np.array(lambdas) <= 0).mean())
 
 
@@ -237,6 +270,7 @@ def _period_sharpe(returns: np.ndarray) -> float:
 def walk_forward_overfitting(
     fold_returns: list[np.ndarray],
     fold_trial_returns: list[list[np.ndarray]] | None = None,
+    embargo_pct: float = 0.0,
 ) -> dict:
     """Overfitting read across walk-forward out-of-sample folds.
 
@@ -266,6 +300,10 @@ def walk_forward_overfitting(
       trial and DSR correctly degrades to plain PSR rather than penalising for
       trials that were never tried.
     - ``verdict`` — plain-English pass/fail combining PBO (when available) and DSR.
+
+    ``embargo_pct`` is forwarded to :func:`cscv_pbo` for every fold's PBO
+    computation — see its docstring. ``0.0`` (default) is the original,
+    unpurged CSCV split.
 
     Returns an empty dict when there is not enough OOS data to say anything.
     """
@@ -307,7 +345,9 @@ def walk_forward_overfitting(
             continue
         n_partitions = max(4, min(8, min_len // 2))
         matrix = np.column_stack([t[:min_len] for t in trial_series])
-        fold_pbos.append(cscv_pbo(matrix, n_partitions=n_partitions))
+        fold_pbos.append(
+            cscv_pbo(matrix, n_partitions=n_partitions, embargo_pct=embargo_pct)
+        )
 
     result: dict = {
         "n_folds": len(series),

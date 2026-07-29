@@ -159,6 +159,7 @@ class ExperimentRunner:
         seed: int = 42,
         param_grid: list[dict[str, Any]] | None = None,
         selection_metric: str = "sharpe_ratio",
+        embargo_days: int = 1,
     ) -> list[ExperimentRun]:
         """Run walk-forward analysis.
 
@@ -181,6 +182,10 @@ class ExperimentRunner:
         to compute PBO/DSR from real competing trials instead of the old
         heuristic of treating sequential OOS folds as pseudo-trials.
 
+        ``embargo_days`` (default 1, matching prior behaviour) is the
+        calendar-day gap enforced between each fold's train and test windows
+        — see :meth:`_compute_walk_forward_splits`.
+
         Returns list of ExperimentRun for each fold (the *test*-window run).
         """
         backtest_cfg = config.get("backtest", {})
@@ -188,7 +193,7 @@ class ExperimentRunner:
         end_date = backtest_cfg.get("end_date", "2023-12-31")
 
         splits = self._compute_walk_forward_splits(
-            start_date, end_date, n_splits, train_pct
+            start_date, end_date, n_splits, train_pct, embargo_days=embargo_days
         )
         candidates = param_grid or [{}]
         log.info(
@@ -380,13 +385,19 @@ class ExperimentRunner:
         return is_run, oos_run
 
     @staticmethod
-    def aggregate_walk_forward(runs: list[ExperimentRun]) -> dict[str, Any]:
+    def aggregate_walk_forward(
+        runs: list[ExperimentRun], embargo_pct: float = 0.0
+    ) -> dict[str, Any]:
         """Summarize out-of-sample metrics across walk-forward folds.
 
         Returns ``{"n_folds", "fold_ids", "metrics": {name: {mean, std,
         min, max, values}}}`` over the completed folds. Aggregating the
         per-fold OOS metrics (not a single full-window fit) is what makes
         walk-forward an honest overfitting check.
+
+        ``embargo_pct`` (default 0.0 = original behaviour) is forwarded to
+        the per-fold PBO computation — see
+        :func:`firm.eval.overfitting.cscv_pbo`.
         """
         completed = [r for r in runs if r.status == "completed" and r.metrics]
         fold_ids = [r.run_id for r in runs]
@@ -423,13 +434,17 @@ class ExperimentRunner:
         }
 
         # Formal overfitting read (PBO / Deflated Sharpe) across the OOS folds.
-        overfitting = ExperimentRunner._walk_forward_overfitting(completed)
+        overfitting = ExperimentRunner._walk_forward_overfitting(
+            completed, embargo_pct=embargo_pct
+        )
         if overfitting:
             result["overfitting"] = overfitting
         return result
 
     @staticmethod
-    def _walk_forward_overfitting(runs: list[ExperimentRun]) -> dict[str, Any]:
+    def _walk_forward_overfitting(
+        runs: list[ExperimentRun], embargo_pct: float = 0.0
+    ) -> dict[str, Any]:
         """Load each fold's OOS returns and run the Bailey/LdP overfitting checks.
 
         Reads ``equity.json`` from each fold's artifacts dir, converts the NAV
@@ -440,7 +455,8 @@ class ExperimentRunner:
         genuine per-candidate train-window returns are passed through too, so
         PBO/DSR are computed from real competing trials rather than treating
         sequential OOS folds as pseudo-trials. Degrades to an empty dict if
-        the equity artifacts are missing or too short.
+        the equity artifacts are missing or too short. ``embargo_pct`` is
+        forwarded to the underlying CSCV/PBO computation.
         """
         from firm.eval.overfitting import walk_forward_overfitting
 
@@ -499,6 +515,7 @@ class ExperimentRunner:
                 [[np.asarray(t) for t in fold] for fold in fold_trial_returns]
                 or None
             ),
+            embargo_pct=embargo_pct,
         )
 
     @staticmethod
@@ -507,8 +524,16 @@ class ExperimentRunner:
         end_date: str,
         n_splits: int,
         train_pct: float,
+        embargo_days: int = 1,
     ) -> list[tuple[str, str, str, str]]:
         """Compute walk-forward date splits.
+
+        ``embargo_days`` (default 1, matching the previous hard-coded
+        behaviour exactly) is the calendar-day gap enforced between each
+        fold's train and test windows — an embargo against serial-correlation
+        leakage across the train/test boundary (López de Prado): the test
+        window never starts the day immediately after training ends. ``0``
+        reproduces a back-to-back split with no gap.
 
         Returns list of (train_start, train_end, test_start, test_end) tuples.
         """
@@ -530,7 +555,7 @@ class ExperimentRunner:
             train_days = int(window_days * train_pct)
             train_start = window_start
             train_end = window_start + timedelta(days=train_days)
-            test_start = train_end + timedelta(days=1)
+            test_start = train_end + timedelta(days=max(embargo_days, 0))
             test_end = window_end
 
             splits.append((

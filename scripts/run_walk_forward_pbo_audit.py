@@ -106,6 +106,19 @@ def main() -> int:
         help="JSON file with a list of config override dicts",
     )
     parser.add_argument("--output", default="/tmp/walk_forward_pbo_audit.json")
+    parser.add_argument(
+        "--embargo-days", type=int, default=1,
+        help="Calendar-day gap between each fold's train and test windows "
+        "(default 1, matching prior behaviour). See "
+        "ExperimentRunner._compute_walk_forward_splits.",
+    )
+    parser.add_argument(
+        "--pbo-embargo-pct", type=float, default=0.0,
+        help="Fraction of each CSCV block purged from the edges of "
+        "out-of-sample blocks adjacent to in-sample blocks when computing "
+        "PBO (default 0.0 = original, unpurged CSCV split). See "
+        "firm.eval.overfitting.cscv_pbo.",
+    )
     args = parser.parse_args()
 
     param_grid = DEFAULT_PARAM_GRID
@@ -134,6 +147,7 @@ def main() -> int:
         seed=42,
         param_grid=param_grid,
         selection_metric=args.selection_metric,
+        embargo_days=args.embargo_days,
     )
     failed = [r for r in runs if r.status != "completed"]
     if failed:
@@ -142,7 +156,7 @@ def main() -> int:
             log.error("  %s: %s", r.run_id, r.notes)
         return 1
 
-    aggregate = runner.aggregate_walk_forward(runs)
+    aggregate = runner.aggregate_walk_forward(runs, embargo_pct=args.pbo_embargo_pct)
     overfit = aggregate.get("overfitting") or {}
     result = {
         "fold_ids": [r.run_id for r in runs],
@@ -150,6 +164,8 @@ def main() -> int:
         "n_splits": args.n_splits,
         "train_pct": args.train_pct,
         "selection_metric": args.selection_metric,
+        "embargo_days": args.embargo_days,
+        "pbo_embargo_pct": args.pbo_embargo_pct,
         "date_range": {"start": args.start_date, "end": args.end_date},
         **aggregate,
     }

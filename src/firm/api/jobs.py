@@ -54,6 +54,8 @@ class JobManager:
         seed: int = 42,
         param_grid: list[dict] | None = None,
         selection_metric: str = "sharpe_ratio",
+        embargo_days: int = 1,
+        pbo_embargo_pct: float = 0.0,
     ) -> dict:
         """Run a walk-forward analysis to completion and return its summary.
 
@@ -77,8 +79,9 @@ class JobManager:
                 seed=seed,
                 param_grid=param_grid,
                 selection_metric=selection_metric,
+                embargo_days=embargo_days,
             )
-            aggregate = runner.aggregate_walk_forward(runs)
+            aggregate = runner.aggregate_walk_forward(runs, embargo_pct=pbo_embargo_pct)
         return {"fold_ids": [r.run_id for r in runs], "aggregate": aggregate}
 
     def _run(self, run_id: str, config: dict) -> None:
