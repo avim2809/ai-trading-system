@@ -635,12 +635,16 @@ class RiskAgent(Agent):
             from firm.regime.detector import MarketRegimeDetector
 
             cfg = self._regime_overlay_cfg
-            self._regime_detector = MarketRegimeDetector(
-                n_states=cfg.get("n_states", 3),
-                lookback_days=cfg.get("lookback_days", 504),
-                retrain_frequency=cfg.get("retrain_frequency", 21),
-                benchmark_symbol=cfg.get("benchmark_symbol"),
-            )
+            detector_kwargs: dict[str, Any] = {
+                "n_states": cfg.get("n_states", 3),
+                "lookback_days": cfg.get("lookback_days", 504),
+                "retrain_frequency": cfg.get("retrain_frequency", 21),
+                "benchmark_symbol": cfg.get("benchmark_symbol"),
+                "ensemble": bool(cfg.get("ensemble", False)),
+            }
+            if cfg.get("ensemble_seeds"):
+                detector_kwargs["ensemble_seeds"] = tuple(cfg["ensemble_seeds"])
+            self._regime_detector = MarketRegimeDetector(**detector_kwargs)
         return self._regime_detector.detect(pit_view)
 
     def _regime_exposure_overlay(

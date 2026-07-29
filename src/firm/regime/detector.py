@@ -15,6 +15,7 @@ import logging
 
 import pandas as pd
 
+from firm.regime.ensemble import DEFAULT_SEEDS, EnsembleRegimeModel
 from firm.regime.features import compute_regime_features
 from firm.regime.model import GaussianRegimeModel, RegimeState, RegimeUnavailable
 
@@ -22,7 +23,16 @@ log = logging.getLogger(__name__)
 
 
 class MarketRegimeDetector:
-    """Detect the prevailing market regime from a broad proxy series."""
+    """Detect the prevailing market regime from a broad proxy series.
+
+    ``ensemble=True`` swaps the single :class:`~firm.regime.model.GaussianRegimeModel`
+    for a :class:`~firm.regime.ensemble.EnsembleRegimeModel` (majority vote
+    over several independently-seeded HMM fits) behind the exact same
+    ``fit``/``classify`` interface — every downstream consumer (``RiskAgent``'s
+    ``regime_overlay``, ``strategy_regime_weights``) is unaffected by which
+    one is active. Off by default: unchanged behaviour unless explicitly
+    opted in.
+    """
 
     def __init__(
         self,
@@ -32,6 +42,8 @@ class MarketRegimeDetector:
         benchmark_symbol: str | None = None,
         min_data_points: int = 120,
         random_state: int = 42,
+        ensemble: bool = False,
+        ensemble_seeds: tuple[int, ...] = DEFAULT_SEEDS,
     ) -> None:
         self.n_states = n_states
         self.lookback_days = lookback_days
@@ -39,7 +51,9 @@ class MarketRegimeDetector:
         self.benchmark_symbol = benchmark_symbol
         self.min_data_points = min_data_points
         self.random_state = random_state
-        self._model: GaussianRegimeModel | None = None
+        self.ensemble = ensemble
+        self.ensemble_seeds = ensemble_seeds
+        self._model: GaussianRegimeModel | EnsembleRegimeModel | None = None
         self._bars_since_fit = 0
         self._warned_unavailable = False
 
@@ -87,9 +101,15 @@ class MarketRegimeDetector:
         needs_fit = self._model is None or self._bars_since_fit >= self.retrain_frequency
         if needs_fit:
             try:
-                model = GaussianRegimeModel(
-                    n_states=self.n_states, random_state=self.random_state
-                ).fit(X)
+                model: GaussianRegimeModel | EnsembleRegimeModel
+                if self.ensemble:
+                    model = EnsembleRegimeModel(
+                        n_states=self.n_states, seeds=self.ensemble_seeds
+                    ).fit(X)
+                else:
+                    model = GaussianRegimeModel(
+                        n_states=self.n_states, random_state=self.random_state
+                    ).fit(X)
                 self._model = model
                 self._bars_since_fit = 0
             except RegimeUnavailable as exc:

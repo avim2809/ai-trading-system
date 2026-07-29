@@ -75,12 +75,16 @@ class Orchestrator(Agent):
         if self._regime_weights_detector is None:
             from firm.regime.detector import MarketRegimeDetector
 
-            self._regime_weights_detector = MarketRegimeDetector(
-                n_states=int(cfg.get("n_states", 3)),
-                lookback_days=int(cfg.get("lookback_days", 252)),
-                retrain_frequency=int(cfg.get("retrain_frequency", 21)),
-                benchmark_symbol=cfg.get("benchmark_symbol"),
-            )
+            detector_kwargs: dict[str, Any] = {
+                "n_states": int(cfg.get("n_states", 3)),
+                "lookback_days": int(cfg.get("lookback_days", 252)),
+                "retrain_frequency": int(cfg.get("retrain_frequency", 21)),
+                "benchmark_symbol": cfg.get("benchmark_symbol"),
+                "ensemble": bool(cfg.get("ensemble", False)),
+            }
+            if cfg.get("ensemble_seeds"):
+                detector_kwargs["ensemble_seeds"] = tuple(cfg["ensemble_seeds"])
+            self._regime_weights_detector = MarketRegimeDetector(**detector_kwargs)
         return self._regime_weights_detector.detect(pit_view)
 
     @staticmethod

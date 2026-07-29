@@ -209,6 +209,11 @@ risk:
     n_states: 3
     retrain_frequency: 5        # refit weekly
     lookback_days: 252
+    # `ensemble: true` swaps in the 5-seed majority-vote regime detector
+    # (firm.regime.ensemble.EnsembleRegimeModel). Only A/B'd against
+    # strategy_regime_weights so far (docs/regime_ensemble_scoping.md) —
+    # not this overlay specifically — so left false pending its own A/B.
+    ensemble: false
     exposure_map:
       Bull: 1.3                 # modest lever in confirmed bull (not aggressive)
       Bear: 0.4                 # meaningful de-risk in bear
@@ -299,9 +304,14 @@ strategy_circuit_breaker:
 #   Scales each strategy's raw signal before bull/bear combine based on
 #   the prevailing market regime (Bull/Bear/Chop). Disabled by default —
 #   calibrate via scripts/calibrate_strategy_regime_weights.py before enabling.
+#   `ensemble: true` swaps the single-model regime detector for a 5-seed
+#   majority-vote ensemble (firm.regime.ensemble.EnsembleRegimeModel) — A/B'd
+#   in docs/regime_ensemble_scoping.md: calms regime_hmm's own noise but does
+#   NOT improve portfolio Sharpe with this feature enabled, so left false.
 # ──────────────────────────────────────────────────────────────
 strategy_regime_weights:
   enabled: false
+  ensemble: false
   benchmark_symbol: SPY
   lookback_days: 252
   retrain_frequency: 21

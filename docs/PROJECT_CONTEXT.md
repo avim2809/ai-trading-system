@@ -563,6 +563,21 @@ now populated unconditionally in both the backtest (`FirmStrategy.next()`) and l
 (`LiveTradingEngine.run_cycle`) paths — previously gated on `signal_combination.method
 == "optimal"` — since the circuit breaker needs it regardless of combination method.
 
+3. **Ensemble-HMM market regime detector (shipped, off by default)** —
+   `regime/ensemble.py`'s `EnsembleRegimeModel` majority-votes across 5
+   independently-seeded `GaussianRegimeModel` fits, swapped in via
+   `MarketRegimeDetector(ensemble=True)` behind the same `fit`/`classify`
+   interface. Built to test whether calming the single HMM's label noise
+   would rescue `strategy_regime_weights` (item 2's sibling feature, which
+   already failed its own A/B). **Result**: the ensemble does calm
+   `regime_hmm`'s own attributed Sharpe (moves toward zero in every window:
+   -1.455→-0.575, -1.516→-0.599, 2.046→2.016) but portfolio Sharpe got
+   *worse* in 2/3 windows with `strategy_regime_weights` enabled under it —
+   detector noise was not the bottleneck; the `optimal`/regime-weight
+   interaction is. **Left disabled by default** on both `regime_overlay.ensemble`
+   and `strategy_regime_weights.ensemble`; see `docs/regime_ensemble_scoping.md`
+   for the full A/B and `scripts/calibrate_regime_ensemble.py` to reproduce.
+
 ### Web UI surfaces (`frontend/src`)
 
 | Page | Adds |
@@ -733,4 +748,4 @@ confirmed with real money on the line, not just simulated.
 - [strategy_regime_weights_calibration.md](strategy_regime_weights_calibration.md) — Regime weight A/B (v1/v2)
 - [llm_ab_test_runbook.md](llm_ab_test_runbook.md) — Quant vs LLM paper experiment procedure
 - [llm_lookahead_audit.md](llm_lookahead_audit.md) — RAG point-in-time audit + a dense-channel crash-on-None-date fix
-- [regime_ensemble_scoping.md](regime_ensemble_scoping.md) — scoped-not-implemented research spike for a less noisy regime detector
+- [regime_ensemble_scoping.md](regime_ensemble_scoping.md) — ensemble-HMM regime detector, A/B'd (shipped disabled: calms `regime_hmm`'s own noise but doesn't rescue `strategy_regime_weights`)
