@@ -865,14 +865,23 @@ class TestReflectionPersistence:
             config=config, broker=broker, data_feed=feed, approval_queue=queue,
         )
         engine2._llm_service = MagicMock()
-        engine2._llm_service.chat.return_value = "Reflection text."
+        engine2._llm_service.chat_json.return_value = {
+            "verdict": "correct",
+            "what_worked": "the thesis held",
+            "what_failed": "",
+            "lesson": "trust the signal",
+        }
         engine2.start()
         engine2.run_cycle()
 
         entries = [json.loads(line) for line in memory_path.read_text().splitlines()]
         reflected = [e for e in entries if e["status"] == "reflected"]
         assert len(reflected) == 1
-        assert reflected[0]["reflection"] == "Reflection text."
+        assert reflected[0]["reflection"] == (
+            "CORRECT. What worked: the thesis held Lesson: trust the signal"
+        )
+        assert reflected[0]["verdict"] == "correct"
+        assert reflected[0]["lesson"] == "trust the signal"
         assert reflected[0]["date"] == entries[0]["date"]
 
     @patch("firm.live.engine.build_orchestrator")

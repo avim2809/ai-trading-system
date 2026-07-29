@@ -12,6 +12,7 @@ import pytest
 from firm.llm.schemas import (
     AnalystEnhancementResponse,
     DebateEnhancementResponse,
+    DecisionReflection,
     PortfolioReviewResponse,
     RiskReviewResponse,
     ThesisEnhancementResponse,
@@ -113,6 +114,36 @@ class TestDebateEnhancementResponse:
     def test_non_numeric_net_conviction_becomes_nan(self):
         r = DebateEnhancementResponse.model_validate({"net_conviction": None})
         assert math.isnan(r.net_conviction)
+
+
+class TestDecisionReflection:
+    def test_valid_response(self):
+        r = DecisionReflection.model_validate({
+            "verdict": "correct",
+            "what_worked": "momentum thesis held",
+            "what_failed": "",
+            "lesson": "trust the signal in trending regimes",
+        })
+        assert r.verdict == "correct"
+        assert r.what_worked == "momentum thesis held"
+        assert r.what_failed == ""
+        assert r.lesson == "trust the signal in trending regimes"
+
+    def test_defaults_when_empty(self):
+        r = DecisionReflection.model_validate({})
+        assert r.verdict == "partial"
+        assert r.what_worked == ""
+        assert r.what_failed == ""
+        assert r.lesson == ""
+
+    def test_invalid_verdict_falls_back_to_partial(self):
+        r = DecisionReflection.model_validate({"verdict": "definitely_maybe"})
+        assert r.verdict == "partial"
+
+    def test_non_string_text_fields_are_coerced(self):
+        r = DecisionReflection.model_validate({"what_worked": None, "lesson": 42})
+        assert r.what_worked == ""
+        assert r.lesson == "42"
 
 
 class TestRiskReviewResponse:

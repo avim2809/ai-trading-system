@@ -486,6 +486,35 @@ class TestMemoryDecisionsAPI:
         r = client.get("/api/memory/decisions?limit=2")
         assert len(r.json()) == 2
 
+    def test_lessons_empty(self, client):
+        r = client.get("/api/memory/lessons")
+        assert r.status_code == 200
+        assert r.json() == {
+            "total": 0,
+            "counts": {"correct": 0, "incorrect": 0, "partial": 0, "unknown": 0},
+            "recent_lessons": [],
+        }
+
+    def test_lessons_aggregates_reflected_decisions(self, client):
+        from unittest.mock import MagicMock
+
+        from firm.agents.memory import TradingMemoryLog
+
+        log = TradingMemoryLog()
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.05})
+        llm = MagicMock()
+        llm.chat_json.return_value = {
+            "verdict": "correct", "what_worked": "x", "what_failed": "",
+            "lesson": "size up on confirmed regime",
+        }
+        log.reflect(date="2026-01-01", raw_return=0.02, benchmark_return=0.01, llm_service=llm)
+
+        r = client.get("/api/memory/lessons")
+        data = r.json()
+        assert data["total"] == 1
+        assert data["counts"]["correct"] == 1
+        assert data["recent_lessons"] == ["size up on confirmed regime"]
+
 
 # ------------------------------------------------------------------
 # Live config/start round-trip (regression: strategies/risk/schedule

@@ -30,19 +30,25 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from firm.llm.schemas import DecisionReflection, parse_llm_response
+
 log = logging.getLogger("firm.agents.memory")
 
 _DEFAULT_PATH = Path("data/memory/decisions.jsonl")
 
 _REFLECTION_SYSTEM = (
     "You are a portfolio manager reviewing your own past trading decision "
-    "now that the outcome is known. Write exactly 2-4 sentences of plain "
-    "prose (no bullets, no headers, no markdown). Cover in order:\n"
-    "1. Was the directional call correct? (cite the return figure)\n"
-    "2. Which part of the thesis held or failed?\n"
-    "3. One concrete lesson to apply to the next similar decision.\n"
-    "Be specific and terse. Your output will be re-read by future agents, "
-    "so every word must earn its place."
+    "now that the outcome is known. Respond with a single JSON object "
+    '(no markdown, no commentary outside the JSON): {"verdict": "correct" | '
+    '"incorrect" | "partial", "what_worked": "...", "what_failed": "...", '
+    '"lesson": "..."}. "verdict" judges the directional call against the '
+    "return figure. \"what_worked\" and \"what_failed\" each name a specific "
+    "part of the original thesis (empty string if not applicable — e.g. "
+    '"what_failed": "" for a fully correct call). "lesson" is one concrete '
+    "takeaway to apply to the next similar decision. Be specific and terse "
+    "in every field — this will be re-read by future agents, and separately "
+    "aggregated across many decisions to spot recurring patterns, so each "
+    "field must stand alone without the others for context."
 )
 
 
@@ -93,6 +99,10 @@ class TradingMemoryLog:
             "raw_return": None,
             "benchmark_return": None,
             "reflection": None,
+            "verdict": None,
+            "what_worked": None,
+            "what_failed": None,
+            "lesson": None,
         }
         self._append(entry)
         log.debug("Memory: stored pending decision for %s", date)
@@ -134,15 +144,36 @@ class TradingMemoryLog:
             f"Original notes: {pending.get('notes', 'none')}\n"
             f"Target weights: {json.dumps(pending.get('proposal_weights', {}), indent=2)}"
         )
+        parsed: DecisionReflection | None = None
         try:
             messages = [
                 {"role": "system", "content": _REFLECTION_SYSTEM},
                 {"role": "user", "content": user_prompt},
             ]
-            reflection = llm_service.chat(messages)
+            raw = llm_service.chat_json(messages)
+            parsed = parse_llm_response(DecisionReflection, raw, context=f"memory/{date}")
         except Exception as exc:
             log.warning("Memory: LLM reflection failed for %s: %s", date, exc)
-            reflection = f"Outcome: {raw_return:+.2%} raw / {alpha:+.2%} alpha. (reflection unavailable)"
+
+        if parsed is not None:
+            verdict, what_worked, what_failed, lesson = (
+                parsed.verdict, parsed.what_worked, parsed.what_failed, parsed.lesson,
+            )
+            # Rendered prose kept for backward-compat prompt injection
+            # (get_context()) — existing consumers read a single string,
+            # not the structured fields.
+            reflection = (
+                f"{verdict.upper()}. "
+                + (f"What worked: {what_worked} " if what_worked else "")
+                + (f"What failed: {what_failed} " if what_failed else "")
+                + (f"Lesson: {lesson}" if lesson else "")
+            ).strip()
+        else:
+            verdict, what_worked, what_failed, lesson = "unknown", "", "", ""
+            reflection = (
+                f"Outcome: {raw_return:+.2%} raw / {alpha:+.2%} alpha. "
+                "(reflection unavailable)"
+            )
 
         entry = {
             **pending,
@@ -150,10 +181,16 @@ class TradingMemoryLog:
             "raw_return": raw_return,
             "benchmark_return": benchmark_return,
             "reflection": reflection,
+            "verdict": verdict,
+            "what_worked": what_worked,
+            "what_failed": what_failed,
+            "lesson": lesson,
         }
         self._append(entry)
-        log.info("Memory: reflected on %s — return %+.2f%%, alpha %+.2f%%",
-                 date, raw_return * 100, alpha * 100)
+        log.info(
+            "Memory: reflected on %s — return %+.2f%%, alpha %+.2f%%, verdict=%s",
+            date, raw_return * 100, alpha * 100, verdict,
+        )
         return reflection
 
     # ── Context injection ────────────────────────────────────────────────────
@@ -181,6 +218,44 @@ class TradingMemoryLog:
                 f"(alpha: {alpha:+.2%})\n{e.get('reflection', '')}\n"
             )
         return "\n".join(lines)
+
+    def summarize_lessons(self, n: int | None = None) -> dict[str, Any]:
+        """Aggregate verdict counts and recent distinct lessons across every
+        reflected decision — a lightweight "lessons learned" digest.
+
+        Pure aggregation over the structured fields ``reflect()`` already
+        persists (no new LLM call): what fraction of past calls were
+        correct/incorrect/partial, and the *n* most recent non-empty
+        ``lesson`` strings, most-recent-first — surfacing recurring
+        patterns that were previously invisible inside individual
+        unstructured reflection blobs.
+
+        Args:
+            n: How many recent lessons to return (default 10).
+
+        Returns:
+            ``{"total": int, "counts": {"correct", "incorrect", "partial",
+            "unknown"}, "recent_lessons": [str, ...]}``.
+        """
+        n = n or 10
+        entries = self._load_all()
+        reflected = sorted(
+            (e for e in entries.values() if e.get("status") == "reflected"),
+            key=lambda e: e["date"],
+        )
+        counts = {"correct": 0, "incorrect": 0, "partial": 0, "unknown": 0}
+        lessons: list[str] = []
+        for e in reflected:
+            verdict = e.get("verdict") or "unknown"
+            counts[verdict] = counts.get(verdict, 0) + 1
+            lesson = (e.get("lesson") or "").strip()
+            if lesson:
+                lessons.append(lesson)
+        return {
+            "total": len(reflected),
+            "counts": counts,
+            "recent_lessons": list(reversed(lessons[-n:])),
+        }
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 

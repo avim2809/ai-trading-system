@@ -39,7 +39,7 @@ the coercion:
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
@@ -160,6 +160,39 @@ class PortfolioReviewResponse(BaseModel):
     notes: str = ""
 
     _coerce_notes = field_validator("notes", mode="before")(_coerce_str)
+
+
+class DecisionReflection(BaseModel):
+    """Portfolio decision retrospective prompt contract (``firm.agents.memory``).
+
+    ``{"verdict": "correct"|"incorrect"|"partial", "what_worked": "...",
+    "what_failed": "...", "lesson": "..."}``
+
+    Replaces the prior free-text "2-4 sentences of prose" reflection: the
+    old format buried "what went well" vs "what didn't" inside a single
+    unstructured blob, so a recurring mistake (or a genuinely working
+    thesis) was invisible unless someone read every reflection by hand.
+    ``verdict`` defaults to ``"partial"`` on any unrecognised value —
+    matching this module's other lenient-coercion fields, a hallucinated
+    verdict degrades to the most honest "can't fully say" reading rather
+    than silently becoming "correct".
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    verdict: Literal["correct", "incorrect", "partial"] = "partial"
+    what_worked: str = ""
+    what_failed: str = ""
+    lesson: str = ""
+
+    _coerce_what_worked = field_validator("what_worked", mode="before")(_coerce_str)
+    _coerce_what_failed = field_validator("what_failed", mode="before")(_coerce_str)
+    _coerce_lesson = field_validator("lesson", mode="before")(_coerce_str)
+
+    @field_validator("verdict", mode="before")
+    @classmethod
+    def _coerce_verdict(cls, v: Any) -> Any:
+        return v if v in ("correct", "incorrect", "partial") else "partial"
 
 
 def parse_llm_response(
