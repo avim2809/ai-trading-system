@@ -50,6 +50,10 @@ class BacktestConfig(BaseModel):
     # backtest unchanged); config/settings.yaml opts in with a conservative
     # calibration for real runs.
     market_impact_coefficient: float = 0.0
+    # Optional linear-below/sqrt-above crossover participation rate (None =
+    # pure square-root law at every size, unchanged). See
+    # firm.agents._liquidity.market_impact_pct.
+    market_impact_crossover_participation: float | None = None
     rebalance_frequency: str = "weekly"
 
 
@@ -69,6 +73,13 @@ class RiskConfig(BaseModel):
     correlation_threshold: float | None = None
     max_correlated_pair_pct: float = 0.25
     correlation_lookback_days: int = 60
+    # Optional CVaR (Conditional Value-at-Risk) tail-risk sizing overlay
+    # (None = disabled). Complements vol_target's diagonal-covariance
+    # estimate with a distributional tail read. See
+    # firm.agents.risk.RiskAgent._cvar_overlay.
+    cvar_limit: float | None = None
+    cvar_confidence: float = 0.95
+    cvar_lookback_days: int = 60
     # Optional HMM market-regime exposure overlay (off unless ``enabled: true``).
     # See firm.agents.risk.RiskAgent and firm.regime.detector.MarketRegimeDetector.
     regime_overlay: dict[str, Any] = {}
@@ -108,7 +119,10 @@ class Settings(BaseSettings):
     # risk_parity | kelly. ``kelly_fraction`` only used when method == kelly.
     allocation_method: str = "conviction_weighted"
     kelly_fraction: float = 0.5
-    # Research signal combination: {"method": "confidence"|"optimal"}.
+    # Research signal combination: {"method": "confidence"|"optimal"|"hrp"}.
+    # "hrp" (Hierarchical Risk Parity) is an opt-in alternative to "optimal"
+    # that never inverts the correlation matrix — see
+    # firm.agents.analysts.hrp_signal_weights.
     signal_combination: dict[str, Any] = Field(default_factory=dict)
     # Generic per-strategy rolling-Sharpe circuit breaker (off unless
     # ``enabled: true``). See firm.agents.research._circuit_breaker.

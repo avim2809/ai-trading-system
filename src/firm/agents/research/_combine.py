@@ -12,6 +12,7 @@ from typing import Any
 
 from firm.agents.analysts import (
     combine_signals_by_symbol,
+    combine_signals_hrp,
     combine_signals_optimal,
 )
 from firm.agents.research._circuit_breaker import apply_circuit_breaker
@@ -31,8 +32,12 @@ def net_scores_for_blackboard(
     When ``config['signal_combination']['method'] == 'optimal'`` **and** the
     context exposes per-strategy return history (``ctx.strategy_returns``), the
     optimal inverse-covariance combination is used instead — it down-weights
-    correlated/redundant strategies. It degrades to the confidence-weighted
-    mean per symbol whenever history is too thin.
+    correlated/redundant strategies. ``method == 'hrp'`` uses Hierarchical Risk
+    Parity instead (same return-history requirement) — an alternative that
+    never inverts the correlation matrix, worth A/B-ing against ``optimal``
+    when the strategy count is high relative to history length (see
+    :func:`firm.agents.analysts.hrp_signal_weights`). Both degrade to the
+    confidence-weighted mean per symbol whenever history is too thin.
 
     Before either combination runs, an opt-in per-strategy circuit breaker
     (``config['strategy_circuit_breaker']``, disabled by default — see
@@ -71,10 +76,16 @@ def net_scores_for_blackboard(
             len(signals),
         )
         return combine_signals_optimal(signals, strategy_returns)
-    if method == "optimal":
+    if method == "hrp" and strategy_returns:
         log.debug(
-            "net_scores: 'optimal' requested but no strategy_returns in context; "
-            "falling back to confidence-weighted mean (%d signals)",
+            "net_scores: HRP (hierarchical risk parity) combination over %d signals",
             len(signals),
+        )
+        return combine_signals_hrp(signals, strategy_returns)
+    if method in ("optimal", "hrp"):
+        log.debug(
+            "net_scores: '%s' requested but no strategy_returns in context; "
+            "falling back to confidence-weighted mean (%d signals)",
+            method, len(signals),
         )
     return combine_signals_by_symbol(signals, weight_by_confidence=True)

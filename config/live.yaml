@@ -164,6 +164,16 @@ risk:
   max_correlated_pair_pct: 0.25
   correlation_lookback_days: 60
 
+  # Optional CVaR (Conditional Value-at-Risk / Expected Shortfall) tail-risk
+  # sizing overlay — complements vol_target's diagonal-covariance estimate
+  # with a distributional tail read (two books with identical variance can
+  # have very different downside severity). Off by default pending a
+  # dedicated A/B, like the other new Phase-4 research item. See
+  # RiskAgent._cvar_overlay / firm.eval.metrics.conditional_value_at_risk.
+  # cvar_limit: 0.03
+  # cvar_confidence: 0.95
+  # cvar_lookback_days: 60
+
   # GICS-style sector tags for the 25-name universe (enables max_sector_pct).
   sector_map:
     AAPL: technology
@@ -219,10 +229,18 @@ costs:
   # sqrt(trade_notional / ADV_dollars). 0.005 ~= 0.5% impact at 100% of ADV,
   # ~0.16% at the risk.max_participation_pct cap below (10% of ADV) — a
   # conservative starting calibration; tune from realised IBKR fills once
-  # available. See firm.agents._liquidity.sqrt_impact_pct. Shares
+  # available. See firm.agents._liquidity.market_impact_pct. Shares
   # risk.adv_lookback_days for its trailing-volume window (same ADV
   # definition as the liquidity cap below).
   market_impact_coefficient: 0.005
+  # Optional linear-below/sqrt-above crossover participation rate — empirical
+  # work shows impact is closer to linear for small orders, sqrt only
+  # dominating at higher participation; this account's trades are small
+  # relative to the mega-cap universe's ADV, so they likely sit in the
+  # linear-dominant regime and a flat sqrt coefficient may overstate their
+  # cost. Unset (None) = pure sqrt law at every size, unchanged. Uncomment
+  # once calibrated from realised fills:
+  # market_impact_crossover_participation: 0.1
   # Short-borrow fees are NOT simulated live: IBKR charges/reports real
   # borrow costs against the account directly, so there is nothing to
   # estimate here (unlike the backtest, which has no real broker to charge

@@ -52,8 +52,12 @@ def estimate_adv_dollars(
     return float(adv_dollars)
 
 
-def sqrt_impact_pct(participation: float, coefficient: float) -> float:
-    """Square-root market-impact cost, as a fraction of trade notional.
+def market_impact_pct(
+    participation: float,
+    coefficient: float,
+    crossover: float | None = None,
+) -> float:
+    """Market-impact cost, as a fraction of trade notional.
 
     Implements the "square-root law" of market impact widely used in the
     execution literature (e.g. Almgren, Thum, Hauptmann & Li 2005; the BARRA
@@ -69,7 +73,32 @@ def sqrt_impact_pct(participation: float, coefficient: float) -> float:
     this codebase's Python-level config) disables the model entirely,
     preserving flat-pct-only cost behaviour; ``config/live.yaml`` and
     ``config/settings.yaml`` opt in with a conservative default.
+
+    ``crossover`` (optional) accounts for empirical work showing impact is
+    closer to *linear* in participation for small orders, crossing over to
+    the square-root regime only as participation grows (e.g. Kyle &
+    Obizhaeva) — a pure sqrt law calibrated at higher participation can
+    overstate the cost of small trades, which is this system's usual
+    regime (a small account relative to the mega-cap universe's ADV).
+    ``None`` (default) preserves the original pure square-root law at every
+    participation level, unchanged. When set, participation below
+    ``crossover`` scales *linearly* from zero, continuous (C0) with the
+    square-root branch at the crossover point itself:
+    ``coefficient * sqrt(crossover) * (participation / crossover)`` below
+    ``crossover``, ``coefficient * sqrt(participation)`` at or above it.
     """
     if coefficient <= 0 or participation <= 0:
         return 0.0
-    return coefficient * math.sqrt(participation)
+    if crossover is None or crossover <= 0 or participation >= crossover:
+        return coefficient * math.sqrt(participation)
+    return coefficient * math.sqrt(crossover) * (participation / crossover)
+
+
+def sqrt_impact_pct(participation: float, coefficient: float) -> float:
+    """Pure square-root market-impact cost — see :func:`market_impact_pct`.
+
+    Kept as a thin, unchanged-behaviour alias (``crossover=None``) so every
+    pre-existing call site is unaffected unless it explicitly opts into the
+    linear/sqrt crossover.
+    """
+    return market_impact_pct(participation, coefficient, crossover=None)

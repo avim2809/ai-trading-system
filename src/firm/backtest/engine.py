@@ -113,6 +113,9 @@ class BacktestEngine:
             spread_pct=spread_pct,
             short_borrow_annual_pct=self.config.get("short_borrow_annual_pct", 0.0),
             market_impact_coefficient=self.config.get("market_impact_coefficient", 0.0),
+            market_impact_crossover_participation=self.config.get(
+                "market_impact_crossover_participation"
+            ),
             adv_lookback_days=int(self.config.get("adv_lookback_days", 20)),
             memory=memory,
             llm_config=llm_config,

@@ -116,6 +116,45 @@ class TestSortinoRatio:
         assert metrics.sortino_ratio(pd.Series(dtype=float)) == 0.0
 
 
+class TestConditionalValueAtRisk:
+    def test_too_few_observations_returns_zero(self):
+        r = _daily_returns(10)
+        assert metrics.conditional_value_at_risk(r) == 0.0
+
+    def test_positive_magnitude_for_normal_returns(self):
+        r = _daily_returns(500, mean=0.0004, std=0.01)
+        cvar = metrics.conditional_value_at_risk(r)
+        assert cvar > 0.0
+
+    def test_fatter_left_tail_has_higher_cvar(self):
+        """Two series with the same variance but one with a fatter left
+        tail should show a *worse* (higher) CVaR — the whole point of a
+        tail-risk metric distinct from Sharpe/Sortino's variance-based read."""
+        rng = np.random.default_rng(7)
+        n = 500
+        dates = pd.bdate_range("2023-01-02", periods=n)
+
+        mild = pd.Series(rng.normal(0.0004, 0.01, n), index=dates)
+
+        fat = mild.copy()
+        tail_idx = rng.choice(n, size=10, replace=False)
+        fat.iloc[tail_idx] -= 0.05  # inject sharp drops, same base distribution
+
+        assert metrics.conditional_value_at_risk(fat) > metrics.conditional_value_at_risk(mild)
+
+    def test_higher_confidence_looks_further_into_the_tail(self):
+        """A higher confidence level averages over a narrower, more extreme
+        slice of the distribution, so CVaR should not decrease as
+        confidence rises (it usually strictly increases with a real tail)."""
+        r = _daily_returns(1000, mean=0.0002, std=0.012)
+        cvar_90 = metrics.conditional_value_at_risk(r, confidence=0.90)
+        cvar_99 = metrics.conditional_value_at_risk(r, confidence=0.99)
+        assert cvar_99 >= cvar_90 - 1e-9
+
+    def test_empty(self):
+        assert metrics.conditional_value_at_risk(pd.Series(dtype=float)) == 0.0
+
+
 class TestMaxDrawdown:
     def test_known_drawdown(self):
         r = pd.Series([0.10, -0.20, 0.05])
@@ -177,7 +216,7 @@ class TestComputeAllMetrics:
         expected_keys = {
             "total_return", "cagr", "annualized_volatility",
             "sharpe_ratio", "sortino_ratio", "max_drawdown",
-            "calmar_ratio", "hit_rate",
+            "calmar_ratio", "hit_rate", "cvar_95",
         }
         assert set(m.keys()) == expected_keys
 

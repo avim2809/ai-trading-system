@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from firm.agents._liquidity import estimate_adv_dollars, sqrt_impact_pct
+from firm.agents._liquidity import estimate_adv_dollars, market_impact_pct
 from firm.agents.base import Agent, AgentContext
 from firm.contracts.models import ExecutionReport, RiskDecision
 
@@ -44,6 +44,11 @@ class ExecutionAgent(Agent):
         # config/live.yaml and config/settings.yaml opt in with a
         # conservative calibration.
         self.market_impact_coefficient: float = cfg.get("market_impact_coefficient", 0.0)
+        # Optional linear-below/sqrt-above crossover (None = pure sqrt law,
+        # unchanged default). See firm.agents._liquidity.market_impact_pct.
+        self.market_impact_crossover: float | None = cfg.get(
+            "market_impact_crossover_participation"
+        )
         self.adv_lookback_days: int = int(cfg.get("adv_lookback_days", 20))
 
     def run(self, ctx: AgentContext, **inputs: Any) -> ExecutionReport:
@@ -168,7 +173,9 @@ class ExecutionAgent(Agent):
         if not adv_dollars:
             return 0.0
         participation = notional / adv_dollars
-        impact_pct = sqrt_impact_pct(participation, self.market_impact_coefficient)
+        impact_pct = market_impact_pct(
+            participation, self.market_impact_coefficient, self.market_impact_crossover
+        )
         return notional * impact_pct
 
     @staticmethod

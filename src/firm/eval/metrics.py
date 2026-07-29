@@ -90,6 +90,36 @@ def sortino_ratio(
     return float(excess.mean() / downside_std * np.sqrt(periods_per_year))
 
 
+def conditional_value_at_risk(
+    returns: pd.Series,
+    confidence: float = 0.95,
+) -> float:
+    """Conditional Value-at-Risk (Expected Shortfall) at *confidence*.
+
+    Returns a positive magnitude (like :func:`max_drawdown`): the mean
+    per-period loss over the worst ``1 - confidence`` fraction of periods —
+    e.g. at ``confidence=0.95``, the average of the worst 5% of returns,
+    negated so a larger number means a worse tail. Unlike Sharpe/Sortino
+    (which summarize the whole distribution via mean/variance), this looks
+    only at the tail — two return series with identical variance can have
+    very different tail severity, which a diagonal-covariance vol estimate
+    can't see (see ``firm.agents.risk.RiskAgent._vol_targeting`` vs
+    ``_cvar_overlay``).
+
+    Needs at least 20 observations for the tail estimate to be meaningful;
+    returns ``0.0`` below that, matching this module's other short-series
+    guards.
+    """
+    r = returns.dropna()
+    if len(r) < 20:
+        return 0.0
+    cutoff = np.percentile(r.to_numpy(), (1 - confidence) * 100)
+    tail = r[r <= cutoff]
+    if tail.empty:
+        return 0.0
+    return float(-tail.mean())
+
+
 def max_drawdown(returns: pd.Series) -> float:
     """Maximum peak-to-trough decline (returned as a positive number)."""
     if returns.empty:
@@ -304,4 +334,5 @@ def compute_all_metrics(
         "max_drawdown": max_drawdown(returns),
         "calmar_ratio": calmar_ratio(returns),
         "hit_rate": hit_rate(returns),
+        "cvar_95": conditional_value_at_risk(returns, confidence=0.95),
     }

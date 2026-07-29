@@ -22,6 +22,7 @@ from typing import Any
 from firm.agents._liquidity import estimate_adv_dollars
 from firm.agents.base import Agent, AgentContext
 from firm.contracts.models import RiskDecision, TradeProposal
+from firm.eval.metrics import conditional_value_at_risk
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +66,17 @@ class RiskAgent(Agent):
         self.correlation_threshold: float | None = cfg.get("correlation_threshold")
         self.max_correlated_pair_pct: float = cfg.get("max_correlated_pair_pct", 0.25)
         self.correlation_lookback_days: int = int(cfg.get("correlation_lookback_days", 60))
+
+        # Optional CVaR (Conditional Value-at-Risk / Expected Shortfall) tail-
+        # risk overlay (disabled unless explicitly configured). Complements
+        # ``_vol_targeting``'s diagonal-covariance vol estimate, which has no
+        # notion of tail shape — two books with identical variance can have
+        # very different downside severity. Requires ctx.pit_view, so it's a
+        # no-op wherever that isn't wired up. See
+        # firm.eval.metrics.conditional_value_at_risk.
+        self.cvar_limit: float | None = cfg.get("cvar_limit")
+        self.cvar_confidence: float = cfg.get("cvar_confidence", 0.95)
+        self.cvar_lookback_days: int = int(cfg.get("cvar_lookback_days", 60))
 
         # Optional HMM market-regime overlay (off by default).  When enabled,
         # gross exposure is scaled by the prevailing market regime per the
@@ -125,6 +137,11 @@ class RiskAgent(Agent):
 
         if self.max_participation_pct:
             targets, v, a = self._cap_liquidity(targets, portfolio, ctx)
+            violations.extend(v)
+            actions.extend(a)
+
+        if self.cvar_limit:
+            targets, v, a = self._cvar_overlay(targets, ctx)
             violations.extend(v)
             actions.extend(a)
 
@@ -449,6 +466,78 @@ class RiskAgent(Agent):
                 )
 
         return adjusted, violations, actions
+
+    def _cvar_overlay(
+        self,
+        targets: dict[str, float],
+        ctx: AgentContext,
+    ) -> tuple[dict[str, float], list[str], list[str]]:
+        """De-risk when the book's historical CVaR exceeds ``cvar_limit``.
+
+        Complements ``_vol_targeting``'s diagonal-covariance vol estimate
+        with a distributional tail-risk read: reuses the same
+        ``pit_view.prices(...)`` -> ``pivot.pct_change()`` idiom as
+        ``_cap_correlated_exposure`` to build a real per-name return matrix,
+        combines it with the current target weights into a historical
+        portfolio return series *under those weights*, and computes that
+        series' Conditional Value-at-Risk (expected shortfall) via
+        :func:`firm.eval.metrics.conditional_value_at_risk`. Only ever
+        de-risks (scale <= 1.0) — same convention as ``_vol_targeting`` —
+        so it can never re-breach the hard caps applied earlier in the
+        pipeline.
+        """
+        pit_view = getattr(ctx, "pit_view", None)
+        if pit_view is None:
+            return targets, [], []
+
+        symbols = [s for s, w in targets.items() if w != 0.0]
+        if not symbols:
+            return targets, [], []
+
+        try:
+            price_df = pit_view.prices(symbols, lookback_days=self.cvar_lookback_days)
+        except Exception as exc:
+            log.warning("CVaR check skipped: failed to load price history (%s)", exc)
+            return targets, [], []
+        if price_df is None or price_df.empty or "close" not in price_df.columns:
+            return targets, [], []
+
+        try:
+            pivot = price_df.pivot_table(index="date", columns="symbol", values="close")
+            rets = pivot.pct_change().dropna(how="all")
+        except Exception as exc:
+            log.debug("CVaR check: failed to compute return matrix (%s)", exc)
+            return targets, [], []
+
+        port_returns = None
+        for sym in rets.columns:
+            w = targets.get(sym, 0.0)
+            if w == 0.0:
+                continue
+            weighted = rets[sym].fillna(0.0) * w
+            port_returns = weighted if port_returns is None else port_returns + weighted
+        if port_returns is None:
+            return targets, [], []
+
+        port_cvar = conditional_value_at_risk(port_returns, self.cvar_confidence)
+        if port_cvar <= self.cvar_limit:
+            return targets, [], []
+
+        scale = min(self.cvar_limit / port_cvar, 1.0)
+        scaled = {s: w * scale for s, w in targets.items()}
+        log.warning(
+            "Risk scale: portfolio CVaR(%.0f%%) %.4f exceeds limit %.4f — "
+            "scaled all weights by %.4f",
+            self.cvar_confidence * 100, port_cvar, self.cvar_limit, scale,
+        )
+        return (
+            scaled,
+            [
+                f"Portfolio CVaR({self.cvar_confidence:.0%}) {port_cvar:.4f} "
+                f"exceeds limit {self.cvar_limit}"
+            ],
+            [f"Scaled all weights by {scale:.4f} (CVaR tail-risk overlay)"],
+        )
 
     def _vol_targeting(
         self,

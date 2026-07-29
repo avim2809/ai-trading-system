@@ -797,6 +797,103 @@ class TestRiskManager:
         assert decision.adjusted_targets["A"] == pytest.approx(0.3)
         assert decision.adjusted_targets["B"] == pytest.approx(0.3)
 
+    @staticmethod
+    def _fat_tailed_pit_view(n_days: int = 80, tail_days: tuple = (10, 30, 50)):
+        """One symbol with small, varied day-to-day returns (no ties, so the
+        tail-percentile cutoff isn't washed out by a run of identical
+        "ordinary" values) plus a few sharp -8% drops — a fat left tail that
+        inflates CVaR without inflating variance-based vol estimates nearly
+        as much."""
+        import pandas as pd
+
+        pattern = [0.0008, -0.0006, 0.0011, -0.0009, 0.0007, -0.0004, 0.0013, -0.0011]
+        dates = pd.bdate_range("2023-01-01", periods=n_days)
+        rows = []
+        price = 100.0
+        for i, d in enumerate(dates):
+            ret = -0.08 if i in tail_days else pattern[i % len(pattern)]
+            price *= 1 + ret
+            rows.append({"date": d, "symbol": "TAIL", "close": price, "volume": 1_000_000})
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def _thin_tailed_pit_view(n_days: int = 80):
+        """One symbol with small, smooth oscillating returns — no fat tail."""
+        import pandas as pd
+
+        dates = pd.bdate_range("2023-01-01", periods=n_days)
+        rows = []
+        price = 100.0
+        pattern = [0.001, -0.001, 0.0015, -0.0012, 0.0008]
+        for i, d in enumerate(dates):
+            price *= 1 + pattern[i % len(pattern)]
+            rows.append({"date": d, "symbol": "STABLE", "close": price, "volume": 1_000_000})
+        return pd.DataFrame(rows)
+
+    def test_cvar_disabled_by_default(self):
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["TAIL"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._fat_tailed_pit_view()
+
+        risk = RiskAgent(config={"max_position_pct": 1.0})
+        proposal = TradeProposal(asof=NOW, targets={"TAIL": 0.3})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["TAIL"] == pytest.approx(0.3)
+
+    def test_fat_tailed_book_is_scaled_down(self, caplog):
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["TAIL"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._fat_tailed_pit_view()
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "cvar_limit": 0.01,
+            "cvar_confidence": 0.95,
+            "cvar_lookback_days": 60,
+        })
+        proposal = TradeProposal(asof=NOW, targets={"TAIL": 0.3})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        with caplog.at_level("WARNING", logger="firm.agents.risk"):
+            decision = risk.run(ctx, proposal=proposal)
+        assert abs(decision.adjusted_targets["TAIL"]) < 0.3
+        assert any("cvar" in r.message.lower() for r in caplog.records)
+
+    def test_thin_tailed_book_not_scaled(self):
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["STABLE"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._thin_tailed_pit_view()
+
+        risk = RiskAgent(config={"max_position_pct": 1.0, "cvar_limit": 0.05})
+        proposal = TradeProposal(asof=NOW, targets={"STABLE": 0.3})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["STABLE"] == pytest.approx(0.3)
+
+    def test_cvar_noop_without_pit_view(self):
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={"max_position_pct": 1.0, "cvar_limit": 0.01})
+        proposal = TradeProposal(asof=NOW, targets={"TAIL": 0.3})
+        ctx = AgentContext(now=NOW, pit_view=None)
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["TAIL"] == pytest.approx(0.3)
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Execution Agent

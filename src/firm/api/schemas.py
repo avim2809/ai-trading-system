@@ -19,6 +19,10 @@ class RunRequest(BaseModel):
     spread_pct: float = Field(default=0.0002, ge=0, lt=1)
     short_borrow_annual_pct: float = Field(default=0.003, ge=0, lt=1)
     market_impact_coefficient: float = Field(default=0.0, ge=0, lt=1)
+    # Optional linear-below/sqrt-above crossover participation (None = pure
+    # sqrt law at every size, unchanged default). See
+    # firm.agents._liquidity.market_impact_pct.
+    market_impact_crossover_participation: float | None = Field(default=None, gt=0, lt=1)
     rebalance_frequency: str = "weekly"
     risk_overrides: dict[str, float] = {}
     # Optional HMM market-regime exposure overlay; merged over the settings
@@ -27,7 +31,8 @@ class RunRequest(BaseModel):
     regime_overlay: dict | None = None
     # Portfolio allocation + research combination (fall back to settings.yaml
     # defaults when omitted). allocation_method: conviction_weighted |
-    # equal_weight | risk_parity | kelly. signal_combination: {"method": ...}.
+    # equal_weight | risk_parity | kelly. signal_combination:
+    # {"method": "confidence"|"optimal"|"hrp"}.
     allocation_method: str | None = None
     kelly_fraction: float | None = None
     signal_combination: dict | None = None
@@ -85,6 +90,15 @@ class WalkForwardRequest(RunRequest):
     # to select between with fewer than 2 candidates).
     param_grid: list[dict] | None = Field(default=None, max_length=25)
     selection_metric: str = "sharpe_ratio"
+    # Calendar-day gap enforced between each fold's train and test windows —
+    # an embargo against train/test boundary leakage (López de Prado). 1
+    # (default) matches prior hard-coded behaviour exactly.
+    embargo_days: int = Field(default=1, ge=0, le=30)
+    # Fraction of each CSCV block purged from the edges of out-of-sample
+    # blocks adjacent to in-sample blocks when computing PBO from a genuine
+    # param_grid's trial data — see firm.eval.overfitting.cscv_pbo. 0.0
+    # (default) reproduces the original, unpurged CSCV split exactly.
+    pbo_embargo_pct: float = Field(default=0.0, ge=0.0, lt=0.5)
 
 
 class RunSummary(BaseModel):

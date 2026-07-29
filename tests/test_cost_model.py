@@ -12,7 +12,9 @@ against a real backtrader broker).
 from __future__ import annotations
 
 import pandas as pd
+import pytest
 
+from firm.agents._liquidity import market_impact_pct, sqrt_impact_pct
 from firm.backtest.commissions import PercentageCommission
 from firm.backtest.engine import BacktestEngine
 from firm.data.pit_store import PointInTimeDataStore
@@ -252,3 +254,61 @@ class TestMarketImpactModel:
         large_rate = (1_000_000_000.0 - large_final) / large_notional
 
         assert large_rate > small_rate
+
+
+class TestMarketImpactCrossover:
+    """Unit tests for the linear-below/sqrt-above crossover in
+    firm.agents._liquidity.market_impact_pct — see the Phase 3 P/L
+    research item: empirical work shows impact is closer to linear for
+    small orders, sqrt only dominating at higher participation."""
+
+    def test_crossover_none_matches_pure_sqrt_law(self):
+        """The default (``crossover=None``) must reproduce the original
+        sqrt_impact_pct exactly, at every participation level."""
+        for participation in (0.001, 0.05, 0.1, 0.5, 1.0, 2.0):
+            assert market_impact_pct(participation, 0.01, crossover=None) == pytest.approx(
+                sqrt_impact_pct(participation, 0.01)
+            )
+
+    def test_continuous_at_crossover_point(self):
+        """The linear and sqrt branches must agree exactly at the crossover
+        participation — no jump in cost right at the boundary."""
+        coefficient, crossover = 0.01, 0.1
+        just_below = market_impact_pct(crossover - 1e-9, coefficient, crossover)
+        at_point = market_impact_pct(crossover, coefficient, crossover)
+        just_above = market_impact_pct(crossover + 1e-9, coefficient, crossover)
+        assert just_below == pytest.approx(at_point, abs=1e-6)
+        assert just_above == pytest.approx(at_point, abs=1e-6)
+
+    def test_linear_below_crossover(self):
+        """Below the crossover, impact_pct must scale linearly with
+        participation (constant cost *rate* per unit of participation),
+        unlike the sqrt branch where the rate itself grows with size."""
+        coefficient, crossover = 0.01, 0.2
+        half = market_impact_pct(crossover / 2, coefficient, crossover)
+        quarter = market_impact_pct(crossover / 4, coefficient, crossover)
+        assert half == pytest.approx(2 * quarter, rel=1e-6)
+
+    def test_sqrt_above_crossover(self):
+        """Above the crossover, behaves exactly like the uncapped sqrt law."""
+        coefficient, crossover = 0.01, 0.1
+        participation = 0.5
+        assert market_impact_pct(participation, coefficient, crossover) == pytest.approx(
+            sqrt_impact_pct(participation, coefficient)
+        )
+
+    def test_below_crossover_cheaper_than_pure_sqrt_law(self):
+        """The whole point: a small order priced under a flat sqrt-law
+        coefficient calibrated at higher participation is overstated: the
+        linear branch should charge less than pure sqrt would, for the same
+        small participation."""
+        coefficient, crossover = 0.01, 0.2
+        small_participation = 0.02
+        linear = market_impact_pct(small_participation, coefficient, crossover)
+        pure_sqrt = sqrt_impact_pct(small_participation, coefficient)
+        assert linear < pure_sqrt
+
+    def test_disabled_coefficient_or_participation_still_zero(self):
+        assert market_impact_pct(0.5, 0.0, crossover=0.1) == 0.0
+        assert market_impact_pct(0.0, 0.01, crossover=0.1) == 0.0
+        assert market_impact_pct(-1.0, 0.01, crossover=0.1) == 0.0

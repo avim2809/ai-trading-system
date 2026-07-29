@@ -14,7 +14,7 @@ import pandas as pd
 
 import backtrader as bt
 
-from firm.agents._liquidity import estimate_adv_dollars, sqrt_impact_pct
+from firm.agents._liquidity import estimate_adv_dollars, market_impact_pct
 from firm.backtest.commissions import PercentageCommission
 from firm.data.pit_store import PointInTimeDataStore
 
@@ -95,8 +95,11 @@ class FirmStrategy(bt.Strategy):
         ("short_borrow_annual_pct", 0.0),  # annualized borrow fee on short notional, accrued daily
         # Size/volume-aware market-impact cost (square-root law), on top of
         # the flat rates above. 0.0 disables it. See
-        # firm.agents._liquidity.sqrt_impact_pct and _apply_market_impact.
+        # firm.agents._liquidity.market_impact_pct and _apply_market_impact.
         ("market_impact_coefficient", 0.0),
+        # Optional linear-below/sqrt-above crossover participation (None =
+        # pure sqrt law, unchanged default). See market_impact_pct.
+        ("market_impact_crossover_participation", None),
         ("adv_lookback_days", 20),  # trailing window for the ADV used above
         ("memory", None),   # TradingMemoryLog instance (optional)
         ("llm_config", None),  # LLM config dict for reflection calls (optional)
@@ -277,7 +280,11 @@ class FirmStrategy(bt.Strategy):
             adv_dollars = estimate_adv_dollars(pit_view, symbol, self.p.adv_lookback_days)
             if adv_dollars:
                 participation = notional / adv_dollars
-                impact_pct = sqrt_impact_pct(participation, self.p.market_impact_coefficient)
+                impact_pct = market_impact_pct(
+                    participation,
+                    self.p.market_impact_coefficient,
+                    self.p.market_impact_crossover_participation,
+                )
 
         # Always refresh (even to impact_pct=0.0) once the model is enabled —
         # otherwise a symbol that traded large once and small/illiquid-data

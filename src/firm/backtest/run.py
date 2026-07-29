@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 _BT_FIELDS = frozenset({
     "start_date", "end_date", "initial_capital",
     "commission_pct", "slippage_pct", "spread_pct", "short_borrow_annual_pct",
-    "market_impact_coefficient",
+    "market_impact_coefficient", "market_impact_crossover_participation",
     # Not a "cost" field itself, but the market-impact model above needs the
     # same trailing-volume window as RiskAgent's ADV/participation-rate
     # liquidity cap (config/settings.yaml risk.adv_lookback_days) so both

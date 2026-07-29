@@ -188,6 +188,7 @@ def launch_run(req: RunRequest):
         "spread_pct": req.spread_pct,
         "short_borrow_annual_pct": req.short_borrow_annual_pct,
         "market_impact_coefficient": req.market_impact_coefficient,
+        "market_impact_crossover_participation": req.market_impact_crossover_participation,
         "rebalance_frequency": req.rebalance_frequency,
         "strategies": req.strategies,
         "strategy_params": req.strategy_params,
@@ -250,6 +251,7 @@ def launch_walk_forward(req: WalkForwardRequest):
             "spread_pct": req.spread_pct,
             "short_borrow_annual_pct": req.short_borrow_annual_pct,
             "market_impact_coefficient": req.market_impact_coefficient,
+            "market_impact_crossover_participation": req.market_impact_crossover_participation,
             "rebalance_frequency": req.rebalance_frequency,
         },
         "strategies": {"enabled": req.strategies},
@@ -282,4 +284,6 @@ def launch_walk_forward(req: WalkForwardRequest):
         seed=req.seed,
         param_grid=req.param_grid,
         selection_metric=req.selection_metric,
+        embargo_days=req.embargo_days,
+        pbo_embargo_pct=req.pbo_embargo_pct,
     )

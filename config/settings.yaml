@@ -17,8 +17,12 @@ backtest:
   # equal to 100% of a name's ADV costs ~0.5% impact, ~0.16% at 10% of ADV
   # (RiskAgent's default max_participation_pct cap below) — a conservative
   # starting calibration; tune from realised fill data when available. See
-  # firm.agents._liquidity.sqrt_impact_pct.
+  # firm.agents._liquidity.market_impact_pct.
   market_impact_coefficient: 0.005
+  # Optional linear-below/sqrt-above crossover participation rate (None =
+  # pure sqrt law at every size, unchanged default). See market_impact_pct's
+  # docstring; uncomment once calibrated from realised fill data:
+  # market_impact_crossover_participation: 0.1
   rebalance_frequency: "weekly"
 
 # Alpha strategies wired into the analysts. Leave empty/omit to enable ALL
@@ -123,6 +127,16 @@ risk:
   # correlation_threshold: 0.75
   # max_correlated_pair_pct: 0.25
   # correlation_lookback_days: 60
+
+  # Optional CVaR (Conditional Value-at-Risk / Expected Shortfall) tail-risk
+  # sizing overlay — complements vol_target's diagonal-covariance estimate
+  # with a distributional tail read. Off by default pending a dedicated A/B
+  # (same rationale as correlation_threshold above: don't move already-
+  # recorded backtest numbers without a fresh, deliberate comparison). See
+  # RiskAgent._cvar_overlay / firm.eval.metrics.conditional_value_at_risk.
+  # cvar_limit: 0.03
+  # cvar_confidence: 0.95
+  # cvar_lookback_days: 60
 
   sector_map:
     AAPL: technology
