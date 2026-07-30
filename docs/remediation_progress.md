@@ -10,12 +10,12 @@ done, in progress, and left, plus context/detail beyond what the plan file's
 todo list captures, so work can resume in a fresh session/chat without the
 prior conversation history.
 
-Last updated: 2026-07-30.
+Last updated: 2026-07-31.
 
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #42 has the most recent detail.
+   "Completed" item #43 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -334,6 +334,29 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     file count): the same missing-`exc_info` pattern across ~15 data-provider
     files' `ProviderError` catch sites — left as a documented, low-priority
     follow-up rather than done in this pass.
+43. **Investing.com Pro integration, Phases 0-2a** (2026-07-30/31) — full
+    detail in `docs/investing_pro_integration.md`. Built an authenticated
+    browser-driven (Playwright, not `requests` — Investing.com 403s plain
+    HTTP clients even on public pages) scraper session
+    (`src/firm/data/investing/`), verified end-to-end against the live site
+    with real login. Phase 1 (economic calendar) wired into `news_guard` as
+    an opt-in richer alternative to Forex Factory, fallback ladder preserved.
+    Phase 2a added a new `estimates()` PitView capability end-to-end
+    (provider ABC, `FallbackProvider`, both PitViewAdapters, `provider_utils`,
+    `fetch_data.py`, and three separately-duplicated backtest data-loading
+    paths that all needed the same fix) plus a new
+    `investing_analyst_ratings` strategy backed by FMP's `grades-historical`
+    (the only FMP analyst-data endpoint with genuine point-in-time history
+    under this plan tier — `price-target-consensus`/`grades-consensus` are
+    current-snapshot-only, `analyst-estimates`'s date is a forward target
+    with no real as-of stamp). **A/B result across the standard 3 diagnostic
+    windows: mixed/inconsistent (worse in the longest window, better in two
+    shorter folds, no stable sign in the strategy's own attributed Sharpe)
+    — shipped registered but NOT enabled in `config/live.yaml`**, same
+    "ship disabled if inconclusive" discipline as the regime-ensemble
+    precedent. Phase 2b (wiring the live Investing.com feed for this
+    strategy) and Phase 3 (ProPicks/technical-summary) are **on hold pending
+    a product decision** — see the doc's final section for the options.
 
 ## In progress
 

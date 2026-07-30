@@ -96,6 +96,7 @@ def execute_backtest(config: dict) -> BacktestReport:
     pit_store = PointInTimeDataStore()
     fund_df = None
     sentiment_df = None
+    estimates_df = None
     if data_source != "synthetic":
         try:
             from firm.config import get_settings
@@ -117,8 +118,20 @@ def execute_backtest(config: dict) -> BacktestReport:
                 "Sentiment cache load failed — sentiment strategy will be inactive",
                 exc_info=True,
             )
+        try:
+            from firm.config import get_settings
+            from firm.runtime import load_analyst_ratings
 
-    pit_store.load(prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df)
+            estimates_df = load_analyst_ratings(get_settings())
+        except Exception:
+            log.warning(
+                "Analyst-ratings cache load failed — that strategy will be inactive",
+                exc_info=True,
+            )
+
+    pit_store.load(
+        prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df, estimates=estimates_df,
+    )
     if fund_df is not None and not fund_df.empty:
         log.info(
             "Loaded fundamentals cache: %d rows, %d symbols",

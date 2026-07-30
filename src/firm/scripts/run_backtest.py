@@ -19,6 +19,7 @@ from firm.data.pit_store import PointInTimeDataStore
 from firm.runtime import (
     build_orchestrator,
     build_universe_resolver,
+    load_analyst_ratings,
     load_fundamentals,
     load_prices,
     load_sentiment,
@@ -77,13 +78,26 @@ def main() -> None:
             "No cached sentiment for this backtest; the sentiment strategy "
             "will emit no signals (see firm.strategies.sentiment)"
         )
+    estimates_df = load_analyst_ratings(settings)
+    if estimates_df is not None:
+        log.info(
+            "Loaded analyst-ratings cache: %d rows, %d symbols",
+            len(estimates_df), estimates_df["symbol"].nunique(),
+        )
+    else:
+        log.debug(
+            "No cached analyst ratings for this backtest; the "
+            "investing_analyst_ratings strategy will emit no signals"
+        )
 
     # A single load() call — passing fundamentals/sentiment to a *second*
     # call without `prices` would raise (prices has no default and each
     # call fully replaces prior state), which silently meant any real
     # dataset with cached fundamentals crashed this CLI entry point outright.
     pit_store = PointInTimeDataStore()
-    pit_store.load(prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df)
+    pit_store.load(
+        prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df, estimates=estimates_df,
+    )
 
     start_dt = datetime.fromisoformat(settings.backtest.start_date)
     end_dt = datetime.fromisoformat(settings.backtest.end_date)
