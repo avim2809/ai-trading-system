@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 from firm.data.cache import ParquetCache
 from firm.data.schemas import UNIVERSE_COLUMNS

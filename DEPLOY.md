@@ -356,29 +356,87 @@ The frontend is now at **`http://YOUR_VPS_IP:8000`**.
 
 ### 6e. Optional: nginx on port 80 / 443
 
+`firm-api` binds `127.0.0.1:8000` only (see `run()` in `src/firm/api/app.py`)
+— it controls live trading (start/stop, order approval, account data) and
+must only ever be reached through a reverse proxy that adds TLS + auth, not
+directly. **Basic auth is not optional for a bare-metal box exposed to the
+internet** — this endpoint was briefly open with no auth in an earlier
+deployment; don't repeat that.
+
 ```bash
-sudo apt-get install -y nginx certbot python3-certbot-nginx
+sudo apt-get install -y nginx apache2-utils
+
+# HTTP basic auth — nginx workers run as www-data, so the file must stay
+# group-readable by that user even after tightening permissions below.
+sudo htpasswd -c /etc/nginx/.htpasswd youroperatorname
+sudo chgrp www-data /etc/nginx/.htpasswd && sudo chmod 640 /etc/nginx/.htpasswd
+
+# Rate-limit zone — basic_auth has no throttling of its own, so without this
+# a brute-force password-guessing script could hit the login as fast as the
+# network allows. 10r/s steady-state is generous for normal dashboard
+# polling (the frontend's fastest poll interval is ~5s per endpoint).
+sudo tee /etc/nginx/conf.d/rate-limit.conf << 'EOF'
+limit_req_zone $binary_remote_addr zone=ai_trading_limit:10m rate=10r/s;
+EOF
 
 sudo tee /etc/nginx/sites-available/firm << 'EOF'
 server {
     listen 80;
     server_name trading.yourdomain.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name trading.yourdomain.com;
+
+    # See "TLS cert" below for either certbot (real domain) or a self-signed
+    # cert (no public domain / IP-only access).
+    ssl_certificate     /etc/nginx/ssl/ai-trading.crt;
+    ssl_certificate_key /etc/nginx/ssl/ai-trading.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+
+    auth_basic "AI Trading System";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    limit_req zone=ai_trading_limit burst=20 nodelay;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # SSE/streaming-friendly settings (harmless for regular requests).
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
     }
 }
 EOF
 
 sudo ln -sf /etc/nginx/sites-available/firm /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
+sudo ufw allow 443/tcp && sudo ufw delete allow 8000/tcp   # only nginx should be internet-reachable
+```
 
-# Free TLS cert (auto-renews):
+**TLS cert — pick one:**
+
+```bash
+# Option A: real domain pointed at this host (free, auto-renews)
+sudo apt-get install -y certbot python3-certbot-nginx
 sudo certbot --nginx -d trading.yourdomain.com
+
+# Option B: no public domain / IP-only access (self-signed — browsers will
+# warn on first visit; that's expected, not a misconfiguration)
+sudo mkdir -p /etc/nginx/ssl
+sudo openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+    -keyout /etc/nginx/ssl/ai-trading.key -out /etc/nginx/ssl/ai-trading.crt \
+    -subj "/CN=ai-trading-system"
 ```
 
 ### 6f. Useful maintenance commands

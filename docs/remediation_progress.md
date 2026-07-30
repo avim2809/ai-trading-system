@@ -10,12 +10,12 @@ done, in progress, and left, plus context/detail beyond what the plan file's
 todo list captures, so work can resume in a fresh session/chat without the
 prior conversation history.
 
-Last updated: 2026-07-27.
+Last updated: 2026-07-30.
 
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #25 has the most recent detail.
+   "Completed" item #41 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -232,6 +232,82 @@ eliminated all pytest warnings (datetime.utcnow deprecations, hmmlearn/
 seaborn/chromadb third-party noise via `pytest.ini` filters, a pandas
 `RuntimeWarning` in `multi_factor.py`), and killed stale/hung pytest
 processes the user flagged mid-session.
+
+**Items 35-41 below are from a separate, later audit** ("P/L-improvement
+research" then a fresh "system improvement plan" audit) — not part of the
+original Cursor remediation plan referenced at the top of this file, so they
+have no `plan-id` and don't appear in the "Full task list" block below.
+
+35. **P/L-improvement research, phases 1-4** (2026-07-29) — CPCV purge/embargo
+    for the PBO audit (`eval/overfitting.py`, `experiments/runner.py`); HRP
+    signal combination as an alternative to `optimal`
+    (`agents/analysts/__init__.py`, opt-in via
+    `signal_combination: {method: hrp}`); market-impact linear/sqrt crossover
+    (`agents/_liquidity.py::market_impact_pct`, opt-in via
+    `market_impact_crossover_participation`); CVaR tail-risk sizing overlay
+    (`agents/risk.py::_cvar_overlay`, opt-in via `risk.cvar_limit`). All
+    shipped disabled/unchanged-by-default; **none yet validated with a real
+    backtest A/B** — do that before ever setting any of them in
+    `config/live.yaml` (see "Next actionable picks" below).
+36. **LLM RAG look-ahead audit** (2026-07-29) — full point-in-time audit of
+    every RAG ingestor's date source. Found/fixed a real crash bug
+    (`VectorStore.query` raised `TypeError` on an explicit `metadata["date"] =
+    None` instead of failing closed) and de-duplicated the dense/BM25
+    fail-closed logic into one shared `_doc_available_by()` helper. No
+    look-ahead leak found in the LLM A/B's Arm B path. Two small non-blocking
+    follow-ups noted, not done: tighten `earnings_ingestor.py` to real
+    transcript dates; add a reporting lag to `run_ingestor.py`. Details:
+    `docs/llm_lookahead_audit.md`.
+37. **Structured trading-decision reflection** (2026-07-29) —
+    `TradingMemoryLog.reflect()` now returns a `DecisionReflection`
+    (verdict/what_worked/what_failed/lesson, `firm.llm.schemas`) instead of
+    one unstructured prose blob. New `summarize_lessons()` aggregation +
+    `GET /api/memory/lessons` + a lessons-learned digest panel on the
+    Decisions page.
+38. **Ensemble-HMM regime detector, implemented + A/B'd** (2026-07-29) —
+    `EnsembleRegimeModel` (`regime/ensemble.py`, 5-seed majority vote) behind
+    `MarketRegimeDetector(ensemble=True)`, wired into both
+    `RiskAgent.regime_overlay` and `strategy_regime_weights` (both opt-in,
+    off by default). A/B'd against the same 3 diagnostic windows: calms
+    `regime_hmm`'s own attributed-Sharpe noise in every window but makes
+    portfolio Sharpe *worse* in 2/3 with `strategy_regime_weights` enabled —
+    detector noise wasn't the bottleneck for that feature. Shipped disabled.
+    Details: `docs/regime_ensemble_scoping.md`.
+39. **Frontend Live Dashboard crash fixed** (2026-07-29) — `LiveDashboard.tsx`
+    rendered `cycle_id` as a truncated UUID string (`.slice(0, 8)`), but the
+    backend (`CycleResult.cycle_id: int`) has always sent a plain integer —
+    the page rendered fine for ~1s then crashed once the cycles query
+    resolved and `.slice()` threw. Fixed end-to-end (component, types,
+    client, test mocks) and rebuilt `frontend/dist`, which was independently
+    stale (predated the crash-causing edits, from before this whole session).
+40. **Live-engine boot-race outage found + fixed** (2026-07-30) — a fresh
+    operational audit found the live engine had been silently stopped for
+    **~27 hours**: `ai-trading.service`'s `After=`/`Wants=ibgateway.service`
+    only waits for the IB Gateway *process* to fork, not for IBC's headless
+    login to actually open the API port, so the boot-time
+    `IBKRBroker.connect()` lost that race and nothing retried or alerted —
+    this also explains why the LLM A/B experiment log looked frozen (no
+    cycles ran). Fixed with `scripts/wait_for_ibgateway.sh` (a systemd
+    `ExecStartPre` readiness wait, always exits 0) plus an app-level
+    safety net (`auto_start_live_with_retries`, 1/60/180/300s backoff,
+    disengages permanently the instant a start ever succeeds so it can't
+    fight an operator's later `POST /live/stop`; fires a critical alert if
+    every retry is exhausted). `ALERT_WEBHOOK_URL` (Discord) is now
+    configured in production. Found and fixed a latent bug in the same pass:
+    Discord's webhook API requires a `content` field and was silently
+    rejecting the module's prior `text`-only payload.
+41. **Operational hardening pass** (2026-07-30) — `.env`/`.htpasswd`
+    permissions tightened (were world-readable, 644); nginx rate limiting
+    (`limit_req`, 10r/s) + security headers (HSTS, X-Frame-Options,
+    X-Content-Type-Options, Referrer-Policy) added in front of the
+    dashboard; journald `SystemMaxUse=200M` cap (host was at 84% disk,
+    journald alone held 675MB — freed ~500MB immediately); 4 pre-existing
+    ruff lint findings fixed; leftover `ib-gateway`→`ibgateway` naming
+    mismatches fixed in `setup.sh` (would have broken `systemctl enable` on
+    a fresh automated install); `DEPLOY.md`'s nginx section rewritten to
+    actually document basic auth + the new hardening (it previously didn't
+    mention auth at all, despite that being what's actually protecting
+    production).
 
 ## In progress
 
