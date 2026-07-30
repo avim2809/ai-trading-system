@@ -83,6 +83,11 @@ class TwelveDataProvider(DataProvider):
     def get_universe_constituents(self, index: str, date: str = "") -> list[str]:
         raise NotImplementedError("TwelveDataProvider does not supply index constituents.")
 
+    def get_analyst_ratings(
+        self, symbols: list[str], start: str, end: str
+    ) -> pd.DataFrame:
+        raise NotImplementedError("TwelveDataProvider does not provide analyst ratings; use FMP.")
+
 
 def _statistics_to_row(
     symbol: str,

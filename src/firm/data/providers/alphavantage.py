@@ -211,6 +211,13 @@ class AlphaVantageProvider(DataProvider):
             "AlphaVantageProvider does not supply index constituents; use FMPProvider."
         )
 
+    def get_analyst_ratings(
+        self, symbols: Sequence[str], start: datetime, end: datetime
+    ) -> pd.DataFrame:
+        raise NotImplementedError(
+            "AlphaVantageProvider does not provide analyst ratings; use FMPProvider."
+        )
+
 
 def _parse_av_time(value: str | None) -> pd.Timestamp:
     """Parse Alpha Vantage ``YYYYMMDDTHHMMSS`` timestamps."""

@@ -47,6 +47,21 @@ CORPORATE_ACTION_COLS: list[str] = [
     "description",
 ]
 
+# Analyst rating-consensus snapshot (raw counts, not a derived score — let
+# strategies decide how to weight strong_buy vs buy etc.). "date" is the
+# consensus snapshot date (FMP's grades-historical is monthly; a live
+# scraper's date is its fetch date). See firm.data.providers.fmp.FMPProvider
+# .get_analyst_ratings and firm.strategies.investing_analyst_ratings.
+ANALYST_RATINGS_COLS: list[str] = [
+    "date",
+    "symbol",
+    "strong_buy",
+    "buy",
+    "hold",
+    "sell",
+    "strong_sell",
+]
+
 # Universe membership window columns (used by UniverseResolver for
 # survivorship-aware point-in-time index membership).
 COL_INDEX = "index"

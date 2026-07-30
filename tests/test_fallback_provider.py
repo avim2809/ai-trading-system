@@ -21,7 +21,7 @@ import pytest
 
 from firm.data.providers.base import ProviderError
 from firm.data.providers.fallback import FallbackProvider, _load
-from firm.data.schemas import PRICE_COLS
+from firm.data.schemas import ANALYST_RATINGS_COLS, PRICE_COLS
 
 
 def _price_df(symbols: list[str], date=None) -> pd.DataFrame:
@@ -214,3 +214,29 @@ class TestLoadDoesNotCrashOnBrokenProvider:
 
         assert result is None
         assert any("data_provider_init_failed" in r.message for r in caplog.records)
+
+
+class TestAnalystRatingsChain:
+    """analyst_ratings chain is FMP-only (no other provider implements it)."""
+
+    def test_delegates_to_fmp(self, provider):
+        ratings_df = pd.DataFrame(
+            [{"date": "2026-07-01", "symbol": "AAPL", "strong_buy": 6, "buy": 23,
+              "hold": 17, "sell": 2, "strong_sell": 2}],
+            columns=ANALYST_RATINGS_COLS,
+        )
+        fmp = _mock_provider(None)
+        fmp.get_analyst_ratings = MagicMock(return_value=ratings_df)
+
+        with patch("firm.data.providers.fallback._load", side_effect=lambda name, cfg: {"fmp": fmp}.get(name)):
+            result = provider.get_analyst_ratings(["AAPL"], "2020-01-01", "2026-08-01")
+
+        fmp.get_analyst_ratings.assert_called_once()
+        assert not result.empty
+        assert result.iloc[0]["strong_buy"] == 6
+
+    def test_fmp_unavailable_returns_empty_typed_frame(self, provider):
+        with patch("firm.data.providers.fallback._load", return_value=None):
+            result = provider.get_analyst_ratings(["AAPL"], "2020-01-01", "2026-08-01")
+        assert result.empty
+        assert list(result.columns) == ANALYST_RATINGS_COLS

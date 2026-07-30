@@ -54,6 +54,19 @@ def _refresh_max_age_hours() -> float:
         return 24.0
 
 
+# Analyst-ratings consensus (FMP's grades-historical) updates monthly, so
+# live cycles default to cache-only here too — same rationale as
+# fundamentals, opt in with FIRM_LIVE_FETCH_ANALYST_RATINGS=1. Unlike
+# sentiment's hot/cold incremental-day partitioning (built for a
+# daily-cadence series), a plain per-cycle fetch of the whole universe is
+# cheap enough at monthly cadence not to need that complexity.
+_LIVE_FETCH_RATINGS_ENV = "FIRM_LIVE_FETCH_ANALYST_RATINGS"
+
+
+def _live_analyst_ratings_fetch_enabled() -> bool:
+    return os.getenv(_LIVE_FETCH_RATINGS_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
 class LivePitViewAdapter:
     """Adapts PointInTimeDataStore to the PitView protocol for live usage.
 
@@ -100,6 +113,14 @@ class LivePitViewAdapter:
     ) -> pd.DataFrame:
         syms = symbols or self._universe
         return self._pit_store.get_sentiment(syms, self._asof, lookback_days)
+
+    def estimates(
+        self,
+        symbols: list[str] | None = None,
+        lookback_days: int = 365,
+    ) -> pd.DataFrame:
+        syms = symbols or self._universe
+        return self._pit_store.get_estimates(syms, self._asof, lookback_days)
 
 
 class LiveDataFeed:
@@ -287,12 +308,45 @@ class LiveDataFeed:
         else:
             log.warning("No 'sentiment' provider configured on this LiveDataFeed")
 
+        estimates = pd.DataFrame()
+        try:
+            from firm.config import get_settings
+            from firm.runtime import load_analyst_ratings
+
+            cached_estimates = load_analyst_ratings(get_settings())
+            if cached_estimates is not None:
+                estimates = cached_estimates
+        except Exception:
+            log.warning("Analyst-ratings cache load failed — continuing without it", exc_info=True)
+        estimates_prov = self._providers.get("estimates")
+        if estimates_prov and _live_analyst_ratings_fetch_enabled():
+            try:
+                fresh = estimates_prov.get_analyst_ratings(self._universe, start, end)
+                if not fresh.empty:
+                    estimates = (
+                        pd.concat([estimates, fresh], ignore_index=True)
+                        if not estimates.empty else fresh
+                    )
+                    estimates["date"] = pd.to_datetime(estimates["date"])
+                    estimates = estimates.sort_values(["symbol", "date"]).drop_duplicates(
+                        subset=["symbol", "date"], keep="last",
+                    )
+                log.info("Fetched %d analyst-ratings rows", len(fresh))
+            except (NotImplementedError, Exception):
+                log.warning("Analyst-ratings fetch failed — using cache if available", exc_info=True)
+        elif estimates_prov:
+            log.debug(
+                "Live analyst ratings: cache-only mode (set %s=1 to enable network fetch)",
+                _LIVE_FETCH_RATINGS_ENV,
+            )
+
         self._pit_store = PointInTimeDataStore()
         self._pit_store.set_universe_resolver(self._universe_resolver)
         self._pit_store.load(
             prices=prices,
             fundamentals=fundamentals if not fundamentals.empty else None,
             sentiment=sentiment if not sentiment.empty else None,
+            estimates=estimates if not estimates.empty else None,
         )
 
         return LivePitViewAdapter(self._pit_store, asof, self._universe)

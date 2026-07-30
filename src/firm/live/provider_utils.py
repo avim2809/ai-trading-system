@@ -215,8 +215,11 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
                 "ALPHAVANTAGE_API_KEY",
             )
         )
+        # analyst_ratings chain is FMP-only (see fallback.py) — gate on that
+        # key specifically rather than the broader fundamentals set above.
+        analyst_ratings_configured = bool(os.getenv("FMP_API_KEY"))
 
-        if sentiment_configured or fundamentals_configured:
+        if sentiment_configured or fundamentals_configured or analyst_ratings_configured:
             try:
                 from firm.data.providers.fallback import FallbackProvider
 
@@ -231,6 +234,9 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
                     log.info(
                         "IBKR live sentiment: Massive → Alpha Vantage → Finnhub fallback chain"
                     )
+                if analyst_ratings_configured:
+                    providers["estimates"] = fallback
+                    log.info("IBKR live analyst ratings: FMP (grades-historical)")
             except Exception as exc:
                 log.warning("Fallback provider not available: %s", exc, exc_info=True)
 
@@ -248,6 +254,7 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
         "prices": market_data,
         "fundamentals": market_data,
         "sentiment": market_data,
+        "estimates": market_data,
     }
 
 

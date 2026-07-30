@@ -6,6 +6,7 @@ Priority order (first non-empty result wins):
   fundamentals      FMP → Finnhub → EDGAR → Alpha Vantage → Twelve Data → Massive
   corporate_actions Massive → (none)
   universe          FMP → (none)
+  analyst_ratings   FMP → (none)
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ import pandas as pd
 from firm.config import Settings, get_settings
 from firm.data.providers.base import DataProvider, ProviderError
 from firm.data.schemas import (
+    ANALYST_RATINGS_COLS,
     CORPORATE_ACTION_COLS,
     FUNDAMENTAL_COLS,
     PRICE_COLS,
@@ -78,6 +80,7 @@ class FallbackProvider(DataProvider):
         ]
         self._actions_chain: list[str] = ["massive"]
         self._universe_chain: list[str] = ["fmp"]
+        self._analyst_ratings_chain: list[str] = ["fmp"]
 
     def _try_chain(
         self,
@@ -239,6 +242,18 @@ class FallbackProvider(DataProvider):
         return self._try_chain(
             self._actions_chain, "get_corporate_actions",
             pd.DataFrame(columns=CORPORATE_ACTION_COLS),
+            symbols, start, end,
+        )
+
+    def get_analyst_ratings(
+        self,
+        symbols: Sequence[str],
+        start: datetime | str,
+        end: datetime | str,
+    ) -> pd.DataFrame:
+        return self._try_chain(
+            self._analyst_ratings_chain, "get_analyst_ratings",
+            pd.DataFrame(columns=ANALYST_RATINGS_COLS),
             symbols, start, end,
         )
 

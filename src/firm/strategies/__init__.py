@@ -7,6 +7,7 @@ from firm.strategies.registry import get, list_strategies, register
 from firm.strategies import (  # noqa: F401
     event_driven,
     gann,
+    investing_analyst_ratings,
     mean_reversion,
     ml_prediction,
     momentum,

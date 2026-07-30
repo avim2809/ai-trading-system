@@ -25,6 +25,7 @@ class PointInTimeDataStore:
         self._prices: pd.DataFrame = pd.DataFrame()
         self._fundamentals: pd.DataFrame = pd.DataFrame()
         self._sentiment: pd.DataFrame = pd.DataFrame()
+        self._estimates: pd.DataFrame = pd.DataFrame()
         self._corporate_actions: pd.DataFrame = pd.DataFrame()
         # Macro series keyed by FRED series ID → DataFrame[date, <series_id>]
         self._macro: dict[str, pd.DataFrame] = {}
@@ -42,19 +43,22 @@ class PointInTimeDataStore:
         fundamentals: pd.DataFrame | None = None,
         sentiment: pd.DataFrame | None = None,
         corporate_actions: pd.DataFrame | None = None,
+        estimates: pd.DataFrame | None = None,
     ) -> None:
         """Load all datasets. Called once at backtest start."""
         self._prices = self._ensure_date_col(prices)
         self._fundamentals = self._ensure_date_col(fundamentals) if fundamentals is not None else pd.DataFrame()
         self._sentiment = self._ensure_date_col(sentiment) if sentiment is not None else pd.DataFrame()
+        self._estimates = self._ensure_date_col(estimates) if estimates is not None else pd.DataFrame()
         self._corporate_actions = (
             self._ensure_date_col(corporate_actions) if corporate_actions is not None else pd.DataFrame()
         )
         log.info(
-            "PIT store loaded: %d price rows, %d fundamental rows, %d sentiment rows",
+            "PIT store loaded: %d price rows, %d fundamental rows, %d sentiment rows, %d estimates rows",
             len(self._prices),
             len(self._fundamentals),
             len(self._sentiment),
+            len(self._estimates),
         )
 
     @staticmethod
@@ -125,6 +129,28 @@ class PointInTimeDataStore:
             .tail(lookback_reports)
             .reset_index(drop=True)
         )
+
+    def get_estimates(
+        self,
+        symbols: list[str],
+        asof: datetime,
+        lookback_days: int = 365,
+    ) -> pd.DataFrame:
+        """Return analyst-ratings-consensus snapshots where date <= asof
+        within the lookback window (e.g. ANALYST_RATINGS_COLS — FMP's
+        grades-historical is monthly, so a ~365-day default keeps roughly a
+        year of consensus trend per symbol, unlike get_sentiment's 5-day
+        default suited to a daily-cadence series)."""
+        if self._estimates.empty:
+            return pd.DataFrame()
+        asof_ts = pd.Timestamp(asof)
+        earliest = asof_ts - timedelta(days=lookback_days)
+        mask = (
+            self._estimates["symbol"].isin(symbols)
+            & (self._estimates["date"] <= asof_ts)
+            & (self._estimates["date"] >= earliest)
+        )
+        return self._estimates.loc[mask].copy()
 
     def get_sentiment(
         self,

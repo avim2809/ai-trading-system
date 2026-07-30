@@ -210,3 +210,6 @@ class IBKRProvider(DataProvider):
 
     def get_universe_constituents(self, index: str, date: str) -> list[str]:
         raise NotImplementedError("IBKRProvider does not provide index constituents; use Polygon or FMP.")
+
+    def get_analyst_ratings(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        raise NotImplementedError("IBKRProvider does not provide analyst ratings; use FMP.")

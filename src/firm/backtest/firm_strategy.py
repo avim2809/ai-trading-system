@@ -70,6 +70,14 @@ class PitViewAdapter:
         syms = symbols or self._universe
         return self._pit_store.get_sentiment(syms, self._asof, lookback_days)
 
+    def estimates(
+        self,
+        symbols: list[str] | None = None,
+        lookback_days: int = 365,
+    ) -> pd.DataFrame:
+        syms = symbols or self._universe
+        return self._pit_store.get_estimates(syms, self._asof, lookback_days)
+
     def macro(self, series_id: str, lookback_days: int = 365) -> pd.Series:
         return self._pit_store.get_macro(series_id, self._asof, lookback_days)
 

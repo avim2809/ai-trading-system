@@ -136,6 +136,34 @@ def _make_sentiment_df(
     return pd.DataFrame(rows)
 
 
+def _make_estimates_df(
+    symbols: list[str],
+    n_months: int = 6,
+    end_date: datetime | None = None,
+) -> pd.DataFrame:
+    """Generate synthetic monthly analyst-ratings-consensus data for *symbols*
+    (ANALYST_RATINGS_COLS shape — mirrors FMP's grades-historical cadence)."""
+    if end_date is None:
+        end_date = datetime(2025, 6, 1)
+    rng = np.random.RandomState(123)
+    rows: list[dict] = []
+    for offset_months in range(n_months):
+        d = pd.Timestamp(end_date) - pd.DateOffset(months=offset_months)
+        for sym in symbols:
+            rows.append(
+                {
+                    "date": d,
+                    "symbol": sym,
+                    "strong_buy": rng.randint(0, 10),
+                    "buy": rng.randint(5, 30),
+                    "hold": rng.randint(5, 20),
+                    "sell": rng.randint(0, 5),
+                    "strong_sell": rng.randint(0, 3),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 class MockPitView:
     """In-memory PitView implementation for testing."""
 
@@ -146,6 +174,7 @@ class MockPitView:
         n_price_days: int = 300,
         include_fundamentals: bool = True,
         include_sentiment: bool = True,
+        include_estimates: bool = True,
     ):
         self._symbols = symbols or SYMBOLS
         self._asof = asof or datetime(2025, 6, 1)
@@ -158,6 +187,11 @@ class MockPitView:
         self._sent_df = (
             _make_sentiment_df(self._symbols, 10, self._asof)
             if include_sentiment
+            else pd.DataFrame()
+        )
+        self._est_df = (
+            _make_estimates_df(self._symbols, 6, self._asof)
+            if include_estimates
             else pd.DataFrame()
         )
 
@@ -211,6 +245,19 @@ class MockPitView:
             df = df[pd.to_datetime(df["date"]) >= cutoff]
         return df
 
+    def estimates(
+        self,
+        symbols: list[str] | None = None,
+        lookback_days: int = 365,
+    ) -> pd.DataFrame:
+        df = self._est_df.copy()
+        if symbols and not df.empty:
+            df = df[df["symbol"].isin(symbols)]
+        if not df.empty:
+            cutoff = pd.Timestamp(self._asof) - pd.Timedelta(days=lookback_days)
+            df = df[pd.to_datetime(df["date"]) >= cutoff]
+        return df
+
 
 class EmptyPitView:
     """PitView that returns empty data for edge-case testing."""
@@ -232,6 +279,9 @@ class EmptyPitView:
     def sentiment(self, symbols=None, lookback_days=5) -> pd.DataFrame:
         return pd.DataFrame()
 
+    def estimates(self, symbols=None, lookback_days=365) -> pd.DataFrame:
+        return pd.DataFrame()
+
 
 class SingleSymbolPitView:
     """PitView with a single symbol for edge-case testing."""
@@ -242,6 +292,7 @@ class SingleSymbolPitView:
         self._price_df = _make_price_df(self._sym, 300, self._asof)
         self._fund_df = _make_fundamental_df(self._sym, self._asof)
         self._sent_df = _make_sentiment_df(self._sym, 10, self._asof)
+        self._est_df = _make_estimates_df(self._sym, 6, self._asof)
 
     @property
     def asof(self) -> datetime:
@@ -261,6 +312,11 @@ class SingleSymbolPitView:
 
     def sentiment(self, symbols=None, lookback_days=5) -> pd.DataFrame:
         df = self._sent_df.copy()
+        cutoff = pd.Timestamp(self._asof) - pd.Timedelta(days=lookback_days)
+        return df[pd.to_datetime(df["date"]) >= cutoff]
+
+    def estimates(self, symbols=None, lookback_days=365) -> pd.DataFrame:
+        df = self._est_df.copy()
         cutoff = pd.Timestamp(self._asof) - pd.Timedelta(days=lookback_days)
         return df[pd.to_datetime(df["date"]) >= cutoff]
 
@@ -301,6 +357,7 @@ ALL_STRATEGY_NAMES = [
     "volatility_breakout",
     "seasonality",
     "gann",
+    "investing_analyst_ratings",
 ]
 
 
@@ -661,6 +718,93 @@ class TestSentiment:
         # "old" (~5 days back) was flat at 0.0, so delta should be ~0.8,
         # not diluted by averaging against the buffer's much-older days.
         assert aapl.meta["sentiment_delta"] == pytest.approx(0.8, abs=0.05)
+
+
+class TestInvestingAnalystRatings:
+    def test_generate(self, pit_view):
+        strat = get("investing_analyst_ratings")()
+        signals = strat.generate(pit_view)
+        assert len(signals) > 0
+        _validate_signals(signals, "investing_analyst_ratings")
+
+    def test_empty_universe(self, empty_view):
+        strat = get("investing_analyst_ratings")()
+        assert strat.generate(empty_view) == []
+
+    def test_no_estimates_data(self):
+        view = MockPitView(include_estimates=False)
+        strat = get("investing_analyst_ratings")()
+        assert strat.generate(view) == []
+
+    def test_fewer_than_3_symbols_emits_nothing(self):
+        view = MockPitView(symbols=["AAPL", "MSFT"])
+        strat = get("investing_analyst_ratings")()
+        assert strat.generate(view) == []
+
+    def test_all_strong_buy_scores_higher_than_all_strong_sell(self):
+        """A name with a unanimous strong-buy consensus must score strictly
+        higher than one with a unanimous strong-sell consensus."""
+        view = MockPitView(symbols=["AAPL", "MSFT", "GOOG"])
+        asof = pd.Timestamp(view.asof)
+        rows = [
+            {"date": asof, "symbol": "AAPL", "strong_buy": 20, "buy": 0, "hold": 0, "sell": 0, "strong_sell": 0},
+            {"date": asof, "symbol": "MSFT", "strong_buy": 0, "buy": 0, "hold": 20, "sell": 0, "strong_sell": 0},
+            {"date": asof, "symbol": "GOOG", "strong_buy": 0, "buy": 0, "hold": 0, "sell": 0, "strong_sell": 20},
+        ]
+        view._est_df = pd.DataFrame(rows)
+        strat = get("investing_analyst_ratings")()
+
+        signals = strat.generate(view)
+        by_symbol = {s.symbol: s for s in signals}
+        assert by_symbol["AAPL"].score > by_symbol["MSFT"].score > by_symbol["GOOG"].score
+        # net_score is bounded in [-2, 2]: unanimous strong_buy -> +2, unanimous strong_sell -> -2.
+        assert by_symbol["AAPL"].meta["rating_level"] == pytest.approx(2.0)
+        assert by_symbol["GOOG"].meta["rating_level"] == pytest.approx(-2.0)
+
+    def test_zero_coverage_symbol_excluded_not_crashed(self):
+        """A symbol with all-zero rating counts (no analyst coverage) must
+        be dropped, not produce a divide-by-zero score."""
+        view = MockPitView(symbols=["AAPL", "MSFT", "GOOG"])
+        asof = pd.Timestamp(view.asof)
+        rows = [
+            {"date": asof, "symbol": "AAPL", "strong_buy": 5, "buy": 10, "hold": 5, "sell": 0, "strong_sell": 0},
+            {"date": asof, "symbol": "MSFT", "strong_buy": 0, "buy": 0, "hold": 0, "sell": 0, "strong_sell": 0},
+            {"date": asof, "symbol": "GOOG", "strong_buy": 2, "buy": 8, "hold": 10, "sell": 0, "strong_sell": 0},
+        ]
+        view._est_df = pd.DataFrame(rows)
+        strat = get("investing_analyst_ratings")()
+
+        signals = strat.generate(view)
+        assert "MSFT" not in {s.symbol for s in signals}
+
+    def test_delta_uses_lookback_days_not_the_full_fetch_buffer(self):
+        """Regression (mirrors the identical sentiment.py fix): 'old' must be
+        ~lookback_days before asof, not just the first row of the fetched
+        buffer."""
+        view = MockPitView(symbols=["AAPL", "MSFT", "GOOG"])
+        asof = pd.Timestamp(view.asof)
+        rows = []
+        # Flat consensus for the prior 12 months, then AAPL gets a fresh
+        # upgrade wave in the most recent snapshot only.
+        for offset_months in range(12, 0, -1):
+            d = asof - pd.DateOffset(months=offset_months)
+            for sym in ("AAPL", "MSFT", "GOOG"):
+                rows.append({"date": d, "symbol": sym, "strong_buy": 2, "buy": 10,
+                             "hold": 8, "sell": 0, "strong_sell": 0})
+        rows.append({"date": asof, "symbol": "AAPL", "strong_buy": 15, "buy": 5,
+                     "hold": 0, "sell": 0, "strong_sell": 0})
+        rows.append({"date": asof, "symbol": "MSFT", "strong_buy": 2, "buy": 10,
+                     "hold": 8, "sell": 0, "strong_sell": 0})
+        rows.append({"date": asof, "symbol": "GOOG", "strong_buy": 2, "buy": 10,
+                     "hold": 8, "sell": 0, "strong_sell": 0})
+        view._est_df = pd.DataFrame(rows)
+        strat = get("investing_analyst_ratings")()
+
+        signals = strat.generate(view)
+        aapl = next(s for s in signals if s.symbol == "AAPL")
+        msft = next(s for s in signals if s.symbol == "MSFT")
+        assert aapl.meta["rating_delta"] > 0.5
+        assert msft.meta["rating_delta"] == pytest.approx(0.0, abs=1e-6)
 
 
 class TestEventDriven:

@@ -175,6 +175,42 @@ class TestGetFundamentals:
         assert result.iloc[-1]["date"] == pd.Timestamp("2020-01-05")  # latest is last
 
 
+class TestGetEstimates:
+    @pytest.fixture()
+    def store_with_estimates(self, store: PointInTimeDataStore) -> PointInTimeDataStore:
+        estimates = pd.DataFrame(
+            {
+                "date": pd.to_datetime(["2025-06-01", "2025-12-01", "2026-06-01"]),
+                "symbol": ["AAPL"] * 3,
+                "strong_buy": [4, 5, 6],
+                "buy": [20, 22, 23],
+                "hold": [12, 15, 17],
+                "sell": [1, 1, 2],
+                "strong_sell": [0, 0, 2],
+            }
+        )
+        store.load(
+            store._prices, store._fundamentals, store._sentiment, estimates=estimates,
+        )
+        return store
+
+    def test_returns_rows_within_lookback_window(self, store_with_estimates):
+        asof = datetime(2026, 7, 1)
+        result = store_with_estimates.get_estimates(["AAPL"], asof, lookback_days=365)
+        # 2025-06-01 is > 365 days before 2026-07-01; only the other two qualify.
+        assert list(result["date"]) == [pd.Timestamp("2025-12-01"), pd.Timestamp("2026-06-01")]
+
+    def test_no_future_estimates(self, store_with_estimates):
+        asof = datetime(2025, 12, 15)
+        result = store_with_estimates.get_estimates(["AAPL"], asof, lookback_days=365)
+        assert list(result["date"]) == [pd.Timestamp("2025-06-01"), pd.Timestamp("2025-12-01")]
+        assert (result["date"] <= pd.Timestamp(asof)).all()
+
+    def test_empty_when_not_loaded(self, store: PointInTimeDataStore):
+        result = store.get_estimates(["AAPL"], datetime(2026, 1, 1))
+        assert result.empty
+
+
 class TestEmptyResult:
     def test_asof_before_any_data(self, store: PointInTimeDataStore) -> None:
         """When asof is before all data, an empty DataFrame must be returned."""

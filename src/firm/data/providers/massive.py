@@ -470,3 +470,8 @@ class MassiveProvider(DataProvider):
         raise NotImplementedError(
             "MassiveProvider does not supply index constituents; use FMPProvider."
         )
+
+    def get_analyst_ratings(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        raise NotImplementedError(
+            "MassiveProvider does not provide analyst ratings; use FMPProvider."
+        )

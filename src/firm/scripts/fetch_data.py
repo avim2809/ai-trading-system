@@ -72,6 +72,7 @@ def main(argv: list[str] | None = None) -> None:
     all_prices: list[pd.DataFrame] = []
     all_fundamentals: list[pd.DataFrame] = []
     all_sentiment: list[pd.DataFrame] = []
+    all_analyst_ratings: list[pd.DataFrame] = []
 
     for name in providers_requested:
         if name not in _KNOWN_PROVIDERS:
@@ -131,6 +132,23 @@ def main(argv: list[str] | None = None) -> None:
             except NotImplementedError:
                 log.debug("  sentiment: not supported by %s", name)
 
+        # Analyst ratings
+        cache_key = cache.make_key(
+            "analyst_ratings", provider=name, symbols=symbols, start=args.start, end=args.end,
+        )
+        if cache.has(cache_key):
+            log.info("  analyst_ratings: cache hit")
+            all_analyst_ratings.append(cache.get(cache_key))  # type: ignore[arg-type]
+        else:
+            try:
+                df = prov.get_analyst_ratings(symbols, args.start, args.end)
+                if not df.empty:
+                    cache.put(cache_key, df)
+                    all_analyst_ratings.append(df)
+                    log.info("  analyst_ratings: %d rows", len(df))
+            except NotImplementedError:
+                log.debug("  analyst_ratings: not supported by %s", name)
+
     # Combine
     combined_prices = pd.concat(all_prices, ignore_index=True) if all_prices else pd.DataFrame()
     combined_fundamentals = (
@@ -138,6 +156,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     combined_sentiment = (
         pd.concat(all_sentiment, ignore_index=True) if all_sentiment else pd.DataFrame()
+    )
+    combined_analyst_ratings = (
+        pd.concat(all_analyst_ratings, ignore_index=True) if all_analyst_ratings else pd.DataFrame()
     )
 
     if not combined_prices.empty:
@@ -150,12 +171,17 @@ def main(argv: list[str] | None = None) -> None:
         combined_sentiment = cache.merge_combined(
             "combined/sentiment", combined_sentiment,
         )
+    if not combined_analyst_ratings.empty:
+        combined_analyst_ratings = cache.merge_combined(
+            "combined/analyst_ratings", combined_analyst_ratings,
+        )
 
     log.info(
-        "Done. Prices=%d rows, Fundamentals=%d rows, Sentiment=%d rows",
+        "Done. Prices=%d rows, Fundamentals=%d rows, Sentiment=%d rows, AnalystRatings=%d rows",
         len(combined_prices),
         len(combined_fundamentals),
         len(combined_sentiment),
+        len(combined_analyst_ratings),
     )
 
 

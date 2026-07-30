@@ -105,3 +105,91 @@ class TestFMPFundamentalsPublicationLag:
         df = provider.get_fundamentals(["SPY", "QQQ"], "2020-01-01", "2026-01-01")
         assert df.empty
         provider._client.get_json.assert_not_called()
+
+
+class TestFMPAnalystRatings:
+    """get_analyst_ratings backed by /stable/grades-historical — fixture
+    shape matches a real live response captured 2026-07-31 (AAPL)."""
+
+    _REAL_SHAPE_RESPONSE = [
+        {
+            "symbol": "AAPL", "date": "2026-07-01",
+            "analystRatingsStrongBuy": 6, "analystRatingsBuy": 23,
+            "analystRatingsHold": 17, "analystRatingsSell": 2,
+            "analystRatingsStrongSell": 2,
+        },
+        {
+            "symbol": "AAPL", "date": "2018-12-01",
+            "analystRatingsStrongBuy": 4, "analystRatingsBuy": 20,
+            "analystRatingsHold": 10, "analystRatingsSell": 1,
+            "analystRatingsStrongSell": 0,
+        },
+    ]
+
+    def test_maps_real_response_shape_to_analyst_ratings_cols(self, provider):
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(return_value=self._REAL_SHAPE_RESPONSE)
+
+        df = provider.get_analyst_ratings(["AAPL"], "2000-01-01", "2027-01-01")
+
+        assert list(df.columns) == ["date", "symbol", "strong_buy", "buy", "hold", "sell", "strong_sell"]
+        assert len(df) == 2
+        row = df[df["date"] == pd.Timestamp("2026-07-01")].iloc[0]
+        assert row["strong_buy"] == 6
+        assert row["buy"] == 23
+        assert row["hold"] == 17
+        assert row["sell"] == 2
+        assert row["strong_sell"] == 2
+
+    def test_no_limit_param_passed_full_history_requested(self, provider):
+        """A 'limit' query param is capped at 10 under this plan tier —
+        omitting it returns the full available history (verified live: 91
+        monthly rows for AAPL back to 2018-12), so it must never be passed."""
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(return_value=[])
+        provider.get_analyst_ratings(["AAPL"], "2000-01-01", "2027-01-01")
+        _, kwargs = provider._client.get_json.call_args
+        assert "limit" not in kwargs.get("params", {})
+
+    def test_date_range_filter_excludes_rows_outside_window(self, provider):
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(return_value=self._REAL_SHAPE_RESPONSE)
+
+        df = provider.get_analyst_ratings(["AAPL"], "2020-01-01", "2027-01-01")
+
+        assert len(df) == 1
+        assert df.iloc[0]["date"] == pd.Timestamp("2026-07-01")
+
+    def test_402_subscription_limit_logs_warning_not_exception(self, provider, caplog):
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(
+            side_effect=ProviderError(
+                "https://financialmodelingprep.com/stable/grades-historical "
+                "returned HTTP 402: Premium Query Parameter"
+            )
+        )
+        with caplog.at_level("WARNING"):
+            df = provider.get_analyst_ratings(["AAPL"], "2020-01-01", "2026-01-01")
+        assert df.empty
+        assert any("fmp_analyst_ratings_unavailable" in r.message for r in caplog.records)
+        assert not any(r.levelname == "ERROR" for r in caplog.records)
+
+    def test_empty_response_returns_typed_empty_frame(self, provider):
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(return_value=[])
+        df = provider.get_analyst_ratings(["AAPL"], "2020-01-01", "2026-01-01")
+        assert df.empty
+        assert list(df.columns) == ["date", "symbol", "strong_buy", "buy", "hold", "sell", "strong_sell"]
+
+    def test_one_bad_symbol_does_not_fail_whole_batch(self, provider):
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(
+            side_effect=lambda path, **kwargs: (
+                (_ for _ in ()).throw(ProviderError("boom"))
+                if kwargs["params"]["symbol"] == "BADSYM"
+                else self._REAL_SHAPE_RESPONSE
+            )
+        )
+        df = provider.get_analyst_ratings(["BADSYM", "AAPL"], "2000-01-01", "2027-01-01")
+        assert not df.empty
+        assert set(df["symbol"]) == {"AAPL"}

@@ -233,6 +233,23 @@ def load_sentiment(settings: Settings) -> pd.DataFrame | None:
     return None
 
 
+def load_analyst_ratings(settings: Settings) -> pd.DataFrame | None:
+    """Load cached analyst-ratings-consensus panels when ``fetch-data`` wrote them.
+
+    Primary key: ``combined/analyst_ratings`` (ParquetCache) — same layout as
+    ``combined/fundamentals``/``combined/sentiment``. Returns ``None`` when
+    absent so callers degrade gracefully (the ``investing_analyst_ratings``
+    strategy simply emits no signals, same as ``sentiment`` does today).
+    """
+    from firm.data.cache import ParquetCache
+
+    cache = ParquetCache(settings.data.cache_dir)
+    df = cache.get("combined/analyst_ratings")
+    if df is not None and not df.empty:
+        return df
+    return None
+
+
 def load_universe_membership(settings: Settings) -> pd.DataFrame | None:
     """Load historical index-membership windows for survivorship-aware backtests.
 
@@ -352,8 +369,28 @@ def run_backtest_from_config(
     except Exception:
         log.warning("Sentiment cache load failed — sentiment strategy will be inactive", exc_info=True)
 
+    estimates_df = None
+    try:
+        from firm.config import get_settings
+
+        estimates_df = load_analyst_ratings(get_settings())
+        if estimates_df is not None:
+            log.info(
+                "Loaded analyst-ratings cache: %d rows, %d symbols",
+                len(estimates_df), estimates_df["symbol"].nunique(),
+            )
+        else:
+            log.debug(
+                "No cached analyst ratings in backtest; the "
+                "investing_analyst_ratings strategy will emit no signals"
+            )
+    except Exception:
+        log.warning("Analyst-ratings cache load failed — that strategy will be inactive", exc_info=True)
+
     pit_store = PointInTimeDataStore()
-    pit_store.load(prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df)
+    pit_store.load(
+        prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df, estimates=estimates_df,
+    )
 
     # Optionally load FRED macro data — gracefully skipped when key is absent.
     fred_api_key = config.get("fred_api_key", "")

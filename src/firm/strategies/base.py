@@ -49,6 +49,13 @@ class PitView(Protocol):
     ) -> pd.DataFrame:
         ...
 
+    def estimates(
+        self,
+        symbols: list[str] | None = None,
+        lookback_days: int = 365,
+    ) -> pd.DataFrame:
+        ...
+
 
 class BaseStrategy(ABC):
     """Abstract base for all alpha strategies."""

@@ -3,11 +3,14 @@
 Docs: https://financialmodelingprep.com/developer/docs
 
 Uses the ``/stable`` endpoint family (post-Aug 2025). Endpoints:
-* Prices:         GET /stable/historical-price-eod/full
-* Income stmt:    GET /stable/income-statement
-* Key metrics:    GET /stable/key-metrics
-* Ratios:         GET /stable/ratios
-* SP500 members:  GET /stable/sp500-constituent  (premium plan required)
+* Prices:          GET /stable/historical-price-eod/full
+* Income stmt:     GET /stable/income-statement
+* Key metrics:     GET /stable/key-metrics
+* Ratios:          GET /stable/ratios
+* SP500 members:   GET /stable/sp500-constituent  (premium plan required)
+* Analyst ratings: GET /stable/grades-historical   (genuine monthly history;
+  price-target-consensus/grades-consensus/analyst-estimates were evaluated
+  and rejected for this — see get_analyst_ratings's docstring)
 """
 
 from __future__ import annotations
@@ -24,7 +27,7 @@ from firm.data.providers.base import (
     ProviderError,
     resolve_filing_date,
 )
-from firm.data.schemas import FUNDAMENTAL_COLS, PRICE_COLS
+from firm.data.schemas import ANALYST_RATINGS_COLS, FUNDAMENTAL_COLS, PRICE_COLS
 from firm.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -206,6 +209,74 @@ class FMPProvider(DataProvider):
         self, symbols: Sequence[str], start: datetime | str, end: datetime | str
     ) -> pd.DataFrame:
         raise NotImplementedError("FMPProvider does not provide news sentiment; use MassiveProvider.")
+
+    # ------------------------------------------------------------------
+    # analyst ratings
+    # ------------------------------------------------------------------
+
+    def get_analyst_ratings(
+        self, symbols: Sequence[str], start: datetime | str, end: datetime | str
+    ) -> pd.DataFrame:
+        """Return analyst rating-consensus history in ANALYST_RATINGS_COLS.
+
+        Backed by ``/stable/grades-historical`` — a genuine monthly
+        historical time series (verified live: ~8 years back to 2018-12 for
+        AAPL), unlike ``price-target-consensus``/``grades-consensus``
+        (current-snapshot only, no history) or ``analyst-estimates`` (annual
+        only under this plan tier, and its "date" is a forward fiscal-year
+        target with no real as-of/publish timestamp — not usable
+        point-in-time). Passing an explicit ``limit`` is capped at 10 under
+        the current plan; omitting it returns the full available history, so
+        it is deliberately not passed here.
+        """
+        start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
+        frames: list[pd.DataFrame] = []
+        for symbol in symbols:
+            api_symbol = _FMP_QUERY_ALIASES.get(symbol.upper(), symbol)
+            try:
+                records = self._client.get_json(
+                    "/stable/grades-historical", params=self._params(symbol=api_symbol),
+                )
+            except ProviderError as exc:
+                if "402" in str(exc):
+                    log.warning(
+                        "fmp_analyst_ratings_unavailable symbol=%s (subscription limit)",
+                        symbol,
+                    )
+                else:
+                    log.warning("fmp_analyst_ratings_failed symbol=%s (%s)", symbol, exc)
+                continue
+            except Exception:
+                log.exception("fmp_analyst_ratings_failed symbol=%s", symbol)
+                continue
+            rows = []
+            for rec in records if isinstance(records, list) else []:
+                date_raw = rec.get("date")
+                if not date_raw:
+                    continue
+                ts = pd.Timestamp(date_raw).normalize()
+                if not (start_ts <= ts <= end_ts):
+                    continue
+                rows.append(
+                    {
+                        "date": ts,
+                        "symbol": symbol,
+                        "strong_buy": rec.get("analystRatingsStrongBuy"),
+                        "buy": rec.get("analystRatingsBuy"),
+                        "hold": rec.get("analystRatingsHold"),
+                        "sell": rec.get("analystRatingsSell"),
+                        "strong_sell": rec.get("analystRatingsStrongSell"),
+                    }
+                )
+            if rows:
+                frames.append(pd.DataFrame(rows, columns=ANALYST_RATINGS_COLS))
+        if not frames:
+            return self.empty_analyst_ratings()
+        return (
+            pd.concat(frames, ignore_index=True)
+            .sort_values(["symbol", "date"])
+            .reset_index(drop=True)
+        )
 
     # ------------------------------------------------------------------
     # corporate actions

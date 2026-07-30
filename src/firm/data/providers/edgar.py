@@ -116,6 +116,11 @@ class EdgarProvider(DataProvider):
     def get_universe_constituents(self, index: str, date: str = "") -> list[str]:
         raise NotImplementedError("EdgarProvider does not supply index constituents.")
 
+    def get_analyst_ratings(
+        self, symbols: list[str], start: str, end: str
+    ) -> pd.DataFrame:
+        raise NotImplementedError("EdgarProvider does not provide analyst ratings; use FMP.")
+
     def _load_cik_map(self) -> dict[str, int]:
         if self._cik_map is not None:
             return self._cik_map

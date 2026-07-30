@@ -137,6 +137,11 @@ class FinnhubProvider(DataProvider):
     def get_universe_constituents(self, index: str, date: str = "") -> list[str]:
         raise NotImplementedError("FinnhubProvider does not supply index constituents.")
 
+    def get_analyst_ratings(
+        self, symbols: list[str], start: str, end: str
+    ) -> pd.DataFrame:
+        raise NotImplementedError("FinnhubProvider does not provide analyst ratings; use FMP.")
+
 
 def _metric_payload_to_rows(
     symbol: str,
