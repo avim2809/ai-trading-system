@@ -288,7 +288,12 @@ Key settings in that unit:
 - `ExecStart=$(pwd)/.venv/bin/firm-api` — single process for API + web UI + live engine
 - `EnvironmentFile=$(pwd)/.env` — API keys and broker credentials
 - `Environment=FIRM_AUTO_START_LIVE=1` — boots live from `config/live.yaml` on startup
-- `After=ibgateway.service` — waits for IB Gateway
+- `After=ibgateway.service` — waits for the IB Gateway *process* to fork
+- `ExecStartPre=scripts/wait_for_ibgateway.sh` — waits (up to 90s, configurable via
+  `IBGATEWAY_WAIT_TIMEOUT`) for IBC's headless login to actually open the API port,
+  since `After=`/`Wants=` alone don't — closes a real boot race that has silently
+  stopped the live engine before (see `docs/PROJECT_CONTEXT.md` "Broker & host
+  failover"). Always exits 0; never blocks `firm-api` from starting indefinitely.
 
 Add to `.env`:
 
@@ -312,6 +317,7 @@ Type=simple
 User=$USER
 WorkingDirectory=$(pwd)
 EnvironmentFile=$(pwd)/.env
+ExecStartPre=$(pwd)/scripts/wait_for_ibgateway.sh
 ExecStart=$(pwd)/.venv/bin/uvicorn firm.api.app:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=10

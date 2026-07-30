@@ -368,6 +368,65 @@ def bootstrap_live_from_yaml(app) -> None:
         )
 
 
+async def auto_start_live_with_retries(
+    app, delays: tuple[float, ...] = (1, 60, 180, 300),
+) -> bool:
+    """Call :func:`bootstrap_live_from_yaml` with retries on boot.
+
+    Safety net against a boot-race outage seen 2026-07-29:
+    ``scripts/wait_for_ibgateway.sh`` (an ``ai-trading.service`` ExecStartPre)
+    already gates process start on IB Gateway's port being open — the
+    primary fix — but IBC's login can rarely still be mid-flight past that
+    (2FA prompt, a slow Gateway/IBC update), and previously nothing retried
+    after a single failed attempt, so the engine silently stayed stopped for
+    hours with no one aware. ``bootstrap_live_from_yaml`` is safe to call
+    repeatedly (it no-ops if the engine is already running).
+
+    Stops retrying — and never tries again — the instant a start is ever
+    observed to succeed, so this can never fight an operator's later,
+    intentional ``POST /live/stop`` (which clears ``app.state.live_engine``).
+
+    Returns ``True`` if the engine came up (immediately, or after a retry),
+    ``False`` if ``FIRM_AUTO_START_LIVE`` isn't enabled or every retry was
+    exhausted without success (in which case a ``critical`` alert is fired
+    via :func:`firm.live.notifications.build_alert_callback`, if configured).
+    """
+    import asyncio
+    import os
+
+    flag = os.getenv("FIRM_AUTO_START_LIVE", "").lower()
+    if flag not in ("1", "true", "yes"):
+        return False
+
+    for delay in delays:
+        await asyncio.sleep(delay)
+        await asyncio.to_thread(bootstrap_live_from_yaml, app)
+        engine = getattr(app.state, "live_engine", None)
+        if engine is not None and engine.is_running:
+            return True
+
+    log.warning(
+        "Live engine still not running after boot + retries "
+        "(FIRM_AUTO_START_LIVE=1) — start manually via POST /api/live/start "
+        "once the underlying issue (e.g. IB Gateway) is resolved",
+    )
+    from firm.live.notifications import build_alert_callback
+
+    alert_callback = build_alert_callback()
+    if alert_callback is not None:
+        alert_callback({
+            "kind": "auto_start_failed",
+            "severity": "critical",
+            "message": (
+                "Live engine failed to auto-start after boot and all "
+                "retries (FIRM_AUTO_START_LIVE=1) — needs manual "
+                "POST /api/live/start."
+            ),
+            "cycle_id": None,
+        })
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Engine control
 # ---------------------------------------------------------------------------

@@ -13,6 +13,11 @@ Environment=FIRM_AUTO_START_LIVE=1
 # LLM A/B experiment — arm A (quant-only). Switch to config/llm_ab_llm.yaml for arm B.
 # See docs/llm_ab_test_runbook.md and docs/llm_ab_experiment_log.md.
 Environment=FIRM_LLM_CONFIG=config/llm_ab_quant.yaml
+# After=/Wants=ibgateway.service above only waits for the process to fork,
+# not for IBC's headless login to actually open the API port (30-60s+) — this
+# closes that race so auto-start doesn't lose to it on boot. Always exits 0
+# (a readiness delay, not a hard gate); see the script for the full rationale.
+ExecStartPre=/local/store/git/ai-trading-system/scripts/wait_for_ibgateway.sh
 ExecStart=/local/store/git/ai-trading-system/.venv/bin/firm-api
 Restart=always
 RestartSec=10

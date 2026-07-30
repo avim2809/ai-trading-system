@@ -7,10 +7,13 @@ logs or polling the dashboard — a kill-switch trip or an
 ``FIRM_ALLOW_TRADING`` block could sit unnoticed indefinitely.
 
 This module builds an ``alert_callback`` (the hook ``LiveTradingEngine``
-already accepts) that posts alerts to a generic webhook — Slack incoming
-webhooks and Microsoft Teams/Discord-style webhooks all accept a JSON body
-with a ``text`` field, so one HTTP POST covers the common cases without a
-hard dependency on any single vendor SDK.
+already accepts) that posts alerts to a generic webhook. Slack and Microsoft
+Teams incoming webhooks read a top-level ``text`` field; Discord's webhook
+API is stricter — it *requires* at least one of ``content``/``embeds``/
+``components``/``poll``/a file, and returns a 400 if none are present, so a
+``text``-only body is silently rejected there. Sending both ``text`` and
+``content`` with the same message covers all three with one POST and no
+hard dependency on any vendor SDK.
 
 Configuration (all optional; the callback is a no-op — returns ``None``
 from :func:`build_alert_callback` — when unset, so silence is the default
@@ -33,6 +36,9 @@ log = logging.getLogger(__name__)
 _SEVERITY_RANK = {"info": 0, "warning": 1, "critical": 2}
 
 
+_DISCORD_CONTENT_LIMIT = 2000  # Discord rejects content over this length.
+
+
 def _post_webhook(url: str, alert: dict[str, Any], timeout: float) -> None:
     import requests
 
@@ -40,7 +46,10 @@ def _post_webhook(url: str, alert: dict[str, Any], timeout: float) -> None:
         f"[{alert.get('severity', '?').upper()}] {alert.get('kind', 'alert')}: "
         f"{alert.get('message', '')} (cycle={alert.get('cycle_id')})"
     )
-    payload = {"text": text, "alert": alert}
+    text = text[: _DISCORD_CONTENT_LIMIT - 1] if len(text) > _DISCORD_CONTENT_LIMIT else text
+    # "text" for Slack/Teams, "content" for Discord (required there — see
+    # module docstring) — both carry the identical message.
+    payload = {"text": text, "content": text, "alert": alert}
     resp = requests.post(url, json=payload, timeout=timeout)
     resp.raise_for_status()
 

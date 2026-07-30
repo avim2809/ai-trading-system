@@ -43,18 +43,16 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         import asyncio
-        import os
 
         async def _auto_start_live() -> None:
-            flag = os.getenv("FIRM_AUTO_START_LIVE", "").lower()
-            if flag not in ("1", "true", "yes"):
-                return
             # IBKR connect uses ib_async on a worker thread — must not run on
             # uvicorn's main asyncio loop (same constraint as POST /live/start).
-            await asyncio.sleep(1)
-            from firm.api.routers.live import bootstrap_live_from_yaml
+            # See auto_start_live_with_retries's docstring for the retry/
+            # alerting rationale (safety net against a 2026-07-29 boot-race
+            # outage; primary fix is scripts/wait_for_ibgateway.sh).
+            from firm.api.routers.live import auto_start_live_with_retries
 
-            await asyncio.to_thread(bootstrap_live_from_yaml, application)
+            await auto_start_live_with_retries(application)
 
         task = asyncio.create_task(_auto_start_live())
         yield

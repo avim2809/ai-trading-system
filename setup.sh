@@ -85,7 +85,7 @@ if [ "$UNINSTALL" = true ]; then
     step "Uninstalling AI Trading System"
 
     # Stop and disable systemd services
-    for svc in firm-api ib-gateway; do
+    for svc in firm-api ibgateway; do
         if systemctl is-active --quiet "$svc" 2>/dev/null; then
             sudo systemctl stop "$svc"
             ok "Stopped $svc"
@@ -514,6 +514,11 @@ Type=simple
 User=$USER
 WorkingDirectory=$PROJECT_ROOT
 EnvironmentFile=$PROJECT_ROOT/.env
+# After=/Wants=ibgateway.service above only waits for the process to fork,
+# not for IBC's headless login to actually open the API port (30-60s+) — this
+# closes that race so auto-start doesn't lose to it on boot. Always exits 0
+# (a readiness delay, not a hard gate); see the script for the full rationale.
+ExecStartPre=$PROJECT_ROOT/scripts/wait_for_ibgateway.sh
 ExecStart=$VENV_UVICORN firm.api.app:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=10
@@ -524,12 +529,12 @@ SERVICE
     ok "Created /etc/systemd/system/firm-api.service"
 
     sudo systemctl daemon-reload
-    sudo systemctl enable ib-gateway firm-api
+    sudo systemctl enable ibgateway firm-api
     ok "Services enabled (will start on next boot)"
 
     warn "Before starting, complete these steps:"
     warn "  1. Edit ~/.ibc/config.ini — set IbLoginId and IbPassword"
-    warn "  2. sudo systemctl start ib-gateway"
+    warn "  2. sudo systemctl start ibgateway"
     warn "  3. Wait ~60s for Gateway login, then: sudo systemctl start firm-api"
     warn "  Monitor: sudo journalctl -u firm-api -f"
 elif [ "$INSTALL_SERVICES" = true ]; then
@@ -593,11 +598,11 @@ if [[ "$COMPONENTS" == *"live"* || "$COMPONENTS" == "all" ]] && \
    [ "$SKIP_IBKR" = false ] && [ "$SKIP_IBC" = false ]; then
     echo "    2. Edit ~/.ibc/config.ini with your IBKR credentials"
     if [ "$INSTALL_SERVICES" = true ]; then
-        echo "    3. sudo systemctl start ib-gateway   # starts headless Gateway"
+        echo "    3. sudo systemctl start ibgateway    # starts headless Gateway"
         echo "    4. sudo systemctl start firm-api     # starts API + frontend"
         echo "    5. Open http://localhost:8000"
     else
-        echo "    3. Start IB Gateway:  sudo systemctl start ib-gateway  (if --install-services was used)"
+        echo "    3. Start IB Gateway:  sudo systemctl start ibgateway  (if --install-services was used)"
         echo "       or manually:       ./scripts/start_ibgateway.sh paper"
         echo "    4. Start the server:  firm-api"
         echo "    5. Open http://localhost:8000"

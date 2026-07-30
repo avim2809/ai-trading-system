@@ -29,6 +29,25 @@ class TestBuildAlertCallback:
         args, kwargs = mock_post.call_args
         assert args[0] == "https://hooks.example.com/x"
         assert "drawdown_breach" in kwargs["json"]["text"]
+        # Discord's webhook API specifically requires "content" (not "text")
+        # or it rejects the payload with a 400 — both fields carry the same
+        # message so one POST works for Slack/Teams and Discord alike.
+        assert kwargs["json"]["content"] == kwargs["json"]["text"]
+
+    def test_discord_content_is_truncated_to_2000_chars(self, monkeypatch):
+        monkeypatch.setenv("ALERT_WEBHOOK_URL", "https://discord.com/api/webhooks/x/y")
+        cb = build_alert_callback()
+        mock_resp = MagicMock(status_code=200)
+        mock_resp.raise_for_status.return_value = None
+        with patch("requests.post", return_value=mock_resp) as mock_post:
+            cb({
+                "kind": "drawdown_breach",
+                "severity": "critical",
+                "message": "x" * 3000,
+                "cycle_id": 5,
+            })
+        content = mock_post.call_args.kwargs["json"]["content"]
+        assert len(content) <= 2000
 
     def test_filters_below_min_severity(self, monkeypatch):
         monkeypatch.setenv("ALERT_WEBHOOK_URL", "https://hooks.example.com/x")
