@@ -261,6 +261,12 @@ news_guard:
   before_min: 30                # minutes before an event to start holding
   after_min: 15                 # minutes after an event to keep holding
   offline: false                # true = use only the bundled events.csv
+  source: forexfactory          # forexfactory (default, free/keyless) | investing
+                                 # (richer coverage via the opt-in Investing.com
+                                 # scraper — requires INVESTING_SCRAPER_ENABLED=1
+                                 # in .env; a fetch failure falls through to
+                                 # forexfactory then the bundled CSV either way,
+                                 # see firm.live.news_guard.load_events)
 
 # ──────────────────────────────────────────────────────────────
 # Signal combination (research stage)

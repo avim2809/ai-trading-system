@@ -155,6 +155,11 @@ class LiveTradingEngine:
         self._news_guard_before = int(ng_cfg.get("before_min", 30))
         self._news_guard_after = int(ng_cfg.get("after_min", 15))
         self._news_guard_offline = bool(ng_cfg.get("offline", False))
+        # "forexfactory" (default, free/keyless) or "investing" (richer
+        # coverage via the opt-in, off-by-default Investing.com scraper —
+        # see firm.data.investing.calendar); either way a live-fetch
+        # failure falls through to forexfactory then the bundled CSV.
+        self._news_guard_source = str(ng_cfg.get("source", "forexfactory"))
         # Per-strategy return history for the optimal (inverse-covariance)
         # signal combination. Maintained in-process and only updated when
         # ``signal_combination.method == 'optimal'`` — so the confidence-
@@ -604,7 +609,9 @@ class LiveTradingEngine:
 
         at = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
         try:
-            events, source = ng.load_events(offline=self._news_guard_offline)
+            events, source = ng.load_events(
+                offline=self._news_guard_offline, source=self._news_guard_source,
+            )
         except Exception as exc:
             # The whole point of this gate is "don't trade blind into a
             # macro-event window"; if we can't tell where the events are

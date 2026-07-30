@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from firm.live.news_guard import (
     Event,
@@ -10,6 +11,7 @@ from firm.live.news_guard import (
     evaluate,
     instrument_currencies,
     is_crypto,
+    load_events,
     load_from_csv,
 )
 
@@ -71,3 +73,59 @@ class TestBundledCsv:
     def test_evaluate_offline_deterministic(self):
         res = evaluate("SPY", "2026-07-29T18:05:00Z", offline=True)
         assert res["decision"] == "block"  # inside FOMC window from bundled CSV
+
+
+class TestLoadEventsSourceDispatch:
+    """source="investing" ladder: investing -> forexfactory -> bundled CSV.
+    Default source="forexfactory" is unchanged (forexfactory -> bundled CSV)."""
+
+    def test_default_source_is_forexfactory_unchanged(self):
+        with patch(
+            "firm.live.news_guard.load_from_forexfactory", return_value=[NFP],
+        ) as mock_ff, patch("firm.live.news_guard.load_from_investing") as mock_investing:
+            events, source = load_events()
+        assert source == "forexfactory"
+        assert events == [NFP]
+        mock_ff.assert_called_once()
+        mock_investing.assert_not_called()
+
+    def test_investing_source_used_when_it_succeeds(self):
+        with patch("firm.live.news_guard.load_from_investing", return_value=[NFP]), \
+             patch("firm.live.news_guard.load_from_forexfactory") as mock_ff:
+            events, source = load_events(source="investing")
+        assert source == "investing"
+        assert events == [NFP]
+        mock_ff.assert_not_called()
+
+    def test_investing_failure_falls_back_to_forexfactory(self):
+        with patch(
+            "firm.live.news_guard.load_from_investing", side_effect=RuntimeError("blocked"),
+        ), patch("firm.live.news_guard.load_from_forexfactory", return_value=[NFP]):
+            events, source = load_events(source="investing")
+        assert source == "forexfactory"
+        assert events == [NFP]
+
+    def test_investing_empty_falls_back_to_forexfactory(self):
+        with patch("firm.live.news_guard.load_from_investing", return_value=[]), \
+             patch("firm.live.news_guard.load_from_forexfactory", return_value=[NFP]):
+            events, source = load_events(source="investing")
+        assert source == "forexfactory"
+        assert events == [NFP]
+
+    def test_investing_and_forexfactory_both_fail_falls_back_to_csv(self):
+        with patch(
+            "firm.live.news_guard.load_from_investing", side_effect=RuntimeError("blocked"),
+        ), patch(
+            "firm.live.news_guard.load_from_forexfactory", side_effect=RuntimeError("network"),
+        ):
+            events, source = load_events(source="investing")
+        assert source == "bundled-csv"
+        assert events  # the bundled CSV always has something
+
+    def test_offline_skips_every_live_source_including_investing(self):
+        with patch("firm.live.news_guard.load_from_investing") as mock_investing, \
+             patch("firm.live.news_guard.load_from_forexfactory") as mock_ff:
+            events, source = load_events(offline=True, source="investing")
+        assert source == "bundled-csv"
+        mock_investing.assert_not_called()
+        mock_ff.assert_not_called()

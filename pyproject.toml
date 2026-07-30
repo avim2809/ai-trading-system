@@ -64,6 +64,21 @@ local = [
 report = [
     "quantstats>=0.0.62",
 ]
+# Optional: Investing.com Pro authenticated scraper (firm.data.investing).
+# Off by default (INVESTING_SCRAPER_ENABLED unset) — this extra is only
+# needed once that feature is actually enabled. See
+# docs/investing_pro_integration.md. `playwright` drives every fetch, not
+# just login — a plain `requests` client gets HTTP 403 even on public pages
+# (confirmed empirically; investing.com blocks non-browser clients at the
+# edge), so there's no lighter-weight fallback for the GET path either. One
+# Chromium instance is launched and reused across all fetches within a run
+# (InvestingSession.close() / a `with` block tears it down), bounding the
+# ~300-500MB RAM cost to once per live cycle (once/day) rather than per
+# request. After installing this extra, run `playwright install chromium`.
+investing = [
+    "beautifulsoup4>=4.12",
+    "playwright>=1.48",
+]
 
 [project.scripts]
 fetch-data = "firm.scripts.fetch_data:main"

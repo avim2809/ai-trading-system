@@ -176,8 +176,50 @@ def bundled_csv_age_hours(path: Path = BUNDLED_CSV) -> Optional[float]:
     return (time.time() - mtime) / 3600.0
 
 
-def load_events(offline: bool = False) -> tuple[list[Event], str]:
-    """Return (events, source). Falls back to the bundled CSV on any failure."""
+def load_from_investing() -> list[Event]:
+    """Fetch the enriched Investing.com weekly calendar. Raises on failure.
+
+    Off by default and separate from the ``forexfactory``/``bundled-csv``
+    ladder below — requires ``INVESTING_SCRAPER_ENABLED=1`` (see
+    ``firm.data.investing.session``); raises ``InvestingDisabledError`` (a
+    ``ProviderError``) otherwise, which :func:`load_events` treats the same
+    as any other fetch failure and falls through on.
+    """
+    from firm.data.investing.calendar import fetch_calendar
+
+    return fetch_calendar()
+
+
+def load_events(offline: bool = False, source: str = "forexfactory") -> tuple[list[Event], str]:
+    """Return (events, source). Falls back to the bundled CSV on any failure.
+
+    Args:
+        offline: Skip every live fetch and use only the bundled CSV.
+        source: ``"forexfactory"`` (default, free/keyless) or ``"investing"``
+            (richer event coverage — see ``firm.data.investing.calendar``;
+            off by default via ``INVESTING_SCRAPER_ENABLED``). Either way,
+            a live-fetch failure falls through to Forex Factory (if that
+            wasn't already the primary source) and then the bundled CSV —
+            the existing fallback ladder is never bypassed, only prefixed.
+    """
+    if not offline and source == "investing":
+        try:
+            events = load_from_investing()
+            if events:
+                log.info(
+                    "news-guard: loaded %d events from Investing.com live calendar",
+                    len(events),
+                )
+                return events, "investing"
+            log.warning(
+                "news-guard: Investing.com calendar returned no events; "
+                "falling back to Forex Factory"
+            )
+        except Exception as exc:  # fall through to forexfactory -> bundled CSV
+            log.warning(
+                "news-guard: Investing.com calendar fetch failed (%s); "
+                "falling back to Forex Factory", exc, exc_info=True,
+            )
     if not offline:
         try:
             events = load_from_forexfactory()

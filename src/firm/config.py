@@ -104,6 +104,33 @@ class Settings(BaseSettings):
     sec_edgar_user_agent: str = ""
     fred_api_key: str = ""
 
+    # Investing.com Pro (no official API — authenticated scraper). Both
+    # empty and ``investing_scraper_enabled`` False by default: an unset
+    # master switch so this net-new, higher-ToS-risk data source never
+    # touches the network unless explicitly opted into. See
+    # firm.data.investing.session.InvestingSession.
+    investing_email: str = ""
+    investing_password: str = ""
+    investing_scraper_enabled: bool = False
+    # "playwright" (default): drive the real login form with a headless
+    # browser — no need to reverse-engineer the POST endpoint, but pulls in
+    # the optional `investing` extra (see pyproject.toml) and launches
+    # Chromium briefly (login only, not every fetch). "endpoint": skip the
+    # browser entirely by POSTing directly to a reverse-engineered login
+    # endpoint (see the three fields below) — lighter-weight if you've
+    # already captured the real request from devtools.
+    investing_auth_method: str = "playwright"
+    # Only used when investing_auth_method == "endpoint". Deliberately NOT
+    # hardcoded anywhere in source: this project does not guess/fabricate
+    # third-party API endpoints. Supply these after inspecting the real
+    # network request (browser devtools while logging in) — see the Phase 0
+    # spike in docs/investing_pro_integration.md. Field names in the login
+    # form (the literal HTML ``name="..."`` attributes for email/password)
+    # go in ``investing_login_field_map`` as "email:<name>,password:<name>".
+    investing_login_page_url: str = ""
+    investing_login_post_url: str = ""
+    investing_login_field_map: str = ""
+
     request_timeout_seconds: int = 30
     max_retries: int = 3
 
