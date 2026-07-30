@@ -35,7 +35,7 @@ def estimate_adv_dollars(
     try:
         price_df = pit_view.prices([symbol], lookback_days=lookback_days)
     except Exception as exc:
-        log.debug("ADV lookup failed for %s: %s", symbol, exc)
+        log.debug("ADV lookup failed for %s: %s", symbol, exc, exc_info=True)
         return None
     if price_df is None or price_df.empty or "volume" not in price_df.columns:
         return None

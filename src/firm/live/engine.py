@@ -524,13 +524,19 @@ class LiveTradingEngine:
                     f"{self._max_daily_trades}, turnover {projected_turnover_frac:.1%}/"
                     f"{self._max_daily_turnover:.1%}); full_auto — submitting anyway."
                 )
+                # full_auto means these orders proceed unchecked past a
+                # configured risk guardrail with no human in the loop — that's
+                # "at risk", not merely noteworthy, unlike the manual-approval
+                # branch below where the same breach is safely held.
+                severity = "critical"
             else:
                 msg = (
                     f"Daily limit would be breached (trades {projected_trades}/"
                     f"{self._max_daily_trades}, turnover {projected_turnover_frac:.1%}/"
                     f"{self._max_daily_turnover:.1%}); routing orders to manual approval."
                 )
-            self._emit_alert("daily_limit_breach", "warning", msg)
+                severity = "warning"
+            self._emit_alert("daily_limit_breach", severity, msg)
         if not breached or self._approval_mode == "full_auto":
             self._daily_trade_count = projected_trades
             self._daily_turnover_value += turnover_value
@@ -610,7 +616,7 @@ class LiveTradingEngine:
                 "news-guard calendar totally unavailable (%s) — failing "
                 "CLOSED: holding all %d order(s) this cycle rather than "
                 "trading blind through a possible blackout window.",
-                exc, len(orders),
+                exc, len(orders), exc_info=True,
             )
             alert = self._emit_alert(
                 "news_guard_calendar_unavailable", "critical",
@@ -1094,7 +1100,10 @@ class LiveTradingEngine:
                 if strategy_returns:
                     context["strategy_returns"] = strategy_returns
             except Exception:
-                log.debug(
+                # Silent attribution corruption directly undermines
+                # per-strategy circuit breakers fed by
+                # get_all_strategy_returns() — must be visible, not debug.
+                log.warning(
                     "attribution daily update failed", exc_info=True,
                 )
 
@@ -1155,7 +1164,10 @@ class LiveTradingEngine:
                         self._orders_to_fills(auto_orders), prices,
                     )
                 except Exception:
-                    log.debug(
+                    # Same rationale as the daily-update case above: this
+                    # quietly recording nothing undermines per-strategy
+                    # attribution/circuit breakers and must be visible.
+                    log.warning(
                         "attribution trade recording failed", exc_info=True,
                     )
 
@@ -1185,6 +1197,17 @@ class LiveTradingEngine:
                 self._consecutive_broker_failures += 1
                 reconnected = self._try_broker_reconnect()
                 message = f"Broker call failed during cycle: {exc}"
+                # Severity mirrors how urgent this actually is: a self-healed
+                # or not-yet-sustained failure is the exact "single dropped
+                # socket/blip — including IB Gateway's routine daily restart —
+                # shouldn't need a human" case _try_broker_reconnect's own
+                # docstring describes, so it stays "warning". Only the
+                # genuinely sustained case (crossed broker_disconnect_alert_
+                # threshold with reconnect still failing) is "critical" —
+                # previously all three branches hardcoded "critical", which
+                # would have paged the alert webhook for routine, already-
+                # resolved blips.
+                severity = "warning"
                 if reconnected:
                     message += (
                         " — reconnected successfully; the next cycle should "
@@ -1193,6 +1216,7 @@ class LiveTradingEngine:
                     alert_kind = "broker_unavailable"
                 elif self._consecutive_broker_failures >= self._broker_disconnect_alert_threshold:
                     alert_kind = "broker_disconnected_sustained"
+                    severity = "critical"
                     message = (
                         f"Broker has failed {self._consecutive_broker_failures} "
                         f"consecutive cycle(s) and automatic reconnect did not "
@@ -1204,7 +1228,7 @@ class LiveTradingEngine:
                 else:
                     alert_kind = "broker_unavailable"
                 result.alerts.append(self._emit_alert(
-                    alert_kind, "critical", message,
+                    alert_kind, severity, message,
                     consecutive_failures=self._consecutive_broker_failures,
                     reconnected=reconnected,
                 ))
@@ -1225,7 +1249,7 @@ class LiveTradingEngine:
         except Exception as exc:
             log.warning(
                 "Broker reconnect attempt failed (consecutive failures=%d): %s",
-                self._consecutive_broker_failures, exc,
+                self._consecutive_broker_failures, exc, exc_info=True,
             )
             return False
         log.info(

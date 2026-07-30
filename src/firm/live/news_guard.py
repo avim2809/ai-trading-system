@@ -194,7 +194,7 @@ def load_events(offline: bool = False) -> tuple[list[Event], str]:
         except Exception as exc:  # fall through to the offline calendar
             log.warning(
                 "news-guard: live calendar fetch failed (%s); "
-                "falling back to bundled offline calendar", exc,
+                "falling back to bundled offline calendar", exc, exc_info=True,
             )
     events = load_from_csv()
     age_hours = bundled_csv_age_hours()

@@ -191,6 +191,7 @@ class TraderAgent(Agent):
         try:
             df = pit_view.prices(symbols=[symbol], lookback_days=lookback)
         except Exception:
+            log.debug("Could not load prices for %s return series", symbol, exc_info=True)
             return None
         if df is None or df.empty:
             return None
@@ -209,6 +210,7 @@ class TraderAgent(Agent):
         try:
             df = pit_view.prices(symbols=[symbol], lookback_days=lookback)
         except Exception:
+            log.debug("Could not load prices for %s vol estimate", symbol, exc_info=True)
             return None
         if df is None or df.empty:
             return None

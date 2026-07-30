@@ -153,7 +153,7 @@ class TradingMemoryLog:
             raw = llm_service.chat_json(messages)
             parsed = parse_llm_response(DecisionReflection, raw, context=f"memory/{date}")
         except Exception as exc:
-            log.warning("Memory: LLM reflection failed for %s: %s", date, exc)
+            log.warning("Memory: LLM reflection failed for %s: %s", date, exc, exc_info=True)
 
         if parsed is not None:
             verdict, what_worked, what_failed, lesson = (
@@ -276,7 +276,9 @@ class TradingMemoryLog:
                 obj = json.loads(line)
                 entries[obj["date"]] = obj
         except Exception as exc:
-            log.warning("Memory: error reading log at %s: %s", self._path, exc)
+            log.warning(
+                "Memory: error reading log at %s: %s", self._path, exc, exc_info=True,
+            )
         return entries
 
     def _find_pending(self, date: str) -> dict | None:

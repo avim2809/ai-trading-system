@@ -35,8 +35,12 @@ class LLMAgentMixin:
             try:
                 from firm.llm.provider import LLMService
                 self._llm = LLMService(self._llm_config)
-            except Exception:
-                raise ImportError("firm.llm.provider.LLMService unavailable")
+            except Exception as exc:
+                log.warning(
+                    "LLMService unavailable — LLM enhancement disabled for this agent",
+                    exc_info=True,
+                )
+                raise ImportError("firm.llm.provider.LLMService unavailable") from exc
         return self._llm
 
     def _get_retriever(self) -> Any:
@@ -55,8 +59,12 @@ class LLMAgentMixin:
                     reranker_provider=rag.get("reranker_provider"),
                     reranker_model=rag.get("reranker_model"),
                 )
-            except Exception:
-                raise ImportError("RAG retriever unavailable")
+            except Exception as exc:
+                log.warning(
+                    "RAG retriever unavailable — RAG context disabled for this agent",
+                    exc_info=True,
+                )
+                raise ImportError("RAG retriever unavailable") from exc
         return self._retriever
 
     def _enhancement_cfg(self) -> dict[str, Any]:
@@ -140,7 +148,17 @@ class LLMAgentMixin:
             return "\n\n".join(
                 f"[{d.metadata.get('source', '?')}] {d.text}" for d in docs
             )
+        except ImportError:
+            return ""  # already logged by _get_retriever()
         except Exception:
+            # A retrieval-time failure (Chroma query, embedding API, etc.) —
+            # distinct from retriever *construction* failing above — was
+            # previously completely silent, with no log call at all.
+            log.warning(
+                "RAG context retrieval failed for %s — proceeding without "
+                "RAG context this cycle",
+                symbol, exc_info=True,
+            )
             return ""
 
     def _compress(self, text: str) -> str:

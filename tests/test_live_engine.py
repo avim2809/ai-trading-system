@@ -976,6 +976,9 @@ class TestEngineConfigUpdates:
         assert result.orders_submitted == 0
         assert result.orders_queued == 2
         assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
+        # Safely routed to manual approval — noteworthy, not an emergency.
+        alert = next(a for a in result.alerts if a["kind"] == "daily_limit_breach")
+        assert alert["severity"] == "warning"
 
     @patch("firm.live.engine.build_orchestrator")
     def test_daily_trade_limit_full_auto_still_submits(self, mock_build, engine_components):
@@ -996,6 +999,10 @@ class TestEngineConfigUpdates:
         assert result.orders_submitted == 2
         assert result.orders_queued == 0
         assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
+        # full_auto means these orders proceeded unchecked past a configured
+        # risk guardrail with no human in the loop — that's "at risk".
+        alert = next(a for a in result.alerts if a["kind"] == "daily_limit_breach")
+        assert alert["severity"] == "critical"
 
     @patch("firm.live.engine.build_orchestrator")
     def test_daily_turnover_limit_forces_manual_approval(self, mock_build, engine_components):
@@ -1036,6 +1043,8 @@ class TestEngineConfigUpdates:
         assert result.orders_submitted == 2
         assert result.orders_queued == 0
         assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
+        alert = next(a for a in result.alerts if a["kind"] == "daily_limit_breach")
+        assert alert["severity"] == "critical"
 
     @patch("firm.live.engine.build_orchestrator")
     def test_within_daily_limits_executes_normally(self, mock_build, engine_components):
@@ -1835,6 +1844,9 @@ class TestBrokerReconnect:
         alert = next(a for a in result.alerts if a["kind"] == "broker_unavailable")
         assert alert["reconnected"] is True
         assert alert["consecutive_failures"] == 1
+        # A self-healed reconnect is routine (IB Gateway's own daily restart
+        # is a normal cause) — must not page a human as "critical".
+        assert alert["severity"] == "warning"
 
     @patch("firm.live.engine.build_orchestrator")
     def test_sustained_disconnect_escalates_past_threshold(self, mock_build, engine_components):
@@ -1862,6 +1874,10 @@ class TestBrokerReconnect:
         result1 = engine.run_cycle()
         assert any(a["kind"] == "broker_unavailable" for a in result1.alerts)
         assert not any(a["kind"] == "broker_disconnected_sustained" for a in result1.alerts)
+        # Not yet past the threshold — "building toward an incident", not
+        # the incident itself — must not page a human as "critical" yet.
+        first_alert = next(a for a in result1.alerts if a["kind"] == "broker_unavailable")
+        assert first_alert["severity"] == "warning"
 
         result2 = engine.run_cycle()
         assert any(a["kind"] == "broker_disconnected_sustained" for a in result2.alerts)

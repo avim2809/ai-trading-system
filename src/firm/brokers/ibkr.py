@@ -252,7 +252,11 @@ class IBKRBroker(Broker):
                 symbol, ticker.close,
             )
             return ticker.close
-        log.warning("No midpoint, last, or close price available for %s; returning 0.0", symbol)
+        # Unlike the previous-close fallback above, this is the exact
+        # "fabricated zero feeding into order sizing" worst case this
+        # method's docstring warns about — deserves a louder level than the
+        # benign stale-but-real-price fallback three lines up.
+        log.error("No midpoint, last, or close price available for %s; returning 0.0", symbol)
         return 0.0
 
     def get_current_price(self, symbol: str) -> float:

@@ -140,7 +140,9 @@ class AlpacaBroker(Broker):
             # Alpaca raises a 404-backed exception for "no open position",
             # which is the expected/benign case — but any other failure
             # (auth, rate limit, network) looks identical here, so log it.
-            log.debug("get_position(%s) returned no result", symbol, exc_info=True)
+            # Was previously log.debug, which the default INFO level filters
+            # out entirely — contradicting this comment's own "so log it".
+            log.info("get_position(%s) returned no result", symbol, exc_info=True)
             return None
 
     def submit_order(self, order: OrderRequest) -> OrderStatus:

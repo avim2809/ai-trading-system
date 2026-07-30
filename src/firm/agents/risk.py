@@ -416,7 +416,10 @@ class RiskAgent(Agent):
         try:
             price_df = pit_view.prices(symbols, lookback_days=self.correlation_lookback_days)
         except Exception as exc:
-            log.warning("Correlation check skipped: failed to load price history (%s)", exc)
+            log.warning(
+                "Correlation check skipped: failed to load price history (%s)",
+                exc, exc_info=True,
+            )
             return targets, [], []
 
         if price_df is None or price_df.empty or "close" not in price_df.columns:
@@ -426,7 +429,14 @@ class RiskAgent(Agent):
             pivot = price_df.pivot_table(index="date", columns="symbol", values="close")
             corr = pivot.pct_change().dropna(how="all").corr()
         except Exception as exc:
-            log.debug("Correlation check: failed to compute correlation matrix (%s)", exc)
+            # A malformed-data failure here is at least as likely to indicate
+            # a real bug as the load failure above — same level, for the same
+            # reason: this is a risk-gate bypass (return unchanged targets),
+            # not a routine, safe-to-ignore event.
+            log.warning(
+                "Correlation check: failed to compute correlation matrix (%s)",
+                exc, exc_info=True,
+            )
             return targets, [], []
 
         violations: list[str] = []
@@ -497,7 +507,10 @@ class RiskAgent(Agent):
         try:
             price_df = pit_view.prices(symbols, lookback_days=self.cvar_lookback_days)
         except Exception as exc:
-            log.warning("CVaR check skipped: failed to load price history (%s)", exc)
+            log.warning(
+                "CVaR check skipped: failed to load price history (%s)",
+                exc, exc_info=True,
+            )
             return targets, [], []
         if price_df is None or price_df.empty or "close" not in price_df.columns:
             return targets, [], []
@@ -506,7 +519,13 @@ class RiskAgent(Agent):
             pivot = price_df.pivot_table(index="date", columns="symbol", values="close")
             rets = pivot.pct_change().dropna(how="all")
         except Exception as exc:
-            log.debug("CVaR check: failed to compute return matrix (%s)", exc)
+            # Same rationale as the correlation check above: a risk-gate
+            # bypass, not a routine event — must be as visible as the load
+            # failure a few lines up in this same function.
+            log.warning(
+                "CVaR check: failed to compute return matrix (%s)",
+                exc, exc_info=True,
+            )
             return targets, [], []
 
         port_returns = None

@@ -15,7 +15,7 @@ Last updated: 2026-07-30.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #41 has the most recent detail.
+   "Completed" item #42 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -308,6 +308,32 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     actually document basic auth + the new hardening (it previously didn't
     mention auth at all, despite that being what's actually protecting
     production).
+42. **Logging/alert severity audit** (2026-07-30) — a two-agent audit
+    (alert severities specifically, since those now drive the Discord
+    webhook; general Python logging hygiene separately) found and fixed real
+    mislabels. Most consequential: `broker_unavailable` was hardcoded
+    `"critical"` for every branch in `engine.py`'s `except BrokerError`
+    handler, including a same-cycle self-healed reconnect (e.g. IB Gateway's
+    routine daily restart) — would have paged the new webhook for routine,
+    already-resolved blips; now only the genuinely sustained case
+    (`broker_disconnected_sustained`, past `broker_disconnect_alert_threshold`)
+    is critical. `daily_limit_breach` now distinguishes `full_auto` (orders
+    proceed past the guardrail unchecked → critical) from safely-held manual
+    approval (→ warning) instead of both being warning. Also fixed: silent
+    `except Exception:` blocks with zero logging in
+    `agents/llm/base_llm_agent.py` (RAG retrieval failures were completely
+    invisible) and `agents/trader.py`; several `debug`-level logs for real
+    failures that should be visible at the default `INFO` level
+    (`engine.py` attribution tracking, `risk.py` correlation/CVaR checks,
+    `brokers/alpaca.py::get_position`); `brokers/ibkr.py`'s fabricated-0.0-
+    price fallback bumped from `warning` to `error` (same level as a benign
+    stale-price fallback, despite the method's own docstring calling it out
+    as the worst case); missing `exc_info=True` on several safety-path
+    exception logs (news-guard calendar fetch, broker reconnect, memory log
+    reads, fallback-provider construction). **Not done** (lower-value, high
+    file count): the same missing-`exc_info` pattern across ~15 data-provider
+    files' `ProviderError` catch sites — left as a documented, low-priority
+    follow-up rather than done in this pass.
 
 ## In progress
 

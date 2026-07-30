@@ -232,7 +232,7 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
                         "IBKR live sentiment: Massive → Alpha Vantage → Finnhub fallback chain"
                     )
             except Exception as exc:
-                log.warning("Fallback provider not available: %s", exc)
+                log.warning("Fallback provider not available: %s", exc, exc_info=True)
 
         if "sentiment" not in providers:
             log.warning(
