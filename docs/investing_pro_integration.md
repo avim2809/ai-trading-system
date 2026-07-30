@@ -1,4 +1,4 @@
-# Investing.com Pro integration — Phase 0-2a complete, strategy shipped disabled
+# Investing.com Pro integration — Phases 0-1 shipped, Phase 2a inconclusive, Phase 2b/3 blocked
 
 Session started 2026-07-30 at the user's request to leverage their paid
 Investing.com Pro subscription for trading signals. Investing.com has no
@@ -6,10 +6,17 @@ official API, so this required an authenticated web-scraper session
 (`src/firm/data/investing/`), plus a new `estimates()` PitView capability and
 `investing_analyst_ratings` strategy backed initially by FMP (for a real,
 backtestable evidence base) before ever wiring the live Investing.com feed.
-**Result: the strategy is implemented, tested, and registered — but shipped
-disabled**, following the same "build it → A/B it → document honestly → ship
-disabled if inconclusive" discipline as `docs/regime_ensemble_scoping.md`'s
-`strategy_regime_weights`/regime-ensemble precedent.
+**Result: the calendar integration (Phase 1) works and is opt-in-enabled; the
+analyst-ratings strategy is implemented/tested/registered but shipped
+disabled** (inconclusive A/B, see Phase 2a below), following the same
+"build it → A/B it → document honestly → ship disabled if inconclusive"
+discipline as `docs/regime_ensemble_scoping.md`'s
+`strategy_regime_weights`/regime-ensemble precedent. **The actual
+Pro-exclusive per-stock data (Fair Value, ProTips, Financial Health,
+ProPicks, technical-summary) turned out to be unreachable** — the pages that
+carry it are gated by an interactive Cloudflare challenge that a real user's
+browser passes and an automated session does not; see "Phase 2b/3" below for
+why this is a hard stop, not an engineering gap.
 
 ## Phase 0 — Authenticated session (`src/firm/data/investing/session.py`)
 
@@ -154,28 +161,52 @@ The strategy is fully implemented, tested (`tests/test_strategies.py`,
 in the registry — but registered-only, matching the
 `strategy_circuit_breaker`/regime-ensemble precedent for an inconclusive A/B.
 
-## What this means for Phase 2b / Phase 3
+## Phase 2b/3 — blocked: per-stock Pro pages are Cloudflare-gated, not just inconclusive
 
-The original plan's Phase 2b ("wire Investing.com Pro as the live feed for
-the same already-validated strategy") was explicitly contingent on Phase 2a
-showing a positive, non-overfit edge. It didn't. Wiring a live scraper feed
-for a strategy that isn't going to be enabled would add real maintenance
-surface (another dependency on Investing.com's markup staying stable) for no
-live value — so Phase 2b is **on hold pending a product decision**, not
-silently abandoned:
-- Option A: stop here. The calendar enrichment (Phase 1) already delivers
-  standalone value; the analyst-ratings strategy is honestly documented as
-  not working and available if a future recalibration (different scoring,
-  different universe, longer/shorter lookback) changes the picture.
-- Option B: still wire Investing.com's live "Analyst Ratings"/ProPicks/
-  technical-summary feeds (Phase 2b/3) for **shadow-mode** observation only
-  (compute + log, never act) — building a forward track record without
-  committing to "this works," the same posture the LLM A/B experiment uses.
-- Option C: revisit the strategy's scoring logic (e.g. weight recent rating
-  *changes* more heavily than the level, given the level's sign was so
-  unstable across windows) before spending more engineering effort on new
-  live-data plumbing for it.
+Two independent reasons converged to stop here, not one:
 
-This decision point should go back to the user rather than being made
-unilaterally, since it trades off further engineering effort against a
-currently-negative evidence base.
+1. **Phase 2a's A/B was inconclusive** (see above) — the original Phase 2b
+   plan ("wire Investing.com Pro as the live feed for the same
+   already-validated strategy") was explicitly contingent on a positive
+   backtest, which this wasn't.
+2. **The actual Pro-exclusive per-stock data isn't reachable at all**, for a
+   more fundamental reason discovered while investigating whether the
+   proxy-backtest even used the right kind of data. Fetching
+   `investing.com/pro/NASDAQGS:AAPL` (the real per-stock Pro dashboard —
+   Fair Value, ProTips, Financial Health, Growth/Profitability Rating, etc.)
+   with the authenticated `InvestingSession` returns an **interactive
+   Cloudflare Turnstile challenge** ("Just a moment...") every time,
+   consistently — confirmed by the user visiting the identical URL in their
+   own real browser, logged in, with no challenge and real (unblurred)
+   data. That rules out an account/subscription-tier explanation: this is
+   Cloudflare specifically distinguishing automated browser traffic from a
+   real user's session on this page (unlike the homepage/login/calendar
+   pages, which load fine either way).
+
+   Separately, and independent of the Cloudflare finding: the homepage's own
+   "Fair Value" table (which looked promising at first glance) turned out to
+   be a **marketing teaser widget** — stock names rendered blurred
+   (`blur-sm`, placeholder text "Aaaaa Aa A") and linking to
+   `/pro/pricing?entry=hp_invpro_fair_value_table`, an upsell page — not real
+   per-symbol data, even setting the Cloudflare issue aside.
+
+   **This is a hard stop, not an engineering gap to close.** Getting past an
+   interactive Cloudflare Turnstile challenge reliably requires
+   anti-detection/stealth tooling (browser fingerprint spoofing, residential
+   IP rotation, etc.) whose entire purpose is defeating bot-detection
+   systems — a meaningfully different thing from driving a normal headless
+   browser the way this project's Phase 0/1 already do, and not something
+   this integration will build. If that calculus changes (e.g. Investing.com
+   ships an official API, or the per-stock page's protection changes), this
+   is where to pick the thread back up.
+
+### Current state
+
+- **Shipped and enabled-by-default-off, working**: authenticated session
+  (Phase 0), economic calendar (Phase 1, opt-in via `news_guard.source:
+  investing`).
+- **Shipped, tested, registered, not enabled**: `investing_analyst_ratings`
+  strategy (FMP-backed; inconclusive A/B).
+- **Not pursued**: Investing.com Pro's per-stock Fair Value/ProTips/
+  Financial Health/ProPicks/technical-summary data — blocked by Cloudflare on
+  the pages that carry it, independent of the backtest result above.

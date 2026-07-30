@@ -355,8 +355,19 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     — shipped registered but NOT enabled in `config/live.yaml`**, same
     "ship disabled if inconclusive" discipline as the regime-ensemble
     precedent. Phase 2b (wiring the live Investing.com feed for this
-    strategy) and Phase 3 (ProPicks/technical-summary) are **on hold pending
-    a product decision** — see the doc's final section for the options.
+    strategy) and Phase 3 (ProPicks/technical-summary) are **blocked, not
+    just paused**: the per-stock Pro dashboard pages that carry this data
+    (`investing.com/pro/<TICKER>`) return an interactive Cloudflare
+    Turnstile challenge to the authenticated automated session every time —
+    confirmed as a genuine bot-detection signal, not an account-tier issue,
+    by the user loading the identical URL in their own real browser (loads
+    fine, real data, no challenge). Getting past that reliably needs
+    anti-detection/stealth browser tooling, which this integration
+    deliberately does not build (see the doc's final section). Separately,
+    the homepage's own "Fair Value" table — which looked like a shortcut
+    around this — turned out to be a blurred marketing teaser widget
+    (anonymized stock names linking to a pricing upsell page), not real
+    per-symbol data.
 
 ## In progress
 
