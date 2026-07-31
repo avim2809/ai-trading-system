@@ -253,14 +253,49 @@ class DanelfinProvider(DataProvider):
         return next(iter(data.values()), None)
 
     def get_trade_ideas(self, **filters) -> pd.DataFrame:
-        """Filterable screener sorted by 3-month win rate
-        (``/v3/trade-ideas``). ``filters`` forwarded as query params
-        (e.g. ``aiscore=8, sector="information-technology", limit=50``)."""
+        """Filterable screener (``/v3/trade-ideas``) — one row per symbol,
+        columns include ``sector``/``industry``, ``aiscore``/``low_risk``/
+        ``fundamental``/``technical``/``sentiment``, ``average_volume_3m``,
+        and ``win_rate_*``/``alpha_win_rate_*``/``avg_perf_*``/``avg_alpha_*``
+        (1m/3m/6m/1y each).
+
+        Verified live 2026-07-31 (this method's earlier implementation
+        assumed a ``{"items": [...]}`` response shape, which was wrong and
+        silently always returned empty — the real shape is
+        ``{date_str: {symbol: {...}}}``, identical to ``/ranking`` and
+        ``get_best_stocks``). Confirmed real, working filter params:
+        ``aiscore=N`` and ``low_risk=N`` are **minimum-threshold** filters
+        (not exact-match, despite the singular name), ``average_volume_3m=N``
+        is likewise a minimum, ``sector=<kebab-case>`` (e.g.
+        ``"information-technology"``, ``"energy"``, ``"health-care"``,
+        confirmed live), and ``limit`` is capped at 100 (HTTP 400 above
+        that) with **no pagination param** (``page`` is rejected as unknown,
+        unlike ``/ranking``) — so a single call can return at most 100
+        symbols; a broader sweep needs one call per ``sector`` filter.
+        There is no ``signal``/buy-sell filter param (confirmed rejected as
+        unknown) — every sampled trade-idea symbol's own
+        ``/v3/trading-parameters`` call returned ``signal: "buy"`` in
+        spot-checks, consistent with this endpoint's purpose (a "trade
+        idea" is inherently a buy call), but that hasn't been exhaustively
+        verified for every result.
+
+        The top-level response also carries sibling ``total``/``limit``/
+        ``offset`` int keys alongside the date key (confirmed live) —
+        unlike ``/ranking``/``get_best_stocks``, which only ever have date
+        keys. These must be skipped, not iterated as if they were dates.
+        """
         data = self._get_with_retry("/v3/trade-ideas", filters)
-        items = data.get("items") if isinstance(data, dict) else None
-        if not items:
+        if not data or (len(data) == 1 and "message" in data):
             return pd.DataFrame()
-        return pd.DataFrame(items)
+        rows = []
+        for date_str, symbols in data.items():
+            if not isinstance(symbols, dict):
+                continue  # skip sibling total/limit/offset metadata keys
+            for symbol, info in symbols.items():
+                rows.append({"date": date_str, "symbol": symbol, **info})
+        if not rows:
+            return pd.DataFrame()
+        return pd.DataFrame(rows)
 
     def get_live_signals(self, symbols: Sequence[str]) -> pd.DataFrame:
         """Combine trading-parameters + price-forecast + performance into

@@ -150,6 +150,64 @@ class TestDanelfinAiScores:
         assert kwargs["headers"] == {"x-api-key": "test-key"}
 
 
+class TestDanelfinTradeIdeas:
+    """Real response shape verified live 2026-07-31: {date: {symbol: {...}}},
+    NOT {"items": [...]} — the original implementation assumed the latter
+    and silently always returned empty; see get_trade_ideas's docstring."""
+
+    def test_maps_real_response_shape(self, provider):
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(
+            return_value={
+                "2026-07-30": {
+                    "VIST": {
+                        "aiscore": 9, "low_risk": 5, "average_volume_3m": 1017627,
+                        "sector": "energy", "win_rate_3m": 0.94,
+                    },
+                    "HWM": {
+                        "aiscore": 7, "low_risk": 6, "average_volume_3m": 2785673,
+                        "sector": "industrials", "win_rate_3m": 0.94,
+                    },
+                }
+            }
+        )
+        df = provider.get_trade_ideas(sector="energy", aiscore=1, low_risk=5, limit=100)
+        assert len(df) == 2
+        assert set(df["symbol"]) == {"VIST", "HWM"}
+        assert df[df["symbol"] == "VIST"].iloc[0]["sector"] == "energy"
+        assert df[df["symbol"] == "VIST"].iloc[0]["aiscore"] == 9
+
+    def test_empty_response_returns_empty_frame(self, provider):
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(return_value={})
+        df = provider.get_trade_ideas(sector="real-estate")
+        assert df.empty
+
+    def test_sibling_metadata_keys_are_skipped_not_iterated(self, provider):
+        """Real bug found live: the response carries sibling total/limit/
+        offset int keys alongside the date key — iterating them as if they
+        were {symbol: {...}} dicts raised AttributeError('int' has no
+        attribute 'items')."""
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(
+            return_value={
+                "2026-07-30": {"TSM": {"aiscore": 8, "sector": "information-technology"}},
+                "total": 42,
+                "limit": 100,
+                "offset": 0,
+            }
+        )
+        df = provider.get_trade_ideas(sector="information-technology", limit=100)
+        assert len(df) == 1
+        assert df.iloc[0]["symbol"] == "TSM"
+
+    def test_message_only_response_returns_empty_frame(self, provider):
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(return_value={"message": "no results"})
+        df = provider.get_trade_ideas(sector="utilities")
+        assert df.empty
+
+
 class TestDanelfinUnsupportedCapabilities:
     def test_other_capabilities_raise_not_implemented(self, provider):
         with pytest.raises(NotImplementedError):

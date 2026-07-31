@@ -1,0 +1,16 @@
+[Unit]
+Description=Run the Danelfin Best-Stocks arm daily after market close
+
+[Timer]
+# 22:00 UTC ≈ 6pm US/Eastern (5pm during DST) — safely after the 4pm ET
+# close, giving EOD price providers time to have data available. Explicit
+# "UTC" suffix matters — this server's local timezone is Asia/Jerusalem
+# (confirmed via timedatectl), not UTC; systemd OnCalendar defaults to
+# local time without it, which would have fired 3h too early (before the
+# US market even closes).
+OnCalendar=*-*-* 22:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

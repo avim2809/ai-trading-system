@@ -25,6 +25,7 @@ data/kill_switch_state.json
 data/live_state.db*
 data/cycle_history.json
 data/order_history.json
+data/best_stocks_ledger.json
 .coverage
 runs/
 .pytest_cache/

@@ -15,7 +15,7 @@ Last updated: 2026-07-31.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #45 has the most recent detail.
+   "Completed" item #46 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -425,6 +425,43 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     renamed `paper_12_strategy`, live service restarted and verified healthy
     (`GET /api/live/status` shows `danelfin_live_signals` active,
     `broker_connected: true`).
+46. **Danelfin "Best Stocks Strategy" — separate synthetic paper-tracking
+    arm, initialized and running** (2026-07-31) — full detail in
+    `docs/danelfin_best_stocks_arm.md`. The user shared Danelfin's own
+    published rules-based methodology (sector-ranked, 25-stock
+    equal-weight, quarterly/annual rebalance) and, given an explicit
+    3-way choice, chose to build it as a **separate tracked arm** rather
+    than blend it into the existing engine. Research into this project's
+    "LLM A/B" precedent found it's sequential (one engine/broker
+    account/state DB), not a real concurrent multi-arm setup — genuinely
+    running two simultaneous engines would need a second IBKR client ID, a
+    second systemd process, and a second `LiveStateStore` db (that store
+    has no experiment-name column). Rather than stand up that
+    infrastructure silently, this arm is a lightweight **synthetic
+    mark-to-market ledger** (real market data drives selection/valuation,
+    but no broker order is ever placed) — its own JSON state file,
+    independent of `data/live_state.db`. Building the sector-scan selector
+    on Danelfin's `/v3/trade-ideas` screener surfaced two more real,
+    previously undetected bugs in `DanelfinProvider.get_trade_ideas`
+    (introduced when `/v3/*` was first exposed in item #44, never
+    exercised until now): it assumed a `{"items": [...]}` response shape
+    (real shape: `{date: {symbol: {...}}}`, same as `/ranking`) and — even
+    after that fix — didn't skip the response's sibling `total`/`limit`/
+    `offset` int keys, crashing with `AttributeError`. Both fixed and
+    covered by new tests. Verified live filter semantics before building
+    on them (`aiscore`/`low_risk`/`average_volume_3m` are minimum-threshold
+    filters; `sector` is kebab-case; `limit` caps at 100 with no
+    pagination — one call per sector needed for a full sweep; no `signal`
+    filter exists, so "Proven Buy Signal" is inferred from the endpoint's
+    own buy-only purpose, spot-checked on 3 symbols). Ran the real
+    initialization live: 25 holdings across materials/energy/financials/
+    industrials/utilities (today's top 5 sectors — notably no tech or
+    healthcare), $100k synthetic capital, equal-weighted. Installed
+    `deploy/best-stocks-arm.{service,timer}` (systemd oneshot + daily
+    calendar timer, `OnCalendar=*-*-* 22:00:00 UTC`) and enabled it on this
+    host — caught a real timezone bug before it could cause a 3-hour-early
+    fire: this server's local timezone is `Asia/Jerusalem`, and systemd's
+    `OnCalendar` defaults to local time without an explicit `UTC` suffix.
 
 ## In progress
 
