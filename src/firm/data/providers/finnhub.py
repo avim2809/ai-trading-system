@@ -142,6 +142,9 @@ class FinnhubProvider(DataProvider):
     ) -> pd.DataFrame:
         raise NotImplementedError("FinnhubProvider does not provide analyst ratings; use FMP.")
 
+    def get_ai_scores(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        raise NotImplementedError("FinnhubProvider does not provide AI scores; use Danelfin.")
+
 
 def _metric_payload_to_rows(
     symbol: str,

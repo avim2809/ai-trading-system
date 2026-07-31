@@ -121,6 +121,9 @@ class EdgarProvider(DataProvider):
     ) -> pd.DataFrame:
         raise NotImplementedError("EdgarProvider does not provide analyst ratings; use FMP.")
 
+    def get_ai_scores(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        raise NotImplementedError("EdgarProvider does not provide AI scores; use Danelfin.")
+
     def _load_cik_map(self) -> dict[str, int]:
         if self._cik_map is not None:
             return self._cik_map

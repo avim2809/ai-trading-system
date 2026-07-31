@@ -97,6 +97,7 @@ def execute_backtest(config: dict) -> BacktestReport:
     fund_df = None
     sentiment_df = None
     estimates_df = None
+    ai_scores_df = None
     if data_source != "synthetic":
         try:
             from firm.config import get_settings
@@ -128,9 +129,20 @@ def execute_backtest(config: dict) -> BacktestReport:
                 "Analyst-ratings cache load failed — that strategy will be inactive",
                 exc_info=True,
             )
+        try:
+            from firm.config import get_settings
+            from firm.runtime import load_ai_scores
+
+            ai_scores_df = load_ai_scores(get_settings())
+        except Exception:
+            log.warning(
+                "AI-scores cache load failed — that strategy will be inactive",
+                exc_info=True,
+            )
 
     pit_store.load(
-        prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df, estimates=estimates_df,
+        prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df,
+        estimates=estimates_df, ai_scores=ai_scores_df,
     )
     if fund_df is not None and not fund_df.empty:
         log.info(

@@ -103,6 +103,7 @@ class Settings(BaseSettings):
     twelvedata_api_key: str = ""
     sec_edgar_user_agent: str = ""
     fred_api_key: str = ""
+    danelfin_api_key: str = ""
 
     # Investing.com Pro (no official API — authenticated scraper). Both
     # empty and ``investing_scraper_enabled`` False by default: an unset

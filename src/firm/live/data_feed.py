@@ -67,6 +67,19 @@ def _live_analyst_ratings_fetch_enabled() -> bool:
     return os.getenv(_LIVE_FETCH_RATINGS_ENV, "").strip().lower() in ("1", "true", "yes")
 
 
+# Danelfin's AI scores update daily (unlike analyst-ratings' monthly
+# cadence) — still cache-only by default for consistency with every other
+# optional capability here, opt in with FIRM_LIVE_FETCH_AI_SCORES=1. A live
+# fetch is cheap even when enabled: get_ai_scores(start=yesterday) only
+# pulls page 1 per symbol (its own pagination stops as soon as it reaches
+# `start`), not a full historical re-walk.
+_LIVE_FETCH_AI_SCORES_ENV = "FIRM_LIVE_FETCH_AI_SCORES"
+
+
+def _live_ai_scores_fetch_enabled() -> bool:
+    return os.getenv(_LIVE_FETCH_AI_SCORES_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
 class LivePitViewAdapter:
     """Adapts PointInTimeDataStore to the PitView protocol for live usage.
 
@@ -121,6 +134,14 @@ class LivePitViewAdapter:
     ) -> pd.DataFrame:
         syms = symbols or self._universe
         return self._pit_store.get_estimates(syms, self._asof, lookback_days)
+
+    def ai_scores(
+        self,
+        symbols: list[str] | None = None,
+        lookback_days: int = 30,
+    ) -> pd.DataFrame:
+        syms = symbols or self._universe
+        return self._pit_store.get_ai_scores(syms, self._asof, lookback_days)
 
 
 class LiveDataFeed:
@@ -340,6 +361,38 @@ class LiveDataFeed:
                 _LIVE_FETCH_RATINGS_ENV,
             )
 
+        ai_scores = pd.DataFrame()
+        try:
+            from firm.config import get_settings
+            from firm.runtime import load_ai_scores
+
+            cached_ai_scores = load_ai_scores(get_settings())
+            if cached_ai_scores is not None:
+                ai_scores = cached_ai_scores
+        except Exception:
+            log.warning("AI-scores cache load failed — continuing without it", exc_info=True)
+        ai_scores_prov = self._providers.get("ai_scores")
+        if ai_scores_prov and _live_ai_scores_fetch_enabled():
+            try:
+                fresh = ai_scores_prov.get_ai_scores(self._universe, start, end)
+                if not fresh.empty:
+                    ai_scores = (
+                        pd.concat([ai_scores, fresh], ignore_index=True)
+                        if not ai_scores.empty else fresh
+                    )
+                    ai_scores["date"] = pd.to_datetime(ai_scores["date"])
+                    ai_scores = ai_scores.sort_values(["symbol", "date"]).drop_duplicates(
+                        subset=["symbol", "date"], keep="last",
+                    )
+                log.info("Fetched %d AI-score rows", len(fresh))
+            except (NotImplementedError, Exception):
+                log.warning("AI-scores fetch failed — using cache if available", exc_info=True)
+        elif ai_scores_prov:
+            log.debug(
+                "Live AI scores: cache-only mode (set %s=1 to enable network fetch)",
+                _LIVE_FETCH_AI_SCORES_ENV,
+            )
+
         self._pit_store = PointInTimeDataStore()
         self._pit_store.set_universe_resolver(self._universe_resolver)
         self._pit_store.load(
@@ -347,6 +400,7 @@ class LiveDataFeed:
             fundamentals=fundamentals if not fundamentals.empty else None,
             sentiment=sentiment if not sentiment.empty else None,
             estimates=estimates if not estimates.empty else None,
+            ai_scores=ai_scores if not ai_scores.empty else None,
         )
 
         return LivePitViewAdapter(self._pit_store, asof, self._universe)

@@ -289,6 +289,11 @@ class FMPProvider(DataProvider):
             "FMPProvider corporate actions require a premium plan; use MassiveProvider."
         )
 
+    def get_ai_scores(
+        self, symbols: Sequence[str], start: datetime | str, end: datetime | str
+    ) -> pd.DataFrame:
+        raise NotImplementedError("FMPProvider does not provide AI scores; use DanelfinProvider.")
+
     # ------------------------------------------------------------------
     # universe
     # ------------------------------------------------------------------

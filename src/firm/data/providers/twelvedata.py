@@ -88,6 +88,9 @@ class TwelveDataProvider(DataProvider):
     ) -> pd.DataFrame:
         raise NotImplementedError("TwelveDataProvider does not provide analyst ratings; use FMP.")
 
+    def get_ai_scores(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        raise NotImplementedError("TwelveDataProvider does not provide AI scores; use Danelfin.")
+
 
 def _statistics_to_row(
     symbol: str,

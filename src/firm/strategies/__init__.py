@@ -5,6 +5,7 @@ from firm.strategies.registry import get, list_strategies, register
 
 # Import every strategy module so that @register decorators execute.
 from firm.strategies import (  # noqa: F401
+    danelfin_ai_score,
     event_driven,
     gann,
     investing_analyst_ratings,

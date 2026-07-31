@@ -7,6 +7,7 @@ Priority order (first non-empty result wins):
   corporate_actions Massive → (none)
   universe          FMP → (none)
   analyst_ratings   FMP → (none)
+  ai_scores         Danelfin → (none)
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import pandas as pd
 from firm.config import Settings, get_settings
 from firm.data.providers.base import DataProvider, ProviderError
 from firm.data.schemas import (
+    AI_SCORE_COLS,
     ANALYST_RATINGS_COLS,
     CORPORATE_ACTION_COLS,
     FUNDAMENTAL_COLS,
@@ -81,6 +83,7 @@ class FallbackProvider(DataProvider):
         self._actions_chain: list[str] = ["massive"]
         self._universe_chain: list[str] = ["fmp"]
         self._analyst_ratings_chain: list[str] = ["fmp"]
+        self._ai_scores_chain: list[str] = ["danelfin"]
 
     def _try_chain(
         self,
@@ -254,6 +257,18 @@ class FallbackProvider(DataProvider):
         return self._try_chain(
             self._analyst_ratings_chain, "get_analyst_ratings",
             pd.DataFrame(columns=ANALYST_RATINGS_COLS),
+            symbols, start, end,
+        )
+
+    def get_ai_scores(
+        self,
+        symbols: Sequence[str],
+        start: datetime | str,
+        end: datetime | str,
+    ) -> pd.DataFrame:
+        return self._try_chain(
+            self._ai_scores_chain, "get_ai_scores",
+            pd.DataFrame(columns=AI_SCORE_COLS),
             symbols, start, end,
         )
 

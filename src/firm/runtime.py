@@ -250,6 +250,23 @@ def load_analyst_ratings(settings: Settings) -> pd.DataFrame | None:
     return None
 
 
+def load_ai_scores(settings: Settings) -> pd.DataFrame | None:
+    """Load cached Danelfin AI-score panels when ``fetch-data`` wrote them.
+
+    Primary key: ``combined/ai_scores`` (ParquetCache) — same layout as
+    ``combined/analyst_ratings``. Returns ``None`` when absent so callers
+    degrade gracefully (the ``danelfin_ai_score`` strategy simply emits no
+    signals).
+    """
+    from firm.data.cache import ParquetCache
+
+    cache = ParquetCache(settings.data.cache_dir)
+    df = cache.get("combined/ai_scores")
+    if df is not None and not df.empty:
+        return df
+    return None
+
+
 def load_universe_membership(settings: Settings) -> pd.DataFrame | None:
     """Load historical index-membership windows for survivorship-aware backtests.
 
@@ -387,9 +404,28 @@ def run_backtest_from_config(
     except Exception:
         log.warning("Analyst-ratings cache load failed — that strategy will be inactive", exc_info=True)
 
+    ai_scores_df = None
+    try:
+        from firm.config import get_settings
+
+        ai_scores_df = load_ai_scores(get_settings())
+        if ai_scores_df is not None:
+            log.info(
+                "Loaded AI-scores cache: %d rows, %d symbols",
+                len(ai_scores_df), ai_scores_df["symbol"].nunique(),
+            )
+        else:
+            log.debug(
+                "No cached AI scores in backtest; the danelfin_ai_score "
+                "strategy will emit no signals"
+            )
+    except Exception:
+        log.warning("AI-scores cache load failed — that strategy will be inactive", exc_info=True)
+
     pit_store = PointInTimeDataStore()
     pit_store.load(
-        prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df, estimates=estimates_df,
+        prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df,
+        estimates=estimates_df, ai_scores=ai_scores_df,
     )
 
     # Optionally load FRED macro data — gracefully skipped when key is absent.

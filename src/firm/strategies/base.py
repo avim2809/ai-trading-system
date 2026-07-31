@@ -56,6 +56,13 @@ class PitView(Protocol):
     ) -> pd.DataFrame:
         ...
 
+    def ai_scores(
+        self,
+        symbols: list[str] | None = None,
+        lookback_days: int = 30,
+    ) -> pd.DataFrame:
+        ...
+
 
 class BaseStrategy(ABC):
     """Abstract base for all alpha strategies."""

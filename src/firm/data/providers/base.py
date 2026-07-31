@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 
 from firm.data.schemas import (
+    AI_SCORE_COLS,
     ANALYST_RATINGS_COLS,
     CORPORATE_ACTION_COLS,
     FUNDAMENTAL_COLS,
@@ -107,6 +108,10 @@ class DataProvider(ABC):
     def empty_analyst_ratings() -> pd.DataFrame:
         return pd.DataFrame(columns=ANALYST_RATINGS_COLS)
 
+    @staticmethod
+    def empty_ai_scores() -> pd.DataFrame:
+        return pd.DataFrame(columns=AI_SCORE_COLS)
+
     @abstractmethod
     def get_prices(
         self, symbols: list[str], start: str, end: str
@@ -147,4 +152,11 @@ class DataProvider(ABC):
         self, symbols: list[str], start: str, end: str
     ) -> pd.DataFrame:
         """Return analyst rating-consensus dataframe with ANALYST_RATINGS_COLS."""
+        ...
+
+    @abstractmethod
+    def get_ai_scores(
+        self, symbols: list[str], start: str, end: str
+    ) -> pd.DataFrame:
+        """Return AI-driven composite score dataframe with AI_SCORE_COLS."""
         ...

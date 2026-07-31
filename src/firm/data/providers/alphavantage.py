@@ -218,6 +218,13 @@ class AlphaVantageProvider(DataProvider):
             "AlphaVantageProvider does not provide analyst ratings; use FMPProvider."
         )
 
+    def get_ai_scores(
+        self, symbols: Sequence[str], start: datetime, end: datetime
+    ) -> pd.DataFrame:
+        raise NotImplementedError(
+            "AlphaVantageProvider does not provide AI scores; use DanelfinProvider."
+        )
+
 
 def _parse_av_time(value: str | None) -> pd.Timestamp:
     """Parse Alpha Vantage ``YYYYMMDDTHHMMSS`` timestamps."""

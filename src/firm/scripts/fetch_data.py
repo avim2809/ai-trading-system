@@ -24,7 +24,7 @@ log = logging.getLogger("firm.scripts.fetch_data")
 # Provider names understood by the CLI; "fallback" is the default.
 _KNOWN_PROVIDERS = {
     "fallback", "massive", "tiingo", "alphavantage", "fmp",
-    "finnhub", "edgar", "twelvedata",
+    "finnhub", "edgar", "twelvedata", "danelfin",
 }
 
 
@@ -73,6 +73,7 @@ def main(argv: list[str] | None = None) -> None:
     all_fundamentals: list[pd.DataFrame] = []
     all_sentiment: list[pd.DataFrame] = []
     all_analyst_ratings: list[pd.DataFrame] = []
+    all_ai_scores: list[pd.DataFrame] = []
 
     for name in providers_requested:
         if name not in _KNOWN_PROVIDERS:
@@ -149,6 +150,23 @@ def main(argv: list[str] | None = None) -> None:
             except NotImplementedError:
                 log.debug("  analyst_ratings: not supported by %s", name)
 
+        # AI scores (Danelfin)
+        cache_key = cache.make_key(
+            "ai_scores", provider=name, symbols=symbols, start=args.start, end=args.end,
+        )
+        if cache.has(cache_key):
+            log.info("  ai_scores: cache hit")
+            all_ai_scores.append(cache.get(cache_key))  # type: ignore[arg-type]
+        else:
+            try:
+                df = prov.get_ai_scores(symbols, args.start, args.end)
+                if not df.empty:
+                    cache.put(cache_key, df)
+                    all_ai_scores.append(df)
+                    log.info("  ai_scores: %d rows", len(df))
+            except NotImplementedError:
+                log.debug("  ai_scores: not supported by %s", name)
+
     # Combine
     combined_prices = pd.concat(all_prices, ignore_index=True) if all_prices else pd.DataFrame()
     combined_fundamentals = (
@@ -159,6 +177,9 @@ def main(argv: list[str] | None = None) -> None:
     )
     combined_analyst_ratings = (
         pd.concat(all_analyst_ratings, ignore_index=True) if all_analyst_ratings else pd.DataFrame()
+    )
+    combined_ai_scores = (
+        pd.concat(all_ai_scores, ignore_index=True) if all_ai_scores else pd.DataFrame()
     )
 
     if not combined_prices.empty:
@@ -175,13 +196,17 @@ def main(argv: list[str] | None = None) -> None:
         combined_analyst_ratings = cache.merge_combined(
             "combined/analyst_ratings", combined_analyst_ratings,
         )
+    if not combined_ai_scores.empty:
+        combined_ai_scores = cache.merge_combined("combined/ai_scores", combined_ai_scores)
 
     log.info(
-        "Done. Prices=%d rows, Fundamentals=%d rows, Sentiment=%d rows, AnalystRatings=%d rows",
+        "Done. Prices=%d rows, Fundamentals=%d rows, Sentiment=%d rows, "
+        "AnalystRatings=%d rows, AiScores=%d rows",
         len(combined_prices),
         len(combined_fundamentals),
         len(combined_sentiment),
         len(combined_analyst_ratings),
+        len(combined_ai_scores),
     )
 
 

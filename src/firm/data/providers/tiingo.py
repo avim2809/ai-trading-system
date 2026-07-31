@@ -133,3 +133,6 @@ class TiingoProvider(DataProvider):
 
     def get_analyst_ratings(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
         raise NotImplementedError("Tiingo does not provide analyst ratings; use FMP.")
+
+    def get_ai_scores(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        raise NotImplementedError("Tiingo does not provide AI scores; use Danelfin.")

@@ -475,3 +475,8 @@ class MassiveProvider(DataProvider):
         raise NotImplementedError(
             "MassiveProvider does not provide analyst ratings; use FMPProvider."
         )
+
+    def get_ai_scores(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        raise NotImplementedError(
+            "MassiveProvider does not provide AI scores; use DanelfinProvider."
+        )

@@ -164,6 +164,34 @@ def _make_estimates_df(
     return pd.DataFrame(rows)
 
 
+def _make_ai_scores_df(
+    symbols: list[str],
+    n_days: int = 40,
+    end_date: datetime | None = None,
+) -> pd.DataFrame:
+    """Generate synthetic daily Danelfin AI-score data for *symbols*
+    (AI_SCORE_COLS shape — mirrors /ranking's daily cadence)."""
+    if end_date is None:
+        end_date = datetime(2025, 6, 1)
+    rng = np.random.RandomState(321)
+    rows: list[dict] = []
+    for offset in range(n_days):
+        d = pd.Timestamp(end_date) - pd.Timedelta(days=offset)
+        for sym in symbols:
+            rows.append(
+                {
+                    "date": d,
+                    "symbol": sym,
+                    "ai_score": rng.randint(1, 11),
+                    "fundamental_score": rng.randint(1, 11),
+                    "technical_score": rng.randint(1, 11),
+                    "sentiment_score": rng.randint(1, 11),
+                    "low_risk_score": rng.randint(1, 11),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 class MockPitView:
     """In-memory PitView implementation for testing."""
 
@@ -175,6 +203,7 @@ class MockPitView:
         include_fundamentals: bool = True,
         include_sentiment: bool = True,
         include_estimates: bool = True,
+        include_ai_scores: bool = True,
     ):
         self._symbols = symbols or SYMBOLS
         self._asof = asof or datetime(2025, 6, 1)
@@ -192,6 +221,11 @@ class MockPitView:
         self._est_df = (
             _make_estimates_df(self._symbols, 6, self._asof)
             if include_estimates
+            else pd.DataFrame()
+        )
+        self._ai_score_df = (
+            _make_ai_scores_df(self._symbols, 40, self._asof)
+            if include_ai_scores
             else pd.DataFrame()
         )
 
@@ -258,6 +292,19 @@ class MockPitView:
             df = df[pd.to_datetime(df["date"]) >= cutoff]
         return df
 
+    def ai_scores(
+        self,
+        symbols: list[str] | None = None,
+        lookback_days: int = 30,
+    ) -> pd.DataFrame:
+        df = self._ai_score_df.copy()
+        if symbols and not df.empty:
+            df = df[df["symbol"].isin(symbols)]
+        if not df.empty:
+            cutoff = pd.Timestamp(self._asof) - pd.Timedelta(days=lookback_days)
+            df = df[pd.to_datetime(df["date"]) >= cutoff]
+        return df
+
 
 class EmptyPitView:
     """PitView that returns empty data for edge-case testing."""
@@ -282,6 +329,9 @@ class EmptyPitView:
     def estimates(self, symbols=None, lookback_days=365) -> pd.DataFrame:
         return pd.DataFrame()
 
+    def ai_scores(self, symbols=None, lookback_days=30) -> pd.DataFrame:
+        return pd.DataFrame()
+
 
 class SingleSymbolPitView:
     """PitView with a single symbol for edge-case testing."""
@@ -293,6 +343,7 @@ class SingleSymbolPitView:
         self._fund_df = _make_fundamental_df(self._sym, self._asof)
         self._sent_df = _make_sentiment_df(self._sym, 10, self._asof)
         self._est_df = _make_estimates_df(self._sym, 6, self._asof)
+        self._ai_score_df = _make_ai_scores_df(self._sym, 40, self._asof)
 
     @property
     def asof(self) -> datetime:
@@ -317,6 +368,11 @@ class SingleSymbolPitView:
 
     def estimates(self, symbols=None, lookback_days=365) -> pd.DataFrame:
         df = self._est_df.copy()
+        cutoff = pd.Timestamp(self._asof) - pd.Timedelta(days=lookback_days)
+        return df[pd.to_datetime(df["date"]) >= cutoff]
+
+    def ai_scores(self, symbols=None, lookback_days=30) -> pd.DataFrame:
+        df = self._ai_score_df.copy()
         cutoff = pd.Timestamp(self._asof) - pd.Timedelta(days=lookback_days)
         return df[pd.to_datetime(df["date"]) >= cutoff]
 
@@ -358,6 +414,7 @@ ALL_STRATEGY_NAMES = [
     "seasonality",
     "gann",
     "investing_analyst_ratings",
+    "danelfin_ai_score",
 ]
 
 
@@ -805,6 +862,80 @@ class TestInvestingAnalystRatings:
         msft = next(s for s in signals if s.symbol == "MSFT")
         assert aapl.meta["rating_delta"] > 0.5
         assert msft.meta["rating_delta"] == pytest.approx(0.0, abs=1e-6)
+
+
+class TestDanelfinAiScore:
+    def test_generate(self, pit_view):
+        strat = get("danelfin_ai_score")()
+        signals = strat.generate(pit_view)
+        assert len(signals) > 0
+        _validate_signals(signals, "danelfin_ai_score")
+
+    def test_empty_universe(self, empty_view):
+        strat = get("danelfin_ai_score")()
+        assert strat.generate(empty_view) == []
+
+    def test_no_ai_score_data(self):
+        view = MockPitView(include_ai_scores=False)
+        strat = get("danelfin_ai_score")()
+        assert strat.generate(view) == []
+
+    def test_fewer_than_3_symbols_emits_nothing(self):
+        view = MockPitView(symbols=["AAPL", "MSFT"])
+        strat = get("danelfin_ai_score")()
+        assert strat.generate(view) == []
+
+    def test_ai_score_10_scores_higher_than_ai_score_1(self):
+        view = MockPitView(symbols=["AAPL", "MSFT", "GOOG"])
+        asof = pd.Timestamp(view.asof)
+        rows = [
+            {"date": asof, "symbol": "AAPL", "ai_score": 10, "fundamental_score": 8,
+             "technical_score": 8, "sentiment_score": 8, "low_risk_score": 8},
+            {"date": asof, "symbol": "MSFT", "ai_score": 5, "fundamental_score": 5,
+             "technical_score": 5, "sentiment_score": 5, "low_risk_score": 5},
+            {"date": asof, "symbol": "GOOG", "ai_score": 1, "fundamental_score": 3,
+             "technical_score": 3, "sentiment_score": 3, "low_risk_score": 3},
+        ]
+        view._ai_score_df = pd.DataFrame(rows)
+        strat = get("danelfin_ai_score")()
+
+        signals = strat.generate(view)
+        by_symbol = {s.symbol: s for s in signals}
+        assert by_symbol["AAPL"].score > by_symbol["MSFT"].score > by_symbol["GOOG"].score
+        assert by_symbol["AAPL"].meta["ai_score_level"] == pytest.approx(10.0)
+        assert by_symbol["AAPL"].meta["fundamental_score"] == pytest.approx(8.0)
+        assert by_symbol["GOOG"].meta["ai_score_level"] == pytest.approx(1.0)
+
+    def test_delta_uses_lookback_days_not_the_full_fetch_buffer(self):
+        """Regression (mirrors sentiment.py/investing_analyst_ratings.py's
+        identical fix): 'old' must be ~lookback_days before asof, not just
+        the first row of the fetched buffer."""
+        view = MockPitView(symbols=["AAPL", "MSFT", "GOOG"])
+        asof = pd.Timestamp(view.asof)
+        rows = []
+        for offset in range(35, 0, -1):
+            d = asof - pd.Timedelta(days=offset)
+            for sym in ("AAPL", "MSFT", "GOOG"):
+                rows.append({"date": d, "symbol": sym, "ai_score": 5,
+                             "fundamental_score": 5, "technical_score": 5,
+                             "sentiment_score": 5, "low_risk_score": 5})
+        rows.append({"date": asof, "symbol": "AAPL", "ai_score": 10,
+                     "fundamental_score": 5, "technical_score": 5,
+                     "sentiment_score": 5, "low_risk_score": 5})
+        rows.append({"date": asof, "symbol": "MSFT", "ai_score": 5,
+                     "fundamental_score": 5, "technical_score": 5,
+                     "sentiment_score": 5, "low_risk_score": 5})
+        rows.append({"date": asof, "symbol": "GOOG", "ai_score": 5,
+                     "fundamental_score": 5, "technical_score": 5,
+                     "sentiment_score": 5, "low_risk_score": 5})
+        view._ai_score_df = pd.DataFrame(rows)
+        strat = get("danelfin_ai_score")()
+
+        signals = strat.generate(view)
+        aapl = next(s for s in signals if s.symbol == "AAPL")
+        msft = next(s for s in signals if s.symbol == "MSFT")
+        assert aapl.meta["ai_score_delta"] > 3.0
+        assert msft.meta["ai_score_delta"] == pytest.approx(0.0, abs=1e-6)
 
 
 class TestEventDriven:

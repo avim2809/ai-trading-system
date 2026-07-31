@@ -62,6 +62,21 @@ ANALYST_RATINGS_COLS: list[str] = [
     "strong_sell",
 ]
 
+# Danelfin AI-driven composite scores (1-10 scale per component). See
+# firm.data.providers.danelfin.DanelfinProvider.get_ai_scores and
+# firm.strategies.danelfin_ai_score. "fundamental_score" can be null (missing
+# for some historical dates per Danelfin's own data) — callers must handle
+# missing values, not assume every column is always populated.
+AI_SCORE_COLS: list[str] = [
+    "date",
+    "symbol",
+    "ai_score",
+    "fundamental_score",
+    "technical_score",
+    "sentiment_score",
+    "low_risk_score",
+]
+
 # Universe membership window columns (used by UniverseResolver for
 # survivorship-aware point-in-time index membership).
 COL_INDEX = "index"

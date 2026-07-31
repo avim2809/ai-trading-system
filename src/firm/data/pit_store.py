@@ -26,6 +26,7 @@ class PointInTimeDataStore:
         self._fundamentals: pd.DataFrame = pd.DataFrame()
         self._sentiment: pd.DataFrame = pd.DataFrame()
         self._estimates: pd.DataFrame = pd.DataFrame()
+        self._ai_scores: pd.DataFrame = pd.DataFrame()
         self._corporate_actions: pd.DataFrame = pd.DataFrame()
         # Macro series keyed by FRED series ID → DataFrame[date, <series_id>]
         self._macro: dict[str, pd.DataFrame] = {}
@@ -44,21 +45,25 @@ class PointInTimeDataStore:
         sentiment: pd.DataFrame | None = None,
         corporate_actions: pd.DataFrame | None = None,
         estimates: pd.DataFrame | None = None,
+        ai_scores: pd.DataFrame | None = None,
     ) -> None:
         """Load all datasets. Called once at backtest start."""
         self._prices = self._ensure_date_col(prices)
         self._fundamentals = self._ensure_date_col(fundamentals) if fundamentals is not None else pd.DataFrame()
         self._sentiment = self._ensure_date_col(sentiment) if sentiment is not None else pd.DataFrame()
         self._estimates = self._ensure_date_col(estimates) if estimates is not None else pd.DataFrame()
+        self._ai_scores = self._ensure_date_col(ai_scores) if ai_scores is not None else pd.DataFrame()
         self._corporate_actions = (
             self._ensure_date_col(corporate_actions) if corporate_actions is not None else pd.DataFrame()
         )
         log.info(
-            "PIT store loaded: %d price rows, %d fundamental rows, %d sentiment rows, %d estimates rows",
+            "PIT store loaded: %d price rows, %d fundamental rows, %d sentiment rows, "
+            "%d estimates rows, %d ai_score rows",
             len(self._prices),
             len(self._fundamentals),
             len(self._sentiment),
             len(self._estimates),
+            len(self._ai_scores),
         )
 
     @staticmethod
@@ -151,6 +156,28 @@ class PointInTimeDataStore:
             & (self._estimates["date"] >= earliest)
         )
         return self._estimates.loc[mask].copy()
+
+    def get_ai_scores(
+        self,
+        symbols: list[str],
+        asof: datetime,
+        lookback_days: int = 30,
+    ) -> pd.DataFrame:
+        """Return Danelfin AI-score snapshots where date <= asof within the
+        lookback window (AI_SCORE_COLS). Danelfin's /ranking is a daily
+        series (unlike get_estimates' monthly-cadence default), so a ~30-day
+        default is enough to compute a short-term level/trend without
+        pulling in a whole year of daily rows."""
+        if self._ai_scores.empty:
+            return pd.DataFrame()
+        asof_ts = pd.Timestamp(asof)
+        earliest = asof_ts - timedelta(days=lookback_days)
+        mask = (
+            self._ai_scores["symbol"].isin(symbols)
+            & (self._ai_scores["date"] <= asof_ts)
+            & (self._ai_scores["date"] >= earliest)
+        )
+        return self._ai_scores.loc[mask].copy()
 
     def get_sentiment(
         self,
