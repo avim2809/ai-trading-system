@@ -15,7 +15,7 @@ Last updated: 2026-07-31.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #43 has the most recent detail.
+   "Completed" item #44 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -368,6 +368,36 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     around this — turned out to be a blurred marketing teaser widget
     (anonymized stock names linking to a pricing upsell page), not real
     per-symbol data.
+44. **Danelfin AI-score integration — enabled in live paper trading**
+    (2026-07-31) — full detail in `docs/investing_pro_integration.md`
+    ("Danelfin AI-score" section). The user subscribed to Danelfin (Expert
+    API plan) as a genuine-API replacement for the unreachable Investing.com
+    Pro per-stock data. Verified live: `GET /ranking?ticker=X` has real
+    historical AI/Fundamental/Technical/Sentiment/Low-Risk scores back to
+    ~2016 (an undocumented `page=N` param is the only way to paginate that
+    far — not in Danelfin's own official docs). Built the same
+    `ai_scores()` PitView capability + `danelfin_ai_score` strategy pattern
+    as `investing_analyst_ratings`, this time wiring all 3 backtest
+    data-loading paths from the start (the missing-path bug from item #43
+    was caught and fixed there, not repeated here). **A/B across the
+    standard 3 diagnostic windows: portfolio Sharpe improved in every single
+    window** (+0.279, +0.589, +1.576) — the most consistent result of
+    anything tried this session (contrast with `investing_analyst_ratings`'
+    mixed record, worse in 1 of 3). Honest caveat: the strategy's own
+    standalone Sharpe was itself inconsistent (positive in the recent
+    window, negative in the two older folds) — likely a genuine
+    diversification effect under `optimal` combination rather than
+    unambiguous proof of Danelfin's "AI Score predicts returns" marketing
+    claim, but the portfolio-level metric this project has always promoted
+    on was unambiguously better every time. **Enabled in `config/live.yaml`**
+    (`strategies.enabled`/`auto_approve`, experiment renamed
+    `paper_11_strategy`), live service restarted and verified healthy
+    (`GET /api/live/status` shows `danelfin_ai_score` active,
+    `broker_connected: true`). Also exposed Danelfin's `/v3/*`
+    latest-snapshot endpoints (best-stocks/trading-parameters/
+    price-forecast/performance) as read-only `DanelfinProvider` methods —
+    not backtestable (no historical dates per Danelfin's docs) and
+    deliberately not wired into any strategy/risk/execution logic yet.
 
 ## In progress
 

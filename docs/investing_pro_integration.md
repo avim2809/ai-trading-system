@@ -1,4 +1,4 @@
-# Investing.com Pro integration — Phases 0-1 shipped, Phase 2a inconclusive, Phase 2b/3 blocked
+# Investing.com Pro / Danelfin integration — calendar + Danelfin enabled, FMP analyst-ratings shipped disabled
 
 Session started 2026-07-30 at the user's request to leverage their paid
 Investing.com Pro subscription for trading signals. Investing.com has no
@@ -6,17 +6,29 @@ official API, so this required an authenticated web-scraper session
 (`src/firm/data/investing/`), plus a new `estimates()` PitView capability and
 `investing_analyst_ratings` strategy backed initially by FMP (for a real,
 backtestable evidence base) before ever wiring the live Investing.com feed.
-**Result: the calendar integration (Phase 1) works and is opt-in-enabled; the
-analyst-ratings strategy is implemented/tested/registered but shipped
-disabled** (inconclusive A/B, see Phase 2a below), following the same
-"build it → A/B it → document honestly → ship disabled if inconclusive"
-discipline as `docs/regime_ensemble_scoping.md`'s
-`strategy_regime_weights`/regime-ensemble precedent. **The actual
-Pro-exclusive per-stock data (Fair Value, ProTips, Financial Health,
-ProPicks, technical-summary) turned out to be unreachable** — the pages that
-carry it are gated by an interactive Cloudflare challenge that a real user's
-browser passes and an automated session does not; see "Phase 2b/3" below for
-why this is a hard stop, not an engineering gap.
+That FMP-backed A/B came back inconclusive, and separately the actual
+Investing.com Pro per-stock data (Fair Value, ProTips, Financial Health,
+ProPicks, technical-summary) turned out to be unreachable — gated by an
+interactive Cloudflare challenge a real browser passes and an automated
+session does not (see "Phase 2b/3" below). The user then subscribed to
+**Danelfin** (a genuine paid REST API, not a scraper) to fill the same gap
+with real, backtestable data — that A/B came back **consistently positive
+across all 3 diagnostic windows** and is now **enabled in live paper
+trading** (see "Danelfin AI-score" below).
+
+**Summary of where everything landed:**
+- Economic calendar (Phase 1): shipped, opt-in-enabled.
+- `investing_analyst_ratings` (FMP-backed): shipped, tested, registered,
+  **not enabled** — inconclusive A/B.
+- `danelfin_ai_score` (Danelfin-backed): shipped, tested, registered, **and
+  enabled** in `config/live.yaml` — consistently positive A/B.
+- Investing.com Pro's actual per-stock data: **unreachable**, Cloudflare-gated.
+
+All of this follows the same "build it → A/B it → document honestly → ship
+disabled if inconclusive, enable if consistently positive" discipline as
+`docs/regime_ensemble_scoping.md`'s `strategy_regime_weights`/regime-ensemble
+precedent (which is *also* still disabled, for comparison — that one didn't
+clear this bar; `danelfin_ai_score` did).
 
 ## Phase 0 — Authenticated session (`src/firm/data/investing/session.py`)
 
@@ -200,13 +212,124 @@ Two independent reasons converged to stop here, not one:
    ships an official API, or the per-stock page's protection changes), this
    is where to pick the thread back up.
 
+## Danelfin AI-score — a genuine paid API, not a scraper (2026-07-31, enabled)
+
+While Investing.com Pro's actual differentiated data turned out to be
+unreachable, the user separately subscribed to **Danelfin** (Expert plan)
+specifically to fill that gap with real, backtestable data. Unlike
+Investing.com, this needed no browser automation at all — Danelfin has a
+genuine, documented REST API (`https://apirest.danelfin.com`, header auth)
+meant to be called directly.
+
+### What it is
+
+Danelfin scores every US-listed stock/ETF (+ major European names) 1-10 on
+five axes — AI Score (composite), Fundamental, Technical, Sentiment, Low
+Risk — updated daily. Their own marketing claims 10/10-scored stocks have
+historically outperformed by ~+21% (3-month annualized alpha) while
+1/10-scored stocks underperformed by ~-33%; this integration tests that
+claim directly rather than taking it at face value.
+
+### What was verified live before building anything
+
+- `GET /ranking?ticker=<SYMBOL>` is the only endpoint with genuine
+  historical depth — real dated scores back to ~2016-12 (matching the
+  advertised "since 2017"). An **undocumented** `page=<N>` query parameter
+  (not in Danelfin's own official docs, empirically verified across pages
+  1 through 25+) is the only way to paginate back that far — the documented
+  params (`ticker`, `date`, score filters, `sector`, etc.) have no date-range
+  option.
+- The `/v3/*` endpoints (`beststocks`, `trading-parameters`, `price-forecast`,
+  `performance`, `trade-ideas`) are **latest-snapshot-only, no historical
+  dates** (confirmed in Danelfin's own docs) — not backtestable, exposed on
+  `DanelfinProvider` as read-only fetchers for future live/shadow-mode use,
+  deliberately **not wired into any strategy or risk/execution logic** (e.g.
+  `trading-parameters`' stop-loss/take-profit levels could inform
+  `RiskAgent`/`ExecutionAgent`, but that's a live-risk-relevant behavioral
+  change needing its own explicit review, not something to fold in silently
+  alongside a new alpha signal).
+- One account/key discrepancy worth flagging: the API key returned "Too Many
+  Requests" after only ~4 rapid calls during initial testing, which doesn't
+  match Danelfin's documented rate limit for anything above their Free tier
+  (60-180/min) — the user confirmed they're on the Expert plan (10,000
+  calls/mo, 120/min) shortly after, so this was very likely the plan/key
+  still propagating rather than a real Free-tier cap, but worth a look if
+  rate-limiting recurs.
+
+### What shipped
+
+Mirrors the `investing_analyst_ratings`/`estimates()` pattern exactly (a new
+`ai_scores()` PitView capability): `AI_SCORE_COLS` schema,
+`DataProvider.get_ai_scores` abstract method (stubbed `NotImplementedError`
+on every other provider), `DanelfinProvider` (real implementation),
+`FallbackProvider` chain (Danelfin-only), `PointInTimeDataStore`, both
+PitViewAdapters, `provider_utils`, `fetch_data.py`'s cache pipeline, and —
+learned from the `investing_analyst_ratings` episode — **all three**
+backtest data-loading paths (`runtime.py`, `firm.backtest.run.execute_backtest`,
+`scripts/run_backtest.py`) wired from the start this time, not discovered
+missing after a silent zero-signal A/B.
+
+`firm.strategies.danelfin_ai_score.DanelfinAiScoreStrategy`: AI-score level
+(centered at the 1-10 scale's midpoint, 5.5) + trend, emitted as a raw score
+— by construction bounded within ±9 (level ±4.5, trend weighted at 0.5 of
+its own ±9 range) to stay inside this project's raw-score sanity convention
+even under adversarial data (a real bug caught by the shared
+`test_strategies.py` synthetic-data harness during development, fixed by
+tempering `delta_weight` from 1.0 to 0.5).
+
+### A/B results — same 3 diagnostic windows, `scripts/calibrate_danelfin_ai_score.py`
+
+| window | arm | portfolio Sharpe | portfolio return | ai_score's own Sharpe |
+|---|---|---|---|---|
+| run_18mo_2025_2026 | baseline | 0.708 | 0.067 | — |
+| run_18mo_2025_2026 | **+ai_score** | **0.987** | 0.091 | 1.336 |
+| wf_fold0_2020_2021 | baseline | -0.729 | -0.021 | — |
+| wf_fold0_2020_2021 | **+ai_score** | **-0.140** | -0.005 | -0.671 |
+| wf_fold1 | baseline | -0.930 | -0.017 | — |
+| wf_fold1 | **+ai_score** | **0.646** | 0.012 | -0.513 |
+
+Raw results: `/tmp/danelfin_ai_score_calibration.json`.
+
+### Finding — consistently positive at the portfolio level; enabled
+
+Unlike `investing_analyst_ratings`'s mixed record (worse in 1 of 3 windows),
+adding `danelfin_ai_score` **improved portfolio Sharpe in all 3 windows**
+(+0.279, +0.589, +1.576) — the most consistent result of anything tried this
+session. **Honest caveat**: the strategy's own standalone attributed Sharpe
+is itself inconsistent (+1.336 in the recent window, -0.671 and -0.513 in
+the two older folds) — the portfolio-level improvement despite a negative
+standalone Sharpe in 2 of 3 windows looks like the `optimal`
+inverse-covariance combiner using it as a diversifier (low/negative
+correlation with the other 10 strategies) rather than unambiguous proof of
+Danelfin's own "the AI Score directly predicts returns" marketing claim.
+That distinction matters for interpretation, but the metric this project
+has consistently promoted features on (portfolio-level Sharpe, e.g. the
+`optimal` vs `confidence` combination-method decision) was unambiguously
+better in every window, with no counter-example.
+
+**Decision: enabled in `config/live.yaml`** (`strategies.enabled` +
+`auto_approve`, `experiment.name` bumped to `paper_11_strategy`) — verified
+via `GET /api/live/status` after a live-service restart that
+`danelfin_ai_score` is active and the broker connection/engine health were
+unaffected. Monitor live per-strategy attribution the same way every other
+strategy here is monitored; revert the single `config/live.yaml` line to
+disable if it doesn't hold up in live paper trading, matching this
+project's standard promotion-gate discipline.
+
 ### Current state
 
-- **Shipped and enabled-by-default-off, working**: authenticated session
-  (Phase 0), economic calendar (Phase 1, opt-in via `news_guard.source:
-  investing`).
+- **Shipped and enabled-by-default-off, working**: authenticated Investing.com
+  session (Phase 0), economic calendar (Phase 1, opt-in via
+  `news_guard.source: investing`).
 - **Shipped, tested, registered, not enabled**: `investing_analyst_ratings`
   strategy (FMP-backed; inconclusive A/B).
+- **Shipped, tested, registered, and ENABLED in live paper trading**:
+  `danelfin_ai_score` strategy (Danelfin-backed; consistently positive A/B).
+- **Available but not wired into any strategy**: Danelfin's `/v3/*`
+  latest-snapshot endpoints (best-stocks, trading-parameters, price-forecast,
+  performance track record) — `DanelfinProvider.get_best_stocks()` /
+  `.get_trading_parameters()` / `.get_price_forecast()` / `.get_performance()`
+  / `.get_trade_ideas()`.
 - **Not pursued**: Investing.com Pro's per-stock Fair Value/ProTips/
   Financial Health/ProPicks/technical-summary data — blocked by Cloudflare on
-  the pages that carry it, independent of the backtest result above.
+  the pages that carry it, independent of any backtest result.

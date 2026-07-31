@@ -1,12 +1,12 @@
 # ──────────────────────────────────────────────────────────────
-#  Paper trading — 10 strategies (gann + ml_prediction permanently disabled;
+#  Paper trading — 11 strategies (gann + ml_prediction permanently disabled;
 #  see docs/gann_research_closeout.md)
 #  Monitor live at: http://localhost:8000/live
 # ──────────────────────────────────────────────────────────────
 
 experiment:
-  name: "paper_10_strategy"
-  description: "10 strategies — gann/ml_prediction off after IC audit"
+  name: "paper_11_strategy"
+  description: "10 strategies + danelfin_ai_score (enabled 2026-07-31, see docs/investing_pro_integration.md)"
   start_date: "2026-07-17"
   end_date: "2026-07-24"
 
@@ -37,6 +37,16 @@ strategies:
     - seasonality
     # gann — permanently disabled; no timing value on any asset class tested
     - regime_hmm
+    # danelfin_ai_score — enabled 2026-07-31 after a 3-window A/B showed
+    # portfolio Sharpe improved in every window (never worse; see
+    # docs/investing_pro_integration.md "Danelfin AI-score" section for the
+    # full honest writeup, including the caveat that the strategy's own
+    # standalone Sharpe was inconsistent across windows — this looks like a
+    # genuine diversification effect under `optimal` combination, not
+    # unambiguous proof of Danelfin's own predictive-power marketing claim).
+    # Monitor live attribution; revert this one line to disable if it
+    # doesn't hold up in live paper trading.
+    - danelfin_ai_score
   auto_approve:
     - momentum
     - trend
@@ -48,6 +58,7 @@ strategies:
     - volatility_breakout
     - seasonality
     - regime_hmm
+    - danelfin_ai_score
 
 # Per-strategy parameters passed to build_orchestrator via strategy_params.
 strategy_params:
