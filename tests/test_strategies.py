@@ -192,6 +192,39 @@ def _make_ai_scores_df(
     return pd.DataFrame(rows)
 
 
+def _make_live_signals_df(
+    symbols: list[str],
+    end_date: datetime | None = None,
+) -> pd.DataFrame:
+    """Generate a synthetic single-snapshot Danelfin live-signals row per
+    symbol (LIVE_SIGNAL_COLS shape — mirrors /v3/* latest-only semantics:
+    one row per symbol, no history)."""
+    if end_date is None:
+        end_date = datetime(2025, 6, 1)
+    rng = np.random.RandomState(654)
+    ts = pd.Timestamp(end_date)
+    rows: list[dict] = []
+    signals = ["buy", "hold", "sell"]
+    for sym in symbols:
+        tp_signal = signals[rng.randint(0, 3)]
+        rows.append(
+            {
+                "date": ts,
+                "symbol": sym,
+                "tp_signal": tp_signal,
+                "tp_entry_price": 100.0 + rng.uniform(-20, 20),
+                "tp_stop_loss_pct": -rng.uniform(2, 10),
+                "tp_take_profit_pct": rng.uniform(5, 20),
+                "pf_median_return_3m": rng.uniform(-0.1, 0.1),
+                "pf_q05_return_3m": rng.uniform(-0.2, -0.05),
+                "pf_q95_return_3m": rng.uniform(0.05, 0.25),
+                "perf_win_rate_3m": rng.uniform(0.4, 0.8),
+                "perf_alpha_win_rate_3m": rng.uniform(0.4, 0.7),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 class MockPitView:
     """In-memory PitView implementation for testing."""
 
@@ -204,6 +237,7 @@ class MockPitView:
         include_sentiment: bool = True,
         include_estimates: bool = True,
         include_ai_scores: bool = True,
+        include_live_signals: bool = True,
     ):
         self._symbols = symbols or SYMBOLS
         self._asof = asof or datetime(2025, 6, 1)
@@ -226,6 +260,11 @@ class MockPitView:
         self._ai_score_df = (
             _make_ai_scores_df(self._symbols, 40, self._asof)
             if include_ai_scores
+            else pd.DataFrame()
+        )
+        self._live_signals_df = (
+            _make_live_signals_df(self._symbols, self._asof)
+            if include_live_signals
             else pd.DataFrame()
         )
 
@@ -305,6 +344,12 @@ class MockPitView:
             df = df[pd.to_datetime(df["date"]) >= cutoff]
         return df
 
+    def live_signals(self, symbols: list[str] | None = None) -> pd.DataFrame:
+        df = self._live_signals_df.copy()
+        if symbols and not df.empty:
+            df = df[df["symbol"].isin(symbols)]
+        return df
+
 
 class EmptyPitView:
     """PitView that returns empty data for edge-case testing."""
@@ -332,6 +377,9 @@ class EmptyPitView:
     def ai_scores(self, symbols=None, lookback_days=30) -> pd.DataFrame:
         return pd.DataFrame()
 
+    def live_signals(self, symbols=None) -> pd.DataFrame:
+        return pd.DataFrame()
+
 
 class SingleSymbolPitView:
     """PitView with a single symbol for edge-case testing."""
@@ -344,6 +392,7 @@ class SingleSymbolPitView:
         self._sent_df = _make_sentiment_df(self._sym, 10, self._asof)
         self._est_df = _make_estimates_df(self._sym, 6, self._asof)
         self._ai_score_df = _make_ai_scores_df(self._sym, 40, self._asof)
+        self._live_signals_df = _make_live_signals_df(self._sym, self._asof)
 
     @property
     def asof(self) -> datetime:
@@ -375,6 +424,9 @@ class SingleSymbolPitView:
         df = self._ai_score_df.copy()
         cutoff = pd.Timestamp(self._asof) - pd.Timedelta(days=lookback_days)
         return df[pd.to_datetime(df["date"]) >= cutoff]
+
+    def live_signals(self, symbols=None) -> pd.DataFrame:
+        return self._live_signals_df.copy()
 
 
 # ---------------------------------------------------------------------------
@@ -415,6 +467,7 @@ ALL_STRATEGY_NAMES = [
     "gann",
     "investing_analyst_ratings",
     "danelfin_ai_score",
+    "danelfin_live_signals",
 ]
 
 
@@ -936,6 +989,79 @@ class TestDanelfinAiScore:
         msft = next(s for s in signals if s.symbol == "MSFT")
         assert aapl.meta["ai_score_delta"] > 3.0
         assert msft.meta["ai_score_delta"] == pytest.approx(0.0, abs=1e-6)
+
+
+class TestDanelfinLiveSignals:
+    def test_generate(self, pit_view):
+        strat = get("danelfin_live_signals")()
+        signals = strat.generate(pit_view)
+        _validate_signals(signals, "danelfin_live_signals")
+
+    def test_empty_universe(self, empty_view):
+        strat = get("danelfin_live_signals")()
+        assert strat.generate(empty_view) == []
+
+    def test_no_live_signals_data(self):
+        view = MockPitView(include_live_signals=False)
+        strat = get("danelfin_live_signals")()
+        assert strat.generate(view) == []
+
+    def test_hold_signal_emits_nothing(self):
+        view = MockPitView(symbols=["AAPL"])
+        view._live_signals_df = pd.DataFrame([{
+            "date": pd.Timestamp(view.asof), "symbol": "AAPL",
+            "tp_signal": "hold", "tp_entry_price": 100.0,
+            "tp_stop_loss_pct": -5.0, "tp_take_profit_pct": 10.0,
+            "pf_median_return_3m": 0.05, "pf_q05_return_3m": -0.1,
+            "pf_q95_return_3m": 0.2, "perf_win_rate_3m": 0.6,
+            "perf_alpha_win_rate_3m": 0.55,
+        }])
+        strat = get("danelfin_live_signals")()
+        assert strat.generate(view) == []
+
+    def test_buy_scores_positive_sell_scores_negative(self):
+        view = MockPitView(symbols=["AAPL", "MSFT"])
+        asof = pd.Timestamp(view.asof)
+        view._live_signals_df = pd.DataFrame([
+            {
+                "date": asof, "symbol": "AAPL",
+                "tp_signal": "buy", "tp_entry_price": 100.0,
+                "tp_stop_loss_pct": -5.0, "tp_take_profit_pct": 10.0,
+                "pf_median_return_3m": 0.064, "pf_q05_return_3m": -0.1,
+                "pf_q95_return_3m": 0.2, "perf_win_rate_3m": 0.71,
+                "perf_alpha_win_rate_3m": 0.61,
+            },
+            {
+                "date": asof, "symbol": "MSFT",
+                "tp_signal": "sell", "tp_entry_price": 200.0,
+                "tp_stop_loss_pct": -8.0, "tp_take_profit_pct": 4.0,
+                "pf_median_return_3m": -0.05, "pf_q05_return_3m": -0.15,
+                "pf_q95_return_3m": 0.02, "perf_win_rate_3m": 0.55,
+                "perf_alpha_win_rate_3m": 0.5,
+            },
+        ])
+        strat = get("danelfin_live_signals")()
+        signals = strat.generate(view)
+        by_symbol = {s.symbol: s for s in signals}
+        assert by_symbol["AAPL"].score > 0
+        assert by_symbol["MSFT"].score < 0
+        assert by_symbol["AAPL"].confidence == pytest.approx(0.71)
+
+    def test_score_clipped_to_raw_score_ceiling(self):
+        """An extreme forecast return must still land inside [-10, 10]."""
+        view = MockPitView(symbols=["AAPL"])
+        view._live_signals_df = pd.DataFrame([{
+            "date": pd.Timestamp(view.asof), "symbol": "AAPL",
+            "tp_signal": "buy", "tp_entry_price": 100.0,
+            "tp_stop_loss_pct": -5.0, "tp_take_profit_pct": 10.0,
+            "pf_median_return_3m": 5.0,  # absurd, adversarial input
+            "pf_q05_return_3m": -0.1, "pf_q95_return_3m": 0.2,
+            "perf_win_rate_3m": 0.6, "perf_alpha_win_rate_3m": 0.55,
+        }])
+        strat = get("danelfin_live_signals")()
+        signals = strat.generate(view)
+        _validate_signals(signals, "danelfin_live_signals")
+        assert signals[0].score == pytest.approx(10.0)
 
 
 class TestEventDriven:

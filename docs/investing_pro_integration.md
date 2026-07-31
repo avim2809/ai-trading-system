@@ -316,6 +316,89 @@ strategy here is monitored; revert the single `config/live.yaml` line to
 disable if it doesn't hold up in live paper trading, matching this
 project's standard promotion-gate discipline.
 
+## Danelfin live-signals — trading-parameters + price-forecast + performance (2026-07-31, enabled)
+
+The user pushed back on leaving `/v3/*` unwired: *"why don't you wire the
+other V3 endpoints? ... can't you feed all that goodness into my analysts
+implementation"*. This section documents that follow-up, and is honest about
+what's different from `danelfin_ai_score` above: **this one was never A/B
+tested and cannot be**, because it has no history to test against.
+
+### What was verified live before building anything
+
+Danelfin's own official docs describe `/v3/*` only at the level of "latest
+snapshot, no historical dates" — no field-level shape. Rather than guess at
+`trading-parameters`/`price-forecast`/`performance`'s actual JSON field names
+(as the earlier `get_trading_parameters`/`get_price_forecast`/
+`get_performance` fetchers had done, unverified, when first written), this
+work made one real, minimal-cost live call per endpoint against AAPL and
+confirmed the exact shape:
+
+- `/v3/trading-parameters` → `{entry_price, stop_loss, stop_loss_pct,
+  take_profit, take_profit_pct, horizon, currency, signal}` — `signal` is a
+  literal string (`"buy"` observed live), and **`stop_loss_pct`/
+  `take_profit_pct` are percentage points** (e.g. `-5.29` == -5.29%), not a
+  0-1 decimal.
+- `/v3/price-forecast` → `{signal, median_3m, q05_3m, q16_3m, q84_3m,
+  q95_3m, take_profit_3m, stop_loss_3m}` — these ARE 0-1 decimals (e.g.
+  `0.064` == +6.4%). A real unit mismatch against `trading-parameters`'
+  percentage-point fields, not a typo — both are used as-is in their own
+  native units, never mixed.
+- `/v3/performance` → `{signal, win_rate_1m/3m/6m/1y, alpha_win_rate_*,
+  avg_perf_*, avg_alpha_*}`.
+
+This also caught a real bug before shipping: the original `get_live_signals`
+always queried `/v3/performance` with `signal="buy"` regardless of what
+`trading-parameters` actually recommended, so a "sell" call would have
+carried the *buy* signal's historical win-rate as its confidence — meaningless
+for a sell. Fixed to query performance for whichever signal
+`trading-parameters` returned (falling back to `"buy"` only for `"hold"`/
+missing, since `/v3/performance` only documents buy/sell tracks).
+
+### What shipped
+
+A new `live_signals()` PitView capability, wired through the same points as
+`ai_scores()` above, with two deliberate differences given its
+snapshot-only nature:
+- `LIVE_SIGNAL_COLS` schema is explicitly documented as never having
+  historical data — `pit_view.live_signals()` always returns empty in a
+  backtest.
+- The live fetch (`data_feed.py`) is **not** gated behind an opt-in env flag
+  like `estimates`/`ai_scores` are — there's no meaningful cache-only mode
+  for data that's only ever "right now", so it fetches every live cycle by
+  default whenever a `live_signals` provider is configured (~75 API calls
+  for a 25-symbol universe, well inside the Expert plan's limits).
+
+`firm.strategies.danelfin_live_signals.DanelfinLiveSignalsStrategy`:
+direction from `tp_signal` (`+1`/`-1` for buy/sell, skips hold/unrecognized
+entirely), magnitude from `|pf_median_return_3m|` scaled 40x and clipped to
+the project's raw-score ceiling, confidence from `perf_win_rate_3m` for
+whichever signal was actually called (defaulting to a neutral 0.5 when
+missing). `tp_stop_loss_pct`/`tp_take_profit_pct` are deliberately **not**
+used in the score — only carried as read-only meta — consistent with the
+earlier decision that wiring actual stop-loss/take-profit price levels into
+`RiskAgent`/`ExecutionAgent`'s execution math is a separate, explicit-review
+change, not something to fold in here.
+
+### No A/B — a live-only judgment call, not an evidence-backed one
+
+Every other strategy promotion in this project (see `danelfin_ai_score`
+above, `investing_analyst_ratings`) went through a 3-window walk-forward A/B
+before an enable/disable decision. That gate is structurally unavailable
+here: `pit_view.live_signals()` is always empty in a backtest (no
+cache-backed history exists to populate one, ever), so
+`scripts/calibrate_danelfin_ai_score.py`'s pattern cannot be reused —
+running it would just show zero signals in every window, telling you
+nothing.
+
+**Decision: enabled in `config/live.yaml` anyway**, per the user's explicit
+instruction, with the caveat stated plainly in both the config comment and
+here: this is unvalidated. Watch its live per-strategy attribution closely;
+revert the single `config/live.yaml` line if it looks bad. `experiment.name`
+bumped to `paper_12_strategy`; verified via `GET /api/live/status` after a
+live-service restart that `danelfin_live_signals` is active and
+`broker_connected` is unaffected.
+
 ### Current state
 
 - **Shipped and enabled-by-default-off, working**: authenticated Investing.com
@@ -325,11 +408,9 @@ project's standard promotion-gate discipline.
   strategy (FMP-backed; inconclusive A/B).
 - **Shipped, tested, registered, and ENABLED in live paper trading**:
   `danelfin_ai_score` strategy (Danelfin-backed; consistently positive A/B).
-- **Available but not wired into any strategy**: Danelfin's `/v3/*`
-  latest-snapshot endpoints (best-stocks, trading-parameters, price-forecast,
-  performance track record) — `DanelfinProvider.get_best_stocks()` /
-  `.get_trading_parameters()` / `.get_price_forecast()` / `.get_performance()`
-  / `.get_trade_ideas()`.
+- **Shipped, tested, registered, and ENABLED in live paper trading, unvalidated**:
+  `danelfin_live_signals` strategy (Danelfin `/v3/*`-backed; structurally
+  unbacktestable, enabled per explicit user request rather than an A/B).
 - **Not pursued**: Investing.com Pro's per-stock Fair Value/ProTips/
   Financial Health/ProPicks/technical-summary data — blocked by Cloudflare on
   the pages that carry it, independent of any backtest result.

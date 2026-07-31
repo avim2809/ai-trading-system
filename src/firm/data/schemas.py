@@ -77,6 +77,31 @@ AI_SCORE_COLS: list[str] = [
     "low_risk_score",
 ]
 
+# Danelfin's /v3/* latest-snapshot signals (trading-parameters +
+# price-forecast + performance track record combined into one row per
+# symbol per fetch). Unlike AI_SCORE_COLS/ANALYST_RATINGS_COLS, these have
+# NO historical time series at all (Danelfin's own docs: "always returns
+# latest snapshot, no historical dates") — "date" here is always the fetch
+# date, and there is no cache-backed history to backtest against, ever.
+# A strategy reading this capability will always see an empty frame in
+# backtests (no historical data source exists to populate one) and only
+# ever sees real data in live cycles. See
+# firm.data.providers.danelfin.DanelfinProvider.get_live_signals and
+# firm.strategies.danelfin_live_signals.
+LIVE_SIGNAL_COLS: list[str] = [
+    "date",
+    "symbol",
+    "tp_signal",             # trading-parameters buy/hold/sell
+    "tp_entry_price",
+    "tp_stop_loss_pct",
+    "tp_take_profit_pct",
+    "pf_median_return_3m",   # price-forecast median 3-month return (decimal)
+    "pf_q05_return_3m",
+    "pf_q95_return_3m",
+    "perf_win_rate_3m",      # historical win-rate for this ticker's buy signal
+    "perf_alpha_win_rate_3m",
+]
+
 # Universe membership window columns (used by UniverseResolver for
 # survivorship-aware point-in-time index membership).
 COL_INDEX = "index"

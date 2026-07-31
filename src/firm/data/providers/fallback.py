@@ -8,6 +8,7 @@ Priority order (first non-empty result wins):
   universe          FMP → (none)
   analyst_ratings   FMP → (none)
   ai_scores         Danelfin → (none)
+  live_signals      Danelfin → (none)
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ from firm.data.schemas import (
     ANALYST_RATINGS_COLS,
     CORPORATE_ACTION_COLS,
     FUNDAMENTAL_COLS,
+    LIVE_SIGNAL_COLS,
     PRICE_COLS,
     SENTIMENT_COLS,
 )
@@ -84,6 +86,7 @@ class FallbackProvider(DataProvider):
         self._universe_chain: list[str] = ["fmp"]
         self._analyst_ratings_chain: list[str] = ["fmp"]
         self._ai_scores_chain: list[str] = ["danelfin"]
+        self._live_signals_chain: list[str] = ["danelfin"]
 
     def _try_chain(
         self,
@@ -271,6 +274,26 @@ class FallbackProvider(DataProvider):
             pd.DataFrame(columns=AI_SCORE_COLS),
             symbols, start, end,
         )
+
+    def get_live_signals(self, symbols: Sequence[str]) -> pd.DataFrame:
+        """Snapshot-only (no start/end), so it can't reuse _try_chain's
+        date-coverage logic — first provider in the chain to return any
+        rows wins."""
+        for name in self._live_signals_chain:
+            provider = _load(name, self._cfg)
+            if provider is None:
+                continue
+            try:
+                result = provider.get_live_signals(symbols)
+            except NotImplementedError:
+                log.debug("fallback_skip provider=%s method=get_live_signals reason=not_implemented", name)
+                continue
+            except ProviderError as exc:
+                log.warning("fallback_error provider=%s method=get_live_signals error=%s", name, exc)
+                continue
+            if isinstance(result, pd.DataFrame) and not result.empty:
+                return result
+        return pd.DataFrame(columns=LIVE_SIGNAL_COLS)
 
     def get_universe_constituents(self, index: str, date: str = "") -> list[str]:
         for name in self._universe_chain:

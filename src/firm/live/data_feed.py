@@ -143,6 +143,10 @@ class LivePitViewAdapter:
         syms = symbols or self._universe
         return self._pit_store.get_ai_scores(syms, self._asof, lookback_days)
 
+    def live_signals(self, symbols: list[str] | None = None) -> pd.DataFrame:
+        syms = symbols or self._universe
+        return self._pit_store.get_live_signals(syms)
+
 
 class LiveDataFeed:
     """Fetches current market data and populates a PIT store for the pipeline."""
@@ -393,6 +397,20 @@ class LiveDataFeed:
                 _LIVE_FETCH_AI_SCORES_ENV,
             )
 
+        # Danelfin's trading-parameters/price-forecast/performance endpoints
+        # are latest-snapshot-only — there is no historical series to cache,
+        # so (unlike fundamentals/estimates/ai_scores above) there's no
+        # meaningful cache-only mode to default to. Fetch every cycle
+        # whenever a live_signals provider is configured, no opt-in flag.
+        live_signals = pd.DataFrame()
+        live_signals_prov = self._providers.get("live_signals")
+        if live_signals_prov:
+            try:
+                live_signals = live_signals_prov.get_live_signals(self._universe)
+                log.info("Fetched %d live-signal rows", len(live_signals))
+            except (NotImplementedError, Exception):
+                log.warning("Live-signals fetch failed — continuing without it", exc_info=True)
+
         self._pit_store = PointInTimeDataStore()
         self._pit_store.set_universe_resolver(self._universe_resolver)
         self._pit_store.load(
@@ -401,6 +419,7 @@ class LiveDataFeed:
             sentiment=sentiment if not sentiment.empty else None,
             estimates=estimates if not estimates.empty else None,
             ai_scores=ai_scores if not ai_scores.empty else None,
+            live_signals=live_signals if not live_signals.empty else None,
         )
 
         return LivePitViewAdapter(self._pit_store, asof, self._universe)

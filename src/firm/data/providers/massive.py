@@ -480,3 +480,8 @@ class MassiveProvider(DataProvider):
         raise NotImplementedError(
             "MassiveProvider does not provide AI scores; use DanelfinProvider."
         )
+
+    def get_live_signals(self, symbols: list[str]) -> pd.DataFrame:
+        raise NotImplementedError(
+            "MassiveProvider does not provide live signals; use DanelfinProvider."
+        )

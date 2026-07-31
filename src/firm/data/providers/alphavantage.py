@@ -225,6 +225,11 @@ class AlphaVantageProvider(DataProvider):
             "AlphaVantageProvider does not provide AI scores; use DanelfinProvider."
         )
 
+    def get_live_signals(self, symbols: Sequence[str]) -> pd.DataFrame:
+        raise NotImplementedError(
+            "AlphaVantageProvider does not provide live signals; use DanelfinProvider."
+        )
+
 
 def _parse_av_time(value: str | None) -> pd.Timestamp:
     """Parse Alpha Vantage ``YYYYMMDDTHHMMSS`` timestamps."""

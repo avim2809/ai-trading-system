@@ -216,3 +216,6 @@ class IBKRProvider(DataProvider):
 
     def get_ai_scores(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
         raise NotImplementedError("IBKRProvider does not provide AI scores; use Danelfin.")
+
+    def get_live_signals(self, symbols: list[str]) -> pd.DataFrame:
+        raise NotImplementedError("IBKRProvider does not provide live signals; use Danelfin.")

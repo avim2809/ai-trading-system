@@ -13,6 +13,7 @@ from firm.data.schemas import (
     ANALYST_RATINGS_COLS,
     CORPORATE_ACTION_COLS,
     FUNDAMENTAL_COLS,
+    LIVE_SIGNAL_COLS,
     PRICE_COLS,
     SENTIMENT_COLS,
     UNIVERSE_COLUMNS,
@@ -112,6 +113,10 @@ class DataProvider(ABC):
     def empty_ai_scores() -> pd.DataFrame:
         return pd.DataFrame(columns=AI_SCORE_COLS)
 
+    @staticmethod
+    def empty_live_signals() -> pd.DataFrame:
+        return pd.DataFrame(columns=LIVE_SIGNAL_COLS)
+
     @abstractmethod
     def get_prices(
         self, symbols: list[str], start: str, end: str
@@ -159,4 +164,11 @@ class DataProvider(ABC):
         self, symbols: list[str], start: str, end: str
     ) -> pd.DataFrame:
         """Return AI-driven composite score dataframe with AI_SCORE_COLS."""
+        ...
+
+    @abstractmethod
+    def get_live_signals(self, symbols: list[str]) -> pd.DataFrame:
+        """Return today's latest-snapshot signal dataframe with
+        LIVE_SIGNAL_COLS. No historical time series exists for this
+        capability — it is always "as of right now", live-only."""
         ...

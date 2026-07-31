@@ -5,8 +5,8 @@
 # ──────────────────────────────────────────────────────────────
 
 experiment:
-  name: "paper_11_strategy"
-  description: "10 strategies + danelfin_ai_score (enabled 2026-07-31, see docs/investing_pro_integration.md)"
+  name: "paper_12_strategy"
+  description: "10 strategies + danelfin_ai_score + danelfin_live_signals (enabled 2026-07-31, see docs/investing_pro_integration.md)"
   start_date: "2026-07-17"
   end_date: "2026-07-24"
 
@@ -47,6 +47,18 @@ strategies:
     # Monitor live attribution; revert this one line to disable if it
     # doesn't hold up in live paper trading.
     - danelfin_ai_score
+    # danelfin_live_signals — enabled 2026-07-31 at the user's explicit
+    # request ("can't you feed all that goodness into my analysts
+    # implementation"). UNLIKE danelfin_ai_score, this one has NEVER been
+    # A/B tested and structurally CANNOT be: it reads Danelfin's /v3/*
+    # trading-parameters + price-forecast + performance endpoints, which
+    # are latest-snapshot-only with no historical dates (confirmed live,
+    # not just per Danelfin's docs) — pit_view.live_signals() is always
+    # empty in a backtest, so the walk-forward promotion gate this project
+    # otherwise relies on is a no-op here. This is a live-only,
+    # unvalidated judgment call, not an evidence-backed one — watch its
+    # live attribution closely and revert this line if it looks bad.
+    - danelfin_live_signals
   auto_approve:
     - momentum
     - trend
@@ -59,6 +71,7 @@ strategies:
     - seasonality
     - regime_hmm
     - danelfin_ai_score
+    - danelfin_live_signals
 
 # Per-strategy parameters passed to build_orchestrator via strategy_params.
 strategy_params:

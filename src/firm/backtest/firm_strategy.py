@@ -86,6 +86,10 @@ class PitViewAdapter:
         syms = symbols or self._universe
         return self._pit_store.get_ai_scores(syms, self._asof, lookback_days)
 
+    def live_signals(self, symbols: list[str] | None = None) -> pd.DataFrame:
+        syms = symbols or self._universe
+        return self._pit_store.get_live_signals(syms)
+
     def macro(self, series_id: str, lookback_days: int = 365) -> pd.Series:
         return self._pit_store.get_macro(series_id, self._asof, lookback_days)
 

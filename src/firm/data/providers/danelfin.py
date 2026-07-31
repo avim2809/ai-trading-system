@@ -30,12 +30,25 @@ behind Cloudflare but the API subdomain does not):
     ``/v3/price-forecast`` (probabilistic return distribution by horizon),
     ``/v3/performance`` (historical win-rate/alpha track record by signal),
     ``/v3/trade-ideas`` (filterable screener). Exposed here as read-only
-    fetchers for live/shadow-mode use — **deliberately not wired into any
+    fetchers for live use, feeding :class:`firm.strategies.danelfin_live_signals
+    .DanelfinLiveSignalsStrategy` — **deliberately not wired into any
     risk/execution logic** (e.g. ``trading-parameters``' stop-loss/
     take-profit levels could inform ``RiskAgent``/``ExecutionAgent``, but
     that's a live-risk-relevant behavioral change that needs its own
     explicit review, not something to fold in silently alongside a new
     alpha signal).
+
+    Field names verified live 2026-07-31 against real AAPL responses (not
+    just guessed from the docs page, which is Cloudflare-blocked):
+    ``trading-parameters`` → ``{entry_price, stop_loss, stop_loss_pct,
+    take_profit, take_profit_pct, horizon, currency, signal}`` where
+    ``stop_loss_pct``/``take_profit_pct`` are **percentage points** (e.g.
+    ``-5.29`` == -5.29%, not a 0-1 decimal); ``price-forecast`` →
+    ``{signal, median_3m, q05_3m, q16_3m, q84_3m, q95_3m, take_profit_3m,
+    stop_loss_3m}`` where these ARE 0-1 decimals (e.g. ``0.064`` == +6.4%)
+    — a real unit mismatch between the two endpoints, not a typo;
+    ``performance`` → ``{signal, win_rate_1m/3m/6m/1y, alpha_win_rate_*,
+    avg_perf_*, avg_alpha_*}``.
 
 Account is on the Expert plan (10,000 calls/mo, 120/min, confirmed by the
 user) — pacing below (1s/request) stays well under that with a safety
@@ -53,7 +66,7 @@ import pandas as pd
 from firm.config import Settings, get_settings
 from firm.data.providers._rest import RestClient
 from firm.data.providers.base import DataProvider, ProviderError
-from firm.data.schemas import AI_SCORE_COLS
+from firm.data.schemas import AI_SCORE_COLS, LIVE_SIGNAL_COLS
 from firm.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -248,6 +261,82 @@ class DanelfinProvider(DataProvider):
         if not items:
             return pd.DataFrame()
         return pd.DataFrame(items)
+
+    def get_live_signals(self, symbols: Sequence[str]) -> pd.DataFrame:
+        """Combine trading-parameters + price-forecast + performance into
+        one row per symbol (LIVE_SIGNAL_COLS) — the actual "feed this into
+        the analysts" capability requested by the user, distinct from
+        get_ai_scores (which has genuine history and can be backtested).
+        This one cannot: per Danelfin's own docs, /v3/* always reflects
+        "right now" with no historical dates, so this is live-only by
+        construction — a strategy reading firm.strategies.base.PitView
+        .live_signals() will always see an empty frame in backtests (no
+        cache-backed history exists to populate one, ever) and only ever
+        sees real data in live cycles.
+
+        3 calls per symbol (trading-parameters, price-forecast,
+        performance) at the same ~1s/request pacing as get_ai_scores —
+        for a 25-symbol universe that's ~75 calls, well inside the Expert
+        plan's 10,000/month, 120/min limits, run once per live cycle
+        (once/day).
+        """
+        today = pd.Timestamp.now(tz="UTC").normalize().tz_localize(None)
+        rows: list[dict] = []
+        for symbol in symbols:
+            try:
+                tp = self.get_trading_parameters(symbol)
+            except ProviderError:
+                tp = None
+            except Exception:
+                log.exception("danelfin_trading_parameters_failed symbol=%s", symbol)
+                tp = None
+            try:
+                pf = self.get_price_forecast(symbol, horizon="3m")
+            except ProviderError:
+                pf = None
+            except Exception:
+                log.exception("danelfin_price_forecast_failed symbol=%s", symbol)
+                pf = None
+            # Query the track record for whichever signal trading-parameters
+            # actually recommends (verified live: "buy"/"sell"), not always
+            # "buy" — the /v3/performance win-rate is meaningless as a
+            # confidence measure for a "sell" call if it's the buy signal's
+            # own historical track record.
+            perf_signal = (tp or {}).get("signal")
+            if perf_signal not in ("buy", "sell"):
+                # get_performance only documents buy/sell tracks; a "hold"
+                # (or missing) trading-parameters signal falls back to buy's
+                # track record rather than guessing at an unsupported value.
+                perf_signal = "buy"
+            try:
+                perf = self.get_performance(symbol, signal=perf_signal)
+            except ProviderError:
+                perf = None
+            except Exception:
+                log.exception("danelfin_performance_failed symbol=%s", symbol)
+                perf = None
+
+            if tp is None and pf is None and perf is None:
+                continue
+            tp = tp or {}
+            pf = pf or {}
+            perf = perf or {}
+            rows.append({
+                "date": today,
+                "symbol": symbol,
+                "tp_signal": tp.get("signal"),
+                "tp_entry_price": tp.get("entry_price"),
+                "tp_stop_loss_pct": tp.get("stop_loss_pct"),
+                "tp_take_profit_pct": tp.get("take_profit_pct"),
+                "pf_median_return_3m": pf.get("median_3m"),
+                "pf_q05_return_3m": pf.get("q05_3m"),
+                "pf_q95_return_3m": pf.get("q95_3m"),
+                "perf_win_rate_3m": perf.get("win_rate_3m"),
+                "perf_alpha_win_rate_3m": perf.get("alpha_win_rate_3m"),
+            })
+        if not rows:
+            return self.empty_live_signals()
+        return pd.DataFrame(rows, columns=LIVE_SIGNAL_COLS)
 
     # ------------------------------------------------------------------
     # Unsupported DataProvider capabilities — Danelfin is a single-purpose

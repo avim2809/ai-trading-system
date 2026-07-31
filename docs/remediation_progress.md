@@ -15,7 +15,7 @@ Last updated: 2026-07-31.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #44 has the most recent detail.
+   "Completed" item #45 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -398,6 +398,33 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     price-forecast/performance) as read-only `DanelfinProvider` methods —
     not backtestable (no historical dates per Danelfin's docs) and
     deliberately not wired into any strategy/risk/execution logic yet.
+45. **Danelfin live-signals (`/v3/*`) wired into a new strategy — enabled,
+    unvalidated** (2026-07-31) — full detail in
+    `docs/investing_pro_integration.md` ("Danelfin live-signals" section).
+    Follow-up to item #44, per the user's explicit push to wire the `/v3/*`
+    endpoints ("can't you feed all that goodness into my analysts
+    implementation") rather than leaving them as read-only fetchers. Made
+    one real live call per endpoint against AAPL to verify the actual field
+    names/shape first (they'd been guessed, unverified, when item #44 first
+    exposed them) — caught a real unit mismatch (`trading-parameters`'
+    `stop_loss_pct`/`take_profit_pct` are percentage points; `price-forecast`'s
+    `median_3m`/`q05_3m`/`q95_3m` are 0-1 decimals) and a real bug
+    (`get_live_signals` always queried `/v3/performance` with `signal="buy"`
+    regardless of what `trading-parameters` actually recommended — fixed to
+    query the signal actually called). Built a new `live_signals()` PitView
+    capability (same wiring points as `ai_scores()`, but fetched every live
+    cycle with no opt-in env-flag gate, since snapshot-only data has no
+    meaningful cache-only mode) and `danelfin_live_signals` strategy
+    (direction from buy/sell, magnitude from forecast return, confidence
+    from win-rate). **Cannot be A/B tested** — `pit_view.live_signals()` is
+    always empty in a backtest by construction (no historical dates exist,
+    ever), so this project's usual walk-forward promotion gate is
+    structurally unavailable. **Enabled in `config/live.yaml` anyway**, per
+    explicit user request rather than evidence — documented plainly as
+    unvalidated in both the config comment and the docs section; experiment
+    renamed `paper_12_strategy`, live service restarted and verified healthy
+    (`GET /api/live/status` shows `danelfin_live_signals` active,
+    `broker_connected: true`).
 
 ## In progress
 

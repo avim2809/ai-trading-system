@@ -124,6 +124,9 @@ class EdgarProvider(DataProvider):
     def get_ai_scores(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
         raise NotImplementedError("EdgarProvider does not provide AI scores; use Danelfin.")
 
+    def get_live_signals(self, symbols: list[str]) -> pd.DataFrame:
+        raise NotImplementedError("EdgarProvider does not provide live signals; use Danelfin.")
+
     def _load_cik_map(self) -> dict[str, int]:
         if self._cik_map is not None:
             return self._cik_map
