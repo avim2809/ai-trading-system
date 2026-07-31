@@ -16,6 +16,7 @@ from firm.live.best_stocks_arm import (
     SECTORS,
     TARGET_HOLDINGS,
     select_best_stocks,
+    select_best_stocks_historical,
 )
 from firm.live.best_stocks_ledger import BestStocksLedger
 
@@ -103,6 +104,119 @@ class TestSelectBestStocks:
         selection = select_best_stocks(provider, top_n_sectors=1, top_n_per_sector=5)
         symbols = {row["symbol"] for row in selection}
         assert symbols == {"HIGH1", "HIGH2", "HIGH3", "HIGH4", "HIGH5"}
+
+
+def _hist_candidate(symbol: str, aiscore: float, low_risk: float = 6) -> dict:
+    return {"symbol": symbol, "aiscore": aiscore, "low_risk": low_risk}
+
+
+class TestSelectBestStocksHistorical:
+    """select_best_stocks_historical uses get_historical_sector_scores
+    (genuinely historical bulk /ranking mode) instead of /v3/trade-ideas —
+    see that function's docstring for why sector ranking is deliberately
+    NOT volume-filtered (only the final per-sector picks are)."""
+
+    def test_sector_ranking_uses_full_unfiltered_pool(self):
+        """Sector average must reflect ALL low_risk-qualifying candidates,
+        not just the ones that would pass a volume filter — this is the
+        documented THIRD deviation in select_best_stocks_historical's
+        docstring."""
+        provider = MagicMock()
+
+        def fake_scan(sector, date, **kwargs):
+            if sector == "information-technology":
+                # High avg aiscore among 6 candidates
+                return _sector_df([_hist_candidate(f"IT{i}", 9 - i * 0.1) for i in range(6)])
+            if sector == "energy":
+                return _sector_df([_hist_candidate(f"EN{i}", 4 - i * 0.1) for i in range(6)])
+            return pd.DataFrame()
+
+        provider.get_historical_sector_scores = MagicMock(side_effect=fake_scan)
+        selection = select_best_stocks_historical(
+            provider, "2024-06-03", top_n_sectors=1, top_n_per_sector=5,
+        )
+        assert len(selection) == 5
+        assert all(row["sector"] == "information-technology" for row in selection)
+        assert all(row["date"] == "2024-06-03" for row in selection)
+
+    def test_volume_filter_only_applied_to_final_picks_not_ranking(self):
+        """A sector's ranking-average must be computed from the FULL pool
+        even when the volume filter would reject most of it — only the
+        final top-N-per-sector picks skip volume-failing names."""
+        provider = MagicMock()
+
+        def fake_scan(sector, date, **kwargs):
+            if sector == "energy":
+                # 6 candidates: top 2 by aiscore fail volume, rest pass.
+                return _sector_df([
+                    _hist_candidate("FAIL1", 9), _hist_candidate("FAIL2", 8.5),
+                    _hist_candidate("OK1", 8), _hist_candidate("OK2", 7.5),
+                    _hist_candidate("OK3", 7), _hist_candidate("OK4", 6.5), _hist_candidate("OK5", 6),
+                ])
+            return pd.DataFrame()
+
+        provider.get_historical_sector_scores = MagicMock(side_effect=fake_scan)
+        volume_filter = lambda sym: not sym.startswith("FAIL")  # noqa: E731
+        selection = select_best_stocks_historical(
+            provider, "2024-06-03", top_n_sectors=1, top_n_per_sector=5, volume_filter=volume_filter,
+        )
+        symbols = {row["symbol"] for row in selection}
+        assert symbols == {"OK1", "OK2", "OK3", "OK4", "OK5"}
+        assert "FAIL1" not in symbols and "FAIL2" not in symbols
+
+    def test_sector_underfilled_when_too_few_pass_volume_filter(self):
+        """If a sector runs out of volume-passing candidates before
+        filling top_n_per_sector slots, it should return however many it
+        found rather than crash or silently include a failing symbol."""
+        provider = MagicMock()
+
+        def fake_scan(sector, date, **kwargs):
+            if sector == "energy":
+                return _sector_df([_hist_candidate(f"E{i}", 9 - i) for i in range(6)])
+            return pd.DataFrame()
+
+        provider.get_historical_sector_scores = MagicMock(side_effect=fake_scan)
+        volume_filter = lambda sym: sym in ("E0", "E1")  # noqa: E731 — only 2 pass, need 5
+        selection = select_best_stocks_historical(
+            provider, "2024-06-03", top_n_sectors=1, top_n_per_sector=5, volume_filter=volume_filter,
+        )
+        assert {row["symbol"] for row in selection} == {"E0", "E1"}
+
+    def test_sector_with_too_few_total_candidates_is_ineligible(self):
+        provider = MagicMock()
+
+        def fake_scan(sector, date, **kwargs):
+            if sector == "information-technology":
+                return _sector_df([_hist_candidate(f"IT{i}", 8) for i in range(2)])  # need 5
+            if sector == "energy":
+                return _sector_df([_hist_candidate(f"EN{i}", 5) for i in range(6)])
+            return pd.DataFrame()
+
+        provider.get_historical_sector_scores = MagicMock(side_effect=fake_scan)
+        selection = select_best_stocks_historical(
+            provider, "2024-06-03", top_n_sectors=1, top_n_per_sector=5,
+        )
+        assert all(row["sector"] == "energy" for row in selection)
+
+    def test_no_eligible_sectors_returns_empty(self):
+        provider = MagicMock()
+        provider.get_historical_sector_scores = MagicMock(return_value=pd.DataFrame())
+        selection = select_best_stocks_historical(provider, "2024-06-03")
+        assert selection == []
+
+    def test_no_volume_filter_selects_top_aiscore_directly(self):
+        provider = MagicMock()
+
+        def fake_scan(sector, date, **kwargs):
+            if sector == "energy":
+                return _sector_df([_hist_candidate(f"E{i}", 9 - i) for i in range(6)])
+            return pd.DataFrame()
+
+        provider.get_historical_sector_scores = MagicMock(side_effect=fake_scan)
+        selection = select_best_stocks_historical(
+            provider, "2024-06-03", top_n_sectors=1, top_n_per_sector=5,
+        )
+        assert {row["symbol"] for row in selection} == {"E0", "E1", "E2", "E3", "E4"}
 
 
 class TestBestStocksLedger:

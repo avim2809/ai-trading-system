@@ -49,6 +49,21 @@ API details verified live before building this (not guessed):
     doing this work (min-threshold ``aiscore``/``low_risk``/
     ``average_volume_3m`` filters, ``sector`` kebab-case values, 100-row
     cap with no pagination).
+
+Update — this IS backtestable after all, via a different endpoint mode:
+    The line above (and this arm's original "structurally unbacktestable"
+    framing) was based only on ``/v3/trade-ideas``, which genuinely has no
+    history. But ``/ranking`` — the same endpoint already used for the
+    genuinely-historical ``danelfin_ai_score`` strategy — also supports a
+    **bulk historical mode**: pass ``date``+``sector`` (+``low_risk``)
+    with NO ``ticker``, and it returns every matching symbol for that
+    historical date, not one ticker's timeline. See
+    ``DanelfinProvider.get_historical_sector_scores`` and
+    ``select_best_stocks_historical`` below, and
+    ``scripts/backtest_best_stocks_arm.py`` for the actual walk-forward
+    test this enables. The live arm (``select_best_stocks``,
+    ``BestStocksLedger``) is unchanged by this — it's a genuinely separate
+    code path exercised only by the backtest script.
 """
 
 from __future__ import annotations
@@ -125,6 +140,7 @@ def select_best_stocks(
     top_n_per_sector: int = TOP_N_PER_SECTOR,
     min_low_risk: int = MIN_LOW_RISK,
     min_avg_volume_3m: int = MIN_AVG_VOLUME_3M,
+    excluded_symbols: frozenset[str] = frozenset(),
 ) -> list[dict]:
     """Danelfin Best-Stocks selection: rank sectors by the average AI
     Score of ALL their qualifying candidates, keep the top *top_n_sectors*,
@@ -134,6 +150,12 @@ def select_best_stocks(
     eligible at all — otherwise it can't fill its slots, which would
     silently shrink the target portfolio below 25 names.
 
+    ``excluded_symbols`` (e.g. the main engine's own universe — see
+    best_stocks_execution.main_engine_excluded_symbols) is dropped from
+    each sector's candidate pool BEFORE ranking/selection, so a colliding
+    name never displaces a non-colliding one and the arm still fills its
+    slots from tradable candidates wherever the sector has enough of them.
+
     Returns a list of dicts (one per selected stock):
     ``{symbol, sector, aiscore, low_risk, average_volume_3m,
     sector_avg_aiscore}``, sorted by sector_avg_aiscore desc, then
@@ -142,6 +164,14 @@ def select_best_stocks(
     per_sector: dict[str, pd.DataFrame] = {}
     for sector in SECTORS:
         df = scan_sector_candidates(provider, sector, min_low_risk, min_avg_volume_3m)
+        if excluded_symbols and not df.empty:
+            before = len(df)
+            df = df[~df["symbol"].isin(excluded_symbols)]
+            if len(df) < before:
+                log.info(
+                    "best_stocks_excluded_collisions sector=%s dropped=%d (main engine universe)",
+                    sector, before - len(df),
+                )
         if len(df) >= top_n_per_sector:
             per_sector[sector] = df
         else:
@@ -178,3 +208,95 @@ def select_best_stocks(
 
 def selection_symbols(selection: list[dict]) -> list[str]:
     return [row["symbol"] for row in selection]
+
+
+def select_best_stocks_historical(
+    provider: DanelfinProvider,
+    date: str,
+    top_n_sectors: int = TOP_N_SECTORS,
+    top_n_per_sector: int = TOP_N_PER_SECTOR,
+    volume_filter=None,
+) -> list[dict]:
+    """Historical reconstruction of :func:`select_best_stocks`, using
+    :meth:`DanelfinProvider.get_historical_sector_scores` (genuinely
+    historical, bulk ``/ranking`` mode) instead of ``/v3/trade-ideas``
+    (snapshot-only, no history — see that method's docstring for how this
+    was discovered).
+
+    Two real differences from the live version, both forced by what
+    Danelfin's historical data actually exposes:
+
+    1. No "Proven Buy Signal" filter — ``/ranking`` has no buy/hold/sell
+       field at any date, historical or otherwise. This selection uses
+       only low_risk (already server-filtered to >=5 via
+       ``get_historical_sector_scores``'s default) + a caller-supplied
+       ``volume_filter`` + aiscore ranking.
+    2. ``volume_filter``, if given, is a ``symbol -> bool`` predicate the
+       CALLER must supply (e.g. backed by this project's own historical
+       price/volume data) — Danelfin's bulk ``/ranking`` mode has no
+       ``average_volume_3m`` field at all (unlike ``/v3/trade-ideas``).
+
+    A THIRD, deliberate difference from both the live arm and the literal
+    Danelfin rule: ``volume_filter`` is only evaluated against candidates
+    actually being considered to FILL a top-ranked sector's slots (top
+    ``aiscore``-first, walking down only as far as needed to fill
+    *top_n_per_sector*), not against every low_risk-qualifying candidate
+    in every sector. Checking real historical volume for every qualifying
+    candidate turned out to mean hundreds to (for a sector like
+    financials) 500+ per-symbol price-history fetches per rebalance date —
+    prohibitively slow for a multi-year backtest. This means the SECTOR
+    RANKING step (mean aiscore across all low_risk-qualifying candidates)
+    is computed WITHOUT the volume filter applied — a real, disclosed
+    deviation from Danelfin's literal rule (which filters by volume
+    first, then ranks), not a silent one. Document this wherever this
+    function's results are reported.
+
+    Returns the same shape as select_best_stocks (plus a ``date`` key),
+    ranked by sector_avg_aiscore desc then aiscore desc within sector.
+    """
+    per_sector: dict[str, pd.DataFrame] = {}
+    for sector in SECTORS:
+        df = provider.get_historical_sector_scores(sector, date)
+        if len(df) >= top_n_per_sector:
+            per_sector[sector] = df
+        else:
+            log.debug(
+                "best_stocks_historical_sector_ineligible sector=%s date=%s n=%d (need >= %d)",
+                sector, date, len(df), top_n_per_sector,
+            )
+
+    if not per_sector:
+        log.warning("best_stocks_historical_no_eligible_sectors date=%s", date)
+        return []
+
+    # Sector ranking is intentionally NOT volume-filtered — see the
+    # docstring's "THIRD difference" above.
+    sector_avg = {sector: df["aiscore"].mean() for sector, df in per_sector.items()}
+    ranked_sectors = sorted(sector_avg, key=lambda s: sector_avg[s], reverse=True)[:top_n_sectors]
+
+    selected: list[dict] = []
+    for sector in ranked_sectors:
+        df = per_sector[sector].sort_values("aiscore", ascending=False)
+        filled = 0
+        for _, row in df.iterrows():
+            symbol = str(row["symbol"])
+            if volume_filter is not None and not volume_filter(symbol):
+                continue
+            selected.append({
+                "symbol": symbol,
+                "sector": sector,
+                "aiscore": float(row["aiscore"]),
+                "low_risk": float(row["low_risk"]),
+                "sector_avg_aiscore": float(sector_avg[sector]),
+                "date": date,
+            })
+            filled += 1
+            if filled >= top_n_per_sector:
+                break
+        if filled < top_n_per_sector:
+            log.warning(
+                "best_stocks_historical_sector_underfilled sector=%s date=%s filled=%d need=%d "
+                "(ran out of low_risk-qualifying candidates passing the volume filter)",
+                sector, date, filled, top_n_per_sector,
+            )
+    return selected

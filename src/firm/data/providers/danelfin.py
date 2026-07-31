@@ -297,6 +297,107 @@ class DanelfinProvider(DataProvider):
             return pd.DataFrame()
         return pd.DataFrame(rows)
 
+    def get_historical_sector_scores(
+        self,
+        sector: str,
+        date: str,
+        low_risk_values: Sequence[int] = (5, 6, 7, 8, 9, 10),
+    ) -> pd.DataFrame:
+        """Bulk **historical** ``/ranking`` scan: every symbol in *sector*
+        on *date* (a specific historical date, not "latest") — genuinely
+        historical, unlike ``/v3/trade-ideas``. Discovered/verified live
+        2026-07-31 while investigating whether the Best-Stocks methodology
+        could be backtested at all (it initially looked snapshot-only,
+        because ``/v3/trade-ideas`` is — this bulk mode of ``/ranking``
+        itself is not).
+
+        Three real, non-obvious things confirmed live before writing this:
+
+        1. Passing ``date`` + ``sector`` (+ optionally ``low_risk``) with
+           **no** ``ticker`` returns every matching symbol for that date,
+           not one ticker's timeline — e.g.
+           ``/ranking?date=2024-06-03&sector=information-technology&low_risk=5``
+           returned 100 real symbols (AMD, APPN, ARM, ...).
+        2. Unlike ``/v3/trade-ideas``'s minimum-threshold filters, this
+           bulk mode's ``low_risk``/``aiscore`` filters are **exact
+           match** (confirmed: a ``low_risk=5`` query returns ONLY
+           low_risk-exactly-5 rows, not >=5) — so "low_risk >= 5" requires
+           one call per exact value 5..10 and a local union, which is what
+           *low_risk_values* is for.
+        3. A single call still caps at 100 rows (confirmed: exactly 100
+           returned with no low_risk filter at all) — but (unlike
+           ``/v3/trade-ideas``) ``page=N`` **does** paginate past that cap
+           here (confirmed: page=2 returned 86 more, non-overlapping,
+           symbols) — the opposite pagination-support split from
+           ``/v3/trade-ideas``, so don't assume the two endpoints behave
+           the same way.
+
+        A 404 here means **zero rows match this exact (sector, date,
+        low_risk) combination** — confirmed live: querying
+        information-technology/2024-06-03 across low_risk 5..10
+        individually returned real non-empty results for 5, 6, 7, 9 and a
+        404 for 8 and 10 (simply no stocks had exactly that score that
+        day), not "invalid date". An earlier version of this docstring
+        wrongly assumed 404 meant "no data for this date at all" (based on
+        a single observation at a market holiday, 2018-01-15, which
+        happened to coincide) and built a whole date-revalidation step in
+        the backtest script around that wrong assumption — it silently
+        rejected perfectly valid trading dates whenever a narrow probe
+        query (e.g. a single high low_risk value) legitimately had zero
+        matches. Fixed: this method now treats a 404 exactly like an empty
+        result for that one low_risk value (no rows added, move to the
+        next value) rather than propagating it as an error.
+
+        There is NO equivalent of ``/v3/trading-parameters``' buy/hold/sell
+        "signal" anywhere in ``/ranking`` — Danelfin's "Proven Buy Signal"
+        criterion has no historical depth at all and cannot be replicated
+        here; only the low_risk/aiscore/sector data can be reconstructed
+        historically. Document this gap wherever this method feeds a
+        historical Best-Stocks reconstruction — it is a real methodology
+        difference from the live arm, not an oversight.
+        """
+        rows: list[dict] = []
+        first_call = True
+        for low_risk in low_risk_values:
+            page = 1
+            while True:
+                if not first_call:
+                    time.sleep(_REQUEST_PAUSE_SECONDS)
+                first_call = False
+                params: dict = {"date": date, "sector": sector, "low_risk": low_risk}
+                if page > 1:
+                    params["page"] = page
+                try:
+                    data = self._get_with_retry("/ranking", params)
+                except ProviderError as exc:
+                    if "404" in str(exc):
+                        log.debug(
+                            "danelfin_historical_sector_scores_empty sector=%s date=%s low_risk=%d page=%d "
+                            "(zero rows match this exact combination — not an error)",
+                            sector, date, low_risk, page,
+                        )
+                    else:
+                        log.warning(
+                            "danelfin_historical_sector_scan_failed sector=%s date=%s low_risk=%d page=%d (%s)",
+                            sector, date, low_risk, page, exc,
+                        )
+                    break
+                inner = data.get(date, {}) if isinstance(data, dict) else {}
+                if not inner:
+                    break
+                for symbol, scores in inner.items():
+                    rows.append({"symbol": symbol, "sector": sector, "date": date, **scores})
+                if len(inner) < 100:
+                    break
+                page += 1
+        if not rows:
+            return pd.DataFrame()
+        return (
+            pd.DataFrame(rows)
+            .drop_duplicates(subset=["symbol"])  # a symbol's low_risk is fixed on a given historical date
+            .reset_index(drop=True)
+        )
+
     def get_live_signals(self, symbols: Sequence[str]) -> pd.DataFrame:
         """Combine trading-parameters + price-forecast + performance into
         one row per symbol (LIVE_SIGNAL_COLS) — the actual "feed this into

@@ -1,10 +1,24 @@
-"""Synthetic mark-to-market ledger for the Danelfin Best-Stocks paper arm.
+"""NAV ledger for the Danelfin Best-Stocks paper arm — synthetic or
+broker-executed.
 
-Deliberately NOT a broker-connected engine (see best_stocks_arm.py's module
-docstring for why) — just a JSON-persisted equal-weight NAV tracker: hold
-25 symbols at target equal dollar weight, mark to market daily, and apply
-Danelfin's own stated rebalance cadence (quarterly replace / annual
-reweight) on schedule.
+A JSON-persisted equal-weight NAV tracker: hold 25 symbols at target equal
+dollar weight, mark to market daily, and apply Danelfin's own stated
+rebalance cadence (quarterly replace / annual reweight) on schedule.
+
+Two execution modes, both maintained by this same class:
+  - ``full_rebalance``/``quarterly_replace``/``annual_rebalance`` — the
+    original synthetic mode: hypothetical fractional shares, no broker
+    involved at all (see best_stocks_arm.py's module docstring for why
+    this was the original, more conservative design).
+  - ``rebalance_via_broker`` — real IBKR paper orders, whole shares, real
+    fills. Added after the user explicitly asked to hook this arm into
+    real trade execution, sharing the main engine's own IBKR paper
+    account (a real collision risk — see
+    firm.live.best_stocks_execution's module docstring for the guard
+    this depends on). Uses a SEPARATE state file
+    (``data/best_stocks_ledger_live.json`` by convention) from the
+    synthetic ledger, so the two remain independently comparable rather
+    than one silently overwriting the other's history.
 """
 
 from __future__ import annotations
@@ -14,6 +28,10 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from firm.brokers.ibkr import IBKRBroker
 
 log = logging.getLogger("firm.live.best_stocks_ledger")
 
@@ -164,6 +182,173 @@ class BestStocksLedger:
         )
         self.last_full_rebalance = asof.date().isoformat()
         log.info("best_stocks_annual_rebalance asof=%s nav=%.2f", asof.date(), current_nav)
+
+    # ------------------------------------------------------------------
+    # real broker execution (whole shares, real fills)
+    # ------------------------------------------------------------------
+
+    def rebalance_via_broker(
+        self,
+        asof: datetime,
+        broker: "IBKRBroker",
+        rebalance_kind: str,
+        target_selection: list[dict] | None = None,
+    ) -> None:
+        """Place real IBKR paper orders (whole shares) to bring holdings
+        toward a target allocation, instead of the synthetic
+        full_rebalance/quarterly_replace/annual_rebalance's hypothetical
+        fractional-share math. See this module's docstring and
+        firm.live.best_stocks_execution's module docstring for the
+        shared-account collision-guard rationale — re-checked HERE, fresh,
+        even though callers are also expected to exclude colliding symbols
+        at selection time (defense in depth: the main engine's universe
+        can change between selection and execution).
+
+        rebalance_kind:
+          "full"      — initial construction; target_selection required.
+                        Every symbol not in the fresh selection is sold to 0.
+          "quarterly" — re-run selection; only symbols that dropped out are
+                        sold, only newly-added symbols are bought (using the
+                        dollars freed by the sells) — still-qualifying
+                        holdings are left untouched, matching Danelfin's
+                        "replace what no longer qualifies" wording more
+                        literally than a full reweight would.
+                        target_selection required (freshly re-run).
+          "annual"    — re-equal-weight CURRENT holdings only, no symbol
+                        changes; target_selection ignored.
+        """
+        from firm.brokers.base import BrokerError, OrderRequest
+        from firm.live.best_stocks_execution import main_engine_excluded_symbols
+
+        excluded = main_engine_excluded_symbols()
+        held = set(self.holdings)
+
+        if rebalance_kind in ("full", "quarterly"):
+            if not target_selection:
+                log.warning(
+                    "best_stocks_rebalance_via_broker_no_selection kind=%s — skipping", rebalance_kind,
+                )
+                return
+            tradable = [row for row in target_selection if row["symbol"] not in excluded]
+            skipped = [row["symbol"] for row in target_selection if row["symbol"] in excluded]
+            if skipped:
+                log.warning(
+                    "best_stocks_collision_guard_skipped kind=%s symbols=%s (main engine universe)",
+                    rebalance_kind, sorted(skipped),
+                )
+            fresh_symbols = {row["symbol"] for row in tradable}
+            held_collisions: set[str] = set()
+        elif rebalance_kind == "annual":
+            held_collisions = held & excluded
+            if held_collisions:
+                log.error(
+                    "best_stocks_collision_guard_triggered symbols=%s currently held but now "
+                    "also in the main engine's universe — left untouched (not sold) this rebalance",
+                    sorted(held_collisions),
+                )
+            fresh_symbols = held - held_collisions
+        else:
+            raise ValueError(f"unknown rebalance_kind: {rebalance_kind!r}")
+
+        if not fresh_symbols and not held_collisions:
+            log.warning(
+                "best_stocks_rebalance_via_broker_no_tradable_symbols kind=%s — leaving ledger unchanged",
+                rebalance_kind,
+            )
+            return
+
+        all_symbols = fresh_symbols | held | held_collisions
+        try:
+            prices = broker.get_current_prices(list(all_symbols))
+        except BrokerError:
+            log.error("best_stocks_price_fetch_failed — aborting rebalance", exc_info=True)
+            return
+
+        current_nav = self.nav(prices)
+        # Untouched positions (collision-guard holdouts) always keep their
+        # current share count — never defaulted to 0, which would instead
+        # generate an unwanted full-liquidation sell order for them.
+        target_shares: dict[str, int] = {s: int(round(self.holdings[s])) for s in held_collisions}
+
+        if rebalance_kind == "quarterly":
+            keep = held & fresh_symbols
+            dropped = held - fresh_symbols - held_collisions
+            added = fresh_symbols - held
+            for s in keep:
+                target_shares[s] = int(round(self.holdings[s]))  # unchanged — no order generated
+            for s in dropped:
+                target_shares[s] = 0
+            priced_added = [s for s in added if prices.get(s, 0) > 0]
+            if priced_added:
+                freed_dollars = sum(self.holdings.get(s, 0.0) * prices.get(s, 0.0) for s in dropped)
+                per_symbol_dollars = freed_dollars / len(priced_added)
+                for s in priced_added:
+                    target_shares[s] = int(per_symbol_dollars // prices[s])
+        else:  # full or annual — equal-weight across the whole (guard-adjusted) target set
+            priced_targets = [s for s in fresh_symbols if prices.get(s, 0) > 0]
+            if not priced_targets:
+                log.warning("best_stocks_rebalance_via_broker_no_priced_targets — leaving ledger unchanged")
+                return
+            # Collision-guard holdouts (annual only) keep their current value
+            # untouched and are excluded from the reweight pool entirely, so
+            # the remaining NAV split across priced_targets doesn't silently
+            # double-count their (unresized) value.
+            held_collisions_value = sum(
+                self.holdings.get(s, 0.0) * prices.get(s, 0.0) for s in held_collisions
+            )
+            per_symbol_dollars = (current_nav - held_collisions_value) / len(priced_targets)
+            for s in priced_targets:
+                target_shares[s] = int(per_symbol_dollars // prices[s])
+
+        for symbol in all_symbols:
+            target = target_shares.get(symbol, 0)
+            current = int(round(self.holdings.get(symbol, 0.0)))
+            delta = target - current
+            if delta == 0:
+                continue
+            side = "buy" if delta > 0 else "sell"
+            order = OrderRequest(
+                symbol=symbol, side=side, quantity=abs(delta), order_type="market",
+                strategy="danelfin_best_stocks",
+                client_order_id=f"beststocks-{symbol}-{asof.strftime('%Y%m%d')}-{side}",
+            )
+            try:
+                status = broker.submit_order(order)
+            except BrokerError:
+                log.error(
+                    "best_stocks_order_failed symbol=%s side=%s qty=%d", symbol, side, abs(delta), exc_info=True,
+                )
+                continue
+            filled = status.filled_quantity or 0.0
+            if filled <= 0:
+                log.warning(
+                    "best_stocks_order_unfilled symbol=%s side=%s status=%s", symbol, side, status.status,
+                )
+                continue
+            signed = filled if side == "buy" else -filled
+            new_qty = self.holdings.get(symbol, 0.0) + signed
+            if abs(new_qty) < 1e-9:
+                self.holdings.pop(symbol, None)
+            else:
+                self.holdings[symbol] = new_qty
+            fill_price = status.avg_fill_price or prices.get(symbol, 0.0)
+            self.cash -= signed * fill_price
+            log.info(
+                "best_stocks_order_filled symbol=%s side=%s qty=%.0f price=%.2f",
+                symbol, side, filled, fill_price,
+            )
+
+        self.selection_meta = [
+            row for row in (target_selection or []) if row["symbol"] in self.holdings
+        ] or self.selection_meta
+
+        if rebalance_kind == "full":
+            self.last_full_rebalance = asof.date().isoformat()
+            self.last_quarterly_replace = asof.date().isoformat()
+        elif rebalance_kind == "quarterly":
+            self.last_quarterly_replace = asof.date().isoformat()
+        elif rebalance_kind == "annual":
+            self.last_full_rebalance = asof.date().isoformat()
 
     # ------------------------------------------------------------------
     # scheduling

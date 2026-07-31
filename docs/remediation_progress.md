@@ -15,7 +15,7 @@ Last updated: 2026-07-31.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #46 has the most recent detail.
+   "Completed" item #47 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -462,6 +462,51 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     host — caught a real timezone bug before it could cause a 3-hour-early
     fire: this server's local timezone is `Asia/Jerusalem`, and systemd's
     `OnCalendar` defaults to local time without an explicit `UTC` suffix.
+47. **Best-Stocks: real IBKR execution built then paused after a negative
+    walk-forward backtest** (2026-07-31, same day) — full detail in
+    `docs/danelfin_best_stocks_arm.md` ("Real IBKR execution" and
+    "Walk-forward backtest" sections). Follow-up to item #46: the user
+    asked to "hook it into trade" (real IBKR paper orders, not just the
+    synthetic ledger). Checked the real collision risk first —
+    `IBKRBroker` has no account/model-code tagging, so IBKR nets all fills
+    into one account-level position regardless of client_id — and the
+    user chose (of 3 options presented) to share the main engine's IBKR
+    account with a symbol-collision guard rather than use a separate
+    account. Built `firm.live.best_stocks_execution` (main-engine universe
+    exclusion, static YAML + live `/api/live/config` union),
+    `select_best_stocks`'s `excluded_symbols` param (drops collisions
+    before ranking, not after), `BestStocksLedger.rebalance_via_broker()`
+    (real whole-share orders, full/quarterly/annual variants, re-checks
+    the guard fresh at order time), and `scripts/run_best_stocks_arm.py
+    --live-trading` (distinct IBKR client_id 3). Before finishing/testing
+    that end-to-end, ran a proper walk-forward backtest of the
+    methodology first — discovered along the way that Danelfin's
+    `/ranking` endpoint (already used for `danelfin_ai_score`) ALSO
+    supports a bulk historical mode (`date`+`sector`, no `ticker`),
+    meaning the Best-Stocks methodology is NOT structurally unbacktestable
+    after all, contrary to item #46's original framing. Building that
+    backtest surfaced two more real bugs: (a) 404 there means "zero rows
+    match this exact low_risk/aiscore value" (exact-match filters, unlike
+    `/v3/trade-ideas`'s minimum-threshold ones) — NOT "invalid date", which
+    an earlier version wrongly assumed and used to build a flawed
+    date-revalidation probe; (b) a live SPY price fetch silently truncated
+    to the last ~2 years (a known Massive tier limit, with Tiingo/FMP too
+    rate-limited this session to fill the gap), which broke rebalance-date
+    resolution outright — 7 of 9 candidate dates collapsed onto the same
+    date with no visible error. Fixed by checking this project's own
+    on-disk parquet price cache first (real SPY history back to 2010 was
+    already sitting there, unused) and adding a hard-fail guard against
+    ever silently resolving duplicate rebalance dates again. **Full
+    2018-2026 annual walk-forward result: Sharpe 0.276 vs SPY's 0.706,
+    total return +27.5% vs SPY's +169.3%, max drawdown -43.0% vs SPY's
+    -34.1%** — decisively negative, the opposite of Danelfin's own claimed
+    outperformance. **Decision: real broker execution was deliberately
+    left unfinished and not deployed** — the code is real and importable
+    but was never exercised against a live IBKR connection or added to
+    any systemd unit, matching this project's promotion discipline
+    (evidence before enabling, not the reverse). The synthetic
+    paper-tracking ledger from item #46 keeps running on its daily timer
+    regardless.
 
 ## In progress
 

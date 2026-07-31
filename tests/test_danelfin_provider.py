@@ -208,6 +208,82 @@ class TestDanelfinTradeIdeas:
         assert df.empty
 
 
+class TestDanelfinHistoricalSectorScores:
+    """Bulk historical /ranking mode (date+sector, no ticker) — discovered
+    live 2026-07-31 while investigating whether the Best-Stocks methodology
+    could be backtested. Real, non-obvious behaviors verified live and
+    covered here: exact-match low_risk filters (not minimum-threshold like
+    /v3/trade-ideas), pagination DOES work here (unlike /v3/trade-ideas),
+    and a 404 means "zero rows for this exact combination" — NOT "invalid
+    date" (an earlier version of this method got that wrong)."""
+
+    def test_merges_across_low_risk_values(self, provider):
+        provider._client = MagicMock()
+
+        def side_effect(path, params, headers):
+            lr = params["low_risk"]
+            if lr == 5:
+                return {"2024-06-03": {"AAA": {"aiscore": 7, "low_risk": 5}}}
+            if lr == 6:
+                return {"2024-06-03": {"BBB": {"aiscore": 8, "low_risk": 6}}}
+            raise ProviderError("https://apirest.danelfin.com/ranking returned HTTP 404: []")
+
+        provider._client.get_json = MagicMock(side_effect=side_effect)
+        with patch("firm.data.providers.danelfin.time.sleep"):
+            df = provider.get_historical_sector_scores(
+                "materials", "2024-06-03", low_risk_values=(5, 6, 7),
+            )
+        assert set(df["symbol"]) == {"AAA", "BBB"}
+        assert df[df["symbol"] == "AAA"].iloc[0]["low_risk"] == 5
+        assert df[df["symbol"] == "BBB"].iloc[0]["low_risk"] == 6
+
+    def test_404_treated_as_empty_not_raised(self, provider):
+        """Real bug found live: 404 here means 'zero rows match this exact
+        (sector, date, low_risk)' — not 'invalid date'. Must not raise."""
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(
+            side_effect=ProviderError("https://apirest.danelfin.com/ranking returned HTTP 404: []")
+        )
+        with patch("firm.data.providers.danelfin.time.sleep"):
+            df = provider.get_historical_sector_scores("materials", "2024-06-03", low_risk_values=(10,))
+        assert df.empty
+
+    def test_paginates_past_100_row_cap(self, provider):
+        """Unlike /v3/trade-ideas (no pagination support, confirmed live),
+        /ranking's bulk mode DOES paginate — confirmed live: page=2 on a
+        low_risk=5 query returned 86 more, non-overlapping symbols."""
+        provider._client = MagicMock()
+        page1 = {"2024-06-03": {f"SYM{i}": {"aiscore": 7, "low_risk": 5} for i in range(100)}}
+        page2 = {"2024-06-03": {"SYM100": {"aiscore": 7, "low_risk": 5}}}
+
+        def side_effect(path, params, headers):
+            if params.get("page", 1) == 1:
+                return page1
+            return page2
+
+        provider._client.get_json = MagicMock(side_effect=side_effect)
+        with patch("firm.data.providers.danelfin.time.sleep"):
+            df = provider.get_historical_sector_scores("materials", "2024-06-03", low_risk_values=(5,))
+        assert len(df) == 101
+        assert "SYM100" in set(df["symbol"])
+
+    def test_non_404_error_logged_and_skipped_not_raised(self, provider):
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(
+            side_effect=ProviderError("Request to https://apirest.danelfin.com/ranking failed after 3 attempts")
+        )
+        with patch("firm.data.providers.danelfin.time.sleep"):
+            df = provider.get_historical_sector_scores("materials", "2024-06-03", low_risk_values=(5, 6))
+        assert df.empty
+
+    def test_all_empty_returns_empty_frame(self, provider):
+        provider._client = MagicMock()
+        provider._client.get_json = MagicMock(return_value={"2024-06-03": {}})
+        with patch("firm.data.providers.danelfin.time.sleep"):
+            df = provider.get_historical_sector_scores("materials", "2024-06-03")
+        assert df.empty
+
+
 class TestDanelfinUnsupportedCapabilities:
     def test_other_capabilities_raise_not_implemented(self, provider):
         with pytest.raises(NotImplementedError):

@@ -1,6 +1,11 @@
 # Danelfin "Best Stocks Strategy" — a separate, synthetic paper-tracking arm
 
-Status: **live, initialized 2026-07-31**, running on its own daily systemd timer.
+Status: **live, initialized 2026-07-31**, running on its own daily systemd
+timer. **A full 2018-2026 walk-forward backtest (below) came back decisively
+negative vs. SPY — real broker execution was deliberately NOT built out as a
+result.** The forward-tracking synthetic ledger keeps running as-is (cheap,
+already working, genuinely informative to keep watching), but this is not
+being escalated to actual paper-account order flow.
 
 ## Why this exists
 
@@ -179,6 +184,13 @@ rule (not a bug — worth remembering when eyeballing later runs).
 (~$4,000/position). State: `data/best_stocks_ledger.json`. First NAV
 snapshot: $100,000 (by construction, at cost basis on day 1).
 
+**Update 2026-07-31 (same day, later):** a full 2018-2026 walk-forward
+backtest of the underlying methodology came back decisively negative vs.
+SPY (Sharpe 0.276 vs 0.706, total return +27.5% vs +169.3% — see "Walk-forward
+backtest" below). The synthetic ledger above keeps running daily regardless
+(cheap, informative), but real broker execution was NOT built out as a
+result — see "Decision: real broker execution NOT built out".
+
 ## How to monitor
 
 No dedicated UI/API endpoint exists yet (consistent with this project's
@@ -207,6 +219,48 @@ systemctl list-timers best-stocks-arm.timer
 journalctl -u best-stocks-arm.service --since "1 day ago"
 ```
 
+## Real IBKR execution (partially built 2026-07-31, paused — see backtest below)
+
+The user's explicit follow-up goal was to "hook it into trade" — actually
+place real IBKR paper orders for this arm, not just track a synthetic
+NAV. Before writing any execution code, the actual collision risk was
+checked: `IBKRBroker.get_positions()`/`submit_order()` (in
+`src/firm/brokers/ibkr.py`) have no account/model-code tagging at all —
+IBKR nets all fills into one account-level position regardless of which
+client_id submitted them. Running this arm's real orders through the same
+account as the main engine would mean the two could silently unwind each
+other's positions on any overlapping symbol.
+
+**Chosen approach (user's explicit call, via options presented): same
+account, with a symbol-collision guard**, not a separate IBKR account.
+Built:
+
+- `src/firm/live/best_stocks_execution.py` — `main_engine_excluded_symbols()`,
+  the union of the main engine's static `config/live.yaml` universe and its
+  live in-memory universe (via `GET /api/live/config`, since a runtime
+  `PUT /api/live/config` universe edit wouldn't be reflected in the YAML
+  file alone). This arm must never trade a symbol in this set.
+- `select_best_stocks`'s `excluded_symbols` param — colliding candidates are
+  dropped from each sector's pool BEFORE ranking, so a collision never
+  silently shrinks the final 25-name portfolio if a non-colliding
+  alternative exists.
+- `BestStocksLedger.rebalance_via_broker()` — real whole-share IBKR orders
+  (`full`/`quarterly`/`annual` variants), re-checking the collision guard
+  fresh at order time (defense in depth against the main engine's universe
+  changing between selection and execution), holding untouched any
+  already-held symbol that becomes a collision after the fact rather than
+  force-liquidating it.
+- `scripts/run_best_stocks_arm.py --live-trading` — connects
+  `IBKRBroker` on a distinct `client_id` (default 3; main engine uses 1
+  for its broker connection and 2 for its data feed — see
+  `.cursor/rules/ibkr-integration.mdc`).
+
+**This was paused, untested end-to-end, once the walk-forward backtest
+below came back decisively negative** — see "Decision: real broker
+execution NOT built out". The code above is real and importable but was
+never exercised against a live IBKR connection, never added to any
+systemd unit, and is not part of any deployment.
+
 ## Known limitations / honest caveats
 
 - **No A/B, by nature.** This isn't a strategy inside the backtestable
@@ -223,6 +277,130 @@ journalctl -u best-stocks-arm.service --since "1 day ago"
   own implicit buy-only purpose, spot-checked on 3 symbols.
 - **Single point-in-time selection per rebalance event** — like Danelfin's
   own screener, this reflects "today's" scores at each rebalance/replace
-  event, not a walk-forward historical replay; there's no way to
-  backtest this arm's specific trajectory before today, since
-  `/v3/trade-ideas` (like all `/v3/*` endpoints) has no historical dates.
+  event, not a walk-forward historical replay of the LIVE arm's exact
+  `/v3/trade-ideas`-based rules (those have no historical depth, ever).
+  **Update:** a *separate* code path (`select_best_stocks_historical`,
+  `scripts/backtest_best_stocks_arm.py`) CAN walk-forward test the
+  underlying methodology via a different Danelfin endpoint mode — see
+  the "Walk-forward backtest" section below. The live arm itself is
+  unchanged by this; it's a genuinely separate reconstruction with its
+  own disclosed simplifications, not a backtest of this exact code path.
+
+## Walk-forward backtest (2026-07-31) — decisively negative vs. SPY
+
+While building real order execution for this arm (see "Real IBKR
+execution" below — since paused as a direct result of this section), the
+user pointed out Danelfin's `/ranking` endpoint (already used for the
+genuinely-historical `danelfin_ai_score` strategy) also supports a **bulk
+historical mode**: `date`+`sector` with no `ticker` returns every matching
+symbol for that historical date, not one ticker's timeline. That means the
+Best-Stocks sector-ranking methodology CAN be honestly walk-forward
+tested — unlike the live arm's `/v3/trade-ideas`, which is genuinely
+snapshot-only.
+
+### What was verified live before building on it
+
+- `/ranking?date=2024-06-03&sector=information-technology&low_risk=5` (no
+  `ticker`) returns every matching symbol for that exact historical date —
+  confirmed with real dated scores (AMD, APPN, ARM, ...).
+- Unlike `/v3/trade-ideas`'s minimum-threshold filters, this bulk mode's
+  `low_risk`/`aiscore` filters are **exact match** (confirmed: querying
+  information-technology/2024-06-03 across low_risk 5..10 individually
+  returned real non-empty results for 5/6/7/9 and a 404 for 8/10 — no
+  stocks had exactly that score that day). "Low_risk >= 5" therefore needs
+  one call per exact value 5-10, unioned locally.
+- **A 404 here means "zero rows match this exact combination"** — NOT
+  "invalid date". An earlier version of this work got that wrong (based
+  on a single observation that happened to coincide with a market
+  holiday) and built a whole date-revalidation step around the wrong
+  assumption, which silently rejected perfectly valid trading dates
+  whenever a narrow probe query legitimately had zero matches. Fixed by
+  removing the Danelfin-based date probe entirely and resolving rebalance
+  dates from a real local price series (SPY) instead.
+- A single call still caps at 100 rows, but (unlike `/v3/trade-ideas`)
+  `page=N` **does** paginate past that cap here — the opposite
+  pagination-support split between the two endpoints.
+- There is **no historical equivalent of "Proven Buy Signal"** anywhere in
+  `/ranking` — only low_risk/aiscore/sector can be reconstructed
+  historically.
+
+### A second real bug, found the same way: benchmark price truncation
+
+The first full run silently corrupted itself: 7 of 9 candidate rebalance
+dates (2018-2024) all resolved to the *same* date, because the live SPY
+price fetch was silently truncated to the last ~2 years (Massive's own
+tier limit, with Tiingo/FMP too rate-limited during this session to fill
+the gap) — and the date-resolution logic picked the earliest available
+row in that truncated series for every earlier target, without erroring.
+Fixed two ways: (1) `PriceCache` now checks this project's own on-disk
+parquet cache first (real SPY history back to 2010 already sat there,
+unused, from earlier backfill work) before ever hitting the live provider
+chain; (2) the backtest script now hard-fails with a clear error if it
+ever resolves duplicate rebalance dates again, instead of silently
+running a corrupted window.
+
+### Disclosed methodology simplifications (not silent deviations)
+
+1. **No "Proven Buy Signal" filter** — no historical equivalent exists;
+   uses low_risk>=5 + aiscore ranking only.
+2. **Annual rebalancing, not quarterly replace + annual reweight** — a
+   full quarterly walk-forward would need on the order of tens of
+   thousands of Danelfin API calls; annual (~9 events over 8.5 years) is
+   Danelfin's own stated "reweight" cadence and a reasonable first pass.
+3. **No real historical liquidity (>100k volume) filter by default** — a
+   single rebalance date's low_risk-qualifying candidate pool spans
+   hundreds to 500+ symbols per sector; fetching real historical volume
+   for all of them hit the same real rate-limit wall described above.
+   Sector ranking uses the full low_risk-qualifying pool (unfiltered by
+   volume); `--check-volume` exists as a slow opt-in that bounds the
+   check to only the names actually being selected, not the whole pool.
+
+### Results: 2018-01-16 to 2026-07-01, 9 annual rebalance events, 25 holdings each
+
+| | Sharpe | CAGR | Max Drawdown | Total Return |
+|---|---|---|---|---|
+| **Best-Stocks (this reconstruction)** | 0.276 | 3.8% | -43.0% | +27.5% |
+| **SPY (benchmark)** | 0.706 | 12.5% | -34.1% | **+169.3%** |
+
+Every one of the 9 rebalance events filled all 25 slots across 5 real
+sectors (no underfilled/ineligible sectors) — this is a complete,
+clean-run result, not a partial one. Full per-date selections in
+`data/best_stocks_backtest_full.json` (gitignored — a data artifact, not
+source).
+
+**This is the opposite of Danelfin's own claimed outperformance** (their
+marketing: S&P 500 outperformance with smaller drawdowns, Jan
+2017-Jun 2025, via Monte Carlo simulation — their claim, never
+independently verified here). Even generously accounting for this
+reconstruction's disclosed simplifications (no buy-signal filter, no
+volume filter, annual not quarterly), the gap is not close: SPY returned
+roughly **6x** more, with a *smaller* drawdown, over the same window.
+Plausible contributors, not excuses: annual (not quarterly) rebalancing
+lets underperforming picks ride a full year before replacement; the
+missing volume filter may let in thinly-traded, higher-volatility names
+that drag down risk-adjusted return; 2018-2026 was an unusually strong,
+narrow-leadership period for US large caps (SPY) that a
+sector-rotating/lower-market-cap strategy would generally struggle to
+keep pace with regardless of stock-picking skill.
+
+### Decision: real broker execution NOT built out
+
+Mid-session, real IBKR paper-order execution for this arm was partially
+built (`BestStocksLedger.rebalance_via_broker`, a `--live-trading` flag on
+`scripts/run_best_stocks_arm.py`, a shared-account collision guard in
+`firm.live.best_stocks_execution`) before this backtest existed to inform
+whether it was worth finishing. Given the decisively negative result
+above, that work was **deliberately left unfinished and not wired into
+any deployment** — building out, testing, and running real order
+execution for a methodology that just failed its own backtest would
+contradict this project's own promotion discipline (build → evidence →
+honest documentation → enable only on positive evidence). The partially-built
+code remains in the codebase (`rebalance_via_broker`, the collision guard,
+the `--live-trading` flag) in case a future revisit — a different rebalance
+cadence, an added volume/buy-signal filter, or a different rule set
+entirely — produces a more promising backtest; it is not deleted, just
+not finished or enabled. The synthetic paper-tracking ledger
+(`scripts/run_best_stocks_arm.py`'s default mode, no `--live-trading`)
+continues running on its daily timer regardless — it's cheap, already
+working, and remains a genuinely informative forward-tracking comparison
+even though real execution isn't happening.
