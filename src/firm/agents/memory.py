@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,13 @@ from firm.llm.schemas import DecisionReflection, parse_llm_response
 log = logging.getLogger("firm.agents.memory")
 
 _DEFAULT_PATH = Path("data/memory/decisions.jsonl")
+# The literal real-production-file path, distinct from `_DEFAULT_PATH` above.
+# `_DEFAULT_PATH` is intentionally monkeypatchable by tests (see
+# TestMemoryDecisionsAPI in tests/test_api.py) — comparing a resolved path
+# against *that* would be tautological whenever `memory_log_path` is omitted
+# from config, since `_DEFAULT_PATH` itself supplies the fallback. This
+# constant never changes, so it's what the pytest-context guard below checks.
+_REAL_PROD_PATH = Path("data/memory/decisions.jsonl")
 
 _REFLECTION_SYSTEM = (
     "You are a portfolio manager reviewing your own past trading decision "
@@ -64,7 +72,24 @@ class TradingMemoryLog:
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         cfg = config or {}
         raw_path = cfg.get("memory_log_path", str(_DEFAULT_PATH))
-        self._path = Path(raw_path).expanduser()
+        resolved = Path(raw_path).expanduser()
+        if resolved == _REAL_PROD_PATH.expanduser() and os.environ.get("PYTEST_CURRENT_TEST"):
+            # A test resolving to the real production decisions file would
+            # silently contaminate it (this exact bug shipped and had to be
+            # cleaned up twice: commit 8822c31, then again here). Checking
+            # the *resolved* path against the never-patched _REAL_PROD_PATH
+            # (not `_DEFAULT_PATH`, which tests legitimately monkeypatch —
+            # see TestMemoryDecisionsAPI in tests/test_api.py, whose
+            # isolation *is* patching that global) means both valid
+            # isolation patterns pass: explicit memory_log_path in config,
+            # or monkeypatching `_DEFAULT_PATH` itself.
+            raise RuntimeError(
+                f"TradingMemoryLog resolved to the real production path "
+                f"{_REAL_PROD_PATH} while running under pytest. Pass "
+                "memory_log_path=str(tmp_path / 'decisions.jsonl') in the "
+                "test's config, or monkeypatch firm.agents.memory._DEFAULT_PATH."
+            )
+        self._path = resolved
         self._max_context: int = int(cfg.get("memory_max_context", 5))
 
     # ── Phase A ─────────────────────────────────────────────────────────────

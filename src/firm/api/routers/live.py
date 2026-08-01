@@ -38,6 +38,7 @@ _TRADE_HISTORY_ORDERS_PATH = "data/order_history.json"
 _TRADE_HISTORY_CYCLES_PATH = "data/cycle_history.json"
 _KILL_SWITCH_STATE_PATH = "data/kill_switch_state.json"
 _STATE_DB_PATH = "data/live_state.db"
+_MEMORY_LOG_PATH = "data/memory/decisions.jsonl"
 
 
 def _start_live_scheduler(
@@ -291,6 +292,7 @@ def _start_live_engine(
         "llm_config": provider_config(),
     }
     config.setdefault("respect_market_hours", True)
+    config.setdefault("memory_log_path", _MEMORY_LOG_PATH)
     engine = LiveTradingEngine(
         config=config,
         broker=broker_instance,

@@ -194,6 +194,34 @@ class DecisionReflection(BaseModel):
     def _coerce_verdict(cls, v: Any) -> Any:
         return v if v in ("correct", "incorrect", "partial") else "partial"
 
+    @field_validator("what_worked", "what_failed", "lesson")
+    @classmethod
+    def _reject_degenerate_text(cls, v: str, info: Any) -> str:
+        """Reject garbled/repetition-loop LLM output rather than persist it.
+
+        A real incident (2026-07-22 decision log entry) shipped a reflection
+        that was thousands of characters of repeated ``<unk>`` tokens and
+        nonsense words — a decoding failure the model itself can't detect,
+        but that's trivially distinguishable from the terse 1-2 sentence
+        prose the system prompt asks for. Raising here fails schema
+        validation, so ``parse_llm_response`` returns ``None`` and the
+        caller (``TradingMemoryLog.reflect``) falls back to its existing
+        "unknown"/reflection-unavailable path — the same behavior as an
+        outright LLM API failure.
+        """
+        if not v:
+            return v
+        if "<unk>" in v:
+            raise ValueError(f"{info.field_name}: contains literal <unk> tokens (degenerate decode)")
+        if len(v) > 1000:
+            raise ValueError(f"{info.field_name}: {len(v)} chars, exceeds sane length for a terse field")
+        words = [w.lower() for w in v.split() if len(w) > 3]
+        if len(words) >= 20:
+            most_common = max(words.count(w) for w in set(words))
+            if most_common / len(words) > 0.2:
+                raise ValueError(f"{info.field_name}: degenerate word-repetition loop")
+        return v
+
 
 def parse_llm_response(
     model_cls: type[BaseModel], raw: Any, *, context: str,

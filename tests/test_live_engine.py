@@ -462,13 +462,13 @@ class TestLiveTradingEngine:
         assert "pipeline boom" in result.error
 
     @patch("firm.live.engine.build_orchestrator")
-    def test_drawdown_kill_switch_trips_and_halts(self, mock_build):
+    def test_drawdown_kill_switch_trips_and_halts(self, mock_build, tmp_path):
         # Broker cash (50k) is far below the 100k starting equity, so the
         # peak-to-trough drawdown (50%) breaches the 10% kill switch.
         broker = MockBroker(initial_cash=50_000)
         feed = LiveDataFeed(providers={}, universe=["AAPL"])
         queue = ApprovalQueue(broker=broker)
-        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1}
+        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1, "memory_log_path": str(tmp_path / "decisions.jsonl")}
 
         mock_orch = MagicMock()
         mock_orch.step.return_value = (_make_orders(), _make_blackboard())
@@ -493,7 +493,7 @@ class TestLiveTradingEngine:
         broker = MockBroker(initial_cash=50_000)
         feed = LiveDataFeed(providers={}, universe=["AAPL"])
         queue = ApprovalQueue(broker=broker)
-        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1}
+        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1, "memory_log_path": str(tmp_path / "decisions.jsonl")}
 
         mock_orch = MagicMock()
         mock_orch.step.return_value = (_make_orders(), _make_blackboard())
@@ -527,7 +527,7 @@ class TestLiveTradingEngine:
         broker = MockBroker(initial_cash=100_000)
         feed = LiveDataFeed(providers={}, universe=["AAPL"])
         queue = ApprovalQueue(broker=broker)
-        config = {"initial_capital": 100_000}
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
         engine = LiveTradingEngine(
             config=config, broker=broker, data_feed=feed, approval_queue=queue,
         )
@@ -539,7 +539,7 @@ class TestLiveTradingEngine:
         broker = MockBroker(initial_cash=50_000)
         feed = LiveDataFeed(providers={}, universe=["AAPL"])
         queue = ApprovalQueue(broker=broker)
-        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1}
+        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1, "memory_log_path": str(tmp_path / "decisions.jsonl")}
 
         mock_orch = MagicMock()
         mock_orch.step.return_value = (_make_orders(), _make_blackboard())
@@ -568,12 +568,12 @@ class TestLiveTradingEngine:
         assert result2.halted is False
 
     @patch("firm.live.engine.build_orchestrator")
-    def test_alert_callback_invoked(self, mock_build):
+    def test_alert_callback_invoked(self, mock_build, tmp_path):
         received: list[dict] = []
         broker = MockBroker(initial_cash=50_000)
         feed = LiveDataFeed(providers={}, universe=["AAPL"])
         queue = ApprovalQueue(broker=broker)
-        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1}
+        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1, "memory_log_path": str(tmp_path / "decisions.jsonl")}
 
         mock_build.return_value = MagicMock()
         engine = LiveTradingEngine(
@@ -763,7 +763,7 @@ class TestDurableLiveState:
         broker = MockBroker(initial_cash=100_000)
         feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
         queue = ApprovalQueue(broker=broker)
-        config = {"initial_capital": 100_000}
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
 
         mock_orch = MagicMock()
         mock_orch.step.return_value = (_make_orders(), _make_blackboard())
@@ -813,7 +813,7 @@ class TestDurableLiveState:
         broker = MockBroker(initial_cash=100_000)
         feed = LiveDataFeed(providers={}, universe=["AAPL"])
         queue = ApprovalQueue(broker=broker)
-        config = {"initial_capital": 100_000}
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
         mock_build.return_value = MagicMock()
 
         engine = LiveTradingEngine(

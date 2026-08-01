@@ -10,12 +10,12 @@ done, in progress, and left, plus context/detail beyond what the plan file's
 todo list captures, so work can resume in a fresh session/chat without the
 prior conversation history.
 
-Last updated: 2026-07-31.
+Last updated: 2026-08-02.
 
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #49 has the most recent detail.
+   "Completed" item #50 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -587,6 +587,56 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     labeled (a cosmetic/audit-trail gap, not a live-data-integrity one —
     not retroactively corrected). Full pytest suite re-run clean after the
     fix.
+
+50. **Decision-log (`TradingMemoryLog`) test contamination recurrence,
+    fixed + hardened against a third recurrence; added LLM-output sanity
+    checking** (2026-08-02) — a deep review of "is the decision log
+    providing meaningful insight" (user request) found `data/memory/
+    decisions.jsonl` was 78% (7 of 9 date-entries, 2026-07-26 through
+    2026-08-01) fabricated test contamination, byte-for-byte matching
+    `tests/test_live_engine.py::TestLiveTradingEngine::
+    test_reset_kill_switch_rearms_trading`'s fixture output
+    (`{"AAPL": 0.05, "MSFT": 0.05}` weights, `nav_at_decision: 50000`,
+    `notes: "cycle=2"`) — a recurrence of a bug already fixed once before
+    (commit `8822c31`, 2026-07-21): that test's `config` dict was missing
+    `memory_log_path`, so `TradingMemoryLog` fell back to the real default
+    path. `TestDurableLiveState::
+    test_portfolio_history_and_attribution_persist_across_restart` had the
+    identical gap but its contamination was masked (not absent) — it runs
+    later in file order and loses the same-day idempotency race against
+    the first test, so it silently no-ops today but would contaminate
+    real data the instant test order or parallelism changed. **Fixed**: (1)
+    added the missing `memory_log_path` override to all 7 test configs in
+    `tests/test_live_engine.py` found missing it (2 confirmed-contaminating,
+    5 assessed as currently-safe-but-fragile — fixed anyway for defense in
+    depth); (2) added a hard guard in `TradingMemoryLog.__init__`
+    (`src/firm/agents/memory.py`) that raises `RuntimeError` if constructed
+    under `PYTEST_CURRENT_TEST` without an explicit `memory_log_path` —
+    this is the durable fix: any *future* test with the same fixture gap
+    now fails loudly at construction time instead of silently writing to
+    production data a third time; (3) purged the 7 fabricated entries from
+    the real `decisions.jsonl` (fingerprint-asserted before deletion) and
+    repaired — rather than deleted — the one genuinely-real entry
+    (2026-07-22) whose `reflection` field was a wall of repeated `<unk>`
+    tokens and gibberish (accepted with zero content validation), keeping
+    its correct `raw_return`/`benchmark_return` and replacing only the
+    corrupted text; (4) added content-sanity validation to
+    `DecisionReflection` (`src/firm/llm/schemas.py`) — rejects
+    `what_worked`/`what_failed`/`lesson` values containing literal
+    `<unk>` tokens, exceeding 1000 chars, or with a single word making up
+    >20% of a ≥20-word field (degenerate repetition loop) — raising
+    `ValidationError` so `parse_llm_response` returns `None` and
+    `TradingMemoryLog.reflect()` falls back to its existing
+    "unknown"/reflection-unavailable path, i.e. treated identically to an
+    outright LLM API failure rather than persisted as a fake insight.
+    Verified: `tests/test_live_engine.py` (99 passed), `tests/
+    test_llm_schemas.py` + `tests/test_memory.py` (45 passed), full suite
+    + ruff re-run clean before commit. Not done in this pass: wiring a
+    real (non-zero) `benchmark_return` — `engine.py`'s `_maybe_reflect`
+    still hardcodes `0.0` — so the "alpha" figure in every reflection
+    remains decorative rather than a true alpha decomposition; flagged as
+    a real follow-up, not attempted here since it needs a real benchmark
+    price feed threaded into the live engine.
 
 ## In progress
 

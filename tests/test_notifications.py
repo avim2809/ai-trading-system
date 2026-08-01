@@ -65,7 +65,7 @@ class TestBuildAlertCallback:
 
 
 class TestEngineIntegration:
-    def test_emit_alert_invokes_callback(self):
+    def test_emit_alert_invokes_callback(self, tmp_path):
         """Regression: LiveTradingEngine._emit_alert must forward to whatever
         callback was wired at construction time (e.g. build_alert_callback())."""
         from firm.live.engine import LiveTradingEngine
@@ -73,7 +73,11 @@ class TestEngineIntegration:
 
         received = []
         engine = LiveTradingEngine(
-            config={"initial_capital": 100_000, "symbols": ["AAPL"]},
+            config={
+                "initial_capital": 100_000,
+                "symbols": ["AAPL"],
+                "memory_log_path": str(tmp_path / "decisions.jsonl"),
+            },
             broker=MockBroker(),
             data_feed=MagicMock(),
             approval_queue=MagicMock(),

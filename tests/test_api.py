@@ -74,6 +74,7 @@ class TestSectorMapHardFail:
         monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
         monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
         monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
+        monkeypatch.setattr(live_mod, "_MEMORY_LOG_PATH", str(tmp_path / "decisions.jsonl"))
 
     def test_start_rejected_when_sector_map_overridden_to_empty(self, client):
         resp = client.post("/api/live/start", json={
@@ -108,6 +109,7 @@ class TestHealthBrokerConnectivity:
         monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
         monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
         monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
+        monkeypatch.setattr(live_mod, "_MEMORY_LOG_PATH", str(tmp_path / "decisions.jsonl"))
 
     def test_health_reflects_ibkr_connectivity_when_running(self, client):
         client.post("/api/live/start", json={"broker": "ibkr_paper", "schedule": "hourly"})
@@ -535,6 +537,7 @@ class TestLiveConfigRoundTrip:
         monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
         monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
         monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
+        monkeypatch.setattr(live_mod, "_MEMORY_LOG_PATH", str(tmp_path / "decisions.jsonl"))
 
     def test_start_applies_strategies_and_risk(self, client):
         resp = client.post("/api/live/start", json={
@@ -656,6 +659,7 @@ class TestLiveClearEndpoints:
         monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
         monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
         monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
+        monkeypatch.setattr(live_mod, "_MEMORY_LOG_PATH", str(tmp_path / "decisions.jsonl"))
 
     def _mock_cycle_deps(self, monkeypatch):
         """run_cycle() otherwise builds a real orchestrator + FallbackProvider
@@ -772,6 +776,7 @@ class TestKillSwitchResetEndpoint:
         monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
         monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
         monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
+        monkeypatch.setattr(live_mod, "_MEMORY_LOG_PATH", str(tmp_path / "decisions.jsonl"))
 
     def _mock_cycle_deps(self, monkeypatch):
         from unittest.mock import MagicMock
