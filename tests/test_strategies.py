@@ -225,6 +225,38 @@ def _make_live_signals_df(
     return pd.DataFrame(rows)
 
 
+def _make_best_stocks_df(
+    symbols: list[str],
+    end_date: datetime | None = None,
+) -> pd.DataFrame:
+    """Generate a synthetic Danelfin /v3/beststocks-shaped snapshot — one row
+    per symbol, ranked 1..N (BEST_STOCKS_COLS shape, no history, mirrors the
+    real endpoint's Top-25 semantics)."""
+    if end_date is None:
+        end_date = datetime(2025, 6, 1)
+    rng = np.random.RandomState(321)
+    ts = pd.Timestamp(end_date)
+    rows: list[dict] = []
+    for i, sym in enumerate(symbols):
+        rows.append(
+            {
+                "date": ts,
+                "symbol": sym,
+                "rank": i + 1,
+                "ai_score": rng.uniform(6, 10),
+                "ai_score_change": rng.uniform(-1, 1),
+                "fundamental_score": rng.uniform(4, 10),
+                "technical_score": rng.uniform(4, 10),
+                "sentiment_score": rng.uniform(4, 10),
+                "low_risk_score": rng.uniform(4, 10),
+                "perf_ytd": rng.uniform(-0.2, 0.5),
+                "sector": "Technology",
+                "country": "US",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 class MockPitView:
     """In-memory PitView implementation for testing."""
 
@@ -238,6 +270,7 @@ class MockPitView:
         include_estimates: bool = True,
         include_ai_scores: bool = True,
         include_live_signals: bool = True,
+        include_best_stocks: bool = True,
     ):
         self._symbols = symbols or SYMBOLS
         self._asof = asof or datetime(2025, 6, 1)
@@ -265,6 +298,11 @@ class MockPitView:
         self._live_signals_df = (
             _make_live_signals_df(self._symbols, self._asof)
             if include_live_signals
+            else pd.DataFrame()
+        )
+        self._best_stocks_df = (
+            _make_best_stocks_df(self._symbols, self._asof)
+            if include_best_stocks
             else pd.DataFrame()
         )
 
@@ -350,6 +388,12 @@ class MockPitView:
             df = df[df["symbol"].isin(symbols)]
         return df
 
+    def best_stocks(self, symbols: list[str] | None = None) -> pd.DataFrame:
+        df = self._best_stocks_df.copy()
+        if symbols and not df.empty:
+            df = df[df["symbol"].isin(symbols)]
+        return df
+
 
 class EmptyPitView:
     """PitView that returns empty data for edge-case testing."""
@@ -380,6 +424,9 @@ class EmptyPitView:
     def live_signals(self, symbols=None) -> pd.DataFrame:
         return pd.DataFrame()
 
+    def best_stocks(self, symbols=None) -> pd.DataFrame:
+        return pd.DataFrame()
+
 
 class SingleSymbolPitView:
     """PitView with a single symbol for edge-case testing."""
@@ -393,6 +440,7 @@ class SingleSymbolPitView:
         self._est_df = _make_estimates_df(self._sym, 6, self._asof)
         self._ai_score_df = _make_ai_scores_df(self._sym, 40, self._asof)
         self._live_signals_df = _make_live_signals_df(self._sym, self._asof)
+        self._best_stocks_df = _make_best_stocks_df(self._sym, self._asof)
 
     @property
     def asof(self) -> datetime:
@@ -427,6 +475,9 @@ class SingleSymbolPitView:
 
     def live_signals(self, symbols=None) -> pd.DataFrame:
         return self._live_signals_df.copy()
+
+    def best_stocks(self, symbols=None) -> pd.DataFrame:
+        return self._best_stocks_df.copy()
 
 
 # ---------------------------------------------------------------------------
@@ -468,6 +519,7 @@ ALL_STRATEGY_NAMES = [
     "investing_analyst_ratings",
     "danelfin_ai_score",
     "danelfin_live_signals",
+    "danelfin_best_stocks_signal",
 ]
 
 
@@ -1062,6 +1114,86 @@ class TestDanelfinLiveSignals:
         signals = strat.generate(view)
         _validate_signals(signals, "danelfin_live_signals")
         assert signals[0].score == pytest.approx(10.0)
+
+
+class TestDanelfinBestStocksSignal:
+    def test_generate(self, pit_view):
+        strat = get("danelfin_best_stocks_signal")()
+        signals = strat.generate(pit_view)
+        _validate_signals(signals, "danelfin_best_stocks_signal")
+        assert len(signals) == len(pit_view.universe)
+
+    def test_empty_universe(self, empty_view):
+        strat = get("danelfin_best_stocks_signal")()
+        assert strat.generate(empty_view) == []
+
+    def test_no_best_stocks_data(self):
+        view = MockPitView(include_best_stocks=False)
+        strat = get("danelfin_best_stocks_signal")()
+        assert strat.generate(view) == []
+
+    def test_all_signals_bullish_and_confident(self, pit_view):
+        strat = get("danelfin_best_stocks_signal")()
+        signals = strat.generate(pit_view)
+        for sig in signals:
+            assert sig.score > 0
+            assert sig.confidence == pytest.approx(0.9)
+
+    def test_symbol_absent_from_list_gets_no_signal(self):
+        view = MockPitView(symbols=["AAPL", "MSFT"])
+        view._best_stocks_df = pd.DataFrame([{
+            "date": pd.Timestamp(view.asof), "symbol": "AAPL", "rank": 1,
+            "ai_score": 9.5, "ai_score_change": 0.1, "fundamental_score": 8.0,
+            "technical_score": 8.0, "sentiment_score": 8.0, "low_risk_score": 7.0,
+            "perf_ytd": 0.15, "sector": "Technology", "country": "US",
+        }])
+        strat = get("danelfin_best_stocks_signal")()
+        signals = strat.generate(view)
+        assert {s.symbol for s in signals} == {"AAPL"}
+
+    def test_rank_1_scores_higher_than_rank_25(self):
+        view = MockPitView(symbols=["AAPL", "MSFT"])
+        asof = pd.Timestamp(view.asof)
+        view._best_stocks_df = pd.DataFrame([
+            {
+                "date": asof, "symbol": "AAPL", "rank": 1,
+                "ai_score": 9.5, "ai_score_change": 0.1, "fundamental_score": 8.0,
+                "technical_score": 8.0, "sentiment_score": 8.0, "low_risk_score": 7.0,
+                "perf_ytd": 0.15, "sector": "Technology", "country": "US",
+            },
+            {
+                "date": asof, "symbol": "MSFT", "rank": 25,
+                "ai_score": 6.1, "ai_score_change": -0.2, "fundamental_score": 6.0,
+                "technical_score": 6.0, "sentiment_score": 6.0, "low_risk_score": 6.0,
+                "perf_ytd": 0.02, "sector": "Technology", "country": "US",
+            },
+        ])
+        strat = get("danelfin_best_stocks_signal")()
+        signals = strat.generate(view)
+        by_symbol = {s.symbol: s for s in signals}
+        assert by_symbol["AAPL"].score > by_symbol["MSFT"].score
+
+    def test_score_clipped_to_raw_score_ceiling(self):
+        """rank=1's bonus must still land inside [-10, 10] even if the base
+        score constant is later bumped closer to the ceiling."""
+        view = MockPitView(symbols=["AAPL"])
+        view._best_stocks_df = pd.DataFrame([{
+            "date": pd.Timestamp(view.asof), "symbol": "AAPL", "rank": 1,
+            "ai_score": 9.9, "ai_score_change": 0.3, "fundamental_score": 9.0,
+            "technical_score": 9.0, "sentiment_score": 9.0, "low_risk_score": 8.0,
+            "perf_ytd": 0.3, "sector": "Technology", "country": "US",
+        }])
+        strat = get("danelfin_best_stocks_signal")()
+        signals = strat.generate(view)
+        _validate_signals(signals, "danelfin_best_stocks_signal")
+
+    def test_meta_carries_rank_and_sector(self, pit_view):
+        strat = get("danelfin_best_stocks_signal")()
+        signals = strat.generate(pit_view)
+        sig = signals[0]
+        assert "rank" in sig.meta
+        assert "sector" in sig.meta
+        assert "country" in sig.meta
 
 
 class TestEventDriven:

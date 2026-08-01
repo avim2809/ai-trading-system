@@ -297,6 +297,9 @@ class FMPProvider(DataProvider):
     def get_live_signals(self, symbols: Sequence[str]) -> pd.DataFrame:
         raise NotImplementedError("FMPProvider does not provide live signals; use DanelfinProvider.")
 
+    def get_best_stocks(self) -> pd.DataFrame:
+        raise NotImplementedError("FMPProvider does not provide best-stocks; use DanelfinProvider.")
+
     # ------------------------------------------------------------------
     # universe
     # ------------------------------------------------------------------

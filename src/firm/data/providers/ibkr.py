@@ -219,3 +219,6 @@ class IBKRProvider(DataProvider):
 
     def get_live_signals(self, symbols: list[str]) -> pd.DataFrame:
         raise NotImplementedError("IBKRProvider does not provide live signals; use Danelfin.")
+
+    def get_best_stocks(self) -> pd.DataFrame:
+        raise NotImplementedError("IBKRProvider does not provide best-stocks; use Danelfin.")

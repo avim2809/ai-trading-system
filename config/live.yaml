@@ -59,6 +59,21 @@ strategies:
     # unvalidated judgment call, not an evidence-backed one — watch its
     # live attribution closely and revert this line if it looks bad.
     - danelfin_live_signals
+    # danelfin_best_stocks_signal — enabled 2026-08-02 at the user's explicit
+    # request to use Danelfin's real /v3/beststocks Top-25 list as a strong
+    # buy signal (not a backtested strategy — same structural reason as
+    # danelfin_live_signals: /v3/beststocks has no historical dates,
+    # confirmed live). Reads the vendor's own curated list directly, unlike
+    # this project's earlier sector-ranking reconstruction (only ~25-30%
+    # match to the real list — see docs/danelfin_best_stocks_arm.md) which
+    # this strategy does NOT use. Will rarely fire against this fixed
+    # ~25-name US-mega-cap universe since Danelfin's real list skews toward
+    # smaller/rotating names — a separate dynamic-universe-growth mechanism
+    # to give it more surface is planned/in progress, see
+    # docs/danelfin_best_stocks_arm.md for status. Live-only, unvalidated
+    # judgment call — watch its attribution and revert this line if it
+    # looks bad.
+    - danelfin_best_stocks_signal
   auto_approve:
     - momentum
     - trend
@@ -72,6 +87,7 @@ strategies:
     - regime_hmm
     - danelfin_ai_score
     - danelfin_live_signals
+    - danelfin_best_stocks_signal
 
 # Per-strategy parameters passed to build_orchestrator via strategy_params.
 strategy_params:

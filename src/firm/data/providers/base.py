@@ -11,6 +11,7 @@ import pandas as pd
 from firm.data.schemas import (
     AI_SCORE_COLS,
     ANALYST_RATINGS_COLS,
+    BEST_STOCKS_COLS,
     CORPORATE_ACTION_COLS,
     FUNDAMENTAL_COLS,
     LIVE_SIGNAL_COLS,
@@ -117,6 +118,10 @@ class DataProvider(ABC):
     def empty_live_signals() -> pd.DataFrame:
         return pd.DataFrame(columns=LIVE_SIGNAL_COLS)
 
+    @staticmethod
+    def empty_best_stocks() -> pd.DataFrame:
+        return pd.DataFrame(columns=BEST_STOCKS_COLS)
+
     @abstractmethod
     def get_prices(
         self, symbols: list[str], start: str, end: str
@@ -171,4 +176,13 @@ class DataProvider(ABC):
         """Return today's latest-snapshot signal dataframe with
         LIVE_SIGNAL_COLS. No historical time series exists for this
         capability — it is always "as of right now", live-only."""
+        ...
+
+    @abstractmethod
+    def get_best_stocks(self) -> pd.DataFrame:
+        """Return today's latest-snapshot Top-25 "Best Stocks" dataframe
+        with BEST_STOCKS_COLS. No historical time series exists for this
+        capability — it is always "as of right now", live-only. Unlike
+        every other capability here, this is NOT parameterized by symbols
+        — it's a fixed-size curated list, not a per-symbol lookup."""
         ...

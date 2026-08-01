@@ -69,6 +69,12 @@ class PitView(Protocol):
     ) -> pd.DataFrame:
         ...
 
+    def best_stocks(
+        self,
+        symbols: list[str] | None = None,
+    ) -> pd.DataFrame:
+        ...
+
 
 class BaseStrategy(ABC):
     """Abstract base for all alpha strategies."""

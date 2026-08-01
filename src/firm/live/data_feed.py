@@ -147,6 +147,10 @@ class LivePitViewAdapter:
         syms = symbols or self._universe
         return self._pit_store.get_live_signals(syms)
 
+    def best_stocks(self, symbols: list[str] | None = None) -> pd.DataFrame:
+        syms = symbols or self._universe
+        return self._pit_store.get_best_stocks(syms)
+
 
 class LiveDataFeed:
     """Fetches current market data and populates a PIT store for the pipeline."""
@@ -411,6 +415,17 @@ class LiveDataFeed:
             except (NotImplementedError, Exception):
                 log.warning("Live-signals fetch failed — continuing without it", exc_info=True)
 
+        # Same rationale as live_signals above — /v3/beststocks is snapshot-only,
+        # no cache-only mode to default to, fetch every cycle unconditionally.
+        best_stocks = pd.DataFrame()
+        best_stocks_prov = self._providers.get("best_stocks")
+        if best_stocks_prov:
+            try:
+                best_stocks = best_stocks_prov.get_best_stocks()
+                log.info("Fetched %d best-stocks rows", len(best_stocks))
+            except (NotImplementedError, Exception):
+                log.warning("Best-stocks fetch failed — continuing without it", exc_info=True)
+
         self._pit_store = PointInTimeDataStore()
         self._pit_store.set_universe_resolver(self._universe_resolver)
         self._pit_store.load(
@@ -420,6 +435,7 @@ class LiveDataFeed:
             estimates=estimates if not estimates.empty else None,
             ai_scores=ai_scores if not ai_scores.empty else None,
             live_signals=live_signals if not live_signals.empty else None,
+            best_stocks=best_stocks if not best_stocks.empty else None,
         )
 
         return LivePitViewAdapter(self._pit_store, asof, self._universe)

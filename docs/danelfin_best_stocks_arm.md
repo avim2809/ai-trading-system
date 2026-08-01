@@ -476,3 +476,34 @@ not finished or enabled. The synthetic paper-tracking ledger
 continues running on its daily timer regardless — it's cheap, already
 working, and remains a genuinely informative forward-tracking comparison
 even though real execution isn't happening.
+
+## A separate, distinct thing: `danelfin_best_stocks_signal` main-engine strategy (2026-08-02)
+
+Do not confuse this with the synthetic arm above. At the user's explicit
+request ("I still want to use best stocks, not a backtested strategy but as
+a very strong signal to buy"), a new strategy —
+`src/firm/strategies/danelfin_best_stocks_signal.py`, registered in the main
+strategy registry — was added to the **main portfolio engine** (enabled in
+`config/live.yaml`). It reads Danelfin's real `/v3/beststocks` Top-25 list
+directly via a new `PitView.best_stocks()` capability (mirrors
+`live_signals()`'s wiring exactly: `pit_store.py`, `PitViewAdapter` in
+backtests — always empty there, by construction — `LivePitViewAdapter` in
+live trading) and emits a strong bullish signal for any universe symbol
+present in it, with no signal (not bearish) for absent symbols. This is
+completely independent of the synthetic ledger/arm above:
+
+- The **arm** (this doc, above) is a side-channel paper-tracking experiment
+  with its own NAV, not connected to the main portfolio at all.
+- **`danelfin_best_stocks_signal`** is a real strategy inside the main
+  12-strategy pipeline, contributing an actual signal to the actual
+  portfolio construction (bull/bear debate → PM → risk → execution), same
+  as `danelfin_live_signals`.
+
+Same "cannot be backtested" structural caveat applies (`/v3/beststocks` has
+no historical `date` param, confirmed live) — this is a live-only,
+unvalidated judgment call, not evidence-backed like `danelfin_ai_score`.
+Expected to rarely fire against the current fixed ~25-name US-mega-cap
+universe, since Danelfin's real Top-25 skews toward smaller/rotating names
+— a general-purpose dynamic-universe-growth mechanism (not Danelfin-specific
+in its own persistence API) to give it more surface is the next planned
+piece of work, tracked separately from this arm's own status above.

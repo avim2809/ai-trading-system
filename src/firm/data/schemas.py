@@ -102,6 +102,26 @@ LIVE_SIGNAL_COLS: list[str] = [
     "perf_alpha_win_rate_3m",
 ]
 
+# Danelfin's /v3/beststocks — their own curated Top-25 "Best Stocks" list.
+# Same no-history caveat as LIVE_SIGNAL_COLS: latest snapshot only, "date" is
+# always the fetch date. See
+# firm.data.providers.danelfin.DanelfinProvider.get_best_stocks and
+# firm.strategies.danelfin_best_stocks_signal.
+BEST_STOCKS_COLS: list[str] = [
+    "date",
+    "symbol",
+    "rank",              # 1 (highest conviction) .. 25
+    "ai_score",
+    "ai_score_change",
+    "fundamental_score",
+    "technical_score",
+    "sentiment_score",
+    "low_risk_score",
+    "perf_ytd",
+    "sector",
+    "country",
+]
+
 # Universe membership window columns (used by UniverseResolver for
 # survivorship-aware point-in-time index membership).
 COL_INDEX = "index"

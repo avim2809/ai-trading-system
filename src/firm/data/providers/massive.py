@@ -485,3 +485,8 @@ class MassiveProvider(DataProvider):
         raise NotImplementedError(
             "MassiveProvider does not provide live signals; use DanelfinProvider."
         )
+
+    def get_best_stocks(self) -> pd.DataFrame:
+        raise NotImplementedError(
+            "MassiveProvider does not provide best-stocks; use DanelfinProvider."
+        )

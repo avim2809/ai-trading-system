@@ -28,6 +28,7 @@ class PointInTimeDataStore:
         self._estimates: pd.DataFrame = pd.DataFrame()
         self._ai_scores: pd.DataFrame = pd.DataFrame()
         self._live_signals: pd.DataFrame = pd.DataFrame()
+        self._best_stocks: pd.DataFrame = pd.DataFrame()
         self._corporate_actions: pd.DataFrame = pd.DataFrame()
         # Macro series keyed by FRED series ID → DataFrame[date, <series_id>]
         self._macro: dict[str, pd.DataFrame] = {}
@@ -48,6 +49,7 @@ class PointInTimeDataStore:
         estimates: pd.DataFrame | None = None,
         ai_scores: pd.DataFrame | None = None,
         live_signals: pd.DataFrame | None = None,
+        best_stocks: pd.DataFrame | None = None,
     ) -> None:
         """Load all datasets. Called once at backtest start."""
         self._prices = self._ensure_date_col(prices)
@@ -56,18 +58,20 @@ class PointInTimeDataStore:
         self._estimates = self._ensure_date_col(estimates) if estimates is not None else pd.DataFrame()
         self._ai_scores = self._ensure_date_col(ai_scores) if ai_scores is not None else pd.DataFrame()
         self._live_signals = self._ensure_date_col(live_signals) if live_signals is not None else pd.DataFrame()
+        self._best_stocks = self._ensure_date_col(best_stocks) if best_stocks is not None else pd.DataFrame()
         self._corporate_actions = (
             self._ensure_date_col(corporate_actions) if corporate_actions is not None else pd.DataFrame()
         )
         log.info(
             "PIT store loaded: %d price rows, %d fundamental rows, %d sentiment rows, "
-            "%d estimates rows, %d ai_score rows, %d live_signal rows",
+            "%d estimates rows, %d ai_score rows, %d live_signal rows, %d best_stocks rows",
             len(self._prices),
             len(self._fundamentals),
             len(self._sentiment),
             len(self._estimates),
             len(self._ai_scores),
             len(self._live_signals),
+            len(self._best_stocks),
         )
 
     @staticmethod
@@ -196,6 +200,15 @@ class PointInTimeDataStore:
         if self._live_signals.empty:
             return pd.DataFrame()
         return self._live_signals.loc[self._live_signals["symbol"].isin(symbols)].copy()
+
+    def get_best_stocks(self, symbols: list[str]) -> pd.DataFrame:
+        """Return the latest Danelfin ``/v3/beststocks`` Top-25 snapshot,
+        restricted to *symbols*. Same rationale as get_live_signals — no
+        ``asof`` filter, since this has no historical depth at all; always
+        empty in backtests, live-only."""
+        if self._best_stocks.empty:
+            return pd.DataFrame()
+        return self._best_stocks.loc[self._best_stocks["symbol"].isin(symbols)].copy()
 
     def get_sentiment(
         self,

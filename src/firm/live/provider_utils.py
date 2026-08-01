@@ -218,14 +218,15 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
         # analyst_ratings chain is FMP-only (see fallback.py) — gate on that
         # key specifically rather than the broader fundamentals set above.
         analyst_ratings_configured = bool(os.getenv("FMP_API_KEY"))
-        # ai_scores / live_signals chains are both Danelfin-only.
+        # ai_scores / live_signals / best_stocks chains are all Danelfin-only.
         ai_scores_configured = bool(os.getenv("DANELFIN_API_KEY"))
         live_signals_configured = bool(os.getenv("DANELFIN_API_KEY"))
+        best_stocks_configured = bool(os.getenv("DANELFIN_API_KEY"))
 
         if (
             sentiment_configured or fundamentals_configured
             or analyst_ratings_configured or ai_scores_configured
-            or live_signals_configured
+            or live_signals_configured or best_stocks_configured
         ):
             try:
                 from firm.data.providers.fallback import FallbackProvider
@@ -250,6 +251,9 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
                 if live_signals_configured:
                     providers["live_signals"] = fallback
                     log.info("IBKR live signals: Danelfin (trading-parameters/price-forecast/performance)")
+                if best_stocks_configured:
+                    providers["best_stocks"] = fallback
+                    log.info("IBKR live best-stocks: Danelfin (/v3/beststocks)")
             except Exception as exc:
                 log.warning("Fallback provider not available: %s", exc, exc_info=True)
 
@@ -270,6 +274,7 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
         "estimates": market_data,
         "ai_scores": market_data,
         "live_signals": market_data,
+        "best_stocks": market_data,
     }
 
 

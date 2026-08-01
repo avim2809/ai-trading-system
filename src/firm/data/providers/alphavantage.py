@@ -230,6 +230,11 @@ class AlphaVantageProvider(DataProvider):
             "AlphaVantageProvider does not provide live signals; use DanelfinProvider."
         )
 
+    def get_best_stocks(self) -> pd.DataFrame:
+        raise NotImplementedError(
+            "AlphaVantageProvider does not provide best-stocks; use DanelfinProvider."
+        )
+
 
 def _parse_av_time(value: str | None) -> pd.Timestamp:
     """Parse Alpha Vantage ``YYYYMMDDTHHMMSS`` timestamps."""
