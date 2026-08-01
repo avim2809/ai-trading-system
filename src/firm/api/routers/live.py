@@ -12,6 +12,7 @@ import threading
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -626,9 +627,31 @@ def live_positions(request: Request) -> list[dict[str, Any]]:
             "avg_cost": p.avg_cost,
             "market_value": p.market_value,
             "unrealized_pnl": p.unrealized_pnl,
+            # Explicit long/short label — quantity's sign already implies
+            # this, but callers (the dashboard in particular) shouldn't
+            # each have to re-derive it themselves.
+            "side": "short" if p.quantity < 0 else "long",
         }
         for p in positions
     ]
+
+
+@router.get("/positions/summary")
+def live_positions_summary(request: Request) -> dict[str, Any]:
+    """Aggregate long vs. short exposure — mirrors the long/short split
+    IBKR itself shows (Client Portal's "Net Asset Value" donut chart)."""
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        return {"long_value": 0.0, "short_value": 0.0, "n_long": 0, "n_short": 0}
+    positions = engine._broker.get_positions()
+    long_value = sum(p.market_value for p in positions if p.quantity > 0)
+    short_value = sum(p.market_value for p in positions if p.quantity < 0)
+    return {
+        "long_value": long_value,
+        "short_value": short_value,
+        "n_long": sum(1 for p in positions if p.quantity > 0),
+        "n_short": sum(1 for p in positions if p.quantity < 0),
+    }
 
 
 @router.get("/account")
@@ -677,6 +700,60 @@ def live_cycles(request: Request) -> list[dict[str, Any]]:
         }
         for c in reversed(engine.cycle_history[-50:])
     ]
+
+
+@router.get("/portfolio-history")
+def live_portfolio_history(request: Request) -> dict[str, Any]:
+    """NAV/equity-curve history + portfolio-level performance metrics,
+    computed from the same PortfolioSnapshot history persisted every cycle
+    to LiveStateStore — the live-trading equivalent of
+    GET /runs/{id}/equity + the portfolio_summary section of
+    GET /runs/{id}/report (see firm.backtest.run.build_equity_data and
+    firm.eval.reports.BacktestReport.portfolio_summary, which this mirrors
+    rather than reimplements)."""
+    from firm.eval.metrics import compute_all_metrics
+
+    engine = getattr(request.app.state, "live_engine", None)
+    empty = {"dates": [], "values": [], "drawdown": [], "metrics": {}, "n_observations": 0}
+    if engine is None:
+        return empty
+    snapshots = engine._portfolio.history
+    if not snapshots:
+        return empty
+
+    dates = [s.asof.isoformat() for s in snapshots]
+    values = [s.nav for s in snapshots]
+    peak = 0.0
+    drawdown = []
+    for nav in values:
+        peak = max(peak, nav)
+        drawdown.append(round((nav - peak) / peak, 6) if peak > 0 else 0.0)
+
+    navs = pd.Series(values, index=pd.DatetimeIndex([s.asof for s in snapshots]))
+    returns = navs.pct_change().dropna()
+    metrics = compute_all_metrics(returns) if not returns.empty else {}
+
+    # Sharpe/CAGR/etc. from a handful of cycles are statistically
+    # meaningless (e.g. a real annualized Sharpe computed from 4 daily
+    # points) — surfaced as its own field so the frontend can caveat
+    # rather than silently show a wild, misleading ratio as if it were
+    # trustworthy.
+    return {
+        "dates": dates, "values": values, "drawdown": drawdown,
+        "metrics": metrics, "n_observations": len(returns),
+    }
+
+
+@router.get("/attribution")
+def live_attribution(request: Request) -> dict[str, dict[str, float]]:
+    """Per-strategy performance metrics from the live engine's own
+    PerformanceAttribution — the live-trading equivalent of
+    GET /runs/{id}/report's ``strategies`` field
+    (firm.eval.reports.BacktestReport.strategy_summary)."""
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        return {}
+    return engine._attribution.get_strategy_metrics()
 
 
 @router.delete("/cycles")

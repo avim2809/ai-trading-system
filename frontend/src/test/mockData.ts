@@ -57,7 +57,7 @@ export const mockAlerts: LiveAlertsResponse = {
 }
 
 export const mockPositions: BrokerPosition[] = [
-  { symbol: 'AAPL', quantity: 1, avg_cost: 332.5, market_value: 332.5, unrealized_pnl: 0 },
+  { symbol: 'AAPL', quantity: 1, avg_cost: 332.5, market_value: 332.5, unrealized_pnl: 0, side: 'long' },
 ]
 
 export const mockAccount: AccountInfo = {

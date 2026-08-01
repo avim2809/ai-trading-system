@@ -324,7 +324,25 @@ export interface BrokerPosition {
   avg_cost: number
   market_value: number
   unrealized_pnl: number
+  side: 'long' | 'short'
 }
+
+export interface PositionsSummary {
+  long_value: number
+  short_value: number
+  n_long: number
+  n_short: number
+}
+
+export interface LivePortfolioHistory {
+  dates: string[]
+  values: number[]
+  drawdown: number[]
+  metrics: Record<string, number>
+  n_observations: number
+}
+
+export type LiveAttribution = Record<string, Record<string, number>>
 
 export interface AccountInfo {
   cash: number

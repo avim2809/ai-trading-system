@@ -12,7 +12,10 @@ import type {
   LiveStatus,
   LiveStartRequest,
   BrokerPosition,
+  PositionsSummary,
   AccountInfo,
+  LivePortfolioHistory,
+  LiveAttribution,
   OrderRecord,
   CycleRecord,
   PendingApproval,
@@ -118,7 +121,15 @@ export const api = {
 
   getPositions: () => fetchJson<BrokerPosition[]>('/live/positions'),
 
+  getPositionsSummary: () =>
+    fetchJson<PositionsSummary>('/live/positions/summary'),
+
   getAccount: () => fetchJson<AccountInfo>('/live/account'),
+
+  getPortfolioHistory: () =>
+    fetchJson<LivePortfolioHistory>('/live/portfolio-history'),
+
+  getLiveAttribution: () => fetchJson<LiveAttribution>('/live/attribution'),
 
   getOrders: (_limit = 50) =>
     fetchJson<OrderRecord[]>('/live/orders'),

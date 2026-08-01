@@ -23,7 +23,7 @@ function formatValue(value: number | string, format?: string): string {
 
 function valueColor(value: number | string, format?: string): string {
   if (typeof value !== 'number' || !format) return 'text-white'
-  if (format === 'pct' || format === 'ratio') {
+  if (format === 'pct' || format === 'ratio' || format === 'currency') {
     if (value > 0) return 'text-emerald-400'
     if (value < 0) return 'text-red-400'
   }

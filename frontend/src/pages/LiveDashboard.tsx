@@ -4,11 +4,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import type {
   LiveStatus, LiveStartRequest, BrokerPosition, AccountInfo, CycleRecord,
-  PendingApproval, StrategyInfo, LiveAlertsResponse,
+  PendingApproval, StrategyInfo, LiveAlertsResponse, PositionsSummary,
+  LivePortfolioHistory, LiveAttribution,
 } from '../api/types'
 import MetricCard from '../components/MetricCard'
 import StatusBadge from '../components/StatusBadge'
 import Spinner from '../components/Spinner'
+import EquityCurveChart from '../components/EquityCurveChart'
+import DrawdownChart from '../components/DrawdownChart'
+import AttributionBar from '../components/AttributionBar'
 import { formatDateTime } from '../lib/time'
 
 const SCHEDULES = [
@@ -20,6 +24,11 @@ const SCHEDULES = [
 
 const inputCls =
   'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500'
+
+// Below this many daily NAV observations, annualized ratios (Sharpe, CAGR)
+// are an extreme extrapolation from a handful of points, not a meaningful
+// estimate — shown as "n/a" rather than a wild, misleading number.
+const MIN_OBSERVATIONS_FOR_RATIOS = 10
 
 function formatUptime(seconds: number | null): string {
   if (seconds == null) return '—'
@@ -35,6 +44,22 @@ const formatTime = (iso: string) => formatDateTime(iso, { seconds: true })
 
 function formatCurrency(val: number): string {
   return val.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+}
+
+// EquityCurveChart/DrawdownChart are shared with the backtest RunDetail
+// page, whose dates are plain "YYYY-MM-DD" and whose own tickFormatter
+// does `v.slice(5)` to get "MM-DD". Live snapshots are full
+// datetime.isoformat() strings with microseconds — passed through
+// unchanged, that slice(5) produces an unreadable
+// "07-27T13:36:28.579110". Reformatting to "YYYY-MM-DD HH:MM" here (same
+// slice(5) then yields a readable "MM-DD HH:MM") avoids touching the
+// shared chart components' formatting, which the backtest page still
+// depends on as-is.
+function toChartDateLabel(iso: string): string {
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return iso
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
 export default function LiveDashboard() {
@@ -94,6 +119,27 @@ export default function LiveDashboard() {
     refetchInterval: 3000,
   })
 
+  const { data: positionsSummary } = useQuery<PositionsSummary>({
+    queryKey: ['live-positions-summary'],
+    queryFn: api.getPositionsSummary,
+    enabled: status?.state === 'running',
+    refetchInterval: 5000,
+  })
+
+  const { data: portfolioHistory } = useQuery<LivePortfolioHistory>({
+    queryKey: ['live-portfolio-history'],
+    queryFn: api.getPortfolioHistory,
+    enabled: status?.state === 'running',
+    refetchInterval: 15000,
+  })
+
+  const { data: attribution } = useQuery<LiveAttribution>({
+    queryKey: ['live-attribution'],
+    queryFn: api.getLiveAttribution,
+    enabled: status?.state === 'running',
+    refetchInterval: 15000,
+  })
+
   const pendingApprovals = approvals?.filter((a) => a.status === 'pending') ?? []
 
   const startMut = useMutation({
@@ -128,6 +174,8 @@ export default function LiveDashboard() {
   }
 
   const isRunning = status?.state === 'running'
+  const hasEnoughHistory = (portfolioHistory?.n_observations ?? 0) >= MIN_OBSERVATIONS_FOR_RATIOS
+  const chartDates = (portfolioHistory?.dates ?? []).map(toChartDateLabel)
 
   return (
     <div>
@@ -456,11 +504,73 @@ export default function LiveDashboard() {
         </div>
       )}
 
+      {/* Performance */}
+      {isRunning && portfolioHistory && portfolioHistory.values.length > 0 && (
+        <div className="mb-6">
+          <h3 className="text-sm font-semibold text-slate-300 mb-3">Performance</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
+            <MetricCard
+              label="Total P&L"
+              value={portfolioHistory.values[portfolioHistory.values.length - 1]! - portfolioHistory.values[0]!}
+              format="currency"
+            />
+            <MetricCard
+              label="Unrealized P&L"
+              value={(positions ?? []).reduce((sum, p) => sum + p.unrealized_pnl, 0)}
+              format="currency"
+            />
+            <MetricCard label="Total Return" value={portfolioHistory.metrics.total_return ?? 0} format="pct" />
+            <MetricCard
+              label="Sharpe"
+              value={hasEnoughHistory ? (portfolioHistory.metrics.sharpe_ratio ?? 0) : 'n/a'}
+              format="ratio"
+            />
+            <MetricCard label="Max Drawdown" value={portfolioHistory.metrics.max_drawdown ?? 0} format="pct" />
+            <MetricCard
+              label="CAGR"
+              value={hasEnoughHistory ? (portfolioHistory.metrics.cagr ?? 0) : 'n/a'}
+              format="pct"
+            />
+          </div>
+          {!hasEnoughHistory && (
+            <p className="text-xs text-slate-500 mb-4">
+              Sharpe and CAGR annualize from only {portfolioHistory.n_observations} recorded day{portfolioHistory.n_observations === 1 ? '' : 's'} of
+              history so far — statistically meaningless this early (an extreme extrapolation from a handful of
+              points), shown as "n/a" until at least {MIN_OBSERVATIONS_FOR_RATIOS} days accumulate. Total Return and
+              Max Drawdown are direct observations, not annualized, so they're shown regardless.
+            </p>
+          )}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <EquityCurveChart dates={chartDates} values={portfolioHistory.values} />
+            <DrawdownChart dates={chartDates} drawdown={portfolioHistory.drawdown} />
+          </div>
+          {attribution && Object.keys(attribution).length > 0 && (
+            <div className="mt-4">
+              <AttributionBar strategies={attribution} />
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Positions Table */}
       {isRunning && (
         <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden mb-6">
-          <div className="px-5 py-3 border-b border-slate-700">
+          <div className="px-5 py-3 border-b border-slate-700 flex items-center justify-between flex-wrap gap-2">
             <h3 className="text-sm font-semibold text-slate-300">Positions</h3>
+            {positionsSummary && (positionsSummary.n_long > 0 || positionsSummary.n_short > 0) && (
+              <div className="flex items-center gap-4 text-xs">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span className="text-slate-400">Long ({positionsSummary.n_long}):</span>
+                  <span className="text-emerald-400 font-mono">{formatCurrency(positionsSummary.long_value)}</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-red-400" />
+                  <span className="text-slate-400">Short ({positionsSummary.n_short}):</span>
+                  <span className="text-red-400 font-mono">{formatCurrency(positionsSummary.short_value)}</span>
+                </span>
+              </div>
+            )}
           </div>
           {!positions || positions.length === 0 ? (
             <div className="p-8 text-center text-sm text-slate-500">No open positions</div>
@@ -470,6 +580,7 @@ export default function LiveDashboard() {
               <thead>
                 <tr className="border-b border-slate-700 text-left">
                   <th className="px-4 py-3 text-slate-400 font-medium">Symbol</th>
+                  <th className="px-4 py-3 text-slate-400 font-medium">Side</th>
                   <th className="px-4 py-3 text-slate-400 font-medium text-right">Qty</th>
                   <th className="px-4 py-3 text-slate-400 font-medium text-right">Avg Cost</th>
                   <th className="px-4 py-3 text-slate-400 font-medium text-right">Market Value</th>
@@ -480,6 +591,15 @@ export default function LiveDashboard() {
                 {positions.map((pos) => (
                   <tr key={pos.symbol} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
                     <td className="px-4 py-3 font-mono text-xs text-blue-400">{pos.symbol}</td>
+                    <td className="px-4 py-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide ${
+                        pos.side === 'long'
+                          ? 'bg-emerald-900/30 text-emerald-400 border border-emerald-700/40'
+                          : 'bg-red-900/30 text-red-400 border border-red-700/40'
+                      }`}>
+                        {pos.side}
+                      </span>
+                    </td>
                     <td className="px-4 py-3 text-right font-mono text-xs">{pos.quantity}</td>
                     <td className="px-4 py-3 text-right font-mono text-xs">${pos.avg_cost.toFixed(2)}</td>
                     <td className="px-4 py-3 text-right font-mono text-xs">{formatCurrency(pos.market_value)}</td>
@@ -501,7 +621,13 @@ export default function LiveDashboard() {
           <h3 className="text-sm font-semibold text-slate-300 mb-3">Recent Cycles</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
             {cycles.map((c) => (
-              <div key={c.cycle_id} className="bg-slate-900/50 border border-slate-700/50 rounded-lg p-3">
+              // cycle_id is an in-memory counter that resets to 1 on every
+              // engine restart, but persisted cycle history spans restarts
+              // — a real, observed bug (duplicate React keys / "Warning:
+              // Encountered two children with the same key") once the
+              // engine has been restarted more than once. timestamp is
+              // unique even when cycle_id repeats.
+              <div key={`${c.cycle_id}-${c.timestamp}`} className="bg-slate-900/50 border border-slate-700/50 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-2">
                   <span className="font-mono text-xs text-slate-400">#{c.cycle_id}</span>
                   <StatusBadge status={c.error ? 'failed' : 'completed'} />
