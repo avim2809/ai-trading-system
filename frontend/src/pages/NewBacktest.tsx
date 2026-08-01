@@ -112,7 +112,11 @@ export default function NewBacktest() {
       strategy_regime_weights: (() => {
         if (!regimeWeights.enabled) return { ...regimeWeights, enabled: false }
         if (!regimeWeightsJson.trim()) return regimeWeights
-        return { ...regimeWeights, weights: JSON.parse(regimeWeightsJson) as Record<string, Record<string, number>> }
+        try {
+          return { ...regimeWeights, weights: JSON.parse(regimeWeightsJson) as Record<string, Record<string, number>> }
+        } catch {
+          throw new Error('Invalid regime weights JSON — fix the Weights JSON field before launching')
+        }
       })(),
       data_source: dataSource,
       seed,
@@ -149,7 +153,19 @@ export default function NewBacktest() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (selected.length === 0) return
-    launch.mutate(buildRequest())
+    let req: RunRequest
+    try {
+      req = buildRequest()
+    } catch (err) {
+      // buildRequest() can throw synchronously (e.g. invalid regime weights
+      // JSON) — calling it as launch.mutate()'s argument would otherwise
+      // throw straight out of this form's onSubmit handler, before
+      // launch.mutate() ever runs, so the "Launch Backtest" click would
+      // silently do nothing with no visible error.
+      setRegimeWeightsJsonError((err as Error).message)
+      return
+    }
+    launch.mutate(req)
   }
 
   if (stratLoading) {

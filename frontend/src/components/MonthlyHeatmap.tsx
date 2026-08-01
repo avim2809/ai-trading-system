@@ -32,13 +32,6 @@ function computeMonthlyReturns(dates: string[], values: number[]) {
   return monthly
 }
 
-function cellColor(ret: number | undefined): string {
-  if (ret === undefined) return 'bg-slate-800'
-  const abs = Math.min(Math.abs(ret) * 10, 1)
-  if (ret > 0) return `bg-emerald-${abs > 0.5 ? '600' : '800'}/[${(0.3 + abs * 0.7).toFixed(2)}]`
-  return `bg-red-${abs > 0.5 ? '600' : '800'}/[${(0.3 + abs * 0.7).toFixed(2)}]`
-}
-
 function cellStyle(ret: number | undefined): React.CSSProperties {
   if (ret === undefined) return { backgroundColor: '#1e293b' }
   const abs = Math.min(Math.abs(ret) * 10, 1)
@@ -89,5 +82,3 @@ export default function MonthlyHeatmap({ dates, values }: Props) {
     </div>
   )
 }
-
-void cellColor

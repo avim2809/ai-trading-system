@@ -140,7 +140,13 @@ export default function RunDetail() {
             <MetricCard label="CAGR" value={report.portfolio['cagr'] ?? 0} format="pct" />
             <MetricCard label="Sharpe Ratio" value={report.portfolio['sharpe_ratio'] ?? 0} format="ratio" />
             <MetricCard label="Sortino Ratio" value={report.portfolio['sortino_ratio'] ?? 0} format="ratio" />
-            <MetricCard label="Max Drawdown" value={report.portfolio['max_drawdown'] ?? 0} format="pct" />
+            {/* max_drawdown comes back from the backend as a positive magnitude
+                (see firm.eval.metrics.max_drawdown), but everywhere else on this
+                page (the equity curve's drawdown series just below, Dashboard's
+                Max DD column) treats drawdown as a loss and colors it red —
+                negate it here so MetricCard's sign-based coloring lands on red
+                instead of green. */}
+            <MetricCard label="Max Drawdown" value={-(report.portfolio['max_drawdown'] ?? 0)} format="pct" />
             <MetricCard label="Volatility" value={report.portfolio['annualized_volatility'] ?? 0} format="pct" />
             <MetricCard label="Final NAV" value={report.final_nav ?? 0} format="currency" />
           </div>
@@ -166,7 +172,7 @@ export default function RunDetail() {
                 Trade-Level Metrics
               </h2>
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                <MetricCard label="Trades" value={report.trade_metrics['num_trades'] ?? 0} format="ratio" />
+                <MetricCard label="Trades" value={report.trade_metrics['num_trades'] ?? 0} format="number" />
                 <MetricCard label="Win Rate" value={report.trade_metrics['trade_win_rate'] ?? 0} format="pct" />
                 <MetricCard label="Profit Factor" value={report.trade_metrics['profit_factor'] ?? 0} format="ratio" />
                 <MetricCard label="Expectancy" value={report.trade_metrics['expectancy'] ?? 0} format="currency" />

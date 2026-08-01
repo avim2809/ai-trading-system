@@ -12,6 +12,17 @@ function formatMetric(key: string, value: number): string {
   return value.toFixed(4)
 }
 
+// Metrics where a *smaller* value is the better outcome (all reported as
+// positive magnitudes by firm.eval.metrics — see max_drawdown/annualized_
+// volatility/conditional_value_at_risk) — everything else defaults to
+// higher-is-better (Sharpe, CAGR, alpha, hit rate, ...).
+const LOWER_IS_BETTER = ['max_drawdown', 'annualized_volatility', 'volatility', 'cvar', 'turnover']
+
+function isLowerBetter(key: string): boolean {
+  const k = key.toLowerCase()
+  return LOWER_IS_BETTER.some((m) => k.includes(m))
+}
+
 export default function Compare() {
   const [searchParams] = useSearchParams()
   const idsParam = searchParams.get('ids') ?? ''
@@ -88,7 +99,8 @@ export default function Compare() {
           <tbody>
             {metrics.map((metric) => {
               const values = runIds.map((id) => data[metric]?.[id])
-              const best = Math.max(...values.filter((v): v is number => v != null && !isNaN(v)))
+              const valid = values.filter((v): v is number => v != null && !isNaN(v))
+              const best = valid.length === 0 ? NaN : isLowerBetter(metric) ? Math.min(...valid) : Math.max(...valid)
               return (
                 <tr key={metric} className="border-b border-slate-700/50">
                   <td className="px-4 py-3 text-slate-300 font-medium">{metric}</td>
