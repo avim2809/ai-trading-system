@@ -15,7 +15,7 @@ Last updated: 2026-07-31.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #47 has the most recent detail.
+   "Completed" item #48 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -507,6 +507,44 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     (evidence before enabling, not the reverse). The synthetic
     paper-tracking ledger from item #46 keeps running on its daily timer
     regardless.
+48. **Best-Stocks backtest reconstruction only ~25-30% matches Danelfin's
+    real live output — a structural data gap, not a bug** (2026-08-02) —
+    full detail in `docs/danelfin_best_stocks_arm.md` ("Important caveat
+    found AFTER the backtest" section). Follow-up to item #47, prompted by
+    a direct question about whether the historical reconstruction actually
+    represents the same thing Danelfin's real product computes. Checked:
+    fetched Danelfin's own live `/v3/beststocks` (their actual curated
+    Top-25) and compared against this project's own reconstruction for the
+    same day — only 6-7 of 25 symbols overlapped (24-28%), only 3 of 5
+    sectors matched. Investigated why via `/ranking` per-symbol,
+    `/v3/trading-parameters`, and a Danelfin help-center article reachable
+    via web search (the main marketing/docs pages stayed Cloudflare-blocked,
+    as established earlier in this project). Confirmed the sector-ranking
+    rule itself (average AI Score of eligible stocks) was implemented
+    correctly, but found two real, structural problems: (a) `/v3/trade-ideas`
+    (the live arm's data source) is not an exhaustive screener at all —
+    querying a sector with zero filters still permanently excludes some
+    genuinely qualifying buy-signal stocks (confirmed: SPG/SKT missing from
+    real-estate even though both have `signal: "buy"`, `low_risk: 6`, and
+    ARE in Danelfin's real Top-25); (b) "Buy Track Record" is a real
+    *eligibility filter* on the sector average (not just a stock-level
+    tie-break as first assumed), and it has **zero historical depth**
+    anywhere in Danelfin's API — meaning the sector-ranking mechanism
+    itself can never be faithfully reconstructed for a past date, not just
+    approximated at the margins. Tried one more tie-break variant
+    (low_risk as secondary sort) as a cheap check before concluding this —
+    it didn't meaningfully close the gap, confirming the mismatch is
+    upstream at sector selection, not stock-level ties. **Conclusion: the
+    negative backtest in item #47 should be read as testing a
+    sector-rotation strategy inspired by Danelfin's public description, not
+    a verified reproduction of their proprietary algorithm** — the
+    direction and rough magnitude of underperformance are still probably
+    informative (SPY winning by ~6x is a large enough gap to survive this
+    caveat), but the specific Sharpe/CAGR numbers shouldn't be read as "what
+    Danelfin's real product would have returned." No further ranking-tweak
+    guessing was pursued past this point — the remaining gap is a genuine
+    public-API data-availability wall, not one more variant away from
+    closing.
 
 ## In progress
 

@@ -3,9 +3,18 @@
 Status: **live, initialized 2026-07-31**, running on its own daily systemd
 timer. **A full 2018-2026 walk-forward backtest (below) came back decisively
 negative vs. SPY — real broker execution was deliberately NOT built out as a
-result.** The forward-tracking synthetic ledger keeps running as-is (cheap,
-already working, genuinely informative to keep watching), but this is not
-being escalated to actual paper-account order flow.
+result.** A follow-up check found this reconstruction only matches
+Danelfin's own real live "Best Stocks" output ~25-30% (see "Important
+caveat" below) — a structural gap (their "Buy Track Record" eligibility
+filter has zero historical depth anywhere in the API), not a bug fixable
+with more ranking-order tweaks. The backtest is therefore best read as
+testing *a strategy inspired by* Danelfin's described rule, not a verified
+reproduction of their actual algorithm — the negative direction and
+magnitude are still informative, but shouldn't be read as "this is what
+Danelfin's real product would have done." The forward-tracking synthetic
+ledger keeps running as-is (cheap, already working, genuinely informative
+to keep watching), but this is not being escalated to actual paper-account
+order flow.
 
 ## Why this exists
 
@@ -382,6 +391,69 @@ that drag down risk-adjusted return; 2018-2026 was an unusually strong,
 narrow-leadership period for US large caps (SPY) that a
 sector-rotating/lower-market-cap strategy would generally struggle to
 keep pace with regardless of stock-picking skill.
+
+### Important caveat found AFTER the backtest: only ~25-30% match with Danelfin's real live selection
+
+Prompted by a direct question about whether the historical reconstruction
+actually represents the same thing as Danelfin's real "Best Stocks"
+product: it doesn't, closely. Fetched Danelfin's own live
+`GET /v3/beststocks` (their actual curated Top-25) for the same day and
+compared it against this reconstruction's live output for that day:
+**only 6-7 of 25 symbols overlapped (24-28%)**, and even the *sectors*
+selected only overlapped 3 of 5.
+
+Investigating why (via `/ranking`'s per-symbol mode, `/v3/trading-parameters`,
+and Danelfin's own help-center article — https://danelfin.com/best-stock-investment-strategy
+and https://danelfin.com/docs/api are Cloudflare-blocked, as established
+earlier this session, but a support-center article was reachable via web
+search):
+
+- The confirmed rule text: sectors ARE ranked by "the average AI Score of
+  their **eligible** stocks" (matching what was built) — but "eligible"
+  means Buy Track Record + low_risk>=5 + volume>100k, and ties are broken
+  by "highest AI Score, prioritizing the ones with a Buy Track Record, and
+  a Low Risk score 6/10 or above."
+- **`/v3/trade-ideas` (the live arm's data source) is not an exhaustive
+  screener at all** — confirmed live: querying `sector=real-estate` with
+  *zero* filters returned only 3 symbols (AHR, CTRE, VTR), permanently
+  excluding SPG and SKT even though both have `signal: "buy"`,
+  `low_risk: 6`, `aiscore: 7` per `/ranking`/`/v3/trading-parameters` and
+  ARE in Danelfin's real Top-25. It's a curated Danelfin subset, not a
+  complete filter-based scan.
+- **"Buy Track Record" is a real *eligibility filter* on the sector
+  average, not just a stock-level tie-break** — and it has **zero
+  historical depth anywhere in Danelfin's API** (confirmed earlier:
+  `/v3/trading-parameters`'s buy/hold/sell call is snapshot-only, no
+  historical dates, ever). That means the sector-ranking mechanism
+  itself — not just tie-breaking within a sector — cannot be faithfully
+  reconstructed for any past date. This reconstruction's sector averages
+  are computed over a plausibly broader pool than Danelfin's real
+  eligible set (since a buy-track-record filter can't be applied
+  historically), which is a real, structural, not effort-fixable gap
+  given the public API's actual surface — not a bug to keep chasing with
+  more ranking-order tweaks.
+- Tried one additional tie-break variant (low_risk as a secondary sort
+  key) as a cheap check — it barely moved the live-day overlap (4-7/25),
+  confirming the mismatch is mostly upstream at sector selection, not
+  stock-level tie-breaking.
+
+**What this means for the results above**: this is not a verified backtest
+of Danelfin's actual proprietary "Best Stocks" algorithm — it's a backtest
+of *a sector-rotation strategy inspired by their publicly described rule*,
+built from the most complete data this project could get to reconstruct
+it, which happens to diverge substantially (~70-75%) from their real
+live output on stock/sector selection specifics. The magnitude of the
+underperformance above (SPY returning ~6x more) is large enough that the
+directional finding — this class of annual sector-rotation strategy
+lagged a concentrated, mega-cap-led market badly over 2018-2026 — is
+probably still informative in a general sense (see the NVDA-rotation
+example in the session transcript: the reconstruction held NVDA/AVGO/ADBE
+for exactly one year in 2018 then rotated into utilities/staples for
+multiple years, missing the subsequent tech run). But the specific
+Sharpe/CAGR numbers should not be read as "this is what Danelfin's real
+product would have returned" — treat them as evidence about the general
+methodology class, not a validated reproduction of Danelfin's own
+algorithm.
 
 ### Decision: real broker execution NOT built out
 
