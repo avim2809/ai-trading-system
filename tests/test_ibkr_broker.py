@@ -390,3 +390,106 @@ class TestGetPositionsUsesRealMarketValue:
         broker.get_positions()
 
         assert calls["positions"] == 0
+
+
+class _FakeOrderStatus:
+    def __init__(self, status: str):
+        self.status = status
+
+
+class _FakeTrade:
+    def __init__(self, contract, order, statuses: list[str]):
+        self.contract = contract
+        self.order = order
+        self.orderStatus = _FakeOrderStatus(statuses[0])
+        self._statuses = statuses
+        self._i = 0
+        self.fills: list = []
+
+    def advance(self) -> None:
+        if self._i + 1 < len(self._statuses):
+            self._i += 1
+            self.orderStatus.status = self._statuses[self._i]
+
+
+def _fake_ib(statuses: list[str]):
+    """A fake ``ib`` whose placeOrder returns a _FakeTrade that advances
+    through *statuses* one step per ib.sleep() call — simulating status
+    updates arriving asynchronously over time, at a fake-but-monotonic
+    clock so tests don't take real wall-clock seconds. Uses the real
+    MarketOrder/Stock objects submit_order constructs (only orderId is
+    injected, mirroring what a real placeOrder call assigns)."""
+    state = {"trade": None, "clock": 0.0}
+
+    def place_order(contract, ib_order):
+        ib_order.orderId = 1
+        trade = _FakeTrade(contract, ib_order, statuses)
+        state["trade"] = trade
+        return trade
+
+    def fake_sleep(interval):
+        state["clock"] += interval
+        if state["trade"] is not None:
+            state["trade"].advance()
+
+    ib = SimpleNamespace(
+        isConnected=lambda: True,
+        qualifyContracts=lambda *contracts: None,
+        placeOrder=place_order,
+        sleep=fake_sleep,
+    )
+    return ib, state
+
+
+class TestSubmitOrderWaitsForRealResolution:
+    """Regression coverage for a real incident: IBKR relays a benign
+    informational message (errorCode 10349, "Order TIF was set to DAY
+    based on order preset") through the same channel real cancellations
+    use, transiently flipping status to "Cancelled" moments before the
+    order proceeds normally to Filled. The original fixed-0.5s-sleep-
+    then-snapshot approach captured and permanently recorded that blip as
+    the order's final status — confirmed live: two real fills got
+    recorded as "cancelled, 0 filled" in this project's own order history,
+    only caught by comparing the live dashboard against the real IBKR
+    account."""
+
+    def test_benign_cancel_blip_then_real_fill_is_recorded_as_filled(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=9)
+        ib, state = _fake_ib(["PendingSubmit", "Cancelled", "Cancelled", "PreSubmitted", "Submitted", "Filled"])
+        broker._ib = ib
+
+        from firm.brokers.base import OrderRequest
+        status = broker.submit_order(OrderRequest(symbol="V", side="sell", quantity=44))
+
+        assert status.status == "filled"
+
+    def test_genuine_fill_returns_without_waiting_out_the_full_budget(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=10)
+        ib, state = _fake_ib(["PendingSubmit", "Submitted", "Filled"])
+        broker._ib = ib
+
+        from firm.brokers.base import OrderRequest
+        status = broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=5))
+
+        assert status.status == "filled"
+        # Should stop polling as soon as Filled is seen, not exhaust the
+        # whole 5s wait budget.
+        assert state["clock"] < 5.0
+
+    def test_genuine_cancellation_with_no_fill_waits_full_budget_then_reports_cancelled(self):
+        """Patches time.monotonic to follow the fake sleep-driven clock, so
+        this test verifies the full-timeout-then-accept behavior without
+        actually costing 5 real wall-clock seconds."""
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=11)
+        ib, state = _fake_ib(["PendingSubmit", "Cancelled"])  # never advances further
+        broker._ib = ib
+
+        from firm.brokers.base import OrderRequest
+        with patch("firm.brokers.ibkr.time.monotonic", side_effect=lambda: state["clock"]):
+            status = broker.submit_order(OrderRequest(symbol="XOM", side="sell", quantity=1))
+
+        assert status.status == "cancelled"
+        # Waited out the full timeout rather than trusting the first
+        # Cancelled-looking status immediately.
+        from firm.brokers.ibkr import _ORDER_STATUS_MAX_WAIT_SECONDS
+        assert state["clock"] >= _ORDER_STATUS_MAX_WAIT_SECONDS

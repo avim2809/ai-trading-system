@@ -19,6 +19,15 @@ from firm.time_utils import utcnow
 
 log = logging.getLogger(__name__)
 
+# How long submit_order will keep watching a newly-placed order before
+# trusting a non-"Filled" terminal-looking status. See
+# IBKRBroker._wait_for_order_resolution's docstring for the real incident
+# this guards against (a benign IBKR informational relay transiently
+# flipping status to "Cancelled" ~0.5-0.6s before the order proceeds to
+# actually fill, confirmed live).
+_ORDER_STATUS_POLL_INTERVAL = 0.25
+_ORDER_STATUS_MAX_WAIT_SECONDS = 5.0
+
 try:
     from ib_async import IB, Stock, LimitOrder, MarketOrder
 
@@ -203,9 +212,50 @@ class IBKRBroker(Broker):
                 ib_order.orderRef = order.client_order_id
 
             trade = ib.placeOrder(contract, ib_order)
-            ib.sleep(0.5)
+            self._wait_for_order_resolution(ib, trade)
 
             return self._map_trade(trade)
+
+    @staticmethod
+    def _wait_for_order_resolution(ib: Any, trade: Any) -> None:
+        """Wait for *trade* to reach a status that will actually stick,
+        instead of grabbing a snapshot after one fixed sleep.
+
+        Real incident (found comparing a live dashboard against the real
+        IBKR paper account — the dashboard was showing stale positions):
+        IBKR relays some benign informational messages (e.g. errorCode
+        10349, "Order TIF was set to DAY based on order preset") through
+        the same channel real cancellations use. ib_async surfaces this as
+        a transient flip of ``orderStatus.status`` to "Cancelled" within
+        ~10ms of submission — moments before the order proceeds completely
+        normally through PreSubmitted -> Submitted -> Filled (confirmed
+        live: the real fill can take ~0.5-0.6s+ to arrive, well past a
+        fixed 0.5s sleep). Two real fills got permanently recorded in this
+        project's own order history as "cancelled, 0 filled" as a result.
+
+        Fix: "Filled" is trusted immediately (a genuine fill essentially
+        never reverses). Any other apparently-terminal status
+        (Cancelled/ApiCancelled/Inactive) is NOT trusted on sight — this
+        method keeps polling for the full wait budget in case a real Fill
+        (or a different, more final status) supersedes it. Only when the
+        whole budget elapses without a Fill arriving is that status
+        accepted as final. This intentionally makes a *genuinely*
+        rejected/cancelled order take the full timeout to report — an
+        acceptable cost (this system runs on a once/day cycle cadence, not
+        latency-sensitive) for not silently corrupting the fill record.
+        """
+        deadline = time.monotonic() + _ORDER_STATUS_MAX_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            ib.sleep(_ORDER_STATUS_POLL_INTERVAL)
+            status = trade.orderStatus.status
+            if status == "Filled":
+                return
+            # Anything else (PendingSubmit/PreSubmitted/Submitted, or a
+            # Cancelled/ApiCancelled/Inactive that might still be the
+            # benign transient blip) — keep watching until the deadline.
+        # Timeout: no Fill ever superseded whatever status is showing now.
+        # _map_trade's own status_map handles every remaining case,
+        # including a genuine terminal Cancelled/rejected order.
 
     def cancel_order(self, order_id: str) -> bool:
         with self._ib_lock:

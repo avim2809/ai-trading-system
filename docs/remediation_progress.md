@@ -15,7 +15,7 @@ Last updated: 2026-07-31.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #48 has the most recent detail.
+   "Completed" item #49 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -545,6 +545,48 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     guessing was pursued past this point — the remaining gap is a genuine
     public-API data-availability wall, not one more variant away from
     closing.
+49. **Real production bug found + fixed: IBKR order-status race corrupted
+    order history and stalled the live dashboard's positions** (2026-08-02)
+    — the user reported their dashboard's holdings/equity didn't match
+    their real IBKR account. Verified by opening a completely separate,
+    fresh IBKR connection (distinct client_id) and diffing its live
+    account/position snapshot against the running engine's — every symbol
+    matched except V (dashboard -9 vs real -53) and XOM (dashboard -126 vs
+    real -316), both off by exactly the size of a specific order (44 and
+    190 shares respectively). Root-caused via the raw `ib_async` event log:
+    IBKR relays a benign informational message (errorCode 10349, "Order
+    TIF was set to DAY based on order preset") through the same channel
+    real cancellations use, which transiently flips `orderStatus.status`
+    to `"Cancelled"` within ~10ms of every order submission — before the
+    order proceeds completely normally through PreSubmitted -> Submitted
+    -> Filled (confirmed: real fills for both orders arrived ~0.5-0.6s+
+    later). `IBKRBroker.submit_order` (`src/firm/brokers/ibkr.py`) grabbed
+    a single status snapshot after a **fixed 0.5s sleep** — squarely inside
+    that transient-blip window — and that wrong snapshot became the
+    order's permanently recorded status (both orders show up in
+    `GET /api/live/orders` today as `"cancelled"`/`filled_quantity: 0.0`,
+    despite being real, filled trades). Confirmed via a completely fresh
+    connection that IBKR itself has zero open orders and the correct final
+    positions — the account's own bookkeeping was never wrong, only this
+    project's view of it. **Fixed**: `submit_order` now polls (
+    `_wait_for_order_resolution`) instead of sleeping once — "Filled" is
+    trusted immediately, but any other apparently-terminal status
+    (Cancelled/ApiCancelled/Inactive) must hold for a full 5-second budget
+    before being trusted, so a real Fill arriving after a false Cancelled
+    blip supersedes it. Added 3 regression tests
+    (`tests/test_ibkr_broker.py::TestSubmitOrderWaitsForRealResolution`)
+    with a fake, sleep-driven clock (patches `time.monotonic` for the
+    timeout-path test so it doesn't cost 5 real wall-clock seconds).
+    **Immediate fix for the live symptom**: restarted `ai-trading.service`
+    (safe — weekend, markets closed, no cycle in progress, next scheduled
+    cycle Monday) — this forced a fresh IBKR connection whose freshly
+    subscribed local cache immediately reflected the correct real
+    positions, confirmed via `GET /api/live/positions`/`GET /api/live/account`
+    matching the independent fresh-connection snapshot exactly. Historical
+    order-history entries for the two affected orders remain incorrectly
+    labeled (a cosmetic/audit-trail gap, not a live-data-integrity one —
+    not retroactively corrected). Full pytest suite re-run clean after the
+    fix.
 
 ## In progress
 
