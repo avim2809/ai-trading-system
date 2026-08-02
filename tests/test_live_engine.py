@@ -958,6 +958,44 @@ class TestEngineConfigUpdates:
         }
 
     @patch("firm.live.engine.build_orchestrator")
+    def test_update_universe_replaces_data_feed_universe_and_syncs_config(
+        self, mock_build, engine_components,
+    ):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+
+        engine.update_universe(["AAPL", "NVDA", "AMD"])
+        assert feed._universe == ["AAPL", "NVDA", "AMD"]
+        assert engine._config["symbols"] == ["AAPL", "NVDA", "AMD"]
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_update_sector_map_merges_into_risk_agent_and_config(
+        self, mock_build, engine_components,
+    ):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        mock_build.return_value.risk.sector_map = {"AAPL": "technology"}
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+
+        engine.update_sector_map({"NVDA": "technology", "XOM": "energy"})
+        assert engine._orchestrator.risk.sector_map == {
+            "AAPL": "technology", "NVDA": "technology", "XOM": "energy",
+        }
+        assert engine._config["sector_map"] == {"NVDA": "technology", "XOM": "energy"}
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_update_sector_map_empty_is_a_noop(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        mock_build.return_value.risk.sector_map = {"AAPL": "technology"}
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+
+        engine.update_sector_map({})
+        assert engine._orchestrator.risk.sector_map == {"AAPL": "technology"}
+        assert "sector_map" not in engine._config
+
+    @patch("firm.live.engine.build_orchestrator")
     def test_daily_trade_limit_forces_manual_approval(self, mock_build, engine_components):
         broker, feed, queue, config = engine_components
         orders = _make_orders()

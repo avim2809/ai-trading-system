@@ -134,6 +134,68 @@ def test_resolve_live_startup_costs_absent_from_yaml_leaves_execution_agent_defa
     assert "market_impact_coefficient" not in resolved["engine_config"]
 
 
+def test_resolve_live_startup_merges_persisted_dynamic_universe_when_enabled(tmp_path):
+    from unittest.mock import patch as _patch
+
+    from firm.live.dynamic_universe_state import save_dynamic_universe_state
+    from firm.live.provider_utils import resolve_live_startup
+
+    state_path = tmp_path / "dyn_state.json"
+    save_dynamic_universe_state(
+        state_path,
+        {"NVDA": {"sector": "technology", "added_date": "2026-08-01", "consecutive_absent_days": 0}},
+    )
+    fake_yaml = {
+        "universe": {"symbols": ["AAPL", "MSFT"]},
+        "danelfin_dynamic_universe": {"enabled": True, "state_path": str(state_path)},
+    }
+    with _patch("firm.live.provider_utils.load_live_yaml_defaults", return_value=fake_yaml):
+        resolved = resolve_live_startup()
+    assert set(resolved["symbols"]) == {"AAPL", "MSFT", "NVDA"}
+    assert resolved["engine_config"]["sector_map"] == {"NVDA": "technology"}
+
+
+def test_resolve_live_startup_ignores_dynamic_state_when_disabled(tmp_path):
+    from unittest.mock import patch as _patch
+
+    from firm.live.dynamic_universe_state import save_dynamic_universe_state
+    from firm.live.provider_utils import resolve_live_startup
+
+    state_path = tmp_path / "dyn_state.json"
+    save_dynamic_universe_state(
+        state_path,
+        {"NVDA": {"sector": "technology", "added_date": "2026-08-01", "consecutive_absent_days": 0}},
+    )
+    fake_yaml = {
+        "universe": {"symbols": ["AAPL", "MSFT"]},
+        "danelfin_dynamic_universe": {"enabled": False, "state_path": str(state_path)},
+    }
+    with _patch("firm.live.provider_utils.load_live_yaml_defaults", return_value=fake_yaml):
+        resolved = resolve_live_startup()
+    assert set(resolved["symbols"]) == {"AAPL", "MSFT"}
+    assert "sector_map" not in resolved["engine_config"]
+
+
+def test_resolve_live_startup_explicit_symbols_override_skips_dynamic_merge(tmp_path):
+    from unittest.mock import patch as _patch
+
+    from firm.live.dynamic_universe_state import save_dynamic_universe_state
+    from firm.live.provider_utils import resolve_live_startup
+
+    state_path = tmp_path / "dyn_state.json"
+    save_dynamic_universe_state(
+        state_path,
+        {"NVDA": {"sector": "technology", "added_date": "2026-08-01", "consecutive_absent_days": 0}},
+    )
+    fake_yaml = {
+        "universe": {"symbols": ["AAPL", "MSFT"]},
+        "danelfin_dynamic_universe": {"enabled": True, "state_path": str(state_path)},
+    }
+    with _patch("firm.live.provider_utils.load_live_yaml_defaults", return_value=fake_yaml):
+        resolved = resolve_live_startup(symbols=["TSLA"])
+    assert resolved["symbols"] == ["TSLA"]
+
+
 @patch("firm.data.providers.ibkr.IBKRProvider")
 def test_build_live_providers_ibkr(mock_ibkr, monkeypatch):
     monkeypatch.setenv("FMP_API_KEY", "test-fmp")

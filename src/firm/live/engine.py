@@ -370,6 +370,40 @@ class LiveTradingEngine:
         self._orchestrator = build_orchestrator(self._config)
         log.info("Live engine strategy_params updated: %s", list(strategy_params))
 
+    def update_universe(self, symbols: list[str]) -> None:
+        """Replace the live trading universe, effective next cycle.
+
+        General-purpose (not tied to any one signal source) — a static
+        universe doesn't make sense in general for a system with capabilities
+        like ``danelfin_universe_sync`` that can identify names worth adding.
+        Keeps ``_config['symbols']`` in sync so a later orchestrator rebuild
+        (e.g. ``update_strategies``) doesn't silently revert to the old list.
+        """
+        symbols = list(symbols)
+        self._data_feed._universe = symbols
+        self._config = {**self._config, "symbols": symbols}
+        log.info("Live engine universe updated: %d symbols", len(symbols))
+
+    def update_sector_map(self, sector_map: dict[str, str]) -> None:
+        """Merge new symbol->sector entries into the risk agent's sector map.
+
+        Additive (merges, never replaces) — closes the gap where a symbol
+        added to the universe outside of ``config/live.yaml`` would
+        otherwise fall into ``RiskAgent``'s ``sector_map.get(sym, "unknown")``
+        fallback and silently bypass its true sector's concentration cap.
+        Also syncs ``_config['sector_map']`` so a later orchestrator rebuild
+        (any ``update_*`` that calls ``build_orchestrator`` again) doesn't
+        drop the mapping.
+        """
+        if not sector_map:
+            return
+        self._orchestrator.risk.sector_map.update(sector_map)
+        self._config = {
+            **self._config,
+            "sector_map": {**self._config.get("sector_map", {}), **sector_map},
+        }
+        log.info("Live engine sector_map updated: %s", sector_map)
+
     def update_news_guard(
         self,
         enabled: bool | None = None,

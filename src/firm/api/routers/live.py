@@ -51,6 +51,7 @@ def _start_live_scheduler(
     schedule_tz = engine_config.get("schedule_timezone", "US/Eastern")
     universe = list(engine_config.get("symbols") or [])
     refresh_hour = int(engine_config.get("fundamentals_refresh_hour", 8))
+    dynamic_universe_cfg = engine_config.get("danelfin_dynamic_universe") or {}
     try:
         from firm.live.fundamentals_refresh import maybe_refresh_fundamentals_cache_on_start
         from firm.live.pipeline_warmup import PipelineWarmupGate, warmup_wait_seconds
@@ -78,6 +79,16 @@ def _start_live_scheduler(
                     timezone=schedule_tz,
                     universe=universe,
                     fundamentals_refresh_hour=refresh_hour,
+                    dynamic_universe_enabled=bool(dynamic_universe_cfg.get("enabled", False)),
+                    dynamic_universe_state_path=dynamic_universe_cfg.get(
+                        "state_path", "data/dynamic_universe_state.json"
+                    ),
+                    dynamic_universe_max_symbols=int(
+                        dynamic_universe_cfg.get("max_dynamic_symbols", 10)
+                    ),
+                    dynamic_universe_min_dwell_days=int(
+                        dynamic_universe_cfg.get("min_dwell_days_before_removal", 5)
+                    ),
                 )
                 scheduler.start()
                 app.state.live_scheduler = scheduler
@@ -1030,7 +1041,7 @@ def update_live_config(body: ConfigUpdateRequest, request: Request) -> dict[str,
             max_daily_turnover=body.risk.max_daily_turnover,
         )
     if body.universe is not None and body.universe.symbols is not None:
-        engine._data_feed._universe = body.universe.symbols
+        engine.update_universe(body.universe.symbols)
     if body.strategy_params is not None:
         engine.update_strategy_params(body.strategy_params)
     if body.news_guard is not None:

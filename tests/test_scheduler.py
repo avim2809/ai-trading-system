@@ -316,6 +316,51 @@ class TestTradingSchedulerLifecycle:
         finally:
             sched.stop()
 
+    def test_dynamic_universe_job_not_added_by_default(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open", universe=["AAPL", "MSFT"]
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._dynamic_universe_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_dynamic_universe_job_added_when_enabled(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open", universe=["AAPL", "MSFT"],
+            dynamic_universe_enabled=True,
+        )
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._dynamic_universe_job_id)
+            assert job is not None
+        finally:
+            sched.stop()
+
+    def test_dynamic_universe_job_not_added_without_universe_even_if_enabled(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open", dynamic_universe_enabled=True,
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._dynamic_universe_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_dynamic_universe_sync_hour_defaults_to_before_fundamentals(self):
+        sched = TradingScheduler(engine=MagicMock(), fundamentals_refresh_hour=8)
+        assert sched._dynamic_universe_sync_hour == 7
+
+    def test_dynamic_universe_sync_hour_explicit_override(self):
+        sched = TradingScheduler(
+            engine=MagicMock(), fundamentals_refresh_hour=8, dynamic_universe_sync_hour=3,
+        )
+        assert sched._dynamic_universe_sync_hour == 3
+
     def test_stop_is_idempotent_when_never_started(self):
         sched = TradingScheduler(engine=MagicMock())
         sched.stop()  # must not raise

@@ -505,5 +505,6 @@ unvalidated judgment call, not evidence-backed like `danelfin_ai_score`.
 Expected to rarely fire against the current fixed ~25-name US-mega-cap
 universe, since Danelfin's real Top-25 skews toward smaller/rotating names
 — a general-purpose dynamic-universe-growth mechanism (not Danelfin-specific
-in its own persistence API) to give it more surface is the next planned
-piece of work, tracked separately from this arm's own status above.
+in its own persistence API) to give it more surface was built next (2026-08-02,
+see `firm.live.danelfin_universe_sync` and `config/live.yaml`'s
+`danelfin_dynamic_universe:` block — disabled by default, opt-in only).

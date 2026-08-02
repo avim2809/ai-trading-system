@@ -68,11 +68,10 @@ strategies:
     # match to the real list — see docs/danelfin_best_stocks_arm.md) which
     # this strategy does NOT use. Will rarely fire against this fixed
     # ~25-name US-mega-cap universe since Danelfin's real list skews toward
-    # smaller/rotating names — a separate dynamic-universe-growth mechanism
-    # to give it more surface is planned/in progress, see
-    # docs/danelfin_best_stocks_arm.md for status. Live-only, unvalidated
-    # judgment call — watch its attribution and revert this line if it
-    # looks bad.
+    # smaller/rotating names — see the danelfin_dynamic_universe: block
+    # below (disabled by default) for the mechanism that can give it more
+    # surface once reviewed and enabled. Live-only, unvalidated judgment
+    # call — watch its attribution and revert this line if it looks bad.
     - danelfin_best_stocks_signal
   auto_approve:
     - momentum
@@ -258,6 +257,26 @@ risk:
       Bull: 1.3                 # modest lever in confirmed bull (not aggressive)
       Bear: 0.4                 # meaningful de-risk in bear
       Chop: 0.7                 # slightly reduced in indeterminate regime
+
+# ──────────────────────────────────────────────────────────────
+# Dynamic universe growth — general-purpose mechanism (not Danelfin-specific
+# in its own persistence/engine API — see firm.live.dynamic_universe_state
+# and LiveTradingEngine.update_universe/update_sector_map), driven here by
+# Danelfin's real /v3/beststocks list (firm.live.danelfin_universe_sync).
+# Disabled by default (explicit opt-in, matching every other risk-bearing
+# toggle in this file) — the user asked for this because a static universe
+# "doesn't make sense in general", and to give danelfin_best_stocks_signal
+# more than the small overlap it gets against the fixed universe below, but
+# it carries a real residual risk this project is not hiding: turnover cost
+# from list churn even with the dwell delay below, and exposure to
+# smaller/less-liquid names than the rest of the universe. Review at least
+# one real cycle's dry-run log output (danelfin_universe_sync's INFO-level
+# additions/removals) before flipping enabled: true for real.
+danelfin_dynamic_universe:
+  enabled: false
+  state_path: "data/dynamic_universe_state.json"
+  max_dynamic_symbols: 10        # hard cap on total dynamically-held symbols
+  min_dwell_days_before_removal: 5   # consecutive absent days before a dynamic symbol is dropped
 
 # ──────────────────────────────────────────────────────────────
 # Transaction costs — must match your actual broker schedule

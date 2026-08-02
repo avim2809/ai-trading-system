@@ -15,7 +15,7 @@ Last updated: 2026-08-02.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #50 has the most recent detail.
+   "Completed" item #52 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -637,6 +637,62 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     remains decorative rather than a true alpha decomposition; flagged as
     a real follow-up, not attempted here since it needs a real benchmark
     price feed threaded into the live engine.
+
+51. **Dynamic universe growth — general-purpose mechanism, driven by
+    Danelfin's real /v3/beststocks list, disabled by default** (2026-08-02)
+    — Phase 3 of the Danelfin deepening plan. The user asked for the
+    real Best-Stocks list to act as a strong buy signal
+    (`danelfin_best_stocks_signal`, added the same night) and separately
+    noted a static universe "doesn't make sense in general" — so this was
+    built as a reusable capability, not hardcoded to Danelfin as its only
+    possible driver: `LiveTradingEngine.update_universe()`/
+    `update_sector_map()` (mirrors the existing `update_news_guard`/
+    `update_risk` mutate-in-place setter pattern; `PUT /api/live/config`'s
+    universe handling now goes through `update_universe()` instead of
+    poking `engine._data_feed._universe` directly); `firm.live.
+    dynamic_universe_state` (plain JSON persistence, same fail-soft
+    read/mkdir-before-write idiom as `kill_switch_state.json`); `firm.live.
+    danelfin_universe_sync` (`compute_universe_update()` — pure, fully
+    unit-tested logic: additions capped at `max_dynamic_symbols`,
+    dwell-based removal only after `min_dwell_days_before_removal`
+    consecutive absent days so one noisy day of list churn doesn't force a
+    full liquidation, statically-configured symbols never touched by
+    absence tracking; `sync_once()` — thin orchestration wrapper reading
+    the already-wired `"best_stocks"` provider off the engine's data feed);
+    a new APScheduler job in `TradingScheduler` (mirrors the
+    `fundamentals_refresh` job's wiring, scheduled an hour before it by
+    default); a boot-time merge in `resolve_live_startup()` so a restart
+    doesn't silently drop dynamic additions or their sector tags (only
+    applies to the yaml-derived default symbol list, not an explicit
+    caller override). New `danelfin_dynamic_universe:` block in
+    `config/live.yaml`, `enabled: false` — explicit opt-in, same convention
+    as every other risk-bearing toggle in this file; real residual risk
+    documented plainly in-line (turnover cost from list churn even with the
+    dwell delay, exposure to smaller/less-liquid names). 32 new tests
+    (`test_danelfin_universe_sync.py`, plus additions to
+    `test_live_engine.py`/`test_scheduler.py`/`test_live_provider_utils.py`).
+    Full suite (1270 tests) + ruff clean.
+
+52. **Real (rare) full-suite hang found and root-caused, not a regression
+    from this session's changes** (2026-08-02) — a full `pytest tests/ -q`
+    run appeared to hang for 6h48m with near-zero CPU. `py-spy dump`
+    showed the main thread frozen inside `create_module` while importing
+    `watchfiles`'s native extension (pulled in transitively by
+    `tests/test_api.py::TestServerBindAddress::test_defaults_to_loopback`'s
+    `import uvicorn` — the only place in the suite that imports uvicorn),
+    while two leftover `"pipeline-warmup"` daemon threads (from earlier
+    live-engine/scheduler tests whose `PipelineWarmupGate`-spawned HMM-fit
+    threads are never joined/cleaned up between tests) were concurrently
+    inside `threadpoolctl`'s `_find_libraries_with_dl_iterate_phdr` —
+    a real glibc dynamic-loader lock contention class of bug (`dlopen()`
+    vs. concurrent `dl_iterate_phdr()`), not anything introduced tonight.
+    Killed the hung process and re-ran clean (1270 passed, 9m14s) — did
+    not reproduce on the retry, consistent with a rare timing-dependent
+    race rather than a deterministic bug. Not fixed in this pass: the
+    underlying resource leak (background threads from live-engine tests
+    outliving their test) that makes this race possible at all is a real,
+    separate test-hygiene issue worth a dedicated look — flagged here, not
+    attempted given the scope of tonight's other work.
 
 ## In progress
 

@@ -147,6 +147,11 @@ class TradingScheduler:
         *,
         universe: list[str] | None = None,
         fundamentals_refresh_hour: int = 8,
+        dynamic_universe_enabled: bool = False,
+        dynamic_universe_state_path: str = "data/dynamic_universe_state.json",
+        dynamic_universe_max_symbols: int = 10,
+        dynamic_universe_min_dwell_days: int = 5,
+        dynamic_universe_sync_hour: int | None = None,
     ) -> None:
         if not _HAS_APSCHEDULER:
             raise ImportError(
@@ -159,9 +164,21 @@ class TradingScheduler:
         self._timezone = timezone
         self._universe = list(universe or [])
         self._fundamentals_refresh_hour = int(fundamentals_refresh_hour)
+        self._dynamic_universe_enabled = bool(dynamic_universe_enabled)
+        self._dynamic_universe_state_path = dynamic_universe_state_path
+        self._dynamic_universe_max_symbols = int(dynamic_universe_max_symbols)
+        self._dynamic_universe_min_dwell_days = int(dynamic_universe_min_dwell_days)
+        # Runs once/day before fundamentals_refresh so the universe is
+        # settled before that job's own fetch, unless explicitly overridden.
+        self._dynamic_universe_sync_hour = (
+            int(dynamic_universe_sync_hour)
+            if dynamic_universe_sync_hour is not None
+            else max(0, self._fundamentals_refresh_hour - 1)
+        )
         self._scheduler: BackgroundScheduler | None = None
         self._job_id = "live_cycle"
         self._fundamentals_job_id = "fundamentals_refresh"
+        self._dynamic_universe_job_id = "danelfin_universe_sync"
 
     def start(self) -> None:
         """Start the background scheduler."""
@@ -194,10 +211,34 @@ class TradingScheduler:
                 max_instances=1,
                 coalesce=True,
             )
+        if self._dynamic_universe_enabled and self._universe:
+            from firm.live.danelfin_universe_sync import sync_once
+
+            self._scheduler.add_job(
+                lambda: sync_once(
+                    self._engine,
+                    state_path=self._dynamic_universe_state_path,
+                    static_universe=self._universe,
+                    max_dynamic_symbols=self._dynamic_universe_max_symbols,
+                    min_dwell_days=self._dynamic_universe_min_dwell_days,
+                ),
+                trigger=CronTrigger(
+                    hour=self._dynamic_universe_sync_hour,
+                    minute=0,
+                    day_of_week="mon-fri",
+                    timezone=self._timezone,
+                ),
+                id=self._dynamic_universe_job_id,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
         if self._universe:
             log.info(
-                "Scheduler started: schedule=%s, tz=%s, fundamentals_refresh=%02d:00",
+                "Scheduler started: schedule=%s, tz=%s, fundamentals_refresh=%02d:00%s",
                 self._schedule_spec, self._timezone, self._fundamentals_refresh_hour,
+                f", danelfin_universe_sync={self._dynamic_universe_sync_hour:02d}:00"
+                if self._dynamic_universe_enabled else "",
             )
         else:
             log.info("Scheduler started: schedule=%s, tz=%s", self._schedule_spec, self._timezone)

@@ -86,10 +86,31 @@ def resolve_live_startup(
     schedule = schedule or yaml_cfg.get("schedule", "market_open")
     approval_mode = approval_mode or yaml_cfg.get("approval_mode", "semi_auto")
 
+    dynamic_universe_symbols: list[str] = []
+    dynamic_universe_sector_map: dict[str, str] = {}
     if not symbols:
         symbols = list((yaml_cfg.get("universe") or {}).get("symbols") or [])
-    if not symbols:
-        symbols = ["AAPL", "MSFT", "GOOG", "AMZN", "META"]
+        if not symbols:
+            symbols = ["AAPL", "MSFT", "GOOG", "AMZN", "META"]
+        # Merge in persisted dynamic-universe-growth state (see
+        # firm.live.danelfin_universe_sync) so a restart doesn't silently
+        # drop symbols that were dynamically added since the last boot.
+        # Only applies to this yaml-derived default list — an explicit
+        # `symbols` override (e.g. a manual /api/live/start request) is
+        # deliberate caller intent and is left untouched.
+        dyn_cfg = yaml_cfg.get("danelfin_dynamic_universe") or {}
+        if dyn_cfg.get("enabled"):
+            from firm.live.dynamic_universe_state import load_dynamic_universe_state
+
+            state = load_dynamic_universe_state(
+                dyn_cfg.get("state_path", "data/dynamic_universe_state.json")
+            )
+            dynamic_universe_symbols = [s for s in state if s not in symbols]
+            dynamic_universe_sector_map = {
+                sym: entry.get("sector", "unknown") for sym, entry in state.items()
+            }
+            if dynamic_universe_symbols:
+                symbols = list(symbols) + dynamic_universe_symbols
 
     if not strategies:
         strategies = list(strategies_block.get("enabled") or []) or None
@@ -115,6 +136,16 @@ def resolve_live_startup(
     if risk_overrides:
         risk.update(risk_overrides)
     engine_config.update(risk)
+    if dynamic_universe_sector_map:
+        # Merge persisted dynamic-universe sector tags on top of
+        # config/live.yaml's static risk.sector_map so RiskAgent's
+        # concentration cap is enforced correctly for these symbols from
+        # the very first cycle after a restart, not just once the next
+        # danelfin_universe_sync run happens to call update_sector_map().
+        engine_config["sector_map"] = {
+            **(engine_config.get("sector_map") or {}),
+            **dynamic_universe_sector_map,
+        }
 
     # Transaction costs. ``config/live.yaml`` documents this block as "must
     # match your actual broker schedule", but ExecutionAgent reads flat
@@ -159,6 +190,7 @@ def resolve_live_startup(
         "pipeline_warmup",
         "schedule_timezone",
         "fundamentals_refresh_hour",
+        "danelfin_dynamic_universe",
     ):
         if key in yaml_cfg:
             engine_config[key] = yaml_cfg[key]
