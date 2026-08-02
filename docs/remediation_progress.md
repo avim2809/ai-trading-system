@@ -15,7 +15,7 @@ Last updated: 2026-08-02.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #55 has the most recent detail.
+   "Completed" item #56 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -764,6 +764,24 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     alpha direction + clamping, meta fields) — all 6 pre-existing tests
     passed unchanged (missing new columns degrade gracefully to the old
     single-horizon behavior). Full suite (1297 tests) + ruff clean.
+
+56. **Danelfin Phase 7 (international coverage): investigated, re-scoped,
+    NOT implemented** (2026-08-02) — checked live against the real IBKR
+    paper account rather than re-stating the original plan's "flagged,
+    deferred" note unverified. Contract resolution for a European name
+    (`Stock("SAP", "IBIS", "EUR")`) qualifies fine via
+    `reqContractDetails`, but a live `reqMktData` call came back IBKR error
+    354 (no market-data subscription for that exchange group) — a real,
+    concrete blocker independent of any code change. Scoped what a real
+    implementation needs beyond that subscription decision: contract
+    routing (`ibkr.py` hardcodes `Stock(symbol, "SMART", "USD")` in ~4
+    places), multi-currency accounting (every NAV/P&L/risk calculation
+    currently assumes USD throughout), and exchange-specific market hours.
+    Unlike every other Danelfin capability this session, these are changes
+    to core shared broker/risk/scheduling code, not additive isolated
+    modules — recommended as its own dedicated project (subscription
+    decision first) rather than an overnight add-on. Full writeup in
+    docs/investing_pro_integration.md's "Phase 7" section. No code changes.
 
 ## In progress
 

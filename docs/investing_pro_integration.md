@@ -500,3 +500,60 @@ and fully tested (12 unit tests, pure logic, no network) for a possible
 future revisit — e.g. a fuller-coverage window, once there's a
 retry/backoff strategy tuned for Danelfin's observed flakiness on this
 endpoint, or more monthly API budget available to spend on validation.
+
+## Phase 7 — International coverage: re-scoped, still NOT implemented (2026-08-02)
+
+`/v3/trade-ideas`'s `market=europe` param genuinely returns real European
+tickers (confirmed earlier this session: Swiss/Turkish/Spanish/French/
+Italian exchanges) — the data-availability side of this was never in
+doubt. What was in doubt was how much real broker-side work stands between
+"Danelfin can name a European stock" and "this project can actually trade
+one," so this session did a concrete investigation rather than re-stating
+the plan's original "flagged, deferred" note unverified.
+
+### What was actually checked, live, on the real IBKR paper account
+
+- **Contract resolution works fine**: `Stock("SAP", "IBIS", "EUR")`
+  qualifies cleanly via `reqContractDetails` — IBKR knows this instrument
+  (Xetra listing, `tradingClass="XETRA"`).
+- **No market-data entitlement exists for it**: a live `reqMktData` call
+  against that same contract returned IBKR error 354 ("Requested market
+  data is not subscribed... Check Market Data Subscription Manager") —
+  every tick came back `NaN`. This is a real, concrete blocker independent
+  of any code change: even a fully-built routing layer couldn't get live
+  European quotes on this account without first adding a (likely paid)
+  IBKR market-data subscription for that exchange group.
+
+### What a real implementation would need (scoped, not built)
+
+1. **Market-data subscription** (account-level, real cost, user decision) —
+   the blocker above. Different IBKR market-data bundles cover different
+   European exchange groups; which one(s) to add depends on which
+   countries actually matter for candidate names.
+2. **Contract routing** — `src/firm/brokers/ibkr.py` hardcodes
+   `Stock(symbol, "SMART", "USD")` in ~4 places (order submission, price
+   fetching, connection test). A non-US symbol needs its own
+   `(exchange, currency)` pair, not "SMART" auto-routing across
+   currencies — this needs a real symbol→(exchange, currency) mapping,
+   not a one-line change.
+3. **Multi-currency accounting** — every NAV/P&L/position-value
+   calculation in this project currently assumes USD throughout (risk
+   limits, portfolio state, live dashboard). A non-USD position needs FX
+   conversion at every one of those points, or the numbers are simply
+   wrong.
+4. **Exchange-specific market hours** — `TradingScheduler`'s
+   `respect_market_hours` logic is built around US market hours; European
+   exchanges trade on a different clock (and calendar of holidays).
+
+### Decision: still not implemented, same as the original plan
+
+Given (a) a confirmed real blocker (no market-data subscription) that
+would need to be resolved before ANY of this is testable end-to-end, and
+(b) items 2-4 above are each non-trivial changes to core, shared
+broker/risk/scheduling code paths (not additive, isolated modules like
+every other Danelfin capability this session), this was not implemented —
+consistent with the original plan's own "flagged, explicitly deferred"
+framing, now backed by a concrete rather than speculative blocker list.
+Recommended as its own dedicated project (subscription decision first, then
+routing/currency/hours work), not an incremental add-on alongside the other
+six phases.
