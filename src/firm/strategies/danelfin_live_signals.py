@@ -32,11 +32,21 @@ Signal logic:
        out near this project's raw-score sanity ceiling) and clipped to
        [0, 10] — bounded by construction regardless of how large a forecast
        return Danelfin ever returns.
-    3. confidence: perf_win_rate_3m (already a 0-1 win-rate) for whichever
-       signal trading-parameters actually called (see
-       DanelfinProvider.get_live_signals' buy/sell fix), defaulting to a
-       neutral 0.5 when missing rather than treating an absent track record
-       as either strong or zero confidence.
+    3. confidence: a weighted blend of perf_win_rate_{1m,3m,6m,1y} (each a
+       0-1 win-rate) for whichever signal trading-parameters actually called
+       (see DanelfinProvider.get_live_signals' buy/sell fix) — weighted
+       toward 3m (matches this strategy's own return horizon) but informed
+       by shorter/longer track records too, since a signal that only works
+       on one specific horizon is less trustworthy than one that's
+       consistently right across horizons. Missing horizons are simply
+       excluded from the weighted average (renormalized over whatever is
+       present), and the whole thing defaults to a neutral 0.5 if every
+       horizon is missing. Then nudged by perf_avg_alpha_3m — a genuine
+       alpha-vs-benchmark figure, not just a raw win-rate, which
+       distinguishes "beats a falling market" from "beats a rising one" —
+       clamped to a modest +/-10% adjustment so one noisy alpha figure
+       can't swing confidence on its own. Final confidence is clamped to
+       [0, 1] regardless.
 
 Portfolio construction approach:
     Long Danelfin's live "buy" calls, short its live "sell" calls, sized by
@@ -61,6 +71,41 @@ from firm.strategies.registry import register
 
 _SIGNAL_DIRECTION: dict[str, float] = {"buy": 1.0, "sell": -1.0}
 _MAX_RAW = 10.0
+
+# Weighted toward 3m (matches this strategy's own pf_median_return_3m
+# horizon) but blended with shorter/longer track records — a signal that's
+# only right on one specific horizon is less trustworthy than one that's
+# consistently right across horizons.
+_WIN_RATE_WEIGHTS: dict[str, float] = {
+    "perf_win_rate_1m": 0.15,
+    "perf_win_rate_3m": 0.40,
+    "perf_win_rate_6m": 0.30,
+    "perf_win_rate_1y": 0.15,
+}
+# avg_alpha_3m of +/-0.5 (a large alpha figure) nudges confidence by at
+# most +/-10% — a secondary adjustment, not the primary confidence driver.
+_ALPHA_ADJUSTMENT_SCALE = 0.2
+_ALPHA_CLIP = 0.5
+
+
+def _blend_confidence(row: pd.Series) -> float:
+    """Weighted win-rate blend across horizons, nudged by avg_alpha_3m."""
+    weighted_sum = 0.0
+    weight_total = 0.0
+    for col, weight in _WIN_RATE_WEIGHTS.items():
+        val = row.get(col)
+        if pd.notna(val):
+            weighted_sum += float(val) * weight
+            weight_total += weight
+
+    confidence = (weighted_sum / weight_total) if weight_total > 0 else 0.5
+
+    alpha = row.get("perf_avg_alpha_3m")
+    if pd.notna(alpha):
+        clipped_alpha = max(-_ALPHA_CLIP, min(float(alpha), _ALPHA_CLIP))
+        confidence *= 1.0 + clipped_alpha * _ALPHA_ADJUSTMENT_SCALE
+
+    return max(0.0, min(confidence, 1.0))
 
 
 @register("danelfin_live_signals")
@@ -98,9 +143,7 @@ class DanelfinLiveSignalsStrategy(BaseStrategy):
                 continue
             raw = direction * magnitude
 
-            win_rate = row.get("perf_win_rate_3m")
-            confidence = float(win_rate) if pd.notna(win_rate) else 0.5
-            confidence = max(0.0, min(confidence, 1.0))
+            confidence = _blend_confidence(row)
 
             signals.append(
                 Signal(
@@ -113,9 +156,18 @@ class DanelfinLiveSignalsStrategy(BaseStrategy):
                     meta={
                         "tp_signal": str(tp_signal),
                         "pf_median_return_3m": float(median_return),
-                        "perf_win_rate_3m": float(win_rate) if pd.notna(win_rate) else float("nan"),
+                        "perf_win_rate_1m": float(row["perf_win_rate_1m"])
+                        if pd.notna(row.get("perf_win_rate_1m")) else float("nan"),
+                        "perf_win_rate_3m": float(row["perf_win_rate_3m"])
+                        if pd.notna(row.get("perf_win_rate_3m")) else float("nan"),
+                        "perf_win_rate_6m": float(row["perf_win_rate_6m"])
+                        if pd.notna(row.get("perf_win_rate_6m")) else float("nan"),
+                        "perf_win_rate_1y": float(row["perf_win_rate_1y"])
+                        if pd.notna(row.get("perf_win_rate_1y")) else float("nan"),
                         "perf_alpha_win_rate_3m": float(row["perf_alpha_win_rate_3m"])
                         if pd.notna(row.get("perf_alpha_win_rate_3m")) else float("nan"),
+                        "perf_avg_alpha_3m": float(row["perf_avg_alpha_3m"])
+                        if pd.notna(row.get("perf_avg_alpha_3m")) else float("nan"),
                     },
                 )
             )

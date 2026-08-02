@@ -372,11 +372,22 @@ snapshot-only nature:
 `firm.strategies.danelfin_live_signals.DanelfinLiveSignalsStrategy`:
 direction from `tp_signal` (`+1`/`-1` for buy/sell, skips hold/unrecognized
 entirely), magnitude from `|pf_median_return_3m|` scaled 40x and clipped to
-the project's raw-score ceiling, confidence from `perf_win_rate_3m` for
-whichever signal was actually called (defaulting to a neutral 0.5 when
-missing). `tp_stop_loss_pct`/`tp_take_profit_pct` are deliberately **not**
-used in the score — only carried as read-only meta — consistent with the
-earlier decision that wiring actual stop-loss/take-profit price levels into
+the project's raw-score ceiling, confidence from a weighted blend of
+`perf_win_rate_{1m,3m,6m,1y}` (weighted 0.15/0.40/0.30/0.15 — 3m weighted
+heaviest since it matches this strategy's own return horizon, but a signal
+that's only right on one specific horizon is less trustworthy than one
+consistently right across horizons; missing horizons are simply excluded
+and the weights renormalized over whatever's present, defaulting to a
+neutral 0.5 if every horizon is missing) for whichever signal was actually
+called, then nudged by `perf_avg_alpha_3m` (a genuine alpha-vs-benchmark
+figure — distinguishes "beats a falling market" from "beats a rising
+one" — clamped to a modest ±10% adjustment so one noisy alpha figure can't
+swing confidence alone) — **richer confidence weighting added 2026-08-02
+(Danelfin deepening plan Phase 6)**, replacing the original
+`perf_win_rate_3m`-only confidence. `tp_stop_loss_pct`/`tp_take_profit_pct`
+are deliberately **not** used in the score — only carried as read-only
+meta — consistent with the earlier decision that wiring actual
+stop-loss/take-profit price levels into
 `RiskAgent`/`ExecutionAgent`'s execution math is a separate, explicit-review
 change, not something to fold in here.
 

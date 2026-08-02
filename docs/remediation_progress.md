@@ -15,7 +15,7 @@ Last updated: 2026-08-02.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #54 has the most recent detail.
+   "Completed" item #55 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -743,6 +743,27 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     strategy + 5 PIT-store date-safety tests for the new
     `get_market_percentile_pool` accessor). Full suite (1291 tests) + ruff
     clean.
+
+55. **Richer confidence weighting in danelfin_live_signals** (2026-08-02)
+    — Phase 6 of the Danelfin deepening plan. Confidence previously came
+    from `perf_win_rate_3m` alone; extended `LIVE_SIGNAL_COLS` and
+    `DanelfinProvider.get_live_signals` to also carry
+    `win_rate_1m`/`win_rate_6m`/`win_rate_1y`/`avg_alpha_3m` from
+    `/v3/performance`'s response (already fetched — no new API calls, just
+    extracting more fields from the same call). New `_blend_confidence()`
+    in `danelfin_live_signals.py`: a weighted blend across win-rate
+    horizons (0.15/0.40/0.30/0.15 for 1m/3m/6m/1y — 3m weighted heaviest
+    since it matches this strategy's own return horizon, but a signal only
+    right on one horizon is less trustworthy than one consistently right
+    across horizons), missing horizons excluded and weights renormalized
+    over whatever's present, defaulting to a neutral 0.5 if every horizon
+    is missing. Then nudged by `avg_alpha_3m` (a genuine alpha-vs-benchmark
+    figure, distinguishing "beats a falling market" from "beats a rising
+    one") clamped to a modest ±10% adjustment. 6 new tests (multi-horizon
+    blend, renormalization over missing horizons, all-missing fallback,
+    alpha direction + clamping, meta fields) — all 6 pre-existing tests
+    passed unchanged (missing new columns degrade gracefully to the old
+    single-horizon behavior). Full suite (1297 tests) + ruff clean.
 
 ## In progress
 

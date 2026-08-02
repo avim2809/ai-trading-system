@@ -100,6 +100,15 @@ LIVE_SIGNAL_COLS: list[str] = [
     "pf_q95_return_3m",
     "perf_win_rate_3m",      # historical win-rate for this ticker's buy signal
     "perf_alpha_win_rate_3m",
+    # Added 2026-08-02 (Danelfin deepening plan Phase 6) — richer
+    # confidence weighting in danelfin_live_signals, blending win-rate
+    # across horizons instead of 3m alone, plus a genuine alpha-vs-
+    # benchmark adjustment (win_rate alone doesn't distinguish "beats a
+    # falling market" from "beats a rising one").
+    "perf_win_rate_1m",
+    "perf_win_rate_6m",
+    "perf_win_rate_1y",
+    "perf_avg_alpha_3m",
 ]
 
 # Danelfin's /v3/beststocks — their own curated Top-25 "Best Stocks" list.

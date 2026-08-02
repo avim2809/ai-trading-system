@@ -469,6 +469,10 @@ class DanelfinProvider(DataProvider):
                 "pf_q95_return_3m": pf.get("q95_3m"),
                 "perf_win_rate_3m": perf.get("win_rate_3m"),
                 "perf_alpha_win_rate_3m": perf.get("alpha_win_rate_3m"),
+                "perf_win_rate_1m": perf.get("win_rate_1m"),
+                "perf_win_rate_6m": perf.get("win_rate_6m"),
+                "perf_win_rate_1y": perf.get("win_rate_1y"),
+                "perf_avg_alpha_3m": perf.get("avg_alpha_3m"),
             })
         if not rows:
             return self.empty_live_signals()

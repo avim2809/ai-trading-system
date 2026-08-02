@@ -220,6 +220,10 @@ def _make_live_signals_df(
                 "pf_q95_return_3m": rng.uniform(0.05, 0.25),
                 "perf_win_rate_3m": rng.uniform(0.4, 0.8),
                 "perf_alpha_win_rate_3m": rng.uniform(0.4, 0.7),
+                "perf_win_rate_1m": rng.uniform(0.4, 0.8),
+                "perf_win_rate_6m": rng.uniform(0.4, 0.8),
+                "perf_win_rate_1y": rng.uniform(0.4, 0.8),
+                "perf_avg_alpha_3m": rng.uniform(-0.1, 0.1),
             }
         )
     return pd.DataFrame(rows)
@@ -1156,6 +1160,102 @@ class TestDanelfinLiveSignals:
         signals = strat.generate(view)
         _validate_signals(signals, "danelfin_live_signals")
         assert signals[0].score == pytest.approx(10.0)
+
+    def test_confidence_blends_across_horizons(self):
+        """Weighted blend of win_rate_1m/3m/6m/1y (0.15/0.40/0.30/0.15),
+        not just perf_win_rate_3m alone."""
+        view = MockPitView(symbols=["AAPL"])
+        view._live_signals_df = pd.DataFrame([{
+            "date": pd.Timestamp(view.asof), "symbol": "AAPL",
+            "tp_signal": "buy", "tp_entry_price": 100.0,
+            "tp_stop_loss_pct": -5.0, "tp_take_profit_pct": 10.0,
+            "pf_median_return_3m": 0.05, "pf_q05_return_3m": -0.1,
+            "pf_q95_return_3m": 0.2,
+            "perf_win_rate_1m": 0.9, "perf_win_rate_3m": 0.7,
+            "perf_win_rate_6m": 0.5, "perf_win_rate_1y": 0.3,
+        }])
+        strat = get("danelfin_live_signals")()
+        signals = strat.generate(view)
+        expected = 0.9 * 0.15 + 0.7 * 0.40 + 0.5 * 0.30 + 0.3 * 0.15
+        assert signals[0].confidence == pytest.approx(expected)
+
+    def test_confidence_renormalizes_over_missing_horizons(self):
+        """Only 3m and 1y present: blend renormalizes over just those two
+        weights instead of silently treating the missing ones as zero."""
+        view = MockPitView(symbols=["AAPL"])
+        view._live_signals_df = pd.DataFrame([{
+            "date": pd.Timestamp(view.asof), "symbol": "AAPL",
+            "tp_signal": "buy", "tp_entry_price": 100.0,
+            "tp_stop_loss_pct": -5.0, "tp_take_profit_pct": 10.0,
+            "pf_median_return_3m": 0.05, "pf_q05_return_3m": -0.1,
+            "pf_q95_return_3m": 0.2,
+            "perf_win_rate_3m": 0.8, "perf_win_rate_1y": 0.4,
+        }])
+        strat = get("danelfin_live_signals")()
+        signals = strat.generate(view)
+        expected = (0.8 * 0.40 + 0.4 * 0.15) / (0.40 + 0.15)
+        assert signals[0].confidence == pytest.approx(expected)
+
+    def test_confidence_defaults_to_neutral_when_all_horizons_missing(self):
+        view = MockPitView(symbols=["AAPL"])
+        view._live_signals_df = pd.DataFrame([{
+            "date": pd.Timestamp(view.asof), "symbol": "AAPL",
+            "tp_signal": "buy", "tp_entry_price": 100.0,
+            "tp_stop_loss_pct": -5.0, "tp_take_profit_pct": 10.0,
+            "pf_median_return_3m": 0.05, "pf_q05_return_3m": -0.1,
+            "pf_q95_return_3m": 0.2,
+        }])
+        strat = get("danelfin_live_signals")()
+        signals = strat.generate(view)
+        assert signals[0].confidence == pytest.approx(0.5)
+
+    def test_positive_alpha_increases_confidence_negative_decreases(self):
+        base_row = {
+            "date": None, "symbol": "AAPL",
+            "tp_signal": "buy", "tp_entry_price": 100.0,
+            "tp_stop_loss_pct": -5.0, "tp_take_profit_pct": 10.0,
+            "pf_median_return_3m": 0.05, "pf_q05_return_3m": -0.1,
+            "pf_q95_return_3m": 0.2, "perf_win_rate_3m": 0.6,
+        }
+        view_pos = MockPitView(symbols=["AAPL"])
+        view_pos._live_signals_df = pd.DataFrame([{
+            **base_row, "date": pd.Timestamp(view_pos.asof), "perf_avg_alpha_3m": 0.3,
+        }])
+        view_neg = MockPitView(symbols=["AAPL"])
+        view_neg._live_signals_df = pd.DataFrame([{
+            **base_row, "date": pd.Timestamp(view_neg.asof), "perf_avg_alpha_3m": -0.3,
+        }])
+        strat = get("danelfin_live_signals")()
+        conf_pos = strat.generate(view_pos)[0].confidence
+        conf_neg = strat.generate(view_neg)[0].confidence
+        assert conf_pos > 0.6 > conf_neg
+
+    def test_confidence_alpha_adjustment_still_clamped_to_0_1(self):
+        """An extreme win-rate + extreme alpha must still land in [0, 1]."""
+        view = MockPitView(symbols=["AAPL"])
+        view._live_signals_df = pd.DataFrame([{
+            "date": pd.Timestamp(view.asof), "symbol": "AAPL",
+            "tp_signal": "buy", "tp_entry_price": 100.0,
+            "tp_stop_loss_pct": -5.0, "tp_take_profit_pct": 10.0,
+            "pf_median_return_3m": 0.05, "pf_q05_return_3m": -0.1,
+            "pf_q95_return_3m": 0.2,
+            "perf_win_rate_1m": 1.0, "perf_win_rate_3m": 1.0,
+            "perf_win_rate_6m": 1.0, "perf_win_rate_1y": 1.0,
+            "perf_avg_alpha_3m": 10.0,  # adversarial, way past the +/-0.5 clip
+        }])
+        strat = get("danelfin_live_signals")()
+        signals = strat.generate(view)
+        assert 0.0 <= signals[0].confidence <= 1.0
+
+    def test_meta_carries_all_horizons_and_avg_alpha(self, pit_view):
+        strat = get("danelfin_live_signals")()
+        signals = strat.generate(pit_view)
+        sig = signals[0]
+        for key in (
+            "perf_win_rate_1m", "perf_win_rate_3m", "perf_win_rate_6m",
+            "perf_win_rate_1y", "perf_alpha_win_rate_3m", "perf_avg_alpha_3m",
+        ):
+            assert key in sig.meta
 
 
 class TestDanelfinBestStocksSignal:
