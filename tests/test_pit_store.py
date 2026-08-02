@@ -222,3 +222,52 @@ class TestEmptyResult:
         """Unknown symbols should yield an empty result, not an error."""
         result = store.get_prices(["ZZZZ"], datetime(2020, 1, 5))
         assert result.empty
+
+
+class TestGetMarketPercentilePool:
+    """Unlike get_ai_scores/get_best_stocks, this returns a whole
+    cross-sectional POPULATION snapshot for a single date (not filtered by
+    symbol), picking the latest available date at-or-before asof within the
+    lookback window — a real PIT-safety nuance worth testing directly."""
+
+    @pytest.fixture()
+    def store_with_pool(self) -> PointInTimeDataStore:
+        s = PointInTimeDataStore()
+        prices = pd.DataFrame({
+            "date": pd.to_datetime(["2020-01-01"]),
+            "symbol": ["AAPL"], "open": [1.0], "high": [1.0], "low": [1.0],
+            "close": [1.0], "volume": [1.0], "adj_close": [1.0],
+        })
+        pool = pd.DataFrame([
+            {"date": pd.Timestamp("2020-01-01"), "symbol": "AAPL", "sector": "tech", "ai_score": 8.0},
+            {"date": pd.Timestamp("2020-01-01"), "symbol": "MSFT", "sector": "tech", "ai_score": 6.0},
+            {"date": pd.Timestamp("2020-01-08"), "symbol": "AAPL", "sector": "tech", "ai_score": 9.0},
+            {"date": pd.Timestamp("2020-01-08"), "symbol": "MSFT", "sector": "tech", "ai_score": 5.0},
+        ])
+        s.load(prices, market_percentile=pool)
+        return s
+
+    def test_returns_latest_date_at_or_before_asof(self, store_with_pool: PointInTimeDataStore):
+        result = store_with_pool.get_market_percentile_pool(datetime(2020, 1, 8), lookback_days=30)
+        assert set(result["date"].unique()) == {pd.Timestamp("2020-01-08")}
+        assert set(result["symbol"]) == {"AAPL", "MSFT"}
+
+    def test_does_not_leak_future_dates(self, store_with_pool: PointInTimeDataStore):
+        """asof strictly before the later snapshot must never see it (no-look-ahead)."""
+        result = store_with_pool.get_market_percentile_pool(datetime(2020, 1, 3), lookback_days=30)
+        assert set(result["date"].unique()) == {pd.Timestamp("2020-01-01")}
+        assert (result["ai_score"] == 8.0).any()  # the 2020-01-01 AAPL row, not 2020-01-08's 9.0
+
+    def test_not_filtered_by_symbol_returns_whole_population(self, store_with_pool: PointInTimeDataStore):
+        """Deliberately NOT restricted to any caller universe — the whole
+        point is ranking against the broader population."""
+        result = store_with_pool.get_market_percentile_pool(datetime(2020, 1, 8))
+        assert len(result) == 2  # both AAPL and MSFT, not just one caller's symbol
+
+    def test_outside_lookback_window_returns_empty(self, store_with_pool: PointInTimeDataStore):
+        result = store_with_pool.get_market_percentile_pool(datetime(2020, 6, 1), lookback_days=7)
+        assert result.empty
+
+    def test_empty_when_not_loaded(self, store: PointInTimeDataStore):
+        result = store.get_market_percentile_pool(datetime(2020, 1, 5))
+        assert result.empty

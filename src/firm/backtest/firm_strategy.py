@@ -94,6 +94,9 @@ class PitViewAdapter:
         syms = symbols or self._universe
         return self._pit_store.get_best_stocks(syms)
 
+    def market_percentile(self) -> pd.DataFrame:
+        return self._pit_store.get_market_percentile_pool(self._asof)
+
     def macro(self, series_id: str, lookback_days: int = 365) -> pd.Series:
         return self._pit_store.get_macro(series_id, self._asof, lookback_days)
 

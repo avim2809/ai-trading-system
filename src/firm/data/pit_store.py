@@ -29,6 +29,7 @@ class PointInTimeDataStore:
         self._ai_scores: pd.DataFrame = pd.DataFrame()
         self._live_signals: pd.DataFrame = pd.DataFrame()
         self._best_stocks: pd.DataFrame = pd.DataFrame()
+        self._market_percentile: pd.DataFrame = pd.DataFrame()
         self._corporate_actions: pd.DataFrame = pd.DataFrame()
         # Macro series keyed by FRED series ID → DataFrame[date, <series_id>]
         self._macro: dict[str, pd.DataFrame] = {}
@@ -50,6 +51,7 @@ class PointInTimeDataStore:
         ai_scores: pd.DataFrame | None = None,
         live_signals: pd.DataFrame | None = None,
         best_stocks: pd.DataFrame | None = None,
+        market_percentile: pd.DataFrame | None = None,
     ) -> None:
         """Load all datasets. Called once at backtest start."""
         self._prices = self._ensure_date_col(prices)
@@ -59,12 +61,16 @@ class PointInTimeDataStore:
         self._ai_scores = self._ensure_date_col(ai_scores) if ai_scores is not None else pd.DataFrame()
         self._live_signals = self._ensure_date_col(live_signals) if live_signals is not None else pd.DataFrame()
         self._best_stocks = self._ensure_date_col(best_stocks) if best_stocks is not None else pd.DataFrame()
+        self._market_percentile = (
+            self._ensure_date_col(market_percentile) if market_percentile is not None else pd.DataFrame()
+        )
         self._corporate_actions = (
             self._ensure_date_col(corporate_actions) if corporate_actions is not None else pd.DataFrame()
         )
         log.info(
             "PIT store loaded: %d price rows, %d fundamental rows, %d sentiment rows, "
-            "%d estimates rows, %d ai_score rows, %d live_signal rows, %d best_stocks rows",
+            "%d estimates rows, %d ai_score rows, %d live_signal rows, %d best_stocks rows, "
+            "%d market_percentile rows",
             len(self._prices),
             len(self._fundamentals),
             len(self._sentiment),
@@ -72,6 +78,7 @@ class PointInTimeDataStore:
             len(self._ai_scores),
             len(self._live_signals),
             len(self._best_stocks),
+            len(self._market_percentile),
         )
 
     @staticmethod
@@ -209,6 +216,34 @@ class PointInTimeDataStore:
         if self._best_stocks.empty:
             return pd.DataFrame()
         return self._best_stocks.loc[self._best_stocks["symbol"].isin(symbols)].copy()
+
+    def get_market_percentile_pool(
+        self,
+        asof: datetime,
+        lookback_days: int = 7,
+    ) -> pd.DataFrame:
+        """Return the most recent full cross-sectional ai_score population
+        snapshot (MARKET_PERCENTILE_COLS) at or before *asof*.
+
+        Unlike every other accessor here, this deliberately does NOT filter
+        by symbol — the whole point is to rank the caller's own universe
+        against the broader population, so restricting to the caller's
+        symbols upfront would defeat the purpose (the caller filters after
+        computing percentiles, not before). Returns only the single latest
+        available date's snapshot within the lookback window, not a
+        concatenated history — percentile only means something computed
+        within one date's cross-section, not averaged across multiple.
+        """
+        if self._market_percentile.empty:
+            return pd.DataFrame()
+        asof_ts = pd.Timestamp(asof)
+        earliest = asof_ts - timedelta(days=lookback_days)
+        mask = (self._market_percentile["date"] <= asof_ts) & (self._market_percentile["date"] >= earliest)
+        candidates = self._market_percentile.loc[mask]
+        if candidates.empty:
+            return pd.DataFrame()
+        latest_date = candidates["date"].max()
+        return candidates.loc[candidates["date"] == latest_date].copy()
 
     def get_sentiment(
         self,

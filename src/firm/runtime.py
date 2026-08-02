@@ -267,6 +267,29 @@ def load_ai_scores(settings: Settings) -> pd.DataFrame | None:
     return None
 
 
+def load_market_percentile(settings: Settings) -> pd.DataFrame | None:
+    """Load a cached cross-sectional ai_score population snapshot panel.
+
+    Primary key: ``combined/market_percentile`` (ParquetCache). Unlike
+    every other ``load_*`` helper here, this cache is NOT populated by the
+    regular ``fetch-data`` pipeline — a full population snapshot costs
+    ~66+ Danelfin API calls per date (see
+    firm.data.danelfin_market_percentile's docstring), so populating it is
+    a deliberate, bounded one-off step (see
+    scripts/fetch_market_percentile_calibration_data.py) rather than
+    something refreshed automatically. Returns ``None`` when absent so
+    callers degrade gracefully (the ``danelfin_market_percentile``
+    strategy simply emits no signals).
+    """
+    from firm.data.cache import ParquetCache
+
+    cache = ParquetCache(settings.data.cache_dir)
+    df = cache.get("combined/market_percentile")
+    if df is not None and not df.empty:
+        return df
+    return None
+
+
 def load_universe_membership(settings: Settings) -> pd.DataFrame | None:
     """Load historical index-membership windows for survivorship-aware backtests.
 
@@ -422,10 +445,29 @@ def run_backtest_from_config(
     except Exception:
         log.warning("AI-scores cache load failed — that strategy will be inactive", exc_info=True)
 
+    market_percentile_df = None
+    try:
+        from firm.config import get_settings
+
+        market_percentile_df = load_market_percentile(get_settings())
+        if market_percentile_df is not None:
+            log.info(
+                "Loaded market-percentile cache: %d rows across %d date(s)",
+                len(market_percentile_df), market_percentile_df["date"].nunique(),
+            )
+        else:
+            log.debug(
+                "No cached market-percentile pool in backtest; the "
+                "danelfin_market_percentile strategy will emit no signals"
+            )
+    except Exception:
+        log.warning("Market-percentile cache load failed — that strategy will be inactive", exc_info=True)
+
     pit_store = PointInTimeDataStore()
     pit_store.load(
         prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df,
         estimates=estimates_df, ai_scores=ai_scores_df,
+        market_percentile=market_percentile_df,
     )
 
     # Optionally load FRED macro data — gracefully skipped when key is absent.

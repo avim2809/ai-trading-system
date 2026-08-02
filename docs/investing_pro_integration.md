@@ -411,6 +411,81 @@ live-service restart that `danelfin_live_signals` is active and
 - **Shipped, tested, registered, and ENABLED in live paper trading, unvalidated**:
   `danelfin_live_signals` strategy (Danelfin `/v3/*`-backed; structurally
   unbacktestable, enabled per explicit user request rather than an A/B).
+- **Shipped, tested, registered, NOT enabled**: `danelfin_market_percentile`
+  strategy (Danelfin `/ranking`-backed; single-window A/B came back net
+  negative — see "Danelfin market-percentile" below).
 - **Not pursued**: Investing.com Pro's per-stock Fair Value/ProTips/
   Financial Health/ProPicks/technical-summary data — blocked by Cloudflare on
   the pages that carry it, independent of any backtest result.
+
+## Danelfin market-percentile — cross-sectional ai_score rank vs. the whole market (2026-08-02, built + A/B'd, NOT enabled)
+
+`danelfin_ai_score` (above) already reads each universe symbol's ai_score,
+but the downstream signal-combination/analyst layer z-scores it only across
+this project's own ~25-name fixed universe — answering "is this a top score
+relative to an arbitrarily chosen small set," not "is this actually a top
+score relative to the whole market." `firm.strategies.
+danelfin_market_percentile` answers the second question directly: each
+universe symbol's ai_score percentile rank within a broad cross-sectional
+population (many symbols across many sectors, not just the fixed universe),
+backed by a new `PitView.market_percentile()` capability
+(`MARKET_PERCENTILE_COLS` in `firm.data.schemas`) fed by
+`firm.data.danelfin_market_percentile.fetch_market_percentile_pool`
+(Danelfin's genuinely-historical bulk `/ranking` mode — the same one
+`get_historical_sector_scores` already uses for the Best-Stocks arm's
+backtest — called once per sector and concatenated).
+
+### Real cost meant this needed a scope decision before backtesting
+
+A full population snapshot for one date costs ~66+ Danelfin API calls (11
+sectors x ~6 low_risk values, +pagination). The user has a 10K Danelfin API
+calls/month budget already shared with `danelfin_live_signals` (fetched
+every live cycle) and the Best-Stocks arm's daily job — a full weekly-cadence
+3-window A/B (matching every other Danelfin strategy's promotion gate) would
+have cost an estimated 15,000+ calls, well over a month's entire budget in
+one sitting. Asked the user directly; given the 10K/month figure, agreed
+scope: **one 18-month window** (`run_18mo_2025_2026`, matching
+`danelfin_ai_score`'s own primary window), **monthly** (not weekly) snapshot
+cadence — an estimated ~1,200 calls (~12% of a month's budget), run via
+`scripts/fetch_market_percentile_calibration_data.py` (the one-off, real-cost
+fetch step, populating `ParquetCache`'s `combined/market_percentile` key) then
+`scripts/calibrate_danelfin_market_percentile.py` (free — reuses the cache,
+same baseline-vs-+1-strategy harness as `calibrate_danelfin_ai_score.py`).
+
+### A real data gap surfaced during the fetch, not silently ignored
+
+Of the 18 planned monthly snapshot dates, only **8 returned real data**
+(2025-04, 05, 07, 08, 10, 12; 2026-04, 05) — the other 10 came back empty
+after Danelfin's API returned retryable HTTP errors (429/5xx) across enough
+of that date's ~66 sector/low_risk calls that every sector for that date
+failed. Confirmed via `journalctl` that no concurrent Danelfin calls from
+the live `ai-trading.service` overlapped the fetch window, ruling out this
+project's own pacing/contention as the cause — this looks like transient
+flakiness/instability on Danelfin's side for this specific bulk-historical
+endpoint, not a bug here. Re-fetching the 10 missing dates would cost
+another ~660 calls with no guarantee of success against the same
+flakiness, so — consistent with the cost-conscious scope already agreed —
+the backtest below ran on the 8/18 (~44%) coverage actually obtained rather
+than spending more budget chasing full coverage. This means the strategy
+had zero signal for 10 of the 18 months in this window, a real limitation
+on how much weight to put on the result below.
+
+### A/B result — net negative, NOT enabled
+
+| arm | portfolio Sharpe | total return | max drawdown | strategy's own Sharpe |
+|---|---|---|---|---|
+| baseline (10 strategies) | 0.786 | 0.073 | 0.056 | — |
+| +danelfin_market_percentile | 0.725 | 0.067 | 0.056 | -0.186 |
+
+Adding the strategy **hurt** portfolio Sharpe (0.786 → 0.725) and total
+return (0.073 → 0.067), and its own standalone Sharpe was negative. Given
+(a) a negative result and (b) only 44% data coverage in the one window
+tested, this is read as "inconclusive-leaning-negative" rather than a
+definitive verdict on the underlying idea — but per this project's own
+promotion-gate discipline (enable only on positive evidence, same standard
+`danelfin_ai_score` had to clear), **`danelfin_market_percentile` is NOT
+enabled in `config/live.yaml`**. The strategy remains shipped, registered,
+and fully tested (12 unit tests, pure logic, no network) for a possible
+future revisit — e.g. a fuller-coverage window, once there's a
+retry/backoff strategy tuned for Danelfin's observed flakiness on this
+endpoint, or more monthly API budget available to spend on validation.

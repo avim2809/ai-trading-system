@@ -15,7 +15,7 @@ Last updated: 2026-08-02.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #53 has the most recent detail.
+   "Completed" item #54 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -708,6 +708,40 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     now defaults to it (1 API call vs. ~11), with the old reconstruction
     kept available via `--reconstruction` for continuity with this arm's
     pre-2026-08-02 history. 4 new tests. Full suite (1274 tests) + ruff
+    clean.
+
+54. **Danelfin market-percentile strategy: built, A/B'd on a real
+    cost-scoped backtest, NOT enabled (net negative result)** (2026-08-02)
+    — Phase 5 of the Danelfin deepening plan. New
+    `danelfin_market_percentile` strategy ranks each universe symbol's
+    ai_score against a broad cross-sectional population (not just this
+    project's own ~25-name fixed universe), backed by a new
+    `PitView.market_percentile()` capability (`MARKET_PERCENTILE_COLS`)
+    fed by bulk historical `/ranking` mode — full 4-file backtest wiring
+    (`pit_store.py`, `firm_strategy.py`, `runtime.py`, `backtest/run.py`)
+    mirroring `ai_scores`'s established pattern. Real cost required a
+    scope decision before backtesting: the user has a 10K Danelfin API
+    calls/month budget already shared with `danelfin_live_signals` and the
+    Best-Stocks arm; a full weekly-cadence 3-window A/B (this project's
+    usual promotion-gate rigor) would have cost ~15,000+ calls — asked
+    directly, agreed scope: one 18-month window, monthly cadence, ~1,200
+    calls (~12% of monthly budget). During the fetch, 10 of 18 planned
+    monthly snapshots came back empty (Danelfin API returned retryable
+    HTTP errors across enough of that date's ~66 calls to fail the whole
+    date) — confirmed via `journalctl` this wasn't concurrent contention
+    from the live service's own Danelfin usage, so read as real API-side
+    flakiness on this specific bulk endpoint, not a bug here. Ran the
+    backtest on the 8/18 (~44%) coverage actually obtained rather than
+    spend more budget chasing full coverage. **Result: net negative** —
+    portfolio Sharpe 0.786 (baseline) -> 0.725 (+strategy), strategy's own
+    standalone Sharpe -0.186. Per this project's own promotion-gate
+    discipline (enable only on positive evidence), **left disabled** in
+    `config/live.yaml` — shipped, registered, and fully tested (12 unit
+    tests, pure logic) for a possible future revisit. Full writeup in
+    docs/investing_pro_integration.md's new "Danelfin market-percentile"
+    section, including the data-gap caveat. 17 new tests total (12
+    strategy + 5 PIT-store date-safety tests for the new
+    `get_market_percentile_pool` accessor). Full suite (1291 tests) + ruff
     clean.
 
 ## In progress

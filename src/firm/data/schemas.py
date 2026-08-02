@@ -122,6 +122,28 @@ BEST_STOCKS_COLS: list[str] = [
     "country",
 ]
 
+# A broad cross-sectional POPULATION snapshot (many symbols across many
+# sectors on a single date), NOT limited to this project's own fixed
+# universe — deliberately a different shape from AI_SCORE_COLS (which is
+# one row per universe symbol per date, a time series). This is what
+# firm.strategies.danelfin_market_percentile ranks each universe symbol
+# against, to answer "is this actually a top ai_score relative to the
+# whole market" rather than "top score relative to an arbitrarily chosen
+# ~25-name universe." Backed by
+# firm.data.providers.danelfin.DanelfinProvider.get_historical_sector_scores
+# (genuinely historical bulk /ranking mode) called once per sector and
+# concatenated — see firm.data.danelfin_market_percentile for the fetch
+# helper. Real cost note: a full population snapshot for one date costs
+# ~11 sectors x ~6 low_risk values (+pagination) = 66+ Danelfin API calls —
+# NOT cheap to fetch on every rebalance date, unlike AI_SCORE_COLS which is
+# served from a pre-populated cache.
+MARKET_PERCENTILE_COLS: list[str] = [
+    "date",
+    "symbol",
+    "sector",
+    "ai_score",
+]
+
 # Universe membership window columns (used by UniverseResolver for
 # survivorship-aware point-in-time index membership).
 COL_INDEX = "index"

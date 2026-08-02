@@ -257,6 +257,31 @@ def _make_best_stocks_df(
     return pd.DataFrame(rows)
 
 
+def _make_market_percentile_pool(
+    universe_symbols: list[str],
+    end_date: datetime | None = None,
+    population_size: int = 250,
+) -> pd.DataFrame:
+    """Synthetic broad cross-sectional ai_score population snapshot
+    (MARKET_PERCENTILE_COLS shape) — universe symbols plus enough extra
+    synthetic names to make a percentile rank meaningful, mirroring the real
+    firm.data.danelfin_market_percentile.fetch_market_percentile_pool
+    output shape (date, symbol, sector, ai_score)."""
+    if end_date is None:
+        end_date = datetime(2025, 6, 1)
+    rng = np.random.RandomState(777)
+    ts = pd.Timestamp(end_date)
+    rows: list[dict] = []
+    for sym in universe_symbols:
+        rows.append({"date": ts, "symbol": sym, "sector": "technology", "ai_score": rng.uniform(1, 10)})
+    n_extra = max(0, population_size - len(universe_symbols))
+    for i in range(n_extra):
+        rows.append({
+            "date": ts, "symbol": f"POOL{i}", "sector": "materials", "ai_score": rng.uniform(1, 10),
+        })
+    return pd.DataFrame(rows)
+
+
 class MockPitView:
     """In-memory PitView implementation for testing."""
 
@@ -271,6 +296,7 @@ class MockPitView:
         include_ai_scores: bool = True,
         include_live_signals: bool = True,
         include_best_stocks: bool = True,
+        include_market_percentile: bool = True,
     ):
         self._symbols = symbols or SYMBOLS
         self._asof = asof or datetime(2025, 6, 1)
@@ -303,6 +329,11 @@ class MockPitView:
         self._best_stocks_df = (
             _make_best_stocks_df(self._symbols, self._asof)
             if include_best_stocks
+            else pd.DataFrame()
+        )
+        self._market_percentile_df = (
+            _make_market_percentile_pool(self._symbols, self._asof)
+            if include_market_percentile
             else pd.DataFrame()
         )
 
@@ -394,6 +425,9 @@ class MockPitView:
             df = df[df["symbol"].isin(symbols)]
         return df
 
+    def market_percentile(self) -> pd.DataFrame:
+        return self._market_percentile_df.copy()
+
 
 class EmptyPitView:
     """PitView that returns empty data for edge-case testing."""
@@ -427,6 +461,9 @@ class EmptyPitView:
     def best_stocks(self, symbols=None) -> pd.DataFrame:
         return pd.DataFrame()
 
+    def market_percentile(self) -> pd.DataFrame:
+        return pd.DataFrame()
+
 
 class SingleSymbolPitView:
     """PitView with a single symbol for edge-case testing."""
@@ -441,6 +478,7 @@ class SingleSymbolPitView:
         self._ai_score_df = _make_ai_scores_df(self._sym, 40, self._asof)
         self._live_signals_df = _make_live_signals_df(self._sym, self._asof)
         self._best_stocks_df = _make_best_stocks_df(self._sym, self._asof)
+        self._market_percentile_df = _make_market_percentile_pool(self._sym, self._asof)
 
     @property
     def asof(self) -> datetime:
@@ -478,6 +516,9 @@ class SingleSymbolPitView:
 
     def best_stocks(self, symbols=None) -> pd.DataFrame:
         return self._best_stocks_df.copy()
+
+    def market_percentile(self) -> pd.DataFrame:
+        return self._market_percentile_df.copy()
 
 
 # ---------------------------------------------------------------------------
@@ -520,6 +561,7 @@ ALL_STRATEGY_NAMES = [
     "danelfin_ai_score",
     "danelfin_live_signals",
     "danelfin_best_stocks_signal",
+    "danelfin_market_percentile",
 ]
 
 
@@ -1194,6 +1236,100 @@ class TestDanelfinBestStocksSignal:
         assert "rank" in sig.meta
         assert "sector" in sig.meta
         assert "country" in sig.meta
+
+
+class TestDanelfinMarketPercentile:
+    def test_generate(self, pit_view):
+        strat = get("danelfin_market_percentile")()
+        signals = strat.generate(pit_view)
+        _validate_signals(signals, "danelfin_market_percentile")
+        assert len(signals) == len(pit_view.universe)
+
+    def test_empty_universe(self, empty_view):
+        strat = get("danelfin_market_percentile")()
+        assert strat.generate(empty_view) == []
+
+    def test_no_market_percentile_data(self):
+        view = MockPitView(include_market_percentile=False)
+        strat = get("danelfin_market_percentile")()
+        assert strat.generate(view) == []
+
+    def test_population_below_minimum_emits_nothing(self):
+        view = MockPitView(symbols=["AAPL", "MSFT"])
+        view._market_percentile_df = _make_market_percentile_pool(
+            ["AAPL", "MSFT"], view.asof, population_size=5,
+        )
+        strat = get("danelfin_market_percentile")()
+        assert strat.generate(view) == []
+
+    def test_highest_ai_score_scores_higher_than_lowest(self):
+        view = MockPitView(symbols=["AAPL", "MSFT"])
+        asof = pd.Timestamp(view.asof)
+        pool_rows = [
+            {"date": asof, "symbol": "AAPL", "sector": "technology", "ai_score": 9.8},
+            {"date": asof, "symbol": "MSFT", "sector": "technology", "ai_score": 1.2},
+        ] + [
+            {"date": asof, "symbol": f"POOL{i}", "sector": "materials", "ai_score": 5.0}
+            for i in range(248)
+        ]
+        view._market_percentile_df = pd.DataFrame(pool_rows)
+        strat = get("danelfin_market_percentile")()
+        signals = strat.generate(view)
+        by_symbol = {s.symbol: s for s in signals}
+        assert by_symbol["AAPL"].score > 0
+        assert by_symbol["MSFT"].score < 0
+        assert by_symbol["AAPL"].score > by_symbol["MSFT"].score
+
+    def test_symbol_absent_from_population_gets_no_signal(self):
+        view = MockPitView(symbols=["AAPL", "MSFT"])
+        asof = pd.Timestamp(view.asof)
+        pool_rows = [
+            {"date": asof, "symbol": "AAPL", "sector": "technology", "ai_score": 8.0},
+        ] + [
+            {"date": asof, "symbol": f"POOL{i}", "sector": "materials", "ai_score": 5.0}
+            for i in range(249)
+        ]
+        view._market_percentile_df = pd.DataFrame(pool_rows)
+        strat = get("danelfin_market_percentile")()
+        signals = strat.generate(view)
+        assert {s.symbol for s in signals} == {"AAPL"}
+
+    def test_score_clipped_to_raw_score_ceiling(self):
+        view = MockPitView(symbols=["AAPL"])
+        asof = pd.Timestamp(view.asof)
+        pool_rows = [
+            {"date": asof, "symbol": "AAPL", "sector": "technology", "ai_score": 10.0},
+        ] + [
+            {"date": asof, "symbol": f"POOL{i}", "sector": "materials", "ai_score": 1.0}
+            for i in range(249)
+        ]
+        view._market_percentile_df = pd.DataFrame(pool_rows)
+        strat = get("danelfin_market_percentile")()
+        signals = strat.generate(view)
+        _validate_signals(signals, "danelfin_market_percentile")
+
+    def test_confidence_scales_with_population_size(self):
+        view_small = MockPitView(symbols=["AAPL", "MSFT"])
+        view_small._market_percentile_df = _make_market_percentile_pool(
+            ["AAPL", "MSFT"], view_small.asof, population_size=40,
+        )
+        view_large = MockPitView(symbols=["AAPL", "MSFT"])
+        view_large._market_percentile_df = _make_market_percentile_pool(
+            ["AAPL", "MSFT"], view_large.asof, population_size=250,
+        )
+        strat = get("danelfin_market_percentile")()
+        small_conf = strat.generate(view_small)[0].confidence
+        large_conf = strat.generate(view_large)[0].confidence
+        assert large_conf > small_conf
+        assert large_conf == pytest.approx(1.0)
+
+    def test_meta_carries_percentile_and_population_size(self, pit_view):
+        strat = get("danelfin_market_percentile")()
+        signals = strat.generate(pit_view)
+        sig = signals[0]
+        assert "percentile" in sig.meta
+        assert "population_size" in sig.meta
+        assert 0.0 <= sig.meta["percentile"] <= 1.0
 
 
 class TestEventDriven:

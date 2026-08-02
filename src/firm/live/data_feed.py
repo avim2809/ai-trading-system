@@ -151,6 +151,17 @@ class LivePitViewAdapter:
         syms = symbols or self._universe
         return self._pit_store.get_best_stocks(syms)
 
+    def market_percentile(self) -> pd.DataFrame:
+        # Deliberately NOT fetched every cycle (unlike live_signals/
+        # best_stocks): a full population snapshot costs ~66+ Danelfin API
+        # calls (see firm.data.danelfin_market_percentile's docstring) —
+        # a per-cycle live fetch at that cost needs an explicit go-ahead,
+        # not a default. Always empty until that's built; the strategy
+        # (firm.strategies.danelfin_market_percentile) degrades to zero
+        # signals gracefully when this is empty, same as any other
+        # not-yet-wired capability.
+        return self._pit_store.get_market_percentile_pool(self._asof)
+
 
 class LiveDataFeed:
     """Fetches current market data and populates a PIT store for the pipeline."""

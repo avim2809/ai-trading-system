@@ -75,6 +75,9 @@ class PitView(Protocol):
     ) -> pd.DataFrame:
         ...
 
+    def market_percentile(self) -> pd.DataFrame:
+        ...
+
 
 class BaseStrategy(ABC):
     """Abstract base for all alpha strategies."""
