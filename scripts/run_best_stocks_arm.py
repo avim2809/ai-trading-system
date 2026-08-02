@@ -103,6 +103,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "here for continuity/comparison, not recommended for new runs."
         ),
     )
+    p.add_argument(
+        "--force-rebalance", action="store_true",
+        help=(
+            "Force an immediate full rebalance regardless of the 91-day "
+            "quarterly / 365-day annual cadence — e.g. after switching "
+            "selection methods (--reconstruction on/off), to cut the ledger "
+            "over cleanly instead of holding stale picks for up to 91 more "
+            "days until the next scheduled quarterly replace. NAV-preserving "
+            "(liquidates existing holdings at current prices and "
+            "redistributes across the fresh selection; does not reset to "
+            "--initial-capital) and resets both the quarterly and annual "
+            "cadence clocks to today."
+        ),
+    )
     return p.parse_args(argv)
 
 
@@ -150,7 +164,16 @@ def _run_synthetic(args: argparse.Namespace, asof: datetime) -> int:
 
     prices = _latest_prices(market_data, list(ledger.holdings), asof)
 
-    if ledger.due_for_quarterly_replace(asof):
+    if args.force_rebalance:
+        log.info("best_stocks_arm: --force-rebalance requested — full rebalance now")
+        selection = _select(danelfin, args)
+        if selection:
+            extra_symbols = [s for s in selection_symbols(selection) if s not in prices]
+            prices.update(_latest_prices(market_data, extra_symbols, asof))
+            ledger.full_rebalance(asof, selection, prices)
+        else:
+            log.error("best_stocks_arm: --force-rebalance requested but selection returned nothing; skipping")
+    elif ledger.due_for_quarterly_replace(asof):
         log.info("best_stocks_arm: quarterly replace due")
         selection = _select(danelfin, args)
         if selection:

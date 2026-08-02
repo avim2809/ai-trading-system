@@ -558,3 +558,42 @@ that bulk-historical path is specifically for `/ranking`, which
 only ever be judged by watching it forward, the same caveat
 `danelfin_best_stocks_signal` (the main-engine strategy, previous section)
 already carries.
+
+## Forced early cutover to the real output (2026-08-02, same day as the switch above)
+
+The Phase 4 switch above changed the *code path* the daily job uses, but
+`BestStocksLedger` only re-selects holdings on its existing 91-day quarterly
+cadence (`due_for_quarterly_replace`) — the last quarterly replace was
+2026-07-31, under the *old* `select_best_stocks` reconstruction, so without
+further action the ledger would have kept marking-to-market that stale,
+reconstruction-based selection for up to ~91 more days before
+`select_from_real_beststocks` was ever actually exercised.
+
+Verified live before deciding what to do: a real `get_best_stocks()` call
+showed today's actual `/v3/beststocks` output is **exactly 5 sectors x 5
+stocks** (materials, energy, financials, utilities, real-estate) — matching
+Danelfin's documented sector-cap rule precisely, better evidence than the
+v3 API blog's vague description alone gave. Given that, and that leaving
+the ledger tracking a stale, already-abandoned selection method for 3 more
+months while claiming to track "the real thing" would be misleading,
+decided to cut over immediately rather than wait.
+
+Added `--force-rebalance` to `scripts/run_best_stocks_arm.py`: triggers an
+immediate `full_rebalance` (NAV-preserving — liquidates existing holdings
+at current prices and redistributes across the fresh selection, does not
+reset to `--initial-capital`) regardless of the quarterly/annual cadence,
+and resets both cadence clocks to today. Ran it once, manually, against the
+real ledger (`data/best_stocks_ledger.json` backed up first):
+
+- NAV before: $98,859.90 (2026-08-01) → NAV after: $98,859.90 — confirmed
+  NAV-preserving, not a reset.
+- Holdings: all 25 real `/v3/beststocks` symbols populated successfully
+  (0 missing), despite the price provider (Massive) rate-limiting
+  individual lookups during the run — `FallbackProvider` correctly fell
+  through to another source for every symbol.
+- `last_full_rebalance`/`last_quarterly_replace` both now `2026-08-02` — the
+  ledger's cadence clocks restart from this cutover point, so the next
+  scheduled quarterly replace is ~2026-10-31.
+
+The ledger now genuinely tracks Danelfin's real Best-Stocks output from
+today forward, rather than drifting on stale reconstruction-based picks.
