@@ -15,7 +15,7 @@ Last updated: 2026-08-02.
 ## How to resume
 
 1. Read this file top to bottom — "In progress" says what to pick up next;
-   "Completed" item #52 has the most recent detail.
+   "Completed" item #53 has the most recent detail.
 2. Re-read the plan file (path above) for the original rationale/evidence
    behind each item if needed — its `todos:` frontmatter status should match
    the "Full task list" section below, other than the two ad-hoc items noted
@@ -693,6 +693,22 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     outliving their test) that makes this race possible at all is a real,
     separate test-hygiene issue worth a dedicated look — flagged here, not
     attempted given the scope of tonight's other work.
+
+53. **Best-Stocks arm daily job switched to Danelfin's real /v3/beststocks
+    output by default** (2026-08-02) — Phase 4 of the Danelfin deepening
+    plan. Both the walk-forward backtest and a follow-up accuracy check
+    (docs/danelfin_best_stocks_arm.md's "Important caveat") found
+    `select_best_stocks` (this project's sector-ranking reconstruction of
+    Danelfin's published rule) only matches Danelfin's real live output
+    ~25-30% of the time — a data-availability limit (their "Buy Track
+    Record" filter has zero historical/programmatic depth in the API), not
+    a tunable bug. New `select_from_real_beststocks()`
+    (`src/firm/live/best_stocks_arm.py`) wraps `/v3/beststocks`'s real
+    Top-25 directly, no reconstruction — `scripts/run_best_stocks_arm.py`
+    now defaults to it (1 API call vs. ~11), with the old reconstruction
+    kept available via `--reconstruction` for continuity with this arm's
+    pre-2026-08-02 history. 4 new tests. Full suite (1274 tests) + ruff
+    clean.
 
 ## In progress
 

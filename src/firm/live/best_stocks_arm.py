@@ -210,6 +210,64 @@ def selection_symbols(selection: list[dict]) -> list[str]:
     return [row["symbol"] for row in selection]
 
 
+def select_from_real_beststocks(
+    provider: DanelfinProvider,
+    excluded_symbols: frozenset[str] = frozenset(),
+) -> list[dict]:
+    """Wrap Danelfin's real ``/v3/beststocks`` Top-25 directly as the
+    ledger's target selection — NO sector-ranking reimplementation at all.
+
+    This is the fix for the real accuracy gap found in this arm's own
+    walk-forward backtest (see docs/danelfin_best_stocks_arm.md's "Important
+    caveat" section): the sector-ranking reconstruction in
+    :func:`select_best_stocks` only matched Danelfin's real live output
+    ~25-30% of the time, because their "Buy Track Record" eligibility
+    filter (part of the published rule) has zero historical or
+    programmatic depth anywhere in the API — it can't be reconstructed,
+    only approximated. Reading the vendor's own curated list directly
+    sidesteps the whole reconstruction-accuracy question: the ledger is now
+    a genuine forward-only tracker of Danelfin's actual product, not a
+    proxy for it.
+
+    ``excluded_symbols`` (e.g. the main engine's own universe — see
+    best_stocks_execution.main_engine_excluded_symbols) is dropped from the
+    list AFTER fetching — unlike :func:`select_best_stocks`, there is no
+    "sector" concept to backfill a displaced slot from here: Danelfin's
+    Top-25 is a fixed-size curated list, not something this project ranks
+    a deeper candidate pool for, so an excluded symbol simply shrinks the
+    ledger's holding count for that cycle rather than being replaced.
+
+    Returns a list of dicts (one per real list entry, minus exclusions):
+    ``{symbol, sector, rank, ai_score, low_risk_score, country}``, in the
+    API's own rank order (best first).
+    """
+    df = provider.get_best_stocks()
+    if df.empty:
+        log.warning("best_stocks_real_list_empty")
+        return []
+    if excluded_symbols:
+        before = len(df)
+        df = df[~df["symbol"].isin(excluded_symbols)]
+        if len(df) < before:
+            log.info(
+                "best_stocks_real_list_excluded_collisions dropped=%d (main engine universe)",
+                before - len(df),
+            )
+    if "rank" in df.columns:
+        df = df.sort_values("rank")
+    return [
+        {
+            "symbol": str(row["symbol"]),
+            "sector": row.get("sector"),
+            "rank": float(row["rank"]) if row.get("rank") is not None else float("nan"),
+            "ai_score": float(row["ai_score"]) if row.get("ai_score") is not None else float("nan"),
+            "low_risk_score": float(row["low_risk_score"]) if row.get("low_risk_score") is not None else float("nan"),
+            "country": row.get("country"),
+        }
+        for _, row in df.iterrows()
+    ]
+
+
 def select_best_stocks_historical(
     provider: DanelfinProvider,
     date: str,

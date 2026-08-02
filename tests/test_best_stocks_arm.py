@@ -17,6 +17,7 @@ from firm.live.best_stocks_arm import (
     TARGET_HOLDINGS,
     select_best_stocks,
     select_best_stocks_historical,
+    select_from_real_beststocks,
 )
 from firm.live.best_stocks_ledger import BestStocksLedger
 
@@ -104,6 +105,48 @@ class TestSelectBestStocks:
         selection = select_best_stocks(provider, top_n_sectors=1, top_n_per_sector=5)
         symbols = {row["symbol"] for row in selection}
         assert symbols == {"HIGH1", "HIGH2", "HIGH3", "HIGH4", "HIGH5"}
+
+
+def _real_beststocks_df(rows: list[tuple[str, int]]) -> pd.DataFrame:
+    """rows: list of (symbol, rank)."""
+    return pd.DataFrame([
+        {
+            "date": "2026-08-02", "symbol": sym, "rank": rank,
+            "ai_score": 9.5 - rank * 0.1, "ai_score_change": 0.1,
+            "fundamental_score": 8.0, "technical_score": 8.0,
+            "sentiment_score": 8.0, "low_risk_score": 7.0,
+            "perf_ytd": 0.1, "sector": "technology", "country": "US",
+        }
+        for sym, rank in rows
+    ])
+
+
+class TestSelectFromRealBestStocks:
+    def test_wraps_real_list_directly_no_reconstruction(self):
+        provider = MagicMock()
+        provider.get_best_stocks.return_value = _real_beststocks_df([("AAPL", 1), ("NVDA", 2)])
+        selection = select_from_real_beststocks(provider)
+        assert [row["symbol"] for row in selection] == ["AAPL", "NVDA"]
+        assert selection[0]["rank"] == 1
+        assert selection[0]["sector"] == "technology"
+
+    def test_empty_list_returns_empty(self):
+        provider = MagicMock()
+        provider.get_best_stocks.return_value = pd.DataFrame()
+        assert select_from_real_beststocks(provider) == []
+
+    def test_excludes_main_engine_collisions(self):
+        provider = MagicMock()
+        provider.get_best_stocks.return_value = _real_beststocks_df([("AAPL", 1), ("NVDA", 2)])
+        selection = select_from_real_beststocks(provider, excluded_symbols=frozenset({"AAPL"}))
+        assert [row["symbol"] for row in selection] == ["NVDA"]
+
+    def test_sorted_by_rank(self):
+        provider = MagicMock()
+        # Deliberately out of rank order in the raw response.
+        provider.get_best_stocks.return_value = _real_beststocks_df([("NVDA", 2), ("AAPL", 1)])
+        selection = select_from_real_beststocks(provider)
+        assert [row["symbol"] for row in selection] == ["AAPL", "NVDA"]
 
 
 def _hist_candidate(symbol: str, aiscore: float, low_risk: float = 6) -> dict:

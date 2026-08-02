@@ -3,14 +3,29 @@
 
 Run once/day (e.g. via cron/systemd timer). On any given day this either:
   - initializes the ledger (first run: select 25 stocks, equal-weight,
-    full rebalance) — Danelfin API calls: ~11 (one per sector).
+    full rebalance) — Danelfin API calls: ~11 (one per sector), or 1 with
+    the default selection method below.
   - marks the existing holdings to market (the common case) — zero
     Danelfin calls, just a price lookup for the held symbols.
   - if >= 91 days since the last quarterly replace: re-runs the selection
-    and swaps out any holding that no longer qualifies — ~11 Danelfin
-    calls.
+    and swaps out any holding that no longer qualifies.
   - if >= 365 days since the last full/annual rebalance: resets holdings
     back to equal dollar weighting (no Danelfin calls, price lookup only).
+
+Selection method (default vs --reconstruction):
+  - Default: `select_from_real_beststocks` — wraps Danelfin's real
+    `/v3/beststocks` Top-25 list directly (1 API call). This is the fix
+    for a real accuracy gap found in this arm's own walk-forward backtest:
+    the reconstruction below only matched Danelfin's real live output
+    ~25-30% of the time (see docs/danelfin_best_stocks_arm.md's "Important
+    caveat" section) — their "Buy Track Record" eligibility filter has no
+    historical/programmatic depth anywhere in the API, so it can only be
+    approximated, not reconstructed. Reading the vendor's own list makes
+    this a genuine forward-only tracker of Danelfin's actual product.
+  - --reconstruction: `select_best_stocks` — this project's own
+    sector-ranking reimplementation of Danelfin's published rule (~11 API
+    calls, one per sector). Kept available for continuity/comparison with
+    this arm's pre-2026-08-02 history, not recommended for new runs.
 
 Two modes:
   - Default (no --live-trading): the original synthetic mode — no broker,
@@ -52,7 +67,11 @@ if _SRC.exists() and str(_SRC) not in sys.path:
 from firm.config import get_settings  # noqa: E402
 from firm.data.providers.danelfin import DanelfinProvider  # noqa: E402
 from firm.data.providers.fallback import FallbackProvider  # noqa: E402
-from firm.live.best_stocks_arm import select_best_stocks, selection_symbols  # noqa: E402
+from firm.live.best_stocks_arm import (  # noqa: E402
+    select_best_stocks,
+    select_from_real_beststocks,
+    selection_symbols,
+)
 from firm.live.best_stocks_ledger import BestStocksLedger  # noqa: E402
 from firm.live.best_stocks_execution import main_engine_excluded_symbols  # noqa: E402
 
@@ -73,7 +92,24 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--ibkr-client-id", type=int, default=_DEFAULT_LIVE_TRADING_CLIENT_ID,
         help="Distinct IBKR client_id for this arm's broker connection (default 3).",
     )
+    p.add_argument(
+        "--reconstruction", action="store_true",
+        help=(
+            "Use this project's own sector-ranking reconstruction "
+            "(select_best_stocks) instead of the default: Danelfin's real "
+            "/v3/beststocks Top-25 list, wrapped directly. The reconstruction "
+            "was found to only match Danelfin's real live output ~25-30%% of "
+            "the time (see docs/danelfin_best_stocks_arm.md) — kept available "
+            "here for continuity/comparison, not recommended for new runs."
+        ),
+    )
     return p.parse_args(argv)
+
+
+def _select(danelfin: DanelfinProvider, args: argparse.Namespace, excluded_symbols: frozenset[str] = frozenset()) -> list[dict]:
+    if args.reconstruction:
+        return select_best_stocks(danelfin, excluded_symbols=excluded_symbols)
+    return select_from_real_beststocks(danelfin, excluded_symbols=excluded_symbols)
 
 
 def _latest_prices(provider: FallbackProvider, symbols: list[str], asof: datetime) -> dict[str, float]:
@@ -100,7 +136,7 @@ def _run_synthetic(args: argparse.Namespace, asof: datetime) -> int:
 
     if not ledger.holdings:
         log.info("best_stocks_arm: no holdings — initial selection + full rebalance")
-        selection = select_best_stocks(danelfin)
+        selection = _select(danelfin, args)
         if not selection:
             log.error("best_stocks_arm: selection returned nothing; leaving ledger uninitialized")
             return 1
@@ -116,7 +152,7 @@ def _run_synthetic(args: argparse.Namespace, asof: datetime) -> int:
 
     if ledger.due_for_quarterly_replace(asof):
         log.info("best_stocks_arm: quarterly replace due")
-        selection = select_best_stocks(danelfin)
+        selection = _select(danelfin, args)
         if selection:
             extra_symbols = [s for s in selection_symbols(selection) if s not in prices]
             prices.update(_latest_prices(market_data, extra_symbols, asof))
@@ -155,7 +191,7 @@ def _run_live_trading(args: argparse.Namespace, asof: datetime) -> int:
 
         if not ledger.holdings:
             log.info("best_stocks_arm: [LIVE] no holdings — initial selection + real full rebalance")
-            selection = select_best_stocks(danelfin, excluded_symbols=frozenset(excluded))
+            selection = _select(danelfin, args, excluded_symbols=frozenset(excluded))
             if not selection:
                 log.error("best_stocks_arm: selection returned nothing; leaving ledger uninitialized")
                 return 1
@@ -163,7 +199,7 @@ def _run_live_trading(args: argparse.Namespace, asof: datetime) -> int:
         else:
             if ledger.due_for_quarterly_replace(asof):
                 log.info("best_stocks_arm: [LIVE] quarterly replace due")
-                selection = select_best_stocks(danelfin, excluded_symbols=frozenset(excluded))
+                selection = _select(danelfin, args, excluded_symbols=frozenset(excluded))
                 if selection:
                     ledger.rebalance_via_broker(asof, broker, "quarterly", target_selection=selection)
                 else:

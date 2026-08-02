@@ -16,6 +16,15 @@ ledger keeps running as-is (cheap, already working, genuinely informative
 to keep watching), but this is not being escalated to actual paper-account
 order flow.
 
+**2026-08-02 update**: the daily ledger job now defaults to
+`select_from_real_beststocks` (wraps `/v3/beststocks` directly, no
+reconstruction) instead of `select_best_stocks` — see "Phase 4" section
+near the end of this doc. This closes the ~25-30%-match gap above going
+forward: the ledger is now a genuine forward-only tracker of Danelfin's
+actual product, not a proxy for it. The backtest and its findings below
+remain valid as historical analysis of the *reconstruction*, which is
+still available via `--reconstruction` for continuity/comparison.
+
 ## Why this exists
 
 The user shared Danelfin's own published methodology
@@ -508,3 +517,44 @@ universe, since Danelfin's real Top-25 skews toward smaller/rotating names
 in its own persistence API) to give it more surface was built next (2026-08-02,
 see `firm.live.danelfin_universe_sync` and `config/live.yaml`'s
 `danelfin_dynamic_universe:` block — disabled by default, opt-in only).
+
+## Phase 4: switch the arm's daily ledger job to Danelfin's real output (2026-08-02)
+
+The walk-forward backtest above and the "Important caveat" section both
+found the same root problem: `select_best_stocks` (the sector-ranking
+reconstruction of Danelfin's *published rule*) only matches Danelfin's real
+live "Best Stocks" list ~25-30% of the time, because their "Buy Track
+Record" eligibility filter — part of the published rule — has zero
+historical or programmatic depth anywhere in the API. No amount of tuning
+the reconstruction's ranking logic can close that gap; it's a data
+availability limit, not a bug.
+
+The fix: `select_from_real_beststocks` (`src/firm/live/best_stocks_arm.py`)
+wraps Danelfin's real `/v3/beststocks` Top-25 list **directly** — no
+sector-ranking reimplementation at all, just the vendor's own curated
+output, dropping any symbol colliding with the main engine's universe
+(same exclusion convention as `select_best_stocks`, just applied after the
+fetch since there's no deeper candidate pool to backfill a dropped slot
+from here — Danelfin's Top-25 is a fixed-size list, not something this
+project ranks a larger pool for).
+
+`scripts/run_best_stocks_arm.py` now uses this as the **default** selection
+method for both the synthetic ledger and the (paused, not deployed) real
+IBKR execution path — one Danelfin API call instead of ~11 (previously one
+`/v3/trade-ideas` call per sector). The old reconstruction remains available
+via `--reconstruction`, for continuity with this arm's pre-2026-08-02
+history or side-by-side comparison, but is no longer the default and isn't
+recommended for new runs.
+
+**What this changes about how to read the arm's ongoing NAV history**: from
+2026-08-02 onward, this is a genuine forward-only tracker of Danelfin's
+actual "Best Stocks" product — not a proxy for it, the way the pre-08-02
+history (and the backtest above) necessarily was. Any future backtest of
+*this* selection method would face the same "no historical data" wall
+`/v3/beststocks` has always had (see the "Update — this IS backtestable
+after all" note near the top of `best_stocks_arm.py`'s module docstring —
+that bulk-historical path is specifically for `/ranking`, which
+`select_from_real_beststocks` does not use), so this method's validity can
+only ever be judged by watching it forward, the same caveat
+`danelfin_best_stocks_signal` (the main-engine strategy, previous section)
+already carries.
