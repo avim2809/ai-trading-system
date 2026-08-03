@@ -17,6 +17,7 @@ import pytest
 
 pytest.importorskip("ib_async")
 
+from firm.brokers.base import BrokerError
 from firm.brokers.ibkr import IBKRBroker
 
 
@@ -580,3 +581,98 @@ class TestSubmitOrderWaitsForRealResolution:
         # Cancelled-looking status immediately.
         from firm.brokers.ibkr import _ORDER_STATUS_MAX_WAIT_SECONDS
         assert state["clock"] >= _ORDER_STATUS_MAX_WAIT_SECONDS
+
+
+class TestBoundedIBLockAndRequestTimeout:
+    """Regression coverage for a real production incident: a submit_order()
+    call hung forever inside qualifyContracts() (no response ever arrived
+    from IB Gateway), and since every IBKRBroker method serialises on the
+    same lock, that one hung call froze positions/account/reconciliation/
+    all future cycles for the rest of the process's life — only a full
+    service restart cleared it.
+
+    Fix: (1) ib_async's IB.RequestTimeout (0 = wait forever by default) is
+    now set on connect() so a stuck request raises TimeoutError instead of
+    hanging forever, and (2) _locked() bounds lock *acquisition* itself and
+    translates a TimeoutError into BrokerError, so a caller that couldn't
+    get in fails fast and loud instead of hanging.
+    """
+
+    def test_connect_sets_request_timeout_on_the_ib_client(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=20)
+        fake_ib = SimpleNamespace(
+            connect=lambda *a, **k: None,
+            reqMarketDataType=lambda *a: None,
+            reqAccountSummary=lambda: None,
+            qualifyContracts=lambda *cs: None,
+            reqContractDetails=lambda *cs: [],
+        )
+        with patch("firm.brokers.ibkr.IB", return_value=fake_ib), patch("firm.brokers.ibkr.Stock"):
+            broker.connect()
+
+        from firm.brokers.ibkr import _IB_REQUEST_TIMEOUT_SECONDS
+        assert fake_ib.RequestTimeout == _IB_REQUEST_TIMEOUT_SECONDS
+
+    def test_a_timeout_error_inside_the_lock_becomes_a_broker_error(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=21)
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            accountSummary=lambda: (_ for _ in ()).throw(TimeoutError("no response")),
+        )
+        with pytest.raises(BrokerError, match="timed out"):
+            broker.get_account()
+        # The lock must be released even though the call raised, or every
+        # subsequent broker call would hang waiting for it forever — the
+        # exact cascade this fix closes.
+        assert broker._ib_lock.acquire(timeout=0)
+        broker._ib_lock.release()
+
+    def test_lock_already_held_by_another_thread_fails_fast_not_forever(self):
+        """Simulates the actual incident: one thread holds _ib_lock (as if
+        stuck inside a hung IB call) while a second, independent caller
+        (e.g. a positions request, or the reconciliation job) tries to use
+        the broker. That second caller must fail fast with a clear
+        BrokerError, not hang indefinitely."""
+        import threading
+
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=22)
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            accountSummary=lambda: [],
+        )
+
+        holder_ready = threading.Event()
+        release_holder = threading.Event()
+
+        def _hold_the_lock():
+            with broker._locked():
+                holder_ready.set()
+                release_holder.wait(timeout=5)
+
+        holder = threading.Thread(target=_hold_the_lock, daemon=True)
+        holder.start()
+        assert holder_ready.wait(timeout=5), "holder thread never acquired the lock"
+
+        with patch(
+            "firm.brokers.ibkr._IB_LOCK_ACQUIRE_TIMEOUT_SECONDS", 0.2,
+        ):
+            with pytest.raises(BrokerError, match="Timed out.*waiting for the IBKR connection lock"):
+                broker.get_account()
+
+        release_holder.set()
+        holder.join(timeout=5)
+
+    def test_lock_released_promptly_once_the_holder_finishes(self):
+        """Companion to the fail-fast case above: once whatever was holding
+        the lock finishes normally, a new caller succeeds immediately —
+        confirms _locked() doesn't leak the lock on the happy path."""
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=23)
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            accountSummary=lambda: [SimpleNamespace(tag="NetLiquidation", value="42.0")],
+        )
+        with broker._locked():
+            pass  # acquire and release once, like a normal call would
+
+        result = broker.get_account()
+        assert result["equity"] == 42.0

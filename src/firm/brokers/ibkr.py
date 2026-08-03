@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -28,6 +29,27 @@ log = logging.getLogger(__name__)
 # actually fill, confirmed live).
 _ORDER_STATUS_POLL_INTERVAL = 0.25
 _ORDER_STATUS_MAX_WAIT_SECONDS = 5.0
+
+# ib_async's IB.RequestTimeout defaults to 0 (wait forever) for every
+# request routed through IB._run() (qualifyContracts, reqContractDetails,
+# reqTickers, ...). Confirmed live in production: a qualifyContracts call
+# hung indefinitely — no response ever arrived (plausibly issued right as
+# IB Gateway was mid-reconnect to its own backend) — and since every
+# IBKRBroker method serialises on the same lock, that one hung call froze
+# every other broker operation (positions, account, reconciliation, all
+# future cycles) for the rest of the process's life; only a full service
+# restart cleared it. Bounding requests here means a stuck call fails loud
+# and fast instead of hanging forever.
+_IB_REQUEST_TIMEOUT_SECONDS = 20.0
+
+# Bound on acquiring _ib_lock itself, independent of the request timeout
+# above — a second layer of defence so that even a hang this module didn't
+# anticipate (anything not routed through IB._run(), or a future ib_async
+# behavior change) can't cascade into freezing every other broker caller
+# forever. Comfortably above _IB_REQUEST_TIMEOUT_SECONDS plus the
+# submit_order's own _ORDER_STATUS_MAX_WAIT_SECONDS poll, so a legitimately
+# slow (not stuck) call is never mistaken for one that's hung.
+_IB_LOCK_ACQUIRE_TIMEOUT_SECONDS = 45.0
 
 try:
     from ib_async import IB, Stock, LimitOrder, MarketOrder
@@ -72,11 +94,37 @@ class IBKRBroker(Broker):
         # concurrently (that deadlock hangs the whole firm-api process).
         self._ib_lock = threading.Lock()
 
+    @contextmanager
+    def _locked(self):
+        """Acquire ``_ib_lock`` with a bound, and translate a request that
+        exceeds ``ib.RequestTimeout`` into a ``BrokerError``.
+
+        Without a bound on both of these, a single hung IB call blocks
+        forever and — since every ``IBKRBroker`` method serialises on this
+        same lock — permanently freezes every other broker operation
+        (positions, account, reconciliation, all future cycles) until the
+        process is restarted. See ``_IB_REQUEST_TIMEOUT_SECONDS``'s comment
+        for the real incident this closes.
+        """
+        if not self._ib_lock.acquire(timeout=_IB_LOCK_ACQUIRE_TIMEOUT_SECONDS):
+            raise BrokerError(
+                f"Timed out after {_IB_LOCK_ACQUIRE_TIMEOUT_SECONDS:.0f}s waiting "
+                "for the IBKR connection lock — a previous call is likely stuck; "
+                "broker access is temporarily unavailable."
+            )
+        try:
+            yield
+        except TimeoutError as exc:
+            raise BrokerError(f"IBKR request timed out: {exc}") from exc
+        finally:
+            self._ib_lock.release()
+
     def connect(self) -> None:
         _require_ib()
         last_exc: Exception | None = None
         for attempt in range(1, 4):
             self._ib = IB()
+            self._ib.RequestTimeout = _IB_REQUEST_TIMEOUT_SECONDS
             try:
                 self._ib.connect(self._host, self._port, clientId=self._client_id)
                 self._ib.reqMarketDataType(self._market_data_type)
@@ -134,7 +182,7 @@ class IBKRBroker(Broker):
         return self._ib
 
     def get_account(self) -> dict[str, Any]:
-        with self._ib_lock:
+        with self._locked():
             return self._get_account_unlocked()
 
     def _get_account_unlocked(self) -> dict[str, Any]:
@@ -166,7 +214,7 @@ class IBKRBroker(Broker):
         return result
 
     def get_positions(self) -> list[BrokerPosition]:
-        with self._ib_lock:
+        with self._locked():
             return self._get_positions_unlocked()
 
     def _get_positions_unlocked(self) -> list[BrokerPosition]:
@@ -192,7 +240,7 @@ class IBKRBroker(Broker):
         return None
 
     def submit_order(self, order: OrderRequest) -> OrderStatus:
-        with self._ib_lock:
+        with self._locked():
             ib = self._ensure_connected()
             contract = Stock(order.symbol, "SMART", "USD")
             ib.qualifyContracts(contract)
@@ -259,7 +307,7 @@ class IBKRBroker(Broker):
         # including a genuine terminal Cancelled/rejected order.
 
     def cancel_order(self, order_id: str) -> bool:
-        with self._ib_lock:
+        with self._locked():
             ib = self._ensure_connected()
             for trade in ib.openTrades():
                 if str(trade.order.orderId) == order_id:
@@ -268,7 +316,7 @@ class IBKRBroker(Broker):
             return False
 
     def get_order_status(self, order_id: str) -> OrderStatus:
-        with self._ib_lock:
+        with self._locked():
             ib = self._ensure_connected()
             for trade in ib.trades():
                 if str(trade.order.orderId) == order_id:
@@ -276,7 +324,7 @@ class IBKRBroker(Broker):
             raise BrokerError(f"Order {order_id} not found")
 
     def get_open_orders(self) -> list[OrderStatus]:
-        with self._ib_lock:
+        with self._locked():
             ib = self._ensure_connected()
             return [self._map_trade(t) for t in ib.openTrades()]
 
@@ -311,7 +359,7 @@ class IBKRBroker(Broker):
         return 0.0
 
     def get_current_price(self, symbol: str) -> float:
-        with self._ib_lock:
+        with self._locked():
             ib = self._ensure_connected()
             contract = Stock(symbol, "SMART", "USD")
             ib.qualifyContracts(contract)
@@ -319,7 +367,7 @@ class IBKRBroker(Broker):
             return self._resolve_price(ticker, symbol)
 
     def get_current_prices(self, symbols: list[str]) -> dict[str, float]:
-        with self._ib_lock:
+        with self._locked():
             ib = self._ensure_connected()
             contracts = [Stock(s, "SMART", "USD") for s in symbols]
             ib.qualifyContracts(*contracts)
