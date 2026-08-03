@@ -279,6 +279,33 @@ class TestMarketOpen:
         assert b.is_market_open() is False
 
 
+class TestMarketHoursDefault:
+    """The concrete Broker.market_hours() default (no override) — used by
+    MockBroker and any future broker that doesn't have richer schedule data
+    available."""
+
+    def test_reflects_is_market_open_true(self):
+        b = MockBroker()
+        mh = b.market_hours()
+        assert mh.is_open is True
+        assert mh.next_open is None
+        assert mh.next_close is None
+
+    def test_reflects_is_market_open_false(self):
+        b = MockBroker()
+        b._market_open = False
+        mh = b.market_hours()
+        assert mh.is_open is False
+        assert mh.next_open is None
+        assert mh.next_close is None
+
+    def test_is_market_open_exception_fails_open(self, monkeypatch):
+        b = MockBroker()
+        monkeypatch.setattr(b, "is_market_open", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+        mh = b.market_hours()
+        assert mh.is_open is True
+
+
 class TestDataclasses:
     def test_order_request_defaults(self):
         req = OrderRequest(symbol="AAPL", side="buy", quantity=10)

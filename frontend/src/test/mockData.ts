@@ -31,6 +31,7 @@ export const mockLiveStatusStopped: LiveStatus = {
   state: 'stopped', broker: '', broker_connected: false, next_run: null,
   active_strategies: [], approval_mode: '', uptime_seconds: null, last_cycle: null,
   cycle_running_seconds: null,
+  market_open: null, next_market_open: null, next_market_close: null,
 }
 
 export const mockLiveStatusRunning: LiveStatus = {
@@ -40,6 +41,7 @@ export const mockLiveStatusRunning: LiveStatus = {
   approval_mode: 'full_auto', uptime_seconds: 3600,
   last_cycle: { cycle_id: 1, timestamp: '2026-07-21T19:49:04.066971', orders_generated: 20 },
   cycle_running_seconds: null,
+  market_open: true, next_market_open: '2026-07-22T09:30:00-04:00', next_market_close: '2026-07-22T16:00:00-04:00',
 }
 
 export const mockLiveConfig: LiveConfig = {

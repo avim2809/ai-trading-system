@@ -563,6 +563,25 @@ class TestLiveConfigRoundTrip:
         assert status["active_strategies"] == ["momentum"]
         assert status["broker"] == "alpaca_paper"
 
+    def test_status_market_open_before_engine_started_is_unknown(self, client):
+        status = client.get("/api/live/status").json()
+        assert status["state"] == "stopped"
+        assert status["market_open"] is None
+        assert status["next_market_open"] is None
+        assert status["next_market_close"] is None
+
+    def test_status_reflects_broker_market_open_state(self, client):
+        resp = client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+        assert resp.status_code == 200, resp.text
+
+        status = client.get("/api/live/status").json()
+        assert status["market_open"] is True  # MockBroker defaults to open
+
+        engine = client.app.state.live_engine
+        engine._broker._market_open = False
+        status = client.get("/api/live/status").json()
+        assert status["market_open"] is False
+
     def test_start_applies_deep_risk_overrides(self, client):
         resp = client.post("/api/live/start", json={
             "broker": "alpaca_paper",

@@ -76,6 +76,46 @@ describe('LiveDashboard', () => {
     expect(screen.queryByText(/this looks stuck/i)).not.toBeInTheDocument()
   })
 
+  it('shows the market as open with a closes-in countdown', async () => {
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json({
+        state: 'running', broker: 'ibkr_paper', broker_connected: true, next_run: null,
+        active_strategies: ['momentum'], approval_mode: 'full_auto', uptime_seconds: 10, last_cycle: null,
+        market_open: true, next_market_open: null, next_market_close: '2099-01-01T16:00:00-05:00',
+      })),
+    )
+    renderWithProviders(<LiveDashboard />)
+    expect(await screen.findByText('Open')).toBeInTheDocument()
+    expect(await screen.findByText(/closes in/)).toBeInTheDocument()
+  })
+
+  it('shows the market as closed with an opens-in countdown', async () => {
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json({
+        state: 'running', broker: 'ibkr_paper', broker_connected: true, next_run: null,
+        active_strategies: ['momentum'], approval_mode: 'full_auto', uptime_seconds: 10, last_cycle: null,
+        market_open: false, next_market_open: '2099-01-01T09:30:00-05:00', next_market_close: null,
+      })),
+    )
+    renderWithProviders(<LiveDashboard />)
+    expect(await screen.findByText('Closed')).toBeInTheDocument()
+    expect(await screen.findByText(/opens in/)).toBeInTheDocument()
+  })
+
+  it('shows a dash for market status when unknown', async () => {
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json({
+        state: 'running', broker: 'ibkr_paper', broker_connected: true, next_run: null,
+        active_strategies: ['momentum'], approval_mode: 'full_auto', uptime_seconds: 10, last_cycle: null,
+        market_open: null, next_market_open: null, next_market_close: null,
+      })),
+    )
+    renderWithProviders(<LiveDashboard />)
+    await waitFor(() => expect(screen.getByText('Running')).toBeInTheDocument())
+    expect(screen.queryByText('Open')).not.toBeInTheDocument()
+    expect(screen.queryByText('Closed')).not.toBeInTheDocument()
+  })
+
   it('start form submits the full payload including selected strategies', async () => {
     let capturedBody: Record<string, unknown> = {}
     server.use(

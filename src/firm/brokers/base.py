@@ -60,6 +60,20 @@ class BrokerPosition:
     unrealized_pnl: float = 0.0
 
 
+@dataclass
+class MarketHoursStatus:
+    """Current open/closed state plus the next session transition, if known.
+
+    ``next_open``/``next_close`` are ``None`` when a broker can't determine
+    them (see ``Broker.market_hours``'s default implementation) — callers
+    must treat that as "unknown", not "market never opens/closes".
+    """
+
+    is_open: bool
+    next_open: datetime | None = None
+    next_close: datetime | None = None
+
+
 class Broker(ABC):
     """Abstract base for all broker integrations."""
 
@@ -136,3 +150,23 @@ class Broker(ABC):
     @abstractmethod
     def is_market_open(self) -> bool:
         """Return True if the primary market is currently open."""
+
+    def market_hours(self) -> MarketHoursStatus:
+        """Return open/closed state plus the next session's open/close time.
+
+        Concrete default: reuses ``is_market_open()`` for the bool but
+        can't compute next-transition times without broker-specific
+        schedule data, so ``next_open``/``next_close`` come back ``None``.
+        Brokers with that data available (IBKR's cached holiday-aware
+        ``liquidHours``, Alpaca's ``get_clock()``) override this for a
+        richer answer — see their own ``market_hours`` implementations.
+        Never raises: an ``is_market_open()`` failure here degrades to
+        "unknown, failing open" (matching that method's own documented
+        fail-open behavior) rather than taking down a status endpoint.
+        """
+        try:
+            is_open = self.is_market_open()
+        except Exception:
+            log.warning("market_hours(): is_market_open() failed; failing open", exc_info=True)
+            is_open = True
+        return MarketHoursStatus(is_open=is_open)

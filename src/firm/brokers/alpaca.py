@@ -9,6 +9,7 @@ from firm.brokers.base import (
     Broker,
     BrokerError,
     BrokerPosition,
+    MarketHoursStatus,
     OrderRequest,
     OrderStatus,
 )
@@ -235,6 +236,18 @@ class AlpacaBroker(Broker):
         client = self._ensure_connected()
         clock = client.get_clock()
         return clock.is_open
+
+    def market_hours(self) -> MarketHoursStatus:
+        """Alpaca's own clock endpoint already returns next_open/next_close
+        directly (holiday-aware server-side) — no separate parsing needed,
+        unlike IBKR's own liquidHours-schedule-based override."""
+        client = self._ensure_connected()
+        clock = client.get_clock()
+        return MarketHoursStatus(
+            is_open=clock.is_open,
+            next_open=clock.next_open,
+            next_close=clock.next_close,
+        )
 
     @staticmethod
     def _map_order(order: Any) -> OrderStatus:

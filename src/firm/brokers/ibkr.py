@@ -5,13 +5,14 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from firm.brokers.base import (
     Broker,
     BrokerError,
     BrokerPosition,
+    MarketHoursStatus,
     OrderRequest,
     OrderStatus,
 )
@@ -386,6 +387,60 @@ class IBKRBroker(Broker):
             )
             return True
         return False
+
+    def market_hours(self) -> MarketHoursStatus:
+        """Holiday-aware open/closed state + next session's open/close time.
+
+        Reuses the same cached ``liquidHours`` schedule as ``is_market_open``
+        (see that method's docstring for why it's cached rather than fetched
+        live), but parses every segment into real datetimes instead of just
+        bounding today's session — the schedule genuinely contains multiple
+        future days' segments (including ``CLOSED`` holiday entries), so
+        this is real next-transition data, not a guess.
+        """
+        self._ensure_connected()
+        cd = self._market_hours_details
+        if cd is None:
+            log.warning("No cached market-hours contract details; failing open")
+            return MarketHoursStatus(is_open=True)
+        try:
+            from zoneinfo import ZoneInfo
+            tz = ZoneInfo(cd.timeZoneId)
+        except Exception:
+            log.warning(
+                "Could not resolve exchange timezone %r; falling back to UTC "
+                "for market-hours check", cd.timeZoneId, exc_info=True,
+            )
+            tz = timezone.utc
+        now = datetime.now(tz)
+
+        is_open = False
+        current_close: datetime | None = None
+        upcoming: list[tuple[datetime, datetime]] = []
+        for segment in cd.liquidHours.split(";"):
+            if "-" not in segment:
+                continue  # e.g. "20260725:CLOSED" (holiday) — no session that day
+            parts = segment.split("-")
+            if len(parts) != 2:
+                continue
+            try:
+                seg_open = datetime.strptime(parts[0], "%Y%m%d:%H%M").replace(tzinfo=tz)
+                seg_close = datetime.strptime(parts[1], "%Y%m%d:%H%M").replace(tzinfo=tz)
+            except ValueError:
+                continue
+            if seg_open <= now <= seg_close:
+                is_open = True
+                current_close = seg_close
+            elif seg_open > now:
+                upcoming.append((seg_open, seg_close))
+
+        if is_open:
+            next_open = min((o for o, _ in upcoming), default=None)
+            return MarketHoursStatus(is_open=True, next_open=next_open, next_close=current_close)
+        if upcoming:
+            next_open, next_close = min(upcoming, key=lambda pair: pair[0])
+            return MarketHoursStatus(is_open=False, next_open=next_open, next_close=next_close)
+        return MarketHoursStatus(is_open=False)
 
     @staticmethod
     def _map_trade(trade: Any) -> OrderStatus:

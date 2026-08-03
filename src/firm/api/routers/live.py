@@ -460,6 +460,11 @@ def live_status(request: Request) -> dict[str, Any]:
             "approval_mode": "",
             "uptime_seconds": None,
             "last_cycle": None,
+            # No broker instance exists at all yet — genuinely unknown, not
+            # a guess at "closed".
+            "market_open": None,
+            "next_market_open": None,
+            "next_market_close": None,
         }
 
     next_run = None
@@ -480,6 +485,18 @@ def live_status(request: Request) -> dict[str, Any]:
             "orders_generated": lc.orders_generated,
         }
 
+    market_open = None
+    next_market_open = None
+    next_market_close = None
+    if engine._broker is not None:
+        try:
+            mh = engine._broker.market_hours()
+            market_open = mh.is_open
+            next_market_open = mh.next_open.isoformat() if mh.next_open else None
+            next_market_close = mh.next_close.isoformat() if mh.next_close else None
+        except Exception:
+            log.warning("live_status: market_hours() failed", exc_info=True)
+
     return {
         "state": "running" if engine.is_running else "stopped",
         "broker": getattr(engine, "_broker_type", ""),
@@ -493,6 +510,9 @@ def live_status(request: Request) -> dict[str, Any]:
         # firing failing silently) — a plain clock read an operator/GUI can
         # use to notice a stuck cycle even if the alert path itself breaks.
         "cycle_running_seconds": engine.current_cycle_running_seconds,
+        "market_open": market_open,
+        "next_market_open": next_market_open,
+        "next_market_close": next_market_close,
     }
 
 

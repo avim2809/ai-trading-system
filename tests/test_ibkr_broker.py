@@ -234,6 +234,93 @@ class TestIsMarketOpen:
         assert result_holder["result"] is True
 
 
+class TestMarketHours:
+    """market_hours() reuses the same cached liquidHours schedule as
+    is_market_open() (see TestIsMarketOpen above) but parses every segment
+    into real datetimes to compute the next open/close transition, not just
+    bound today's session."""
+
+    def _contract_details(self, liquid_hours: str):
+        return SimpleNamespace(liquidHours=liquid_hours, timeZoneId="US/Eastern")
+
+    def _broker_with(self, details):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=4)
+        broker._ib = SimpleNamespace(isConnected=lambda: True)
+        broker._market_hours_details = details
+        return broker
+
+    def _fixed_now(self, monkeypatch, y, mo, d, h, mi):
+        import datetime as dt
+        from zoneinfo import ZoneInfo
+
+        class _FixedDatetime(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return dt.datetime(y, mo, d, h, mi, tzinfo=ZoneInfo("US/Eastern"))
+
+        monkeypatch.setattr("firm.brokers.ibkr.datetime", _FixedDatetime)
+
+    def test_open_now_reports_todays_close(self, monkeypatch):
+        self._fixed_now(monkeypatch, 2026, 7, 20, 11, 0)
+        broker = self._broker_with(self._contract_details(
+            "20260720:0930-20260720:1600;20260721:0930-20260721:1600"
+        ))
+        mh = broker.market_hours()
+        assert mh.is_open is True
+        assert mh.next_close.isoformat() == "2026-07-20T16:00:00-04:00"
+        # Also surfaces the following day's open, since it's known.
+        assert mh.next_open.isoformat() == "2026-07-21T09:30:00-04:00"
+
+    def test_closed_before_open_reports_todays_session(self, monkeypatch):
+        self._fixed_now(monkeypatch, 2026, 7, 20, 6, 0)
+        broker = self._broker_with(self._contract_details("20260720:0930-20260720:1600"))
+        mh = broker.market_hours()
+        assert mh.is_open is False
+        assert mh.next_open.isoformat() == "2026-07-20T09:30:00-04:00"
+        assert mh.next_close.isoformat() == "2026-07-20T16:00:00-04:00"
+
+    def test_closed_after_close_reports_next_days_session(self, monkeypatch):
+        self._fixed_now(monkeypatch, 2026, 7, 20, 18, 0)
+        broker = self._broker_with(self._contract_details(
+            "20260720:0930-20260720:1600;20260721:0930-20260721:1600"
+        ))
+        mh = broker.market_hours()
+        assert mh.is_open is False
+        assert mh.next_open.isoformat() == "2026-07-21T09:30:00-04:00"
+        assert mh.next_close.isoformat() == "2026-07-21T16:00:00-04:00"
+
+    def test_holiday_segment_skipped_next_transition_is_day_after(self, monkeypatch):
+        self._fixed_now(monkeypatch, 2026, 7, 24, 11, 0)
+        broker = self._broker_with(self._contract_details(
+            "20260724:0930-20260724:1600;20260725:CLOSED;20260726:0930-20260726:1600"
+        ))
+        mh = broker.market_hours()
+        assert mh.is_open is True
+        assert mh.next_close.isoformat() == "2026-07-24T16:00:00-04:00"
+        # 7/25 is a holiday (CLOSED, no "-") — must be skipped, not crash,
+        # and next_open must correctly skip past it to 7/26.
+        assert mh.next_open.isoformat() == "2026-07-26T09:30:00-04:00"
+
+    def test_no_cached_details_fails_open_with_unknown_transitions(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=5)
+        broker._ib = SimpleNamespace(isConnected=lambda: True)
+        broker._market_hours_details = None
+        mh = broker.market_hours()
+        assert mh.is_open is True
+        assert mh.next_open is None
+        assert mh.next_close is None
+
+    def test_no_upcoming_segments_at_all_reports_closed_unknown(self, monkeypatch):
+        """Every segment already fully in the past (stale schedule) — must
+        not crash, degrades to closed/unknown rather than fabricating a date."""
+        self._fixed_now(monkeypatch, 2026, 7, 22, 11, 0)
+        broker = self._broker_with(self._contract_details("20260720:0930-20260720:1600"))
+        mh = broker.market_hours()
+        assert mh.is_open is False
+        assert mh.next_open is None
+        assert mh.next_close is None
+
+
 class TestConnectCachesMarketHoursDetails:
     """connect() must fetch the market-hours contract details once, on the
     connecting thread, so is_market_open() never needs to — see

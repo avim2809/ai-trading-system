@@ -258,6 +258,10 @@ export interface LiveStatus {
   uptime_seconds: number | null
   last_cycle: LastCycle | null
   cycle_running_seconds: number | null
+  /** null = unknown (no broker instance to ask yet), not "closed". */
+  market_open: boolean | null
+  next_market_open: string | null
+  next_market_close: string | null
 }
 
 export interface LiveStartRequest {

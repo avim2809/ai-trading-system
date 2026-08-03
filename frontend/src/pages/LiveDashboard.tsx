@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
@@ -42,6 +42,20 @@ function formatUptime(seconds: number | null): string {
 
 const formatTime = (iso: string) => formatDateTime(iso, { seconds: true })
 
+// "opens in 3h 12m" / "closes in 45m" — countdown to a future ISO timestamp,
+// ticking client-side between the status query's own 5-15s poll interval so
+// it doesn't visibly jump/stall.
+function formatCountdown(targetIso: string, now: Date): string {
+  const diffMs = new Date(targetIso).getTime() - now.getTime()
+  if (diffMs <= 0) return 'due now'
+  const totalMinutes = Math.floor(diffMs / 60000)
+  const h = Math.floor(totalMinutes / 60)
+  const m = totalMinutes % 60
+  if (h > 0) return `${h}h ${m}m`
+  if (m > 0) return `${m}m`
+  return '<1m'
+}
+
 function formatCurrency(val: number): string {
   return val.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 }
@@ -72,6 +86,14 @@ export default function LiveDashboard() {
   const [startEnabledStrategies, setStartEnabledStrategies] = useState<Set<string>>(new Set())
   const [startAutoApprove, setStartAutoApprove] = useState<Set<string>>(new Set())
   const [startKillSwitch, setStartKillSwitch] = useState('0.10')
+
+  // Ticks every 30s purely so the market-open/closed countdown text stays
+  // fresh between the status query's own 5-15s polls, without re-fetching.
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(id)
+  }, [])
 
   const { data: availableStrategies } = useQuery<StrategyInfo[]>({
     queryKey: ['strategies'],
@@ -445,7 +467,7 @@ export default function LiveDashboard() {
       {status && (
         <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 mb-6">
           <h3 className="text-sm font-semibold text-slate-300 mb-3">Engine Status</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-sm">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 text-sm">
             <div>
               <span className="text-xs text-slate-400">State</span>
               <div className="mt-1">
@@ -463,6 +485,26 @@ export default function LiveDashboard() {
                   <span className={`w-1.5 h-1.5 rounded-full ${status.broker_connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
                   {status.broker_connected ? 'Yes' : 'No'}
                 </span>
+              </p>
+            </div>
+            <div>
+              <span className="text-xs text-slate-400">Market</span>
+              <p className="mt-1">
+                {status.market_open === null ? (
+                  <span className="text-xs text-slate-500">—</span>
+                ) : (
+                  <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${status.market_open ? 'text-emerald-400' : 'text-red-400'}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${status.market_open ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                    {status.market_open ? 'Open' : 'Closed'}
+                  </span>
+                )}
+              </p>
+              <p className="mt-0.5 text-slate-400 text-xs">
+                {status.market_open && status.next_market_close
+                  ? `closes in ${formatCountdown(status.next_market_close, now)}`
+                  : !status.market_open && status.next_market_open
+                    ? `opens in ${formatCountdown(status.next_market_open, now)}`
+                    : ''}
               </p>
             </div>
             <div>
