@@ -136,6 +136,95 @@ def maybe_catch_up_session_cycle(
     threading.Thread(target=_run, name="live-cycle-catch-up", daemon=True).start()
 
 
+def cycle_was_fully_news_guard_blocked(summary: dict[str, Any]) -> bool:
+    """True when a persisted cycle summary matches "every proposed order was
+    held by the news guard" rather than skipped, errored, or genuinely
+    having had nothing to propose.
+
+    ``_apply_news_guard`` returning an empty list makes ``run_cycle`` return
+    before order routing, so ``orders_submitted``/``orders_queued``/
+    ``orders_failed`` all stay 0 even though ``orders_generated`` is
+    positive — that specific combination is the signature checked here.
+    """
+    if summary.get("skipped") or summary.get("error"):
+        return False
+    return (
+        summary.get("orders_generated", 0) > 0
+        and summary.get("orders_submitted", 0) == 0
+        and summary.get("orders_queued", 0) == 0
+        and summary.get("orders_failed", 0) == 0
+    )
+
+
+def maybe_retry_after_news_guard_block(
+    engine: LiveTradingEngine,
+    *,
+    timezone: str = DEFAULT_MARKET_TIMEZONE,
+) -> None:
+    """Run one more cycle now if today's most recent cycle had every order
+    held by the news guard.
+
+    A single-cycle-per-day schedule (e.g. ``market_open``) means a broad
+    macro-event blackout that blocks the day's only cycle would otherwise
+    silently lose the rest of the trading day, even with hours of market
+    time left. This is meant to be polled periodically (see
+    ``TradingScheduler``); it naturally stops retrying once a cycle actually
+    submits or queues orders, since that cycle's summary no longer matches
+    :func:`cycle_was_fully_news_guard_blocked`.
+    """
+    if not engine.is_running or getattr(engine, "_shutting_down", False):
+        return
+    tz = ZoneInfo(timezone)
+    now_local = datetime.now(tz)
+    if now_local.weekday() >= 5:
+        return
+    try:
+        if not engine._broker.is_market_open():
+            return
+    except Exception:
+        log.warning(
+            "News-guard retry check skipped — could not determine market hours",
+            exc_info=True,
+        )
+        return
+
+    todays = engine.cycles_today(timezone=timezone)
+    if not todays or not cycle_was_fully_news_guard_blocked(todays[-1]):
+        return
+
+    log.info(
+        "Retry cycle: today's most recent cycle (id=%s) had every order "
+        "held by the news guard — retrying now instead of waiting for "
+        "tomorrow's scheduled open",
+        todays[-1].get("cycle_id"),
+    )
+
+    def _run() -> None:
+        try:
+            if getattr(engine, "_shutting_down", False):
+                return
+            engine.run_cycle()
+        except Exception:
+            log.error("News-guard retry cycle failed", exc_info=True)
+
+    threading.Thread(target=_run, name="live-cycle-news-guard-retry", daemon=True).start()
+
+
+def run_order_reconciliation(engine: LiveTradingEngine) -> None:
+    """Poll the broker for every locally non-terminal order's true status.
+
+    Runs independently of the trading-cycle schedule since fills/cancels
+    happen asynchronously at the broker between cycles, not only at cycle
+    time.
+    """
+    if not engine.is_running or getattr(engine, "_shutting_down", False):
+        return
+    try:
+        engine.reconcile_order_history()
+    except Exception:
+        log.error("Order-history reconciliation job failed", exc_info=True)
+
+
 class TradingScheduler:
     """Runs :meth:`LiveTradingEngine.run_cycle` on a configurable schedule."""
 
@@ -179,6 +268,8 @@ class TradingScheduler:
         self._job_id = "live_cycle"
         self._fundamentals_job_id = "fundamentals_refresh"
         self._dynamic_universe_job_id = "danelfin_universe_sync"
+        self._news_guard_retry_job_id = "news_guard_retry"
+        self._order_reconciliation_job_id = "order_reconciliation"
 
     def start(self) -> None:
         """Start the background scheduler."""
@@ -229,6 +320,28 @@ class TradingScheduler:
                     timezone=self._timezone,
                 ),
                 id=self._dynamic_universe_job_id,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        self._scheduler.add_job(
+            lambda: run_order_reconciliation(self._engine),
+            trigger=IntervalTrigger(minutes=15),
+            id=self._order_reconciliation_job_id,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        if self._schedule_spec in _SESSION_SCHEDULES:
+            # Only meaningful for a single-cycle-per-day schedule — an
+            # `every_N_minutes`/`hourly` schedule already retries naturally
+            # on its own next tick.
+            self._scheduler.add_job(
+                lambda: maybe_retry_after_news_guard_block(
+                    self._engine, timezone=self._timezone
+                ),
+                trigger=IntervalTrigger(minutes=30),
+                id=self._news_guard_retry_job_id,
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,

@@ -43,6 +43,9 @@ class TestSetupLogging:
         )
         formatted = console.format(record)
         assert "hello world" in formatted
+        # file:function:line — needed to jump straight to the source of a
+        # log line instead of grepping the message text for a landmark.
+        assert f"{__file__.rsplit('/', 1)[-1]}:" in formatted
         # Not JSON — a plain line, not a '{...}' structure.
         with pytest.raises(json.JSONDecodeError):
             json.loads(formatted)
@@ -65,6 +68,10 @@ class TestSetupLogging:
         assert payload["logger"] == "firm.test.module"
         assert payload["level"] == "INFO"
         assert "ts" in payload
+        # file:function:line — same traceability the console formatter gets.
+        assert payload["file"] == "test_logging_setup.py"
+        assert payload["function"] == "test_file_handler_emits_valid_json"
+        assert isinstance(payload["line"], int)
 
     def test_file_rotation_bounds_disk_usage(self, fresh_firm_logger, tmp_path):
         from firm.logging_setup import setup_logging

@@ -49,9 +49,27 @@ describe('Logs', () => {
     renderWithProviders(<Logs />)
     await waitFor(() => expect(screen.getByText('cycle done')).toBeInTheDocument())
 
-    await user.type(screen.getByPlaceholderText(/Filter by logger or message/), 'rag')
+    await user.type(screen.getByPlaceholderText(/Filter by logger, file, function, or message/), 'rag')
     expect(screen.queryByText('cycle done')).not.toBeInTheDocument()
     expect(screen.getByText('ingested docs')).toBeInTheDocument()
+  })
+
+  it('shows file:function:line when present, and matches it via search', async () => {
+    server.use(http.get('http://localhost/api/logs/tail', () => HttpResponse.json({
+      lines: [
+        { ts: '2026-07-21T00:00:00Z', level: 'INFO', logger: 'firm.live.engine', msg: 'cycle done', file: 'engine.py', function: 'run_cycle', line: 42 },
+        { ts: '2026-07-21T00:00:01Z', level: 'INFO', logger: 'firm.rag.store', msg: 'ingested docs' },
+      ],
+      next_offset: 100, reset: false,
+    })))
+    const user = userEvent.setup()
+    renderWithProviders(<Logs />)
+    await waitFor(() => expect(screen.getByText('engine.py:run_cycle:42')).toBeInTheDocument())
+    expect(screen.getByText('ingested docs')).toBeInTheDocument()
+
+    await user.type(screen.getByPlaceholderText(/Filter by logger, file, function, or message/), 'run_cycle')
+    expect(screen.getByText('cycle done')).toBeInTheDocument()
+    expect(screen.queryByText('ingested docs')).not.toBeInTheDocument()
   })
 
   it('Clear button empties the buffer', async () => {

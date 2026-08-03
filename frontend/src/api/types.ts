@@ -517,6 +517,11 @@ export interface LogEntry {
   logger: string
   msg: string
   exception?: string
+  /** Absent on "RAW" lines (unparseable/non-JSON) and any entry logged
+   * before this field existed. */
+  file?: string
+  function?: string
+  line?: number
 }
 
 export interface LogTailResponse {

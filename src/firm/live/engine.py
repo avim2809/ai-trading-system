@@ -277,19 +277,79 @@ class LiveTradingEngine:
     def cycle_history(self) -> list[CycleResult]:
         return list(self._cycle_history)
 
-    def had_cycle_today(self, timezone: str = "US/Eastern") -> bool:
-        """True when any cycle (including skipped) was recorded for the session date."""
+    def cycles_today(self, timezone: str = "US/Eastern") -> list[dict[str, Any]]:
+        """Every cycle summary recorded for the session date, oldest first.
+
+        Merges in-memory history (this process only) with the persisted
+        trade-history store (survives restarts), keyed by ``cycle_id`` so a
+        cycle recorded in both isn't duplicated. In-memory-only lookups
+        previously let a crash-restart mid-session (e.g. a broker-disconnect
+        crash loop) wipe all knowledge of a cycle that had already run and
+        submitted orders — the scheduler's catch-up job would then fire a
+        spurious duplicate cycle for that day.
+        """
         from datetime import timezone as dt_timezone
         from zoneinfo import ZoneInfo
 
         tz = ZoneInfo(timezone)
         today = datetime.now(tz).date()
+
+        def _is_today(ts: datetime) -> bool:
+            aware = ts if ts.tzinfo is not None else ts.replace(tzinfo=dt_timezone.utc)
+            return aware.astimezone(tz).date() == today
+
+        by_cycle_id: dict[int, dict[str, Any]] = {}
+        if self._trade_history is not None:
+            for summary in self._trade_history.list_cycles(limit=20):
+                raw_ts = summary.get("timestamp")
+                if not raw_ts:
+                    continue
+                try:
+                    ts = datetime.fromisoformat(raw_ts)
+                except ValueError:
+                    continue
+                if _is_today(ts):
+                    by_cycle_id[summary.get("cycle_id", -1)] = dict(summary)
+
         for result in self._cycle_history:
-            # CycleResult.timestamp is always naive UTC (see firm.time_utils.utcnow).
-            ts = result.timestamp.replace(tzinfo=dt_timezone.utc)
-            if ts.astimezone(tz).date() == today:
-                return True
-        return False
+            if _is_today(result.timestamp):
+                by_cycle_id[result.cycle_id] = {
+                    "cycle_id": result.cycle_id,
+                    "timestamp": result.timestamp.isoformat(),
+                    "orders_generated": result.orders_generated,
+                    "orders_submitted": result.orders_submitted,
+                    "orders_queued": result.orders_queued,
+                    "orders_failed": result.orders_failed,
+                    "skipped": result.skipped,
+                    "error": result.error,
+                }
+
+        return [by_cycle_id[cid] for cid in sorted(by_cycle_id)]
+
+    def had_cycle_today(self, timezone: str = "US/Eastern") -> bool:
+        """True when any cycle (including skipped) was recorded for the session date."""
+        return bool(self.cycles_today(timezone=timezone))
+
+    def reconcile_order_history(self) -> int:
+        """Poll the broker for every locally non-terminal order's true status
+        and correct ``order_history.json`` in place.
+
+        See ``firm.live.order_reconciliation`` — orders are otherwise only
+        ever recorded once, at submission time, so an async fill/cancel that
+        happens after that never reaches the persisted record. Returns the
+        number of records corrected; 0 (never raises) if there is no
+        attached trade-history store or the reconciliation pass itself
+        fails.
+        """
+        if self._trade_history is None:
+            return 0
+        from firm.live.order_reconciliation import reconcile_order_statuses
+
+        try:
+            return reconcile_order_statuses(self._trade_history, self._broker)
+        except Exception:
+            log.warning("Order-history reconciliation failed", exc_info=True)
+            return 0
 
     def clear_cycle_history(self) -> int:
         """Wipe the in-memory cycle/order history. Returns the count removed.
@@ -682,6 +742,16 @@ class LiveTradingEngine:
             result.alerts.append(alert)
 
         allowed: list[dict[str, Any]] = []
+        # Grouped by blocking event, not emitted per-symbol: a single
+        # broad macro event (e.g. a US-wide indicator like ISM Manufacturing
+        # PMI) can simultaneously block every symbol in the universe — one
+        # alert per symbol would mean dozens of near-identical alerts (and
+        # dozens of webhook/Discord posts, since _emit_alert forwards every
+        # single one to the alert callback) for what is operationally one
+        # event. Keyed by the event's own identity (title/currency/time),
+        # not the order list's position, since different symbols can
+        # legitimately be blocked by *different* relevant events.
+        blocked: dict[tuple[Any, ...], dict[str, Any]] = {}
         for o in orders:
             symbol = o.get("symbol", "")
             try:
@@ -694,13 +764,38 @@ class LiveTradingEngine:
                 allowed.append(o)
                 continue
             if res.get("decision") == "block":
-                alert = self._emit_alert(
-                    "news_guard_blackout", "warning", res.get("reason", ""),
-                    symbol=symbol, blocking_event=res.get("blocking_event"),
-                )
-                result.alerts.append(alert)
+                event = res.get("blocking_event") or {}
+                key = (event.get("title"), event.get("currency"), event.get("time"))
+                bucket = blocked.setdefault(key, {
+                    "reason": res.get("reason", ""),
+                    "first_symbol": symbol.upper(),
+                    "blocking_event": res.get("blocking_event"),
+                    "symbols": [],
+                })
+                bucket["symbols"].append(symbol.upper())
             else:
                 allowed.append(o)
+
+        for bucket in blocked.values():
+            symbols = sorted(bucket["symbols"])
+            # The per-symbol reason already ends in "... for {SYMBOL}." —
+            # swap that trailing clause for the full held-symbol list rather
+            # than re-deriving the whole sentence (duplicating decide()'s
+            # own phrasing logic here would drift out of sync with it).
+            # Match against the symbol that actually produced this reason
+            # string (the first one seen for this event), not symbols[0]
+            # post-sort — those can differ, which would silently fail the
+            # suffix match and leave a dangling double clause.
+            reason = bucket["reason"]
+            suffix = f" for {bucket['first_symbol']}."
+            if reason.endswith(suffix):
+                reason = reason[: -len(suffix)]
+            reason += f" for {len(symbols)} symbol(s): {', '.join(symbols)}."
+            alert = self._emit_alert(
+                "news_guard_blackout", "warning", reason,
+                symbols=symbols, blocking_event=bucket["blocking_event"],
+            )
+            result.alerts.append(alert)
         return allowed
 
     def _check_drawdown(self, result: CycleResult) -> None:

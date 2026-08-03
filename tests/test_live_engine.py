@@ -27,6 +27,7 @@ from firm.live.approval import ApprovalQueue, PendingApproval
 from firm.live.data_feed import LiveDataFeed, LivePitViewAdapter
 from firm.live.engine import CycleResult, LiveTradingEngine
 from firm.live.portfolio_sync import sync_portfolio_from_broker
+from firm.live.trade_history import TradeHistoryStore
 from firm.portfolio.state import PortfolioState
 from firm.time_utils import utcnow
 
@@ -1312,6 +1313,159 @@ class TestMarketSessionSync:
     # which uses a duck-typed mock engine instead of a full one.
 
 
+class TestCyclesTodaySurvivesRestart:
+    """had_cycle_today()/cycles_today() must consult persisted trade history,
+    not just in-memory state — otherwise a process restart mid-session (e.g.
+    a broker-disconnect crash loop) wipes all knowledge that a cycle already
+    ran today, and the scheduler's catch-up job fires a spurious duplicate
+    cycle that re-submits orders a second time."""
+
+    def _engine(self, engine_components, tmp_path, *, trade_history=True):
+        broker, feed, queue, config = engine_components
+        history = (
+            TradeHistoryStore(
+                orders_path=tmp_path / "orders.json",
+                cycles_path=tmp_path / "cycles.json",
+            )
+            if trade_history
+            else None
+        )
+        with patch("firm.live.engine.build_orchestrator", return_value=MagicMock()):
+            engine = LiveTradingEngine(
+                config=config, broker=broker, data_feed=feed, approval_queue=queue,
+                trade_history=history,
+            )
+        return engine, history
+
+    def test_had_cycle_today_true_from_persisted_history_alone(self, engine_components, tmp_path):
+        """Simulates a restart: the in-memory _cycle_history is empty (as it
+        always is right after construction), but a cycle from earlier today
+        is already sitting in the persisted store."""
+        engine, history = self._engine(engine_components, tmp_path)
+        history.record_cycle({
+            "cycle_id": 1, "timestamp": utcnow().isoformat(),
+            "orders_generated": 3, "orders_submitted": 3,
+            "orders_queued": 0, "orders_failed": 0,
+            "skipped": False, "error": None,
+        })
+        assert engine._cycle_history == []
+        assert engine.had_cycle_today() is True
+
+    def test_had_cycle_today_false_when_persisted_cycle_is_from_a_prior_day(self, engine_components, tmp_path):
+        engine, history = self._engine(engine_components, tmp_path)
+        yesterday = utcnow() - timedelta(days=1)
+        history.record_cycle({
+            "cycle_id": 1, "timestamp": yesterday.isoformat(),
+            "orders_generated": 3, "orders_submitted": 3,
+            "orders_queued": 0, "orders_failed": 0,
+            "skipped": False, "error": None,
+        })
+        assert engine.had_cycle_today() is False
+
+    def test_cycles_today_dedupes_shared_cycle_id_between_memory_and_disk(self, engine_components, tmp_path):
+        engine, history = self._engine(engine_components, tmp_path)
+        now = utcnow()
+        history.record_cycle({
+            "cycle_id": 1, "timestamp": now.isoformat(),
+            "orders_generated": 3, "orders_submitted": 3,
+            "orders_queued": 0, "orders_failed": 0,
+            "skipped": False, "error": None,
+        })
+        engine._cycle_history.append(CycleResult(cycle_id=1, timestamp=now))
+        assert len(engine.cycles_today()) == 1
+
+    def test_had_cycle_today_false_with_no_trade_history_attached(self, engine_components, tmp_path):
+        engine, _ = self._engine(engine_components, tmp_path, trade_history=False)
+        assert engine.had_cycle_today() is False
+
+
+class TestReconcileOrderHistory:
+    """order_history.json is written once at submission time and never
+    touched again otherwise — an order that fills/cancels asynchronously
+    stays frozen at "pending" forever. reconcile_order_history() polls the
+    broker for the true status of each locally non-terminal order."""
+
+    def _engine(self, engine_components, tmp_path, *, trade_history=True):
+        broker, feed, queue, config = engine_components
+        history = (
+            TradeHistoryStore(
+                orders_path=tmp_path / "orders.json",
+                cycles_path=tmp_path / "cycles.json",
+            )
+            if trade_history
+            else None
+        )
+        with patch("firm.live.engine.build_orchestrator", return_value=MagicMock()):
+            engine = LiveTradingEngine(
+                config=config, broker=broker, data_feed=feed, approval_queue=queue,
+                trade_history=history,
+            )
+        return engine, history
+
+    def test_updates_stale_pending_record_once_broker_reports_filled(self, engine_components, tmp_path):
+        broker, feed, queue, config = engine_components
+        engine, history = self._engine(engine_components, tmp_path)
+        history.record_orders([{
+            "order_id": "42", "symbol": "AAPL", "side": "buy", "quantity": 10.0,
+            "filled_quantity": 0.0, "avg_fill_price": 0.0, "status": "pending",
+            "timestamp": utcnow().isoformat(), "strategy": "momentum",
+        }])
+        broker._orders["42"] = OrderStatus(
+            order_id="42", symbol="AAPL", side="buy", quantity=10.0,
+            filled_quantity=10.0, avg_fill_price=151.25, status="filled",
+            timestamp=utcnow(),
+        )
+
+        updated = engine.reconcile_order_history()
+
+        assert updated == 1
+        record = history.list_orders()[0]
+        assert record["status"] == "filled"
+        assert record["filled_quantity"] == 10.0
+        assert record["avg_fill_price"] == 151.25
+
+    def test_leaves_record_untouched_when_broker_reports_same_status(self, engine_components, tmp_path):
+        broker, feed, queue, config = engine_components
+        engine, history = self._engine(engine_components, tmp_path)
+        history.record_orders([{
+            "order_id": "7", "symbol": "MSFT", "side": "sell", "quantity": 5.0,
+            "filled_quantity": 0.0, "avg_fill_price": 0.0, "status": "pending",
+            "timestamp": utcnow().isoformat(), "strategy": "trend",
+        }])
+        broker._orders["7"] = OrderStatus(
+            order_id="7", symbol="MSFT", side="sell", quantity=5.0,
+            filled_quantity=0.0, avg_fill_price=0.0, status="pending",
+            timestamp=utcnow(),
+        )
+
+        assert engine.reconcile_order_history() == 0
+
+    def test_order_unknown_to_broker_is_left_as_is_not_raised(self, engine_components, tmp_path):
+        engine, history = self._engine(engine_components, tmp_path)
+        history.record_orders([{
+            "order_id": "missing", "symbol": "AAPL", "side": "buy", "quantity": 1.0,
+            "filled_quantity": 0.0, "avg_fill_price": 0.0, "status": "pending",
+            "timestamp": utcnow().isoformat(), "strategy": "momentum",
+        }])
+        assert engine.reconcile_order_history() == 0
+        assert history.list_orders()[0]["status"] == "pending"
+
+    def test_already_terminal_records_are_never_polled(self, engine_components, tmp_path):
+        engine, history = self._engine(engine_components, tmp_path)
+        history.record_orders([{
+            "order_id": "1", "symbol": "AAPL", "side": "buy", "quantity": 1.0,
+            "filled_quantity": 1.0, "avg_fill_price": 150.0, "status": "filled",
+            "timestamp": utcnow().isoformat(), "strategy": "momentum",
+        }])
+        # No matching entry in broker._orders — if this were polled it would
+        # raise BrokerError, which reconcile_order_history must not surface.
+        assert engine.reconcile_order_history() == 0
+
+    def test_no_trade_history_attached_returns_zero(self, engine_components, tmp_path):
+        engine, _ = self._engine(engine_components, tmp_path, trade_history=False)
+        assert engine.reconcile_order_history() == 0
+
+
 class TestCycleHardTimeout:
     @patch("firm.live.engine.build_orchestrator")
     def test_hard_timeout_releases_lock_and_alerts(self, mock_build, engine_components):
@@ -1643,6 +1797,36 @@ class TestNewsGuardGate:
         )
         assert allowed == []
         assert any(a["kind"] == "news_guard_blackout" for a in result.alerts)
+
+    def test_multiple_symbols_blocked_by_the_same_event_get_one_alert(self, tmp_path):
+        """A single broad macro event (e.g. FOMC) can block every symbol in
+        the universe simultaneously — must be ONE alert naming every held
+        symbol, not one near-identical alert per symbol (which would also
+        mean one webhook/Discord post per symbol for what is operationally
+        a single event)."""
+        engine = self._engine(
+            tmp_path=tmp_path,
+            news_guard={"enabled": True, "offline": True},
+        )
+        result = CycleResult(cycle_id=1, timestamp=utcnow())
+        at = datetime(2026, 7, 29, 18, 5)  # inside the bundled FOMC blackout
+        orders = [
+            {"symbol": "SPY", "side": "buy", "quantity": 1},
+            {"symbol": "QQQ", "side": "sell", "quantity": 2},
+            {"symbol": "AAPL", "side": "buy", "quantity": 3},
+        ]
+        allowed = engine._apply_news_guard(orders, at, result)
+        assert allowed == []
+        blackout_alerts = [a for a in result.alerts if a["kind"] == "news_guard_blackout"]
+        assert len(blackout_alerts) == 1
+        assert blackout_alerts[0]["symbols"] == ["AAPL", "QQQ", "SPY"]
+        # The single-symbol clause decide() appends (e.g. "... for SPY.")
+        # must have been fully replaced, not left as a dangling duplicate
+        # ahead of the aggregated list.
+        assert blackout_alerts[0]["message"] == (
+            "BLOCK: USD FOMC Statement & Rate Decision (5 min ago) is inside "
+            "the 30m-before/15m-after blackout for 3 symbol(s): AAPL, QQQ, SPY."
+        )
 
     def test_allows_orders_in_quiet_window(self, tmp_path):
         engine = self._engine(

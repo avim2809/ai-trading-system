@@ -79,7 +79,7 @@ export default function Logs() {
 
   const filtered = lines.filter((l) => {
     if (levelFilter !== 'ALL' && l.level !== levelFilter) return false
-    if (search && !`${l.logger} ${l.msg}`.toLowerCase().includes(search.toLowerCase())) return false
+    if (search && !`${l.logger} ${l.msg} ${l.file ?? ''} ${l.function ?? ''}`.toLowerCase().includes(search.toLowerCase())) return false
     return true
   })
 
@@ -127,7 +127,7 @@ export default function Logs() {
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Filter by logger or message…"
+          placeholder="Filter by logger, file, function, or message…"
           className="flex-1 min-w-[140px] px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-lg text-slate-200 text-xs placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
         />
         <span className="text-xs text-slate-500 whitespace-nowrap">
@@ -157,6 +157,11 @@ export default function Logs() {
                 <span className="text-slate-600 flex-shrink-0">{formatTs(l.ts)}</span>
                 <span className={`flex-shrink-0 w-16 ${levelStyles[l.level] ?? 'text-slate-400'}`}>{l.level}</span>
                 <span className="text-slate-500 flex-shrink-0">{l.logger}</span>
+                {l.file && (
+                  <span className="text-slate-700 flex-shrink-0">
+                    {l.file}:{l.function}:{l.line}
+                  </span>
+                )}
                 <span className={levelStyles[l.level] ?? 'text-slate-300'}>{l.msg}</span>
                 {l.exception && (
                   <pre className="w-full text-red-400/80 mt-0.5">{l.exception}</pre>

@@ -54,6 +54,33 @@ class TradeHistoryStore:
             "Recorded %d order(s) to trade history (source=%s)", len(orders), source,
         )
 
+    def update_order_status(
+        self,
+        order_id: str,
+        *,
+        status: str,
+        filled_quantity: float,
+        avg_fill_price: float,
+    ) -> bool:
+        """Correct a previously recorded order's status/fill fields in place.
+
+        Records are otherwise append-only, written once at submission time —
+        this is the one exception, used by reconciliation against the
+        broker's true post-submission status (see
+        ``firm.live.order_reconciliation``). Returns True if a matching
+        record was found and updated.
+        """
+        updated = False
+        for entry in self._orders:
+            if entry.get("order_id") == order_id:
+                entry["status"] = status
+                entry["filled_quantity"] = filled_quantity
+                entry["avg_fill_price"] = avg_fill_price
+                updated = True
+        if updated:
+            self._save_orders()
+        return updated
+
     def record_cycle(self, summary: dict[str, Any]) -> None:
         self._cycles.append(dict(summary))
         self._save_cycles()

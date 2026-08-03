@@ -27,7 +27,10 @@ from firm.live.scheduler import (
     DEFAULT_MARKET_TIMEZONE,
     TradingScheduler,
     _pending_approvals_on_disk,
+    cycle_was_fully_news_guard_blocked,
     maybe_catch_up_session_cycle,
+    maybe_retry_after_news_guard_block,
+    run_order_reconciliation,
     trading_day_key,
 )
 
@@ -87,13 +90,39 @@ class TestPendingApprovalsOnDisk:
 # maybe_catch_up_session_cycle
 # ---------------------------------------------------------------------------
 
-def _mock_engine(*, is_running=True, shutting_down=False, had_cycle_today=False, market_open=True):
+def _mock_engine(
+    *,
+    is_running=True,
+    shutting_down=False,
+    had_cycle_today=False,
+    market_open=True,
+    cycles_today=(),
+):
     engine = MagicMock()
     engine.is_running = is_running
     engine._shutting_down = shutting_down
     engine.had_cycle_today.return_value = had_cycle_today
+    engine.cycles_today.return_value = list(cycles_today)
     engine._broker.is_market_open.return_value = market_open
     return engine
+
+
+def _blocked_cycle(cycle_id=1, orders_generated=5):
+    """A cycle summary matching the "every order held by the news guard"
+    signature: generated orders, but none submitted/queued/failed."""
+    return {
+        "cycle_id": cycle_id, "orders_generated": orders_generated,
+        "orders_submitted": 0, "orders_queued": 0, "orders_failed": 0,
+        "skipped": False, "error": None,
+    }
+
+
+def _successful_cycle(cycle_id=1, orders_submitted=3):
+    return {
+        "cycle_id": cycle_id, "orders_generated": orders_submitted,
+        "orders_submitted": orders_submitted, "orders_queued": 0,
+        "orders_failed": 0, "skipped": False, "error": None,
+    }
 
 
 def _some_weekday() -> datetime:
@@ -271,6 +300,136 @@ class TestMaybeCatchUpSessionCycle:
 
 
 # ---------------------------------------------------------------------------
+# cycle_was_fully_news_guard_blocked / maybe_retry_after_news_guard_block
+# ---------------------------------------------------------------------------
+
+class TestCycleWasFullyNewsGuardBlocked:
+    def test_true_for_the_fully_blocked_signature(self):
+        assert cycle_was_fully_news_guard_blocked(_blocked_cycle()) is True
+
+    def test_false_when_skipped(self):
+        summary = _blocked_cycle()
+        summary["skipped"] = True
+        assert cycle_was_fully_news_guard_blocked(summary) is False
+
+    def test_false_when_errored(self):
+        summary = _blocked_cycle()
+        summary["error"] = "boom"
+        assert cycle_was_fully_news_guard_blocked(summary) is False
+
+    def test_false_when_nothing_was_generated(self):
+        summary = _blocked_cycle(orders_generated=0)
+        assert cycle_was_fully_news_guard_blocked(summary) is False
+
+    def test_false_when_some_orders_submitted(self):
+        summary = _successful_cycle()
+        assert cycle_was_fully_news_guard_blocked(summary) is False
+
+    def test_false_when_some_orders_queued_for_approval(self):
+        summary = _blocked_cycle()
+        summary["orders_queued"] = 2
+        assert cycle_was_fully_news_guard_blocked(summary) is False
+
+    def test_false_when_some_orders_failed(self):
+        summary = _blocked_cycle()
+        summary["orders_failed"] = 1
+        assert cycle_was_fully_news_guard_blocked(summary) is False
+
+
+class TestMaybeRetryAfterNewsGuardBlock:
+    def test_skipped_when_engine_not_running(self):
+        engine = _mock_engine(is_running=False, cycles_today=[_blocked_cycle()])
+        maybe_retry_after_news_guard_block(engine)
+        engine.cycles_today.assert_not_called()
+
+    def test_skipped_when_engine_shutting_down(self):
+        engine = _mock_engine(shutting_down=True, cycles_today=[_blocked_cycle()])
+        maybe_retry_after_news_guard_block(engine)
+        engine.cycles_today.assert_not_called()
+
+    def test_skipped_on_weekend(self):
+        engine = _mock_engine(cycles_today=[_blocked_cycle()])
+        mock_dt = MagicMock(wraps=datetime)
+        mock_dt.now.return_value = _some_saturday()
+        with patch("firm.live.scheduler.datetime", mock_dt):
+            maybe_retry_after_news_guard_block(engine)
+        engine._broker.is_market_open.assert_not_called()
+
+    def test_skipped_when_market_hours_check_raises(self):
+        engine = _mock_engine(cycles_today=[_blocked_cycle()])
+        engine._broker.is_market_open.side_effect = RuntimeError("boom")
+        with _patched_weekday_now():
+            maybe_retry_after_news_guard_block(engine)
+        engine.cycles_today.assert_not_called()
+
+    def test_skipped_when_market_closed(self):
+        engine = _mock_engine(market_open=False, cycles_today=[_blocked_cycle()])
+        with _patched_weekday_now():
+            maybe_retry_after_news_guard_block(engine)
+        engine.run_cycle.assert_not_called()
+
+    def test_skipped_when_no_cycles_ran_today(self):
+        engine = _mock_engine(cycles_today=[])
+        with _patched_weekday_now():
+            maybe_retry_after_news_guard_block(engine)
+        engine.run_cycle.assert_not_called()
+
+    def test_skipped_when_most_recent_cycle_today_was_not_fully_blocked(self):
+        engine = _mock_engine(cycles_today=[_blocked_cycle(cycle_id=1), _successful_cycle(cycle_id=2)])
+        with _patched_weekday_now():
+            maybe_retry_after_news_guard_block(engine)
+        engine.run_cycle.assert_not_called()
+
+    def test_retries_when_most_recent_cycle_today_was_fully_blocked(self):
+        ran = threading.Event()
+        engine = _mock_engine(cycles_today=[_blocked_cycle()])
+        engine.run_cycle.side_effect = lambda: ran.set()
+        with _patched_weekday_now():
+            maybe_retry_after_news_guard_block(engine)
+        assert ran.wait(timeout=5.0), "retry thread never invoked run_cycle()"
+        engine.run_cycle.assert_called_once()
+
+    def test_retry_thread_logs_and_swallows_run_cycle_errors(self):
+        done = threading.Event()
+        engine = _mock_engine(cycles_today=[_blocked_cycle()])
+
+        def _boom():
+            done.set()
+            raise RuntimeError("pipeline exploded")
+
+        engine.run_cycle.side_effect = _boom
+        with _patched_weekday_now():
+            maybe_retry_after_news_guard_block(engine)
+        assert done.wait(timeout=5.0)
+
+
+# ---------------------------------------------------------------------------
+# run_order_reconciliation
+# ---------------------------------------------------------------------------
+
+class TestRunOrderReconciliation:
+    def test_skipped_when_engine_not_running(self):
+        engine = _mock_engine(is_running=False)
+        run_order_reconciliation(engine)
+        engine.reconcile_order_history.assert_not_called()
+
+    def test_skipped_when_engine_shutting_down(self):
+        engine = _mock_engine(shutting_down=True)
+        run_order_reconciliation(engine)
+        engine.reconcile_order_history.assert_not_called()
+
+    def test_delegates_to_engine_reconcile_order_history(self):
+        engine = _mock_engine()
+        run_order_reconciliation(engine)
+        engine.reconcile_order_history.assert_called_once()
+
+    def test_swallows_engine_errors(self):
+        engine = _mock_engine()
+        engine.reconcile_order_history.side_effect = RuntimeError("boom")
+        run_order_reconciliation(engine)  # must not raise
+
+
+# ---------------------------------------------------------------------------
 # TradingScheduler
 # ---------------------------------------------------------------------------
 
@@ -313,6 +472,33 @@ class TestTradingSchedulerLifecycle:
             sched.start()
             job = sched._scheduler.get_job(sched._fundamentals_job_id)
             assert job is not None
+        finally:
+            sched.stop()
+
+    def test_order_reconciliation_job_added_regardless_of_schedule(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule="hourly")
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._order_reconciliation_job_id) is not None
+        finally:
+            sched.stop()
+
+    def test_news_guard_retry_job_added_for_session_schedule(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule="market_open")
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._news_guard_retry_job_id) is not None
+        finally:
+            sched.stop()
+
+    def test_news_guard_retry_job_not_added_for_non_session_schedule(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule="hourly")
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._news_guard_retry_job_id) is None
         finally:
             sched.stop()
 

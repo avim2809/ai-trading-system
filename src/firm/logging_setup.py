@@ -33,6 +33,9 @@ class _JSONFormatter(logging.Formatter):
             "level": record.levelname,
             "logger": record.name,
             "msg": record.getMessage(),
+            "file": record.filename,
+            "function": record.funcName,
+            "line": record.lineno,
         }
         if record.exc_info and record.exc_info[1] is not None:
             payload["exception"] = self.formatException(record.exc_info)
@@ -79,7 +82,8 @@ def setup_logging(
 
     console = logging.StreamHandler(sys.stderr)
     console.setFormatter(logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        "%(asctime)s - %(name)s - %(levelname)s - "
+        "%(filename)s:%(funcName)s:%(lineno)d - %(message)s"
     ))
     root.addHandler(console)
 
