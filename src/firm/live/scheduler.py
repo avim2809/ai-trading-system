@@ -136,18 +136,28 @@ def maybe_catch_up_session_cycle(
     threading.Thread(target=_run, name="live-cycle-catch-up", daemon=True).start()
 
 
-def cycle_was_fully_news_guard_blocked(summary: dict[str, Any]) -> bool:
-    """True when a persisted cycle summary matches "every proposed order was
-    held by the news guard" rather than skipped, errored, or genuinely
-    having had nothing to propose.
+def cycle_had_no_trading_outcome(summary: dict[str, Any]) -> bool:
+    """True when a persisted cycle summary shows no trading outcome for a
+    reason that plausibly clears within the same session — either every
+    proposed order was held by the news guard, or the cycle errored out
+    entirely (e.g. a broker disconnect or a hard timeout).
 
-    ``_apply_news_guard`` returning an empty list makes ``run_cycle`` return
-    before order routing, so ``orders_submitted``/``orders_queued``/
-    ``orders_failed`` all stay 0 even though ``orders_generated`` is
-    positive — that specific combination is the signature checked here.
+    ``skipped`` cycles are excluded regardless of ``error`` (a "skipped:
+    market closed" cycle sets both): market-closed is already covered by
+    this module's own market-hours gate before this function is ever
+    consulted, and the other skip reasons ("cycle already in progress",
+    "engine shutting down") are momentary collisions the existing catch-up
+    path already handles, not a lost trading day.
+
+    The news-guard signature specifically: ``_apply_news_guard`` returning
+    an empty list makes ``run_cycle`` return before order routing, so
+    ``orders_submitted``/``orders_queued``/``orders_failed`` all stay 0
+    even though ``orders_generated`` is positive.
     """
-    if summary.get("skipped") or summary.get("error"):
+    if summary.get("skipped"):
         return False
+    if summary.get("error"):
+        return True
     return (
         summary.get("orders_generated", 0) > 0
         and summary.get("orders_submitted", 0) == 0
@@ -156,21 +166,25 @@ def cycle_was_fully_news_guard_blocked(summary: dict[str, Any]) -> bool:
     )
 
 
-def maybe_retry_after_news_guard_block(
+def maybe_retry_lost_cycle(
     engine: LiveTradingEngine,
     *,
     timezone: str = DEFAULT_MARKET_TIMEZONE,
 ) -> None:
-    """Run one more cycle now if today's most recent cycle had every order
-    held by the news guard.
+    """Run one more cycle now if today's most recent cycle had no trading
+    outcome — either every order was held by the news guard, or the cycle
+    errored out (e.g. a broker disconnect).
 
-    A single-cycle-per-day schedule (e.g. ``market_open``) means a broad
-    macro-event blackout that blocks the day's only cycle would otherwise
-    silently lose the rest of the trading day, even with hours of market
-    time left. This is meant to be polled periodically (see
-    ``TradingScheduler``); it naturally stops retrying once a cycle actually
-    submits or queues orders, since that cycle's summary no longer matches
-    :func:`cycle_was_fully_news_guard_blocked`.
+    A single-cycle-per-day schedule (e.g. ``market_open``) means either
+    failure mode would otherwise silently lose the rest of the trading day,
+    even with hours of market time left. This is meant to be polled
+    periodically (see ``TradingScheduler``); it naturally stops retrying
+    once a cycle actually submits or queues orders, since that cycle's
+    summary no longer matches :func:`cycle_had_no_trading_outcome`. If the
+    underlying cause isn't transient (a persistent bug, an extended broker
+    outage), this will keep retrying every interval rather than giving up —
+    the same bet the news-guard case already makes, and each attempt is
+    cheap and feeds the engine's own consecutive-failure alerting.
     """
     if not engine.is_running or getattr(engine, "_shutting_down", False):
         return
@@ -183,20 +197,22 @@ def maybe_retry_after_news_guard_block(
             return
     except Exception:
         log.warning(
-            "News-guard retry check skipped — could not determine market hours",
+            "Lost-cycle retry check skipped — could not determine market hours",
             exc_info=True,
         )
         return
 
     todays = engine.cycles_today(timezone=timezone)
-    if not todays or not cycle_was_fully_news_guard_blocked(todays[-1]):
+    if not todays or not cycle_had_no_trading_outcome(todays[-1]):
         return
 
+    last = todays[-1]
+    reason = f"error: {last['error']}" if last.get("error") else "held entirely by the news guard"
     log.info(
-        "Retry cycle: today's most recent cycle (id=%s) had every order "
-        "held by the news guard — retrying now instead of waiting for "
-        "tomorrow's scheduled open",
-        todays[-1].get("cycle_id"),
+        "Retry cycle: today's most recent cycle (id=%s) had no trading "
+        "outcome (%s) — retrying now instead of waiting for tomorrow's "
+        "scheduled open",
+        last.get("cycle_id"), reason,
     )
 
     def _run() -> None:
@@ -205,9 +221,9 @@ def maybe_retry_after_news_guard_block(
                 return
             engine.run_cycle()
         except Exception:
-            log.error("News-guard retry cycle failed", exc_info=True)
+            log.error("Lost-cycle retry failed", exc_info=True)
 
-    threading.Thread(target=_run, name="live-cycle-news-guard-retry", daemon=True).start()
+    threading.Thread(target=_run, name="live-cycle-lost-retry", daemon=True).start()
 
 
 def run_order_reconciliation(engine: LiveTradingEngine) -> None:
@@ -268,7 +284,7 @@ class TradingScheduler:
         self._job_id = "live_cycle"
         self._fundamentals_job_id = "fundamentals_refresh"
         self._dynamic_universe_job_id = "danelfin_universe_sync"
-        self._news_guard_retry_job_id = "news_guard_retry"
+        self._lost_cycle_retry_job_id = "lost_cycle_retry"
         self._order_reconciliation_job_id = "order_reconciliation"
 
     def start(self) -> None:
@@ -337,11 +353,11 @@ class TradingScheduler:
             # `every_N_minutes`/`hourly` schedule already retries naturally
             # on its own next tick.
             self._scheduler.add_job(
-                lambda: maybe_retry_after_news_guard_block(
+                lambda: maybe_retry_lost_cycle(
                     self._engine, timezone=self._timezone
                 ),
                 trigger=IntervalTrigger(minutes=30),
-                id=self._news_guard_retry_job_id,
+                id=self._lost_cycle_retry_job_id,
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,

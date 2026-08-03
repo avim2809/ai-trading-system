@@ -27,9 +27,9 @@ from firm.live.scheduler import (
     DEFAULT_MARKET_TIMEZONE,
     TradingScheduler,
     _pending_approvals_on_disk,
-    cycle_was_fully_news_guard_blocked,
+    cycle_had_no_trading_outcome,
     maybe_catch_up_session_cycle,
-    maybe_retry_after_news_guard_block,
+    maybe_retry_lost_cycle,
     run_order_reconciliation,
     trading_day_key,
 )
@@ -122,6 +122,17 @@ def _successful_cycle(cycle_id=1, orders_submitted=3):
         "cycle_id": cycle_id, "orders_generated": orders_submitted,
         "orders_submitted": orders_submitted, "orders_queued": 0,
         "orders_failed": 0, "skipped": False, "error": None,
+    }
+
+
+def _errored_cycle(cycle_id=1, error="broker disconnect timed out"):
+    """A cycle that ran but died before producing any trading outcome —
+    e.g. a broker disconnect or a hard timeout — as opposed to a skipped
+    cycle (market closed, shutdown, concurrent run already in progress)."""
+    return {
+        "cycle_id": cycle_id, "orders_generated": 0,
+        "orders_submitted": 0, "orders_queued": 0, "orders_failed": 0,
+        "skipped": False, "error": error,
     }
 
 
@@ -300,51 +311,58 @@ class TestMaybeCatchUpSessionCycle:
 
 
 # ---------------------------------------------------------------------------
-# cycle_was_fully_news_guard_blocked / maybe_retry_after_news_guard_block
+# cycle_had_no_trading_outcome / maybe_retry_lost_cycle
 # ---------------------------------------------------------------------------
 
-class TestCycleWasFullyNewsGuardBlocked:
-    def test_true_for_the_fully_blocked_signature(self):
-        assert cycle_was_fully_news_guard_blocked(_blocked_cycle()) is True
+class TestCycleHadNoTradingOutcome:
+    def test_true_for_the_fully_news_guard_blocked_signature(self):
+        assert cycle_had_no_trading_outcome(_blocked_cycle()) is True
 
-    def test_false_when_skipped(self):
+    def test_true_when_cycle_errored_even_with_orders_generated(self):
         summary = _blocked_cycle()
+        summary["error"] = "broker disconnect timed out"
+        assert cycle_had_no_trading_outcome(summary) is True
+
+    def test_true_when_cycle_errored_with_nothing_generated(self):
+        summary = _errored_cycle()
+        assert cycle_had_no_trading_outcome(summary) is True
+
+    def test_false_when_skipped_even_though_error_is_also_set(self):
+        """A "skipped: market closed" cycle sets both skipped=True and
+        error — skipped must take priority, since market-closed/shutdown/
+        concurrent-cycle are not lost trading days worth retrying."""
+        summary = _errored_cycle()
         summary["skipped"] = True
-        assert cycle_was_fully_news_guard_blocked(summary) is False
+        assert cycle_had_no_trading_outcome(summary) is False
 
-    def test_false_when_errored(self):
-        summary = _blocked_cycle()
-        summary["error"] = "boom"
-        assert cycle_was_fully_news_guard_blocked(summary) is False
-
-    def test_false_when_nothing_was_generated(self):
+    def test_false_when_nothing_was_generated_and_no_error(self):
         summary = _blocked_cycle(orders_generated=0)
-        assert cycle_was_fully_news_guard_blocked(summary) is False
+        assert cycle_had_no_trading_outcome(summary) is False
 
     def test_false_when_some_orders_submitted(self):
         summary = _successful_cycle()
-        assert cycle_was_fully_news_guard_blocked(summary) is False
+        assert cycle_had_no_trading_outcome(summary) is False
 
     def test_false_when_some_orders_queued_for_approval(self):
         summary = _blocked_cycle()
         summary["orders_queued"] = 2
-        assert cycle_was_fully_news_guard_blocked(summary) is False
+        assert cycle_had_no_trading_outcome(summary) is False
 
     def test_false_when_some_orders_failed(self):
         summary = _blocked_cycle()
         summary["orders_failed"] = 1
-        assert cycle_was_fully_news_guard_blocked(summary) is False
+        assert cycle_had_no_trading_outcome(summary) is False
 
 
-class TestMaybeRetryAfterNewsGuardBlock:
+class TestMaybeRetryLostCycle:
     def test_skipped_when_engine_not_running(self):
         engine = _mock_engine(is_running=False, cycles_today=[_blocked_cycle()])
-        maybe_retry_after_news_guard_block(engine)
+        maybe_retry_lost_cycle(engine)
         engine.cycles_today.assert_not_called()
 
     def test_skipped_when_engine_shutting_down(self):
         engine = _mock_engine(shutting_down=True, cycles_today=[_blocked_cycle()])
-        maybe_retry_after_news_guard_block(engine)
+        maybe_retry_lost_cycle(engine)
         engine.cycles_today.assert_not_called()
 
     def test_skipped_on_weekend(self):
@@ -352,32 +370,44 @@ class TestMaybeRetryAfterNewsGuardBlock:
         mock_dt = MagicMock(wraps=datetime)
         mock_dt.now.return_value = _some_saturday()
         with patch("firm.live.scheduler.datetime", mock_dt):
-            maybe_retry_after_news_guard_block(engine)
+            maybe_retry_lost_cycle(engine)
         engine._broker.is_market_open.assert_not_called()
 
     def test_skipped_when_market_hours_check_raises(self):
         engine = _mock_engine(cycles_today=[_blocked_cycle()])
         engine._broker.is_market_open.side_effect = RuntimeError("boom")
         with _patched_weekday_now():
-            maybe_retry_after_news_guard_block(engine)
+            maybe_retry_lost_cycle(engine)
         engine.cycles_today.assert_not_called()
 
     def test_skipped_when_market_closed(self):
         engine = _mock_engine(market_open=False, cycles_today=[_blocked_cycle()])
         with _patched_weekday_now():
-            maybe_retry_after_news_guard_block(engine)
+            maybe_retry_lost_cycle(engine)
         engine.run_cycle.assert_not_called()
 
     def test_skipped_when_no_cycles_ran_today(self):
         engine = _mock_engine(cycles_today=[])
         with _patched_weekday_now():
-            maybe_retry_after_news_guard_block(engine)
+            maybe_retry_lost_cycle(engine)
         engine.run_cycle.assert_not_called()
 
     def test_skipped_when_most_recent_cycle_today_was_not_fully_blocked(self):
         engine = _mock_engine(cycles_today=[_blocked_cycle(cycle_id=1), _successful_cycle(cycle_id=2)])
         with _patched_weekday_now():
-            maybe_retry_after_news_guard_block(engine)
+            maybe_retry_lost_cycle(engine)
+        engine.run_cycle.assert_not_called()
+
+    def test_skipped_when_most_recent_cycle_today_was_a_market_closed_skip(self):
+        """A market-closed skip is already covered by this function's own
+        market-hours gate for *today's* live check, but a stale persisted
+        skip from earlier in the day (e.g. a brief window right at the
+        open/close boundary) must not itself trigger a retry."""
+        summary = _errored_cycle()
+        summary["skipped"] = True
+        engine = _mock_engine(cycles_today=[summary])
+        with _patched_weekday_now():
+            maybe_retry_lost_cycle(engine)
         engine.run_cycle.assert_not_called()
 
     def test_retries_when_most_recent_cycle_today_was_fully_blocked(self):
@@ -385,7 +415,16 @@ class TestMaybeRetryAfterNewsGuardBlock:
         engine = _mock_engine(cycles_today=[_blocked_cycle()])
         engine.run_cycle.side_effect = lambda: ran.set()
         with _patched_weekday_now():
-            maybe_retry_after_news_guard_block(engine)
+            maybe_retry_lost_cycle(engine)
+        assert ran.wait(timeout=5.0), "retry thread never invoked run_cycle()"
+        engine.run_cycle.assert_called_once()
+
+    def test_retries_when_most_recent_cycle_today_errored_out(self):
+        ran = threading.Event()
+        engine = _mock_engine(cycles_today=[_errored_cycle(error="IB Gateway disconnect timed out")])
+        engine.run_cycle.side_effect = lambda: ran.set()
+        with _patched_weekday_now():
+            maybe_retry_lost_cycle(engine)
         assert ran.wait(timeout=5.0), "retry thread never invoked run_cycle()"
         engine.run_cycle.assert_called_once()
 
@@ -399,7 +438,7 @@ class TestMaybeRetryAfterNewsGuardBlock:
 
         engine.run_cycle.side_effect = _boom
         with _patched_weekday_now():
-            maybe_retry_after_news_guard_block(engine)
+            maybe_retry_lost_cycle(engine)
         assert done.wait(timeout=5.0)
 
 
@@ -484,21 +523,21 @@ class TestTradingSchedulerLifecycle:
         finally:
             sched.stop()
 
-    def test_news_guard_retry_job_added_for_session_schedule(self):
+    def test_lost_cycle_retry_job_added_for_session_schedule(self):
         engine = MagicMock()
         sched = TradingScheduler(engine=engine, schedule="market_open")
         try:
             sched.start()
-            assert sched._scheduler.get_job(sched._news_guard_retry_job_id) is not None
+            assert sched._scheduler.get_job(sched._lost_cycle_retry_job_id) is not None
         finally:
             sched.stop()
 
-    def test_news_guard_retry_job_not_added_for_non_session_schedule(self):
+    def test_lost_cycle_retry_job_not_added_for_non_session_schedule(self):
         engine = MagicMock()
         sched = TradingScheduler(engine=engine, schedule="hourly")
         try:
             sched.start()
-            assert sched._scheduler.get_job(sched._news_guard_retry_job_id) is None
+            assert sched._scheduler.get_job(sched._lost_cycle_retry_job_id) is None
         finally:
             sched.stop()
 
