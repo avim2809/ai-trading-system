@@ -132,6 +132,33 @@ export default function Decisions() {
                 ))}
               </div>
 
+              {d.per_strategy && Object.keys(d.per_strategy).length > 0 && (
+                <details className="mb-3">
+                  <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-400">
+                    Per-strategy breakdown ({Object.keys(d.per_strategy).length} strategies)
+                  </summary>
+                  <div className="mt-2 space-y-1.5">
+                    {Object.entries(d.per_strategy).map(([strategy, weights]) => (
+                      <div key={strategy} className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-mono text-blue-300">{strategy}:</span>
+                        {Object.entries(weights).map(([sym, w]) => (
+                          <span
+                            key={sym}
+                            className={`px-2 py-0.5 rounded text-xs font-mono border ${
+                              w >= 0
+                                ? 'bg-emerald-900/20 border-emerald-700/40 text-emerald-300'
+                                : 'bg-red-900/20 border-red-700/40 text-red-300'
+                            }`}
+                          >
+                            {sym} {w >= 0 ? '+' : ''}{(w * 100).toFixed(1)}%
+                          </span>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+
               {d.notes && <p className="text-xs text-slate-500 mb-2">{d.notes}</p>}
 
               {d.verdict && (d.what_worked || d.what_failed || d.lesson) ? (

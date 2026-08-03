@@ -52,7 +52,12 @@ _REFLECTION_SYSTEM = (
     '"lesson": "..."}. "verdict" judges the directional call against the '
     "return figure. \"what_worked\" and \"what_failed\" each name a specific "
     "part of the original thesis (empty string if not applicable — e.g. "
-    '"what_failed": "" for a fully correct call). "lesson" is one concrete '
+    '"what_failed": "" for a fully correct call). When a per-strategy '
+    "attribution is provided, name the specific strategy/strategies "
+    "responsible in \"what_worked\"/\"what_failed\" (e.g. \"momentum's long "
+    "NVDA call\") instead of speaking only about \"the portfolio\" — that's "
+    "what makes the lesson actionable for a specific future signal, not "
+    'just a vague restatement of the return. "lesson" is one concrete '
     "takeaway to apply to the next similar decision. Be specific and terse "
     "in every field — this will be re-read by future agents, and separately "
     "aggregated across many decisions to spot recurring patterns, so each "
@@ -100,6 +105,7 @@ class TradingMemoryLog:
         proposal_weights: dict[str, float],
         notes: str = "",
         nav_at_decision: float | None = None,
+        per_strategy: dict[str, dict[str, float]] | None = None,
     ) -> None:
         """Record a pending decision immediately after the orchestrator runs.
 
@@ -112,6 +118,16 @@ class TradingMemoryLog:
                               later ``reflect()`` call can compute the return
                               even if the caller (e.g. the live engine)
                               restarted and lost any in-memory pointer to it.
+            per_strategy:     {strategy: {symbol: weight}} attribution of the
+                              final blended targets (``TradeProposal.
+                              per_strategy``) — without this, a reflection
+                              can only judge "the portfolio" as a whole, with
+                              no way to say which strategy's calls were
+                              actually right or wrong that cycle. Same
+                              traceability gap as order history not
+                              recording which strategy placed an order;
+                              fed into reflect()'s own prompt below, not
+                              just stored for display.
         """
         if self._idempotency_check(date):
             return
@@ -119,6 +135,7 @@ class TradingMemoryLog:
             "date": date,
             "status": "pending",
             "proposal_weights": proposal_weights,
+            "per_strategy": per_strategy or {},
             "notes": notes,
             "nav_at_decision": nav_at_decision,
             "raw_return": None,
@@ -161,6 +178,13 @@ class TradingMemoryLog:
             return None
 
         alpha = raw_return - benchmark_return
+        per_strategy = pending.get("per_strategy") or {}
+        per_strategy_block = (
+            f"\nPer-strategy attribution (which strategy targeted which symbol/weight): "
+            f"{json.dumps(per_strategy, indent=2)}"
+            if per_strategy
+            else ""
+        )
         user_prompt = (
             f"Decision date: {date}\n"
             f"Portfolio return: {raw_return:+.2%}\n"
@@ -168,6 +192,7 @@ class TradingMemoryLog:
             f"Alpha: {alpha:+.2%}\n\n"
             f"Original notes: {pending.get('notes', 'none')}\n"
             f"Target weights: {json.dumps(pending.get('proposal_weights', {}), indent=2)}"
+            f"{per_strategy_block}"
         )
         parsed: DecisionReflection | None = None
         try:

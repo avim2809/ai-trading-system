@@ -781,6 +781,50 @@ class TestLiveClearEndpoints:
         orders = client.get("/api/live/orders").json()
         assert len(orders) >= 1
         assert orders[0]["symbol"] == "AAPL"
+        # The originating strategy must survive all the way to the
+        # persisted/served trade history — this is what the frontend's
+        # Order History "Strategy" column reads.
+        assert orders[0]["strategy"] == "momentum"
+
+    def test_approved_order_persists_strategy(self, client, monkeypatch):
+        """Same traceability requirement as test_orders_persist_after_stop,
+        but for the semi_auto approval-queue path (a distinct code path —
+        firm.live.approval.ApprovalQueue.approve, not
+        LiveTradingEngine._execute_orders)."""
+        from tests.test_brokers import MockBroker
+
+        self._mock_cycle_deps(monkeypatch)
+        mock_broker = MockBroker()
+        import firm.api.routers.live as live_mod
+
+        monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: mock_broker)
+
+        client.post("/api/live/start", json={
+            "broker": "alpaca_paper",
+            "schedule": "hourly",
+            "approval_mode": "semi_auto",
+            "initial_capital": 100_000,
+        })
+        engine = client.app.state.live_engine
+        mock_orch = engine._orchestrator
+        mock_orch.step.return_value = (
+            [{"symbol": "AAPL", "side": "buy", "quantity": 1, "strategy": "momentum"}],
+            None,
+        )
+        engine.run_cycle(force=True)
+
+        approvals = client.get("/api/live/approvals").json()
+        assert len(approvals) == 1
+        aid = approvals[0]["approval_id"]
+
+        resp = client.post(f"/api/live/approvals/{aid}/approve")
+        assert resp.status_code == 200, resp.text
+
+        orders = client.get("/api/live/orders").json()
+        assert len(orders) >= 1
+        assert orders[0]["symbol"] == "AAPL"
+        assert orders[0]["strategy"] == "momentum"
+        assert orders[0]["source"] == "approval"
 
 
 class TestKillSwitchResetEndpoint:

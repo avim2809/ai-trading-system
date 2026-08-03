@@ -301,6 +301,10 @@ export interface DecisionEntry {
   date: string
   status: 'pending' | 'reflected'
   proposal_weights: Record<string, number>
+  /** {strategy: {symbol: weight}} attribution of proposal_weights — absent
+   * (undefined, not just empty) on entries recorded before this field
+   * existed. */
+  per_strategy?: Record<string, Record<string, number>>
   notes: string
   nav_at_decision: number | null
   raw_return: number | null

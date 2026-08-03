@@ -118,8 +118,16 @@ class ApprovalQueue:
         self._save()
         return count
 
-    def approve(self, approval_id: str) -> list[OrderStatus]:
-        """Approve and execute the pending orders."""
+    def approve(self, approval_id: str) -> list[tuple[OrderStatus, str]]:
+        """Approve and execute the pending orders.
+
+        Returns ``(OrderStatus, strategy)`` pairs, not bare ``OrderStatus`` —
+        same rationale as ``LiveTradingEngine._execute_orders``: the
+        originating strategy is only known here, at submission time, and
+        the caller needs it to persist a traceable trade history (which
+        strategy caused which order — used for reflection/lessons-learned,
+        not just display).
+        """
         approval_id = self.resolve_id(approval_id)
         approval = self.get_by_id(approval_id)
         if approval is None:
@@ -133,7 +141,7 @@ class ApprovalQueue:
         if self._broker is None:
             raise RuntimeError("No broker configured on ApprovalQueue")
 
-        results: list[OrderStatus] = []
+        results: list[tuple[OrderStatus, str]] = []
         for order_dict in approval.orders:
             raw_qty = float(order_dict.get("quantity", abs(order_dict.get("shares", 0))))
             share_qty = int(round(abs(raw_qty)))
@@ -154,7 +162,7 @@ class ApprovalQueue:
             )
             try:
                 status = self._broker.submit_order(req)
-                results.append(status)
+                results.append((status, req.strategy))
             except Exception:
                 log.error("Failed to submit order for %s", req.symbol, exc_info=True)
 

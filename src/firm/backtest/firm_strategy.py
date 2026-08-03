@@ -273,6 +273,7 @@ class FirmStrategy(bt.Strategy):
                     proposal_weights=dict(proposal.targets),
                     notes=getattr(proposal, "notes", "") or "",
                     nav_at_decision=nav,
+                    per_strategy=dict(getattr(proposal, "per_strategy", {}) or {}),
                 )
                 self._prev_rebalance_date = date_str
                 self._prev_rebalance_nav = nav

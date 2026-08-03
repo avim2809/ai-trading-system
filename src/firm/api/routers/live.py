@@ -894,7 +894,7 @@ def approve_order(approval_id: str, request: Request) -> dict[str, Any]:
     store = _get_trade_history(request.app)
     if statuses:
         store.record_orders(
-            [LiveTradingEngine._status_to_dict(s) for s in statuses],
+            [LiveTradingEngine._status_to_dict(s, strategy) for s, strategy in statuses],
             source="approval",
             approval_id=resolved_id,
         )

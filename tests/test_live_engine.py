@@ -109,7 +109,10 @@ class TestApprovalQueue:
         statuses = queue.approve(aid)
 
         assert len(statuses) == 2
-        assert all(s.status == "filled" for s in statuses)
+        assert all(s.status == "filled" for s, _strategy in statuses)
+        # Strategy attribution must survive approval too, same as the
+        # auto-submit path — needed for a traceable trade history.
+        assert {strategy for _s, strategy in statuses} == {"momentum", "trend"}
 
         approval = queue.get_by_id(aid)
         assert approval.status == "approved"
@@ -685,7 +688,8 @@ class TestLiveTradingEngine:
 
         statuses = queue.approve(aid)
         assert len(statuses) == 1
-        assert statuses[0].status == "filled"
+        assert statuses[0][0].status == "filled"
+        assert statuses[0][1] == "momentum"
 
         assert broker.get_position("AAPL") is not None
 
@@ -883,6 +887,41 @@ class TestReflectionPersistence:
         assert reflected[0]["verdict"] == "correct"
         assert reflected[0]["lesson"] == "trust the signal"
         assert reflected[0]["date"] == entries[0]["date"]
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_per_strategy_attribution_persisted_with_the_decision(self, mock_build, tmp_path):
+        """TradeProposal.per_strategy must reach the persisted decision log,
+        not just proposal.targets — same traceability requirement as order
+        history recording which strategy placed each order (this is the
+        same information one level up: which strategy drove the cycle's
+        blended target weights)."""
+        memory_path = tmp_path / "decisions.jsonl"
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "memory_log_path": str(memory_path)}
+
+        bb = Blackboard(asof=utcnow())
+        bb.proposal = TradeProposal(
+            asof=bb.asof,
+            targets={"AAPL": 0.05, "MSFT": 0.05},
+            per_strategy={"momentum": {"AAPL": 0.05}, "trend": {"MSFT": 0.05}},
+        )
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], bb)
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine.start()
+        engine.run_cycle()
+
+        entries = [json.loads(line) for line in memory_path.read_text().splitlines()]
+        assert len(entries) == 1
+        assert entries[0]["per_strategy"] == {
+            "momentum": {"AAPL": 0.05}, "trend": {"MSFT": 0.05},
+        }
 
     @patch("firm.live.engine.build_orchestrator")
     def test_missing_llm_service_logs_warning(self, mock_build, tmp_path, caplog):
@@ -1722,6 +1761,9 @@ class TestExecutionSafetyGate:
         statuses, failed = engine._execute_orders(_make_orders())
         assert len(statuses) == 2
         assert failed == []
+        # Strategy attribution must survive submission — needed for a
+        # traceable trade history, not just the bare fill.
+        assert {strategy for _, strategy in statuses} == {"momentum", "trend"}
 
     def test_live_broker_submits_with_env(self, tmp_path, monkeypatch):
         monkeypatch.setenv("FIRM_ALLOW_TRADING", "1")
@@ -1777,7 +1819,8 @@ class TestOrderRiskCapGate:
         ]
         statuses, failed = engine._execute_orders(orders)
         assert len(statuses) == 1
-        assert statuses[0].symbol == "AAPL"
+        assert statuses[0][0].symbol == "AAPL"
+        assert statuses[0][1] == "momentum"
         assert len(failed) == 1
         assert failed[0]["symbol"] == "TSLA"
         assert "allowlist" in failed[0]["error"]

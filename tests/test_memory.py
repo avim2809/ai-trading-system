@@ -33,6 +33,24 @@ class TestStoreDecision:
         log.store_decision(date="2026-01-01", proposal_weights={"MSFT": 0.2})
         assert len(log.list_decisions()) == 1
 
+    def test_stores_per_strategy_attribution(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(
+            date="2026-01-01",
+            proposal_weights={"AAPL": 0.1, "MSFT": -0.05},
+            per_strategy={"momentum": {"AAPL": 0.1}, "trend": {"MSFT": -0.05}},
+        )
+        entry = log.list_decisions()[0]
+        assert entry["per_strategy"] == {"momentum": {"AAPL": 0.1}, "trend": {"MSFT": -0.05}}
+
+    def test_per_strategy_defaults_to_empty_dict_when_not_given(self, tmp_path):
+        """Backward compatible: callers that don't pass per_strategy (or an
+        older entry re-read from disk) must not crash reflect()'s lookup."""
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1})
+        entry = log.list_decisions()[0]
+        assert entry["per_strategy"] == {}
+
 
 class TestReflect:
     def test_structured_response_populates_fields_and_renders_prose(self, tmp_path):
@@ -106,6 +124,44 @@ class TestReflect:
 
         assert "reflection unavailable" in reflection
         assert log.list_decisions()[0]["verdict"] == "unknown"
+
+    def test_per_strategy_attribution_included_in_reflection_prompt(self, tmp_path):
+        """The reflection-generating LLM call must actually SEE the
+        per-strategy breakdown, not just have it stored for display —
+        otherwise the LLM can only judge "the portfolio" as a whole and
+        can never name which strategy's call was right or wrong."""
+        log = _log(tmp_path)
+        log.store_decision(
+            date="2026-01-01",
+            proposal_weights={"AAPL": 0.1, "MSFT": -0.05},
+            per_strategy={"momentum": {"AAPL": 0.1}, "danelfin_ai_score": {"MSFT": -0.05}},
+        )
+        llm = MagicMock()
+        llm.chat_json.return_value = {
+            "verdict": "correct", "what_worked": "momentum's AAPL call",
+            "what_failed": "", "lesson": "trust momentum in trends",
+        }
+        log.reflect(date="2026-01-01", raw_return=0.02, benchmark_return=0.01, llm_service=llm)
+
+        user_prompt = llm.chat_json.call_args[0][0][1]["content"]
+        assert "momentum" in user_prompt
+        assert "danelfin_ai_score" in user_prompt
+        assert '"AAPL": 0.1' in user_prompt
+
+    def test_no_per_strategy_omits_the_block_cleanly(self, tmp_path):
+        """A decision stored before this field existed (or with none given)
+        must not render a dangling/empty "Per-strategy attribution:" label
+        with nothing after it."""
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1})
+        llm = MagicMock()
+        llm.chat_json.return_value = {
+            "verdict": "correct", "what_worked": "x", "what_failed": "", "lesson": "y",
+        }
+        log.reflect(date="2026-01-01", raw_return=0.02, benchmark_return=0.01, llm_service=llm)
+
+        user_prompt = llm.chat_json.call_args[0][0][1]["content"]
+        assert "Per-strategy attribution" not in user_prompt
 
     def test_no_pending_entry_returns_none(self, tmp_path):
         log = _log(tmp_path)

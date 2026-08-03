@@ -1162,6 +1162,7 @@ class LiveTradingEngine:
                     proposal_weights=dict(proposal.targets),
                     notes=f"cycle={self._cycle_count}; {regime}".strip("; "),
                     nav_at_decision=self._portfolio.nav,
+                    per_strategy=dict(proposal.per_strategy),
                 )
 
             if not orders:
@@ -1196,7 +1197,9 @@ class LiveTradingEngine:
                     auto_orders, cycle_id=self._cycle_count
                 )
                 result.orders_submitted = len(statuses)
-                result.order_statuses = [self._status_to_dict(s) for s in statuses]
+                result.order_statuses = [
+                    self._status_to_dict(s, strategy) for s, strategy in statuses
+                ]
                 result.failed_orders = failed
                 result.orders_failed = len(failed)
 
@@ -1463,7 +1466,7 @@ class LiveTradingEngine:
 
     def _execute_orders(
         self, orders: list[dict[str, Any]], cycle_id: int = 0
-    ) -> tuple[list[OrderStatus], list[dict[str, Any]]]:
+    ) -> tuple[list[tuple[OrderStatus, str]], list[dict[str, Any]]]:
         """Submit orders to the broker.
 
         Returns ``(statuses, failed)`` where *failed* lists the orders whose
@@ -1471,6 +1474,12 @@ class LiveTradingEngine:
         caller/operator rather than silently dropped.  Each order carries a
         deterministic ``client_order_id`` so the broker can deduplicate a
         re-submission of the same cycle's order.
+
+        ``statuses`` is ``(OrderStatus, strategy)`` pairs, not bare
+        ``OrderStatus`` — the originating strategy is only known here, at
+        submission time, and must be threaded through explicitly for the
+        persisted trade history to remain traceable back to which strategy
+        caused which order (see ``_status_to_dict``).
         """
         from firm.live.execution_safety import Order, RiskProfile, guard_live_submission, guard_order
 
@@ -1492,7 +1501,7 @@ class LiveTradingEngine:
             require_stop=False,
         )
 
-        statuses: list[OrderStatus] = []
+        statuses: list[tuple[OrderStatus, str]] = []
         failed: list[dict[str, Any]] = []
         for o in orders:
             safety_order = Order(
@@ -1548,7 +1557,14 @@ class LiveTradingEngine:
             )
             try:
                 status = self._broker.submit_order(req)
-                statuses.append(status)
+                # Paired with req.strategy here (not read back off `status`
+                # later): OrderStatus is a broker-level type with no notion
+                # of which of *our* strategies caused it — this is the only
+                # point where that link still exists, and losing it here
+                # means the persisted trade history can never answer "which
+                # strategy placed this order" (needed for reflection/
+                # lessons-learned, not just display).
+                statuses.append((status, req.strategy))
                 log.info("Submitted: %s %s %.2f %s → %s",
                          req.side, req.symbol, req.quantity, req.order_type, status.status)
             except BrokerError as exc:
@@ -1585,7 +1601,7 @@ class LiveTradingEngine:
         return fills
 
     @staticmethod
-    def _status_to_dict(s: OrderStatus) -> dict[str, Any]:
+    def _status_to_dict(s: OrderStatus, strategy: str = "") -> dict[str, Any]:
         return {
             "order_id": s.order_id,
             "symbol": s.symbol,
@@ -1595,4 +1611,5 @@ class LiveTradingEngine:
             "avg_fill_price": s.avg_fill_price,
             "status": s.status,
             "timestamp": s.timestamp.isoformat() if s.timestamp else None,
+            "strategy": strategy,
         }
