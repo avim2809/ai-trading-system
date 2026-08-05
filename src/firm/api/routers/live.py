@@ -8,6 +8,7 @@ on ``request.app.state`` and initialised lazily on the first ``/start``.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
@@ -33,12 +34,18 @@ _engine_lock = threading.Lock()
 # the real production file (as a hardcoded literal previously did) means
 # every test that calls /live/start reads and overwrites live approval
 # history with test data.
-_APPROVALS_PATH = "data/approvals.json"
-_TRADE_HISTORY_ORDERS_PATH = "data/order_history.json"
-_TRADE_HISTORY_CYCLES_PATH = "data/cycle_history.json"
-_KILL_SWITCH_STATE_PATH = "data/kill_switch_state.json"
-_STATE_DB_PATH = "data/live_state.db"
-_MEMORY_LOG_PATH = "data/memory/decisions.jsonl"
+#
+# FIRM_DATA_DIR lets a second firm-api instance (same checkout, same venv)
+# run against an isolated state directory instead of colliding with these
+# files — e.g. a parallel Alpaca paper-trading instance alongside the
+# production IBKR one. Defaults to "data" (unchanged behaviour).
+_DATA_DIR = os.environ.get("FIRM_DATA_DIR", "data")
+_APPROVALS_PATH = f"{_DATA_DIR}/approvals.json"
+_TRADE_HISTORY_ORDERS_PATH = f"{_DATA_DIR}/order_history.json"
+_TRADE_HISTORY_CYCLES_PATH = f"{_DATA_DIR}/cycle_history.json"
+_KILL_SWITCH_STATE_PATH = f"{_DATA_DIR}/kill_switch_state.json"
+_STATE_DB_PATH = f"{_DATA_DIR}/live_state.db"
+_MEMORY_LOG_PATH = f"{_DATA_DIR}/memory/decisions.jsonl"
 
 
 def _start_live_scheduler(
@@ -81,7 +88,7 @@ def _start_live_scheduler(
                     fundamentals_refresh_hour=refresh_hour,
                     dynamic_universe_enabled=bool(dynamic_universe_cfg.get("enabled", False)),
                     dynamic_universe_state_path=dynamic_universe_cfg.get(
-                        "state_path", "data/dynamic_universe_state.json"
+                        "state_path", f"{_DATA_DIR}/dynamic_universe_state.json"
                     ),
                     dynamic_universe_max_symbols=int(
                         dynamic_universe_cfg.get("max_dynamic_symbols", 10)
@@ -282,7 +289,7 @@ def _start_live_engine(
         )
 
     broker_instance = _create_broker(broker)
-    live_providers = build_live_providers(broker)
+    live_providers = build_live_providers(broker, broker_instance)
     data_feed = LiveDataFeed(providers=live_providers, universe=symbols)
 
     if strategies:

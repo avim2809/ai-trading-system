@@ -1,0 +1,408 @@
+# ──────────────────────────────────────────────────────────────
+#  Paper trading — Alpaca parallel instance (2026-08-05).
+#  Deliberately mirrors config/live.yaml (same strategies/universe/risk
+#  envelope) so the two paper accounts are a true side-by-side comparison of
+#  broker execution quality, not two different experiments. Run via a
+#  separate firm-api process (own port/FIRM_DATA_DIR) — see
+#  deploy/ai-trading-alpaca.service. Requires ALPACA_API_KEY/
+#  ALPACA_SECRET_KEY/ALPACA_PAPER in .env.
+#  Monitor live at: http://localhost:8001/live
+# ──────────────────────────────────────────────────────────────
+
+experiment:
+  name: "paper_12_strategy_alpaca"
+  description: "Mirrors paper_12_strategy (config/live.yaml) on Alpaca instead of IBKR, for a same-strategy broker comparison."
+  start_date: "2026-08-05"
+  end_date: "2026-08-12"
+
+broker: "alpaca_paper"
+schedule: "market_open"
+# Cron timezone for market_open / market_close (US equity RTH).
+# Also buckets daily trade/turnover limits and decision-memory dates.
+schedule_timezone: "US/Eastern"
+# LiveTradingEngine only recognises "full_auto" / "semi_auto" — anything else
+# (e.g. plain "auto") silently falls through to "everything needs approval".
+approval_mode: "full_auto"
+
+# Live cycles read ``data/cache/combined/fundamentals`` only (no per-cycle API).
+# firm-api refreshes that cache daily at fundamentals_refresh_hour and at boot
+# when older than FIRM_FUNDAMENTALS_REFRESH_MAX_AGE_HOURS (default 24).
+fundamentals_refresh_hour: 8
+strategies:
+  enabled:
+    - momentum
+    - trend
+    - mean_reversion
+    - stat_arb
+    - multi_factor
+    - sentiment
+    - event_driven
+    # ml_prediction — disabled: overfit risk on 25-name universe (IC audit)
+    - volatility_breakout
+    - seasonality
+    # gann — permanently disabled; no timing value on any asset class tested
+    - regime_hmm
+    # danelfin_ai_score — enabled 2026-07-31 after a 3-window A/B showed
+    # portfolio Sharpe improved in every window (never worse; see
+    # docs/investing_pro_integration.md "Danelfin AI-score" section for the
+    # full honest writeup, including the caveat that the strategy's own
+    # standalone Sharpe was inconsistent across windows — this looks like a
+    # genuine diversification effect under `optimal` combination, not
+    # unambiguous proof of Danelfin's own predictive-power marketing claim).
+    # Monitor live attribution; revert this one line to disable if it
+    # doesn't hold up in live paper trading.
+    - danelfin_ai_score
+    # danelfin_live_signals — enabled 2026-07-31 at the user's explicit
+    # request ("can't you feed all that goodness into my analysts
+    # implementation"). UNLIKE danelfin_ai_score, this one has NEVER been
+    # A/B tested and structurally CANNOT be: it reads Danelfin's /v3/*
+    # trading-parameters + price-forecast + performance endpoints, which
+    # are latest-snapshot-only with no historical dates (confirmed live,
+    # not just per Danelfin's docs) — pit_view.live_signals() is always
+    # empty in a backtest, so the walk-forward promotion gate this project
+    # otherwise relies on is a no-op here. This is a live-only,
+    # unvalidated judgment call, not an evidence-backed one — watch its
+    # live attribution closely and revert this line if it looks bad.
+    - danelfin_live_signals
+    # danelfin_best_stocks_signal — enabled 2026-08-02 at the user's explicit
+    # request to use Danelfin's real /v3/beststocks Top-25 list as a strong
+    # buy signal (not a backtested strategy — same structural reason as
+    # danelfin_live_signals: /v3/beststocks has no historical dates,
+    # confirmed live). Reads the vendor's own curated list directly, unlike
+    # this project's earlier sector-ranking reconstruction (only ~25-30%
+    # match to the real list — see docs/danelfin_best_stocks_arm.md) which
+    # this strategy does NOT use. Will rarely fire against this fixed
+    # ~25-name US-mega-cap universe since Danelfin's real list skews toward
+    # smaller/rotating names — see the danelfin_dynamic_universe: block
+    # below (disabled by default) for the mechanism that can give it more
+    # surface once reviewed and enabled. Live-only, unvalidated judgment
+    # call — watch its attribution and revert this line if it looks bad.
+    - danelfin_best_stocks_signal
+  auto_approve:
+    - momentum
+    - trend
+    - mean_reversion
+    - stat_arb
+    - multi_factor
+    - sentiment
+    - event_driven
+    - volatility_breakout
+    - seasonality
+    - regime_hmm
+    - danelfin_ai_score
+    - danelfin_live_signals
+    - danelfin_best_stocks_signal
+
+# Per-strategy parameters passed to build_orchestrator via strategy_params.
+strategy_params:
+  stat_arb:
+    require_cointegration: true
+    coint_pvalue: 0.10
+    max_pairs: 5
+    entry_z: 2.0
+    exit_z: 0.5
+    lookback_days: 60
+    # Sector/thematic anchors — avoids correlation-mining across the full universe.
+    predefined_pairs:
+      - ["SPY", "QQQ"]
+      - ["SPY", "IWM"]
+      - ["AAPL", "MSFT"]
+      - ["JPM", "BAC"]
+      - ["XOM", "CVX"]
+      - ["GOOG", "META"]
+
+universe:
+  symbols:
+    # Mega-cap tech
+    - AAPL
+    - MSFT
+    - NVDA
+    - GOOG
+    - AMZN
+    - META
+    # Growth / momentum
+    - TSLA
+    - AVGO
+    - AMD
+    - CRM
+    - NFLX
+    - ADBE
+    # Financials
+    - JPM
+    - GS
+    - BAC
+    - V
+    - MA
+    # Healthcare / defensives
+    - JNJ
+    - UNH
+    - LLY
+    # Energy
+    - XOM
+    - CVX
+    # ETFs — stat-arb anchors + regime proxy
+    - SPY
+    - QQQ
+    - IWM
+
+rebalance_frequency: "daily"
+initial_capital: 1_000_000
+
+# Live cycle timeouts (seconds). Hard timeout releases the cycle lock so a
+# hung LLM/IBKR call cannot block every future scheduled cycle.
+cycle_hard_timeout_seconds: 900
+cycle_watchdog_seconds: 1800
+# Broker & host failover (see docs/PROJECT_CONTEXT.md "Broker & host
+# failover"). A broker call failing mid-cycle triggers one inline reconnect
+# attempt on the cycle worker thread; after this many *consecutive* cycles
+# still failing despite reconnect attempts, the alert escalates from
+# "broker_unavailable" to the louder "broker_disconnected_sustained" (likely
+# needs a human — IB Gateway down/logged out, or a host issue).
+broker_disconnect_alert_threshold: 3
+# Per-analyst wall-clock cap inside the orchestrator parallel pool.
+analyst_timeout_seconds: 300
+# Bull/bear/debate/trader/risk/execution stage cap (defaults to analyst timeout).
+orchestrator_stage_timeout_seconds: 300
+# Pre-import HMM / RAG stacks before the first catch-up cycle.
+pipeline_warmup: true
+
+# ──────────────────────────────────────────────────────────────
+# Risk — realistic live-account constraints
+# These are the numbers you would actually enforce on a live
+# account, so paper P&L is a valid predictor of live results.
+# ──────────────────────────────────────────────────────────────
+risk:
+  # Live-engine circuit breakers
+  kill_switch_drawdown: 0.08    # halt at 8% portfolio drawdown — standard retail hard stop
+  max_daily_trades: 40          # realistic order count before costs eat alpha
+  max_daily_turnover: 0.25      # 25% of NAV/day — high-frequency edge is rare at this scale
+
+  # Risk-agent position and exposure limits
+  max_position_pct: 0.05        # 5% single-stock cap — institutional standard
+  max_gross_exposure: 1.5       # 1.5× gross — modest leverage, survives gap risk
+  max_net_exposure: 0.50        # 50% net long — mild long bias, not market-neutral
+  max_sector_pct: 0.25          # 25% sector cap — diversification guardrail
+  vol_target: 0.12              # 12% annualised vol target — conservative live baseline
+  max_drawdown_pct: 0.15        # 15% per-strategy drawdown before it is sized down
+
+  # ADV/participation-rate liquidity cap: clips the implied trade size (not
+  # the resting position) to this fraction of a symbol's trailing 20-day
+  # average daily dollar volume. 10% is a standard conservative desk limit —
+  # this account is small relative to the mega-cap universe's ADV, so it's
+  # a backstop against illiquid/halted names rather than a routine binding
+  # constraint. See RiskAgent._cap_liquidity.
+  max_participation_pct: 0.10
+  adv_lookback_days: 20
+
+  # Pairwise-correlation concentration cap: same-direction positions with
+  # 60-day return correlation above this threshold have their combined
+  # weight capped, catching cross-sector correlated risk max_sector_pct
+  # misses (e.g. two rate-sensitive names in different GICS sectors).
+  # Unlike the liquidity cap this CAN bind under normal trending regimes
+  # (many large caps correlate >0.75 with broad market beta), so it's
+  # enabled here (pre-launch, no live track record to preserve) but left
+  # off in settings.yaml to keep the already-documented backtest numbers in
+  # docs/portfolio_construction_diagnosis.md comparable. See
+  # RiskAgent._cap_correlated_exposure.
+  correlation_threshold: 0.75
+  max_correlated_pair_pct: 0.25
+  correlation_lookback_days: 60
+
+  # Optional CVaR (Conditional Value-at-Risk / Expected Shortfall) tail-risk
+  # sizing overlay — complements vol_target's diagonal-covariance estimate
+  # with a distributional tail read (two books with identical variance can
+  # have very different downside severity). Off by default pending a
+  # dedicated A/B, like the other new Phase-4 research item. See
+  # RiskAgent._cvar_overlay / firm.eval.metrics.conditional_value_at_risk.
+  # cvar_limit: 0.03
+  # cvar_confidence: 0.95
+  # cvar_lookback_days: 60
+
+  # GICS-style sector tags for the 25-name universe (enables max_sector_pct).
+  sector_map:
+    AAPL: technology
+    MSFT: technology
+    NVDA: technology
+    GOOG: communication
+    AMZN: consumer_discretionary
+    META: communication
+    TSLA: consumer_discretionary
+    AVGO: technology
+    AMD: technology
+    CRM: technology
+    NFLX: communication
+    ADBE: technology
+    JPM: financials
+    GS: financials
+    BAC: financials
+    V: financials
+    MA: financials
+    JNJ: healthcare
+    UNH: healthcare
+    LLY: healthcare
+    XOM: energy
+    CVX: energy
+    SPY: etf
+    QQQ: etf
+    IWM: etf
+
+  # HMM regime overlay — live-equivalent exposure scaling
+  regime_overlay:
+    enabled: true
+    benchmark_symbol: "SPY"
+    n_states: 3
+    retrain_frequency: 5        # refit weekly
+    lookback_days: 252
+    # `ensemble: true` swaps in the 5-seed majority-vote regime detector
+    # (firm.regime.ensemble.EnsembleRegimeModel). Only A/B'd against
+    # strategy_regime_weights so far (docs/regime_ensemble_scoping.md) —
+    # not this overlay specifically — so left false pending its own A/B.
+    ensemble: false
+    exposure_map:
+      Bull: 1.3                 # modest lever in confirmed bull (not aggressive)
+      Bear: 0.4                 # meaningful de-risk in bear
+      Chop: 0.7                 # slightly reduced in indeterminate regime
+
+# ──────────────────────────────────────────────────────────────
+# Dynamic universe growth — general-purpose mechanism (not Danelfin-specific
+# in its own persistence/engine API — see firm.live.dynamic_universe_state
+# and LiveTradingEngine.update_universe/update_sector_map), driven here by
+# Danelfin's real /v3/beststocks list (firm.live.danelfin_universe_sync).
+# Disabled by default (explicit opt-in, matching every other risk-bearing
+# toggle in this file) — the user asked for this because a static universe
+# "doesn't make sense in general", and to give danelfin_best_stocks_signal
+# more than the small overlap it gets against the fixed universe below, but
+# it carries a real residual risk this project is not hiding: turnover cost
+# from list churn even with the dwell delay below, and exposure to
+# smaller/less-liquid names than the rest of the universe. Review at least
+# one real cycle's dry-run log output (danelfin_universe_sync's INFO-level
+# additions/removals) before flipping enabled: true for real.
+danelfin_dynamic_universe:
+  enabled: false
+  state_path: "data_alpaca/dynamic_universe_state.json"
+  max_dynamic_symbols: 10        # hard cap on total dynamically-held symbols
+  min_dwell_days_before_removal: 5   # consecutive absent days before a dynamic symbol is dropped
+
+# ──────────────────────────────────────────────────────────────
+# Transaction costs — must match your actual broker schedule
+# IBKR Tiered: ~$0.005/share; modelled here as pct of notional
+# ──────────────────────────────────────────────────────────────
+costs:
+  commission_pct: 0.0005        # 0.05% — realistic IBKR tiered rate
+  slippage_pct: 0.0005          # 0.05% — flat baseline slippage (quote/latency noise)
+  spread_pct: 0.0002            # 0.02% — approx. cost of crossing the bid-ask spread
+  # Size/volume-aware market-impact cost, ON TOP of the flat rates above —
+  # those don't scale with order size relative to a name's trading volume,
+  # so a trade that's a large fraction of ADV was priced the same as a tiny
+  # one. Square-root law: impact_pct = market_impact_coefficient *
+  # sqrt(trade_notional / ADV_dollars). 0.005 ~= 0.5% impact at 100% of ADV,
+  # ~0.16% at the risk.max_participation_pct cap below (10% of ADV) — a
+  # conservative starting calibration; tune from realised IBKR fills once
+  # available. See firm.agents._liquidity.market_impact_pct. Shares
+  # risk.adv_lookback_days for its trailing-volume window (same ADV
+  # definition as the liquidity cap below).
+  market_impact_coefficient: 0.005
+  # Optional linear-below/sqrt-above crossover participation rate — empirical
+  # work shows impact is closer to linear for small orders, sqrt only
+  # dominating at higher participation; this account's trades are small
+  # relative to the mega-cap universe's ADV, so they likely sit in the
+  # linear-dominant regime and a flat sqrt coefficient may overstate their
+  # cost. Unset (None) = pure sqrt law at every size, unchanged. Uncomment
+  # once calibrated from realised fills:
+  # market_impact_crossover_participation: 0.1
+  # Short-borrow fees are NOT simulated live: IBKR charges/reports real
+  # borrow costs against the account directly, so there is nothing to
+  # estimate here (unlike the backtest, which has no real broker to charge
+  # it). See firm.config.BacktestConfig.short_borrow_annual_pct.
+
+# ──────────────────────────────────────────────────────────────
+# Macro-event blackout (news-guard) — pre-trade gate
+# Holds orders whose instrument sits inside a high-impact economic
+# event window (FOMC / NFP / CPI / ECB / BoE). Default OFF.
+# ──────────────────────────────────────────────────────────────
+news_guard:
+  enabled: true                 # set true to arm the blackout gate
+  before_min: 30                # minutes before an event to start holding
+  after_min: 15                 # minutes after an event to keep holding
+  offline: false                # true = use only the bundled events.csv
+  source: forexfactory          # forexfactory (default, free/keyless) | investing
+                                 # (richer coverage via the opt-in Investing.com
+                                 # scraper — requires INVESTING_SCRAPER_ENABLED=1
+                                 # in .env; a fetch failure falls through to
+                                 # forexfactory then the bundled CSV either way,
+                                 # see firm.live.news_guard.load_events)
+
+# ──────────────────────────────────────────────────────────────
+# Signal combination (research stage)
+#   confidence = confidence-weighted mean (legacy default)
+#   optimal    = inverse-covariance weighting (down-weights correlated /
+#                poor-performing strategies); requires per-strategy return
+#                history, which live attribution now tracks unconditionally.
+#
+# Set to `optimal` per docs/portfolio_construction_diagnosis.md: a 3-window
+# A/B (2026-07-26) showed `optimal` beat `confidence` on portfolio Sharpe in
+# every tested window (never worse), including one large improvement
+# (0.16 -> 1.00). Falls back to confidence-equivalent weighting automatically
+# when return history is too thin (see agents/research/_combine.py).
+# ──────────────────────────────────────────────────────────────
+signal_combination:
+  method: optimal
+
+# ──────────────────────────────────────────────────────────────
+# Generic per-strategy rolling-Sharpe circuit breaker (research/_circuit_breaker.py)
+#   Damps (never fully zeroes) a strategy's raw signal contribution when its
+#   trailing realized Sharpe is persistently and materially negative —
+#   complementary to `optimal` above, which has no notion of edge *sign*.
+#   Motivated by regime_hmm's negative Sharpe in 6/6 diagnostic windows.
+#
+# DISABLED: an A/B with these exact thresholds over the same 3 diagnostic
+# windows found it net *hurt* portfolio Sharpe in all 3 (over-gated several
+# volatile-but-legitimate strategies via a noisy 60-day trailing Sharpe on
+# short windows). Kept here for future calibration/research, not enabled.
+# See docs/portfolio_construction_diagnosis.md.
+# ──────────────────────────────────────────────────────────────
+strategy_circuit_breaker:
+  enabled: false
+  lookback_days: 60
+  min_track_record_days: 20
+  trigger_sharpe: -0.5
+  full_cutoff_sharpe: -1.5
+  damping_floor: 0.25
+
+# ──────────────────────────────────────────────────────────────
+# Regime-conditional strategy multipliers (experimental)
+#   Scales each strategy's raw signal before bull/bear combine based on
+#   the prevailing market regime (Bull/Bear/Chop). Disabled by default —
+#   calibrate via scripts/calibrate_strategy_regime_weights.py before enabling.
+#   `ensemble: true` swaps the single-model regime detector for a 5-seed
+#   majority-vote ensemble (firm.regime.ensemble.EnsembleRegimeModel) — A/B'd
+#   in docs/regime_ensemble_scoping.md: calms regime_hmm's own noise but does
+#   NOT improve portfolio Sharpe with this feature enabled, so left false.
+# ──────────────────────────────────────────────────────────────
+strategy_regime_weights:
+  enabled: false
+  ensemble: false
+  benchmark_symbol: SPY
+  lookback_days: 252
+  retrain_frequency: 21
+  weights:
+    Bull:
+      momentum: 1.2
+      trend: 1.2
+      mean_reversion: 0.8
+    Bear:
+      stat_arb: 1.2
+      mean_reversion: 1.1
+      momentum: 0.7
+      trend: 0.7
+    Chop:
+      regime_hmm: 0.5
+      volatility_breakout: 0.8
+
+# ──────────────────────────────────────────────────────────────
+# Portfolio allocation (TraderAgent)
+#   allocation_method: conviction_weighted | equal_weight | risk_parity | kelly
+#   kelly_fraction is only used when allocation_method: kelly (half-Kelly = 0.5)
+# ──────────────────────────────────────────────────────────────
+allocation_method: conviction_weighted
+kelly_fraction: 0.5

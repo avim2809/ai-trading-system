@@ -28,6 +28,9 @@ data/order_history.json
 data/best_stocks_ledger.json
 data/best_stocks_backtest_full.json
 data/dynamic_universe_state.json
+# data_alpaca/ — isolated runtime state for the parallel Alpaca instance
+# (deploy/ai-trading-alpaca.service, FIRM_DATA_DIR=data_alpaca).
+data_alpaca/
 .coverage
 runs/
 .pytest_cache/

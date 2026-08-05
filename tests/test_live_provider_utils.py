@@ -236,6 +236,25 @@ def test_build_live_providers_ibkr_sentiment_without_fundamentals_keys(mock_ibkr
     assert "fundamentals" in providers
 
 
-def test_build_live_providers_fallback():
+@patch("firm.data.providers.alpaca.AlpacaProvider")
+def test_build_live_providers_alpaca(mock_alpaca, monkeypatch):
+    monkeypatch.setenv("ALPACA_API_KEY", "test-alpaca-key")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "test-alpaca-secret")
+    monkeypatch.setenv("FMP_API_KEY", "test-fmp")
+    monkeypatch.setenv("MASSIVE_API_KEY", "test-massive")
+    from firm.data.providers.fallback import FallbackProvider
+
     providers = build_live_providers("alpaca_paper")
+    assert "prices" in providers
+    assert "sentiment" in providers
+    assert isinstance(providers["sentiment"], FallbackProvider)
+    assert isinstance(providers["fundamentals"], FallbackProvider)
+    assert providers["sentiment"] is providers["fundamentals"]
+    mock_alpaca.assert_called_once()
+
+
+def test_build_live_providers_fallback():
+    # A broker with no dedicated data-provider branch (unlike ibkr*/alpaca*)
+    # falls through to one shared FallbackProvider for every capability.
+    providers = build_live_providers("some_future_broker")
     assert providers["prices"] is providers["fundamentals"]

@@ -214,15 +214,98 @@ def resolve_live_startup(
     }
 
 
-def build_live_providers(broker_type: str) -> dict[str, Any]:
+def _attach_auxiliary_providers(providers: dict[str, Any], label: str) -> None:
+    """Attach FallbackProvider-backed fundamentals/sentiment/estimates/
+    ai_scores/live_signals/best_stocks to *providers* (in place) when their
+    respective API keys are configured. Shared by every broker branch that
+    supplies its own dedicated ``prices`` provider (IBKR, Alpaca) but still
+    wants the same vendor-agnostic auxiliary data everyone else gets.
+    """
+    sentiment_configured = any(
+        os.getenv(k)
+        for k in ("MASSIVE_API_KEY", "ALPHAVANTAGE_API_KEY", "FINNHUB_API_KEY")
+    )
+    fundamentals_configured = any(
+        os.getenv(k)
+        for k in (
+            "FMP_API_KEY",
+            "MASSIVE_API_KEY",
+            "FINNHUB_API_KEY",
+            "TWELVEDATA_API_KEY",
+            "ALPHAVANTAGE_API_KEY",
+        )
+    )
+    # analyst_ratings chain is FMP-only (see fallback.py) — gate on that
+    # key specifically rather than the broader fundamentals set above.
+    analyst_ratings_configured = bool(os.getenv("FMP_API_KEY"))
+    # ai_scores / live_signals / best_stocks chains are all Danelfin-only.
+    ai_scores_configured = bool(os.getenv("DANELFIN_API_KEY"))
+    live_signals_configured = bool(os.getenv("DANELFIN_API_KEY"))
+    best_stocks_configured = bool(os.getenv("DANELFIN_API_KEY"))
+
+    if (
+        sentiment_configured or fundamentals_configured
+        or analyst_ratings_configured or ai_scores_configured
+        or live_signals_configured or best_stocks_configured
+    ):
+        try:
+            from firm.data.providers.fallback import FallbackProvider
+
+            fallback = FallbackProvider()
+            if fundamentals_configured:
+                providers["fundamentals"] = fallback
+                log.info(
+                    "%s live fundamentals: FMP → Finnhub → EDGAR → … fallback chain", label
+                )
+            if sentiment_configured:
+                providers["sentiment"] = fallback
+                log.info(
+                    "%s live sentiment: Massive → Alpha Vantage → Finnhub → Alpaca "
+                    "fallback chain", label
+                )
+            if analyst_ratings_configured:
+                providers["estimates"] = fallback
+                log.info("%s live analyst ratings: FMP (grades-historical)", label)
+            if ai_scores_configured:
+                providers["ai_scores"] = fallback
+                log.info("%s live AI scores: Danelfin", label)
+            if live_signals_configured:
+                providers["live_signals"] = fallback
+                log.info("%s live signals: Danelfin (trading-parameters/price-forecast/performance)", label)
+            if best_stocks_configured:
+                providers["best_stocks"] = fallback
+                log.info("%s live best-stocks: Danelfin (/v3/beststocks)", label)
+        except Exception as exc:
+            log.warning("Fallback provider not available: %s", exc, exc_info=True)
+
+    if "sentiment" not in providers:
+        log.warning(
+            "No sentiment API key (MASSIVE_API_KEY, ALPHAVANTAGE_API_KEY, "
+            "FINNHUB_API_KEY, or ALPACA_API_KEY); sentiment strategy will "
+            "receive empty data on live"
+        )
+
+
+def build_live_providers(broker_type: str, broker_instance: Any = None) -> dict[str, Any]:
     """Build the provider map expected by :class:`LiveDataFeed`.
 
-    IBKR brokers use IB Gateway for daily OHLCV prices only.  News sentiment
-    uses the Massive → Alpha Vantage → Finnhub fallback chain (same as
-    backtests).  Fundamentals use FMP → Finnhub → … when configured.
-    All other brokers use :class:`FallbackProvider` for all capabilities.
+    IBKR and Alpaca brokers each use their own connection for daily OHLCV
+    prices only — everything else (fundamentals/sentiment/estimates/
+    ai_scores/live_signals/best_stocks) uses the same vendor-agnostic
+    Massive → Alpha Vantage → Finnhub → Alpaca (sentiment) / FMP → … chain as
+    backtests, via :func:`_attach_auxiliary_providers`. All other brokers use
+    :class:`FallbackProvider` for every capability including prices.
+
+    ``broker_instance``, when given an ``IBKRBroker``, is reused for market
+    data instead of opening a second independent IB Gateway connection —
+    running two separate connections on the live-cycle worker thread was
+    confirmed live (2026-08-05) to make the broker's own order-submission
+    calls hang until timeout. Alpaca's market-data client is a stateless
+    REST client (no persistent socket), so it has no equivalent
+    connection-sharing need — a fresh ``AlpacaProvider`` is always created.
     """
     if broker_type.startswith("ibkr"):
+        from firm.brokers.ibkr import IBKRBroker
         from firm.data.providers.ibkr import IBKRProvider
 
         host = os.getenv("IBKR_HOST", "127.0.0.1")
@@ -230,70 +313,21 @@ def build_live_providers(broker_type: str) -> dict[str, Any]:
             port = int(os.getenv("IBKR_PAPER_PORT", "4002"))
         else:
             port = int(os.getenv("IBKR_PORT", "7496"))
-        ibkr = IBKRProvider(host=host, port=port, client_id=2)
+        shared_broker = broker_instance if isinstance(broker_instance, IBKRBroker) else None
+        ibkr = IBKRProvider(host=host, port=port, client_id=2, shared_broker=shared_broker)
         providers: dict[str, Any] = {"prices": ibkr}
+        _attach_auxiliary_providers(providers, "IBKR")
+        return providers
 
-        sentiment_configured = any(
-            os.getenv(k)
-            for k in ("MASSIVE_API_KEY", "ALPHAVANTAGE_API_KEY", "FINNHUB_API_KEY")
+    if broker_type.startswith("alpaca"):
+        from firm.data.providers.alpaca import AlpacaProvider
+
+        alpaca_provider = AlpacaProvider(
+            api_key=os.getenv("ALPACA_API_KEY", ""),
+            secret_key=os.getenv("ALPACA_SECRET_KEY", ""),
         )
-        fundamentals_configured = any(
-            os.getenv(k)
-            for k in (
-                "FMP_API_KEY",
-                "MASSIVE_API_KEY",
-                "FINNHUB_API_KEY",
-                "TWELVEDATA_API_KEY",
-                "ALPHAVANTAGE_API_KEY",
-            )
-        )
-        # analyst_ratings chain is FMP-only (see fallback.py) — gate on that
-        # key specifically rather than the broader fundamentals set above.
-        analyst_ratings_configured = bool(os.getenv("FMP_API_KEY"))
-        # ai_scores / live_signals / best_stocks chains are all Danelfin-only.
-        ai_scores_configured = bool(os.getenv("DANELFIN_API_KEY"))
-        live_signals_configured = bool(os.getenv("DANELFIN_API_KEY"))
-        best_stocks_configured = bool(os.getenv("DANELFIN_API_KEY"))
-
-        if (
-            sentiment_configured or fundamentals_configured
-            or analyst_ratings_configured or ai_scores_configured
-            or live_signals_configured or best_stocks_configured
-        ):
-            try:
-                from firm.data.providers.fallback import FallbackProvider
-
-                fallback = FallbackProvider()
-                if fundamentals_configured:
-                    providers["fundamentals"] = fallback
-                    log.info(
-                        "IBKR live fundamentals: FMP → Finnhub → EDGAR → … fallback chain"
-                    )
-                if sentiment_configured:
-                    providers["sentiment"] = fallback
-                    log.info(
-                        "IBKR live sentiment: Massive → Alpha Vantage → Finnhub fallback chain"
-                    )
-                if analyst_ratings_configured:
-                    providers["estimates"] = fallback
-                    log.info("IBKR live analyst ratings: FMP (grades-historical)")
-                if ai_scores_configured:
-                    providers["ai_scores"] = fallback
-                    log.info("IBKR live AI scores: Danelfin")
-                if live_signals_configured:
-                    providers["live_signals"] = fallback
-                    log.info("IBKR live signals: Danelfin (trading-parameters/price-forecast/performance)")
-                if best_stocks_configured:
-                    providers["best_stocks"] = fallback
-                    log.info("IBKR live best-stocks: Danelfin (/v3/beststocks)")
-            except Exception as exc:
-                log.warning("Fallback provider not available: %s", exc, exc_info=True)
-
-        if "sentiment" not in providers:
-            log.warning(
-                "No sentiment API key (MASSIVE_API_KEY, ALPHAVANTAGE_API_KEY, or "
-                "FINNHUB_API_KEY); sentiment strategy will receive empty data on live"
-            )
+        providers = {"prices": alpaca_provider}
+        _attach_auxiliary_providers(providers, "Alpaca")
         return providers
 
     from firm.data.providers.fallback import FallbackProvider

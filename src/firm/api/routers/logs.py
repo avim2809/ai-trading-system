@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -18,7 +19,8 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/logs", tags=["logs"])
 
-_LOG_FILE = Path("data/logs/api.log")
+# Must match firm.api.app's setup_logging(log_file=...) default.
+_LOG_FILE = Path(os.environ.get("FIRM_DATA_DIR", "data")) / "logs" / "api.log"
 # Caps a single response (and the initial/reset read) so a client that's
 # fallen far behind, or opens the page against a large file, can't force a
 # huge read in one request.

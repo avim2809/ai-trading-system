@@ -1,0 +1,31 @@
+[Unit]
+Description=AI Trading System API (Alpaca paper-trading parallel instance)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/local/store/git/ai-trading-system
+EnvironmentFile=/local/store/git/ai-trading-system/.env
+# firm-api reads config/live_alpaca.yaml on boot when this is set (see
+# firm.api.routers.live / firm.live.provider_utils).
+Environment=FIRM_AUTO_START_LIVE=1
+Environment=FIRM_LIVE_CONFIG=config/live_alpaca.yaml
+# Isolates this instance's port and data/log/state files from
+# ai-trading.service's own (same checkout, same venv) — see the matching
+# FIRM_DATA_DIR default in firm.api.app / firm.api.routers.live.
+Environment=FIRM_API_PORT=8001
+Environment=FIRM_DATA_DIR=data_alpaca
+# Same LLM arm as the production IBKR instance (config/llm_ab_quant.yaml) so
+# this is a broker-only comparison, not a confounded one. See
+# docs/llm_ab_test_runbook.md.
+Environment=FIRM_LLM_CONFIG=config/llm_ab_quant.yaml
+# No IB Gateway dependency — Alpaca's REST API needs no local gateway process.
+ExecStart=/local/store/git/ai-trading-system/.venv/bin/firm-api
+Restart=always
+RestartSec=10
+TimeoutStopSec=120
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

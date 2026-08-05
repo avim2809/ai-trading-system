@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -18,7 +19,11 @@ from starlette.staticfiles import StaticFiles
 # monitor would have nothing to show.
 from firm.logging_setup import setup_logging
 
-setup_logging(log_file="data/logs/api.log")
+# FIRM_DATA_DIR lets a second firm-api instance (same checkout) log to an
+# isolated directory instead of interleaving with another instance's log —
+# see the matching default in firm.api.routers.live.
+_DATA_DIR = os.environ.get("FIRM_DATA_DIR", "data")
+setup_logging(log_file=f"{_DATA_DIR}/logs/api.log")
 
 log = logging.getLogger(__name__)
 
@@ -137,10 +142,10 @@ def run() -> None:
     container network already isolates it) if you need it to listen on all
     interfaces.
     """
-    import os
     import uvicorn
     host = os.environ.get("FIRM_API_HOST", "127.0.0.1")
-    uvicorn.run(app, host=host, port=8000)
+    port = int(os.environ.get("FIRM_API_PORT", "8000"))
+    uvicorn.run(app, host=host, port=port)
 
 
 app = create_app()
