@@ -1,0 +1,14 @@
+- [IBKR paper trading setup status](project_ibkr_paper_trading_setup.md) — blockers/state for IBKR paper; 8/3-4: retry+reconciliation added, hung qualifyContracts() froze broker until timeouts fixed
+- [Data pipeline & backtest reliability](project_data_pipeline_and_backtest_reliability.md) — 6 real bugs in fallback provider/fetch-data/walk-forward found running real data end to end
+- [RAG subsystem status](project_rag_subsystem_status.md) — fixed retrieval bugs; 4344 real chunks ingested (SEC/research/system), news pending AV quota reset
+- [Exception-logging audit](project_exception_logging_audit.md) — fixed silent excepts across ~20 files; found/fixed critical /live/start empty-providers bug
+- [Frontend log monitor](project_frontend_log_monitor.md) — added /logs page + GET /api/logs/tail; fixed setup_logging only firing via firm-api entrypoint
+- [Reflection & GUI parity](project_reflection_and_gui_parity.md) — reflection restart-safety, Config page fix; 8/3: backtest-registry architecture + 2 strategy-attribution bugs fixed
+- [Cost optimization & logging](project_cost_optimization_and_logging.md) — VPS is 2-core/3.3GB (real constraint); LLMLingua off live path; Voyage cost fixes; rotating logs wired up
+- [Live monitoring & security](project_live_monitoring_and_security.md) — real IBKR trade run found/fixed 6 bugs; nginx+ufw+basic-auth now in front of the API (was open to the internet)
+- [User profile](user_profile.md) — comfortable with infra-level work, defer to them only for credentials
+- [Memory-keeping habits](feedback_memory_habits.md) — user wants proactive, thorough memory updates, not just on request
+- [Full-stack sync](feedback_full_stack_sync.md) — always verify frontend against real backend shapes and rebuild frontend/dist, not just backend fixes
+- [Danelfin integration](project_danelfin_integration.md) — ai_scores (A/B'd, enabled), live_signals (enabled, unvalidated), Best-Stocks synthetic arm; LLM A/B is sequential not concurrent
+- [Autonomous scope calls](feedback_autonomous_scope_calls.md) — user wants paid-data capabilities maximally wired in even without A/B; still no anti-bot bypass or silent heavy infra
+- [Production incident priority](feedback_production_incident_priority.md) — fix currently-broken live-trading bugs now, in-session, not as a deferred follow-up
