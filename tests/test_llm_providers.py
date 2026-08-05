@@ -74,7 +74,7 @@ class TestBuildLLMService:
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
         monkeypatch.setenv("GOOGLE_API_KEY", "google-key")
         svc = build_llm_service(provider="gemini")
-        assert svc.default_model == "gemini/gemini-2.5-flash"
+        assert svc.default_model == "gemini/gemini-2.5-pro"
         assert os.environ.get("GEMINI_API_KEY") == "google-key"
 
     def test_request_timeout_passed_to_litellm(self, monkeypatch):

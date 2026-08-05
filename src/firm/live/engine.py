@@ -1329,6 +1329,21 @@ class LiveTradingEngine:
                 result.orders_failed,
             )
 
+            # A cycle where every auto order failed to submit is a silent
+            # no-trade day: the broker can report "reconnected" (a lightweight
+            # check) while individual calls like qualifyContracts still time
+            # out, so this doesn't go through the BrokerError path below and
+            # would otherwise surface as nothing louder than the routine
+            # broker_unavailable/broker_reconnected alerts.
+            if auto_orders and result.orders_submitted == 0 and result.orders_failed == len(auto_orders):
+                result.alerts.append(self._emit_alert(
+                    "cycle_all_orders_failed",
+                    "critical",
+                    f"All {result.orders_failed} order(s) failed to submit this "
+                    "cycle (0 submitted) — broker may report connected while "
+                    "individual requests time out; check IB Gateway.",
+                ))
+
         except Exception as exc:
             result.error = str(exc)
             log.error("Cycle %d failed: %s", self._cycle_count, exc, exc_info=True)

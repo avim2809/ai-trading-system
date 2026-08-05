@@ -1,6 +1,6 @@
 # Default to a FREE model. Options that cost nothing to run:
 #   groq/llama-3.3-70b-versatile               – free Groq tier, needs a free GROQ_API_KEY
-#   gemini/gemini-2.5-flash                    – Google Gemini, needs GEMINI_API_KEY
+#   gemini/gemini-2.5-pro                      – Google Gemini, needs GEMINI_API_KEY
 #   openrouter/nvidia/nemotron-3-ultra-550b-a55b:free – free OpenRouter tier, needs OPENROUTER_API_KEY
 #   openrouter/openrouter/free                 – OpenRouter auto-router over whatever :free model fits
 #   ollama/llama3                              – fully local/offline, needs Ollama running
@@ -19,7 +19,7 @@ provider:
   # retries the rest of the list in order before giving up.
   fallback_models:
     - "groq/llama-3.1-8b-instant"
-    - "gemini/gemini-2.5-flash"
+    - "gemini/gemini-2.5-pro"
     - "openrouter/openai/gpt-oss-20b:free"
     - "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
     - "openrouter/google/gemma-4-31b-it:free"

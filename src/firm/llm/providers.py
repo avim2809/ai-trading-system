@@ -61,9 +61,10 @@ PROVIDERS: dict[str, LLMProvider] = {
     ),
     "gemini": LLMProvider(
         "gemini", "Google Gemini", "GEMINI_API_KEY",
-        "gemini/gemini-2.5-flash", "gemini/", True,
+        "gemini/gemini-2.5-pro", "gemini/", True,
         (
-            "gemini/gemini-2.5-flash",
+            # gemini-2.5-flash was decommissioned for new API keys (404 from
+            # Google, confirmed live 2026-08-05) — dropped from the chain.
             "gemini/gemini-2.5-pro",
             "gemini/gemini-2.0-flash",
         ),

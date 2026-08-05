@@ -13,6 +13,8 @@ Fundamentals, corporate actions, and index constituents are not implemented.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
+from typing import Any
 
 import pandas as pd
 
@@ -54,6 +56,7 @@ class IBKRProvider(DataProvider):
         client_id: int = 2,
         market_data_type: int = 3,
         what_to_show: str = "TRADES",
+        shared_broker: Any = None,
     ) -> None:
         if not _HAS_IB:
             raise ImportError(
@@ -68,8 +71,18 @@ class IBKRProvider(DataProvider):
         self._market_data_type = market_data_type
         self._what_to_show = what_to_show
         self._ib = ib
-        self._owns_connection = ib is None
+        self._owns_connection = ib is None and shared_broker is None
         self._news_codes: str | None = None
+        # When set, reuse IBKRBroker's own connection instead of opening a
+        # second independent one. Confirmed live 2026-08-05: running two
+        # separate ib_async IB() connections on the live-cycle worker thread
+        # made the broker's own qualifyContracts calls hang (20s timeout,
+        # every single order) a few minutes into a real cycle, even though
+        # neither connection nor IB Gateway itself was actually unhealthy
+        # (isolated single-connection reproduction never failed). Sharing one
+        # connection removes the second connection entirely rather than
+        # relying on a fully root-caused explanation of the interaction.
+        self._shared_broker = shared_broker
 
     def _ensure_ib(self) -> "IB":
         if self._ib is not None and self._ib.isConnected():
@@ -82,8 +95,25 @@ class IBKRProvider(DataProvider):
         )
         return self._ib
 
+    @contextmanager
+    def _connection(self) -> "IB":
+        """Yield a connected ``IB`` instance for the duration of one call.
+
+        When ``shared_broker`` is set, reuses its connection under its own
+        lock (see ``IBKRBroker.shared_connection``) instead of opening a
+        second independent one.
+        """
+        if self._shared_broker is not None:
+            with self._shared_broker.shared_connection() as ib:
+                yield ib
+            return
+        yield self._ensure_ib()
+
     def get_prices(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
-        ib = self._ensure_ib()
+        with self._connection() as ib:
+            return self._get_prices(ib, symbols, start, end)
+
+    def _get_prices(self, ib: "IB", symbols: list[str], start: str, end: str) -> pd.DataFrame:
         ib.reqMarketDataType(self._market_data_type)
 
         # IB durations are relative to an end datetime; derive a day span from
@@ -139,8 +169,12 @@ class IBKRProvider(DataProvider):
         raise NotImplementedError("IBKRProvider does not provide fundamentals; use FMP.")
 
     def get_news_sentiment(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
-        ib = self._ensure_ib()
+        with self._connection() as ib:
+            return self._get_news_sentiment(ib, symbols, start, end)
 
+    def _get_news_sentiment(
+        self, ib: "IB", symbols: list[str], start: str, end: str
+    ) -> pd.DataFrame:
         if self._news_codes is None:
             try:
                 self._news_codes = "+".join(p.code for p in ib.reqNewsProviders())

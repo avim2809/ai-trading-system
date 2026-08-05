@@ -181,6 +181,25 @@ class IBKRBroker(Broker):
             raise BrokerError("Not connected to IBKR – call connect() first")
         return self._ib
 
+    @contextmanager
+    def shared_connection(self):
+        """Yield the connected ``IB`` instance under the same lock that
+        serialises every other broker call.
+
+        For other components (currently ``IBKRProvider``) that need to reuse
+        this connection instead of opening a second one — running two
+        independent ``ib_async`` connections on the live-cycle worker thread
+        was confirmed live (2026-08-05) to make the broker's own
+        ``qualifyContracts`` calls hang until timeout, minutes into a real
+        cycle, even though neither connection nor IB Gateway was otherwise
+        unhealthy. Reusing one connection requires this lock: without it, a
+        data-fetch call on the cycle thread and a reconciliation call on
+        APScheduler's own worker thread could hit the same ``IB`` object at
+        the same time, which ``_ib_lock`` exists specifically to prevent.
+        """
+        with self._locked():
+            yield self._ensure_connected()
+
     def get_account(self) -> dict[str, Any]:
         with self._locked():
             return self._get_account_unlocked()
