@@ -929,6 +929,19 @@ class LiveTradingEngine:
                 )
         except Exception:
             log.warning("Failed to restore persisted attribution state", exc_info=True)
+        try:
+            daily_limits = self._state_store.load_daily_limits()
+            if daily_limits:
+                self._daily_date = daily_limits.get("daily_date")
+                self._daily_trade_count = int(daily_limits.get("daily_trade_count", 0))
+                self._daily_turnover_value = float(daily_limits.get("daily_turnover_value", 0.0))
+                log.info(
+                    "Restored daily trade/turnover counters for %s: "
+                    "%d trades, $%.2f turnover",
+                    self._daily_date, self._daily_trade_count, self._daily_turnover_value,
+                )
+        except Exception:
+            log.warning("Failed to restore persisted daily trade/turnover counters", exc_info=True)
 
     def _persist_live_state(self) -> None:
         """Save portfolio history + attribution state after a cycle.
@@ -959,6 +972,14 @@ class LiveTradingEngine:
             })
         except Exception:
             log.debug("Failed to mirror kill-switch state to state store", exc_info=True)
+        try:
+            self._state_store.save_daily_limits({
+                "daily_date": self._daily_date,
+                "daily_trade_count": self._daily_trade_count,
+                "daily_turnover_value": round(self._daily_turnover_value, 2),
+            })
+        except Exception:
+            log.warning("Failed to persist daily trade/turnover counters", exc_info=True)
 
     def reset_kill_switch(self) -> dict[str, Any]:
         """Clear the drawdown kill switch and re-arm trading.

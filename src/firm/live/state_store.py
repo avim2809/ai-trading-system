@@ -38,6 +38,7 @@ log = logging.getLogger(__name__)
 PORTFOLIO_HISTORY_KEY = "portfolio_history"
 ATTRIBUTION_STATE_KEY = "attribution_state"
 KILL_SWITCH_KEY = "kill_switch"
+DAILY_LIMITS_KEY = "daily_limits"
 
 
 class LiveStateStore:
@@ -186,6 +187,19 @@ class LiveStateStore:
 
     def load_kill_switch(self) -> dict[str, Any] | None:
         return self._load_blob(KILL_SWITCH_KEY)
+
+    # ------------------------------------------------------------------
+    # Daily trade-count/turnover caps (see LiveTradingEngine._check_daily_limits).
+    # These are counted against a same-process in-memory total by default;
+    # without persisting them here, a mid-day restart (deploy, crash, etc.)
+    # silently resets the "daily" cap to zero for the rest of that day.
+    # ------------------------------------------------------------------
+
+    def save_daily_limits(self, state: dict[str, Any]) -> None:
+        self._save_blob(DAILY_LIMITS_KEY, state)
+
+    def load_daily_limits(self) -> dict[str, Any] | None:
+        return self._load_blob(DAILY_LIMITS_KEY)
 
     # ------------------------------------------------------------------
 
