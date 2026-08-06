@@ -822,10 +822,13 @@ class LiveTradingEngine:
             self._persist_kill_switch_state(
                 reason=alert["message"], drawdown=drawdown, nav=nav,
             )
-        elif self._kill_switch_state_path is not None:
+        elif self._kill_switch_state_path is not None and not self._halted:
             # Keep peak-equity tracking durable even while not halted, so a
             # restart mid-drawdown (but before the trip threshold) doesn't
             # reset the high-water mark and understate a subsequent breach.
+            # Only reached when not halted: once tripped, self._halted stays
+            # True and every later cycle must leave the persisted halt (and
+            # its reason/tripped_at) alone rather than silently clearing it.
             self._persist_kill_switch_state(halted=False)
 
     def _load_kill_switch_state(self) -> None:

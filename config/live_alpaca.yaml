@@ -146,7 +146,10 @@ universe:
     - IWM
 
 rebalance_frequency: "daily"
-initial_capital: 1_000_000
+# Must match the actual Alpaca paper account equity ($100k default) — this
+# seeds peak_equity for the drawdown kill switch, and a mismatch here
+# (previously copied from live.yaml's $1M) trips it immediately on boot.
+initial_capital: 100_000
 
 # Live cycle timeouts (seconds). Hard timeout releases the cycle lock so a
 # hung LLM/IBKR call cannot block every future scheduled cycle.

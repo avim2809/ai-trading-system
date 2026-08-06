@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 try:
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import (
+        GetOrdersRequest,
         LimitOrderRequest,
         MarketOrderRequest,
     )
@@ -196,7 +197,7 @@ class AlpacaBroker(Broker):
     def get_open_orders(self) -> list[OrderStatus]:
         client = self._ensure_connected()
         try:
-            orders = client.get_orders(filter=QueryOrderStatus.OPEN)
+            orders = client.get_orders(filter=GetOrdersRequest(status=QueryOrderStatus.OPEN))
         except Exception:
             log.warning(
                 "Filtered open-orders request failed; falling back to "
