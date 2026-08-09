@@ -802,6 +802,62 @@ class TestDurableLiveState:
         assert "momentum" in engine2._attribution.strategies
         assert engine2._attribution.trade_log == engine._attribution.trade_log
 
+    @patch("firm.live.engine.build_orchestrator")
+    def test_trader_conviction_ema_persists_across_restart(self, mock_build, tmp_path):
+        """Companion to the daily-limits restart fix: TraderAgent's
+        conviction-EMA memory must also survive a process restart, or the
+        very first cycle after every restart runs unsmoothed at full
+        strength — undermining the reason the smoothing exists."""
+        from firm.agents.base import AgentContext
+        from firm.agents.trader import TraderAgent
+        from firm.contracts.models import DebateResult
+
+        db_path = tmp_path / "live_state.db"
+        broker = MockBroker(initial_cash=100_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {
+            "initial_capital": 100_000,
+            "memory_log_path": str(tmp_path / "decisions.jsonl"),
+            "conviction_smoothing_enabled": True,
+        }
+
+        real_trader = TraderAgent(config=config)
+        mock_orch = MagicMock()
+        mock_orch.trader = real_trader
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            state_db_path=db_path,
+        )
+        engine.start()
+        real_trader.run(
+            AgentContext(now=utcnow()),
+            debate_results=[DebateResult(symbol="AAPL", net_conviction=0.8)],
+        )
+        engine.run_cycle()  # triggers _persist_live_state -> save_trader_state
+        engine.stop()
+
+        assert real_trader._conviction_ema  # sanity: there's something to lose
+
+        real_trader2 = TraderAgent(config=config)
+        mock_orch2 = MagicMock()
+        mock_orch2.trader = real_trader2
+        mock_orch2.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch2
+
+        # A fresh engine instance (simulating a process restart) must
+        # restore the EMA memory before its first cycle runs.
+        LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            state_db_path=db_path,
+        )
+        assert real_trader2._conviction_ema == real_trader._conviction_ema
+
     def test_no_state_db_path_never_creates_file(self, tmp_path, engine_components):
         broker, feed, queue, config = engine_components
         would_be_path = tmp_path / "should_not_exist.db"
@@ -1059,9 +1115,14 @@ class TestEngineConfigUpdates:
         assert alert["severity"] == "warning"
 
     @patch("firm.live.engine.build_orchestrator")
-    def test_daily_trade_limit_full_auto_still_submits(self, mock_build, engine_components):
+    def test_daily_trade_limit_full_auto_caps_to_budget(self, mock_build, engine_components):
+        """Confirmed live 2026-08-03 through 2026-08-07: full_auto let a
+        breach through completely unchanged (turnover ran 60-95% of NAV
+        against a nominal 25% cap every trading day) — the cap was pure
+        telemetry. It must now actually trim the order list instead of just
+        alerting and submitting everything."""
         broker, feed, queue, config = engine_components
-        orders = _make_orders()
+        orders = _make_orders()  # AAPL notional 1500, MSFT notional 1500 (tied)
         bb = _make_blackboard()
         mock_orch = MagicMock()
         mock_orch.step.return_value = (orders, bb)
@@ -1074,11 +1135,16 @@ class TestEngineConfigUpdates:
         engine.start()
 
         result = engine.run_cycle()
-        assert result.orders_submitted == 2
+        # Only 1 trade slot remains — the second order is dropped this cycle
+        # (it re-generates next cycle from the still-unmet target weight)
+        # rather than both going through unchecked.
+        assert result.orders_submitted == 1
         assert result.orders_queued == 0
+        assert broker.get_position("AAPL") is not None  # tie-break: first wins
+        assert broker.get_position("MSFT") is None
         assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
-        # full_auto means these orders proceeded unchecked past a configured
-        # risk guardrail with no human in the loop — that's "at risk".
+        # full_auto means no human reviews this cycle — still worth a loud
+        # alert even though the breach is now contained, not bypassed.
         alert = next(a for a in result.alerts if a["kind"] == "daily_limit_breach")
         assert alert["severity"] == "critical"
 
@@ -1103,23 +1169,29 @@ class TestEngineConfigUpdates:
         assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
 
     @patch("firm.live.engine.build_orchestrator")
-    def test_daily_turnover_limit_full_auto_still_submits(self, mock_build, engine_components):
+    def test_daily_turnover_limit_full_auto_caps_to_budget(self, mock_build, engine_components):
+        """Trade count fits, but notional doesn't — every surviving order
+        should be scaled down pro-rata (not dropped) so total turnover lands
+        at the cap instead of blowing through it."""
         broker, feed, queue, config = engine_components
-        orders = _make_orders()
+        orders = _make_orders()  # AAPL qty10@150 + MSFT qty5@300 = 3000 notional
         bb = _make_blackboard()
         mock_orch = MagicMock()
         mock_orch.step.return_value = (orders, bb)
         mock_build.return_value = mock_orch
 
         engine = LiveTradingEngine(
+            # nav=100_000 * 1% cap = 1000 remaining vs 3000 requested -> scale 1/3.
             config={**config, "max_daily_turnover": 0.01}, broker=broker, data_feed=feed,
             approval_queue=queue, approval_mode="full_auto",
         )
         engine.start()
 
         result = engine.run_cycle()
-        assert result.orders_submitted == 2
+        assert result.orders_submitted == 2  # both survive, just smaller
         assert result.orders_queued == 0
+        assert broker.get_position("AAPL").quantity == 3   # round(10/3)
+        assert broker.get_position("MSFT").quantity == 2   # round(5/3)
         assert any(a["kind"] == "daily_limit_breach" for a in result.alerts)
         alert = next(a for a in result.alerts if a["kind"] == "daily_limit_breach")
         assert alert["severity"] == "critical"
@@ -1724,6 +1796,48 @@ class TestLiveEngineHardening:
         assert result.orders_submitted == 1  # AAPL went through
         assert result.orders_failed == 1     # MSFT failed and is visible
         assert result.failed_orders[0]["symbol"] == "MSFT"
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_broker_circuit_breaker_stops_after_consecutive_failures(
+        self, mock_build, engine_components
+    ):
+        """A stuck broker connection (confirmed live 2026-08-07: IBKR Gateway
+        stalled mid-cycle and every submit_order call timed out independently)
+        must not be retried order-by-order for the rest of the cycle — after
+        a few consecutive failures the remaining orders should be skipped
+        without ever touching the broker."""
+        broker, feed, queue, config = engine_components
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT", "GOOG", "TSLA", "NVDA"])
+
+        class AlwaysTimesOutBroker(MockBroker):
+            def __init__(self):
+                super().__init__()
+                self.submit_calls = []
+
+            def submit_order(self, order):
+                self.submit_calls.append(order.symbol)
+                raise BrokerError("IBKR request timed out")
+
+        broker = AlwaysTimesOutBroker()
+        orders = [
+            {"symbol": sym, "side": "buy", "quantity": 1, "price": 100.0, "strategy": "momentum"}
+            for sym in ["AAPL", "MSFT", "GOOG", "TSLA", "NVDA"]
+        ]
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (orders, _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config, approval_mode="full_auto")
+        engine.start()
+        result = engine.run_cycle()
+
+        # Circuit opens after 3 consecutive failures — the last 2 orders are
+        # skipped locally and submit_order is never called for them.
+        assert broker.submit_calls == ["AAPL", "MSFT", "GOOG"]
+        assert result.orders_submitted == 0
+        assert result.orders_failed == 5
+        skipped = [o for o in result.failed_orders if "circuit open" in o["error"]]
+        assert {o["symbol"] for o in skipped} == {"TSLA", "NVDA"}
 
     def test_reconcile_respects_in_flight_orders(self):
         """An unsettled open order must not cause internal holdings to be

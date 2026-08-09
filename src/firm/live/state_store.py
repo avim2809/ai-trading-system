@@ -39,6 +39,7 @@ PORTFOLIO_HISTORY_KEY = "portfolio_history"
 ATTRIBUTION_STATE_KEY = "attribution_state"
 KILL_SWITCH_KEY = "kill_switch"
 DAILY_LIMITS_KEY = "daily_limits"
+TRADER_STATE_KEY = "trader_state"
 
 
 class LiveStateStore:
@@ -200,6 +201,21 @@ class LiveStateStore:
 
     def load_daily_limits(self) -> dict[str, Any] | None:
         return self._load_blob(DAILY_LIMITS_KEY)
+
+    # ------------------------------------------------------------------
+    # TraderAgent conviction-EMA state (see TraderAgent._smooth_convictions).
+    # Same rationale as daily limits: without persisting this, a mid-day
+    # restart resets the smoothing memory to nothing, so the very next cycle
+    # rebalances at full unsmoothed strength — exactly the volatility this
+    # feature exists to damp, and restarts are frequent enough in this
+    # deployment (multiple per week) that this would matter in practice.
+    # ------------------------------------------------------------------
+
+    def save_trader_state(self, state: dict[str, Any]) -> None:
+        self._save_blob(TRADER_STATE_KEY, state)
+
+    def load_trader_state(self) -> dict[str, Any] | None:
+        return self._load_blob(TRADER_STATE_KEY)
 
     # ------------------------------------------------------------------
 

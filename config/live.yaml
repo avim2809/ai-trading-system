@@ -257,6 +257,13 @@ risk:
       Bull: 1.3                 # modest lever in confirmed bull (not aggressive)
       Bear: 0.4                 # meaningful de-risk in bear
       Chop: 0.7                 # slightly reduced in indeterminate regime
+    # Separation-based damping (mirrors the per-symbol regime_hmm strategy's
+    # min_state_separation/separation_damping_floor): a label statistically
+    # indistinguishable from its neighbour is label-switching risk, so its
+    # effect on gross exposure is pulled back toward a no-op rather than
+    # applying the full playbook factor at full confidence.
+    min_state_separation: 0.5
+    separation_damping_floor: 0.15
 
 # ──────────────────────────────────────────────────────────────
 # Dynamic universe growth — general-purpose mechanism (not Danelfin-specific
@@ -398,6 +405,16 @@ strategy_regime_weights:
 # Portfolio allocation (TraderAgent)
 #   allocation_method: conviction_weighted | equal_weight | risk_parity | kelly
 #   kelly_fraction is only used when allocation_method: kelly (half-Kelly = 0.5)
+#   conviction_smoothing: EMA on each symbol's net_conviction across cycles.
+#   Confirmed live 2026-08-03 through 2026-08-07: with TraderAgent's
+#   max_positions default (20) landing at the universe size, the average
+#   position sits exactly at risk.max_position_pct by construction, so
+#   unsmoothed day-to-day signal noise pushed most of the book to its
+#   per-name cap on both sides every cycle — 60-95% daily turnover against a
+#   nominal 25% cap. Halflife of 3 trading days damps that without
+#   materially lagging a real regime change.
 # ──────────────────────────────────────────────────────────────
 allocation_method: conviction_weighted
 kelly_fraction: 0.5
+conviction_smoothing_enabled: true
+conviction_smoothing_halflife_days: 3.0

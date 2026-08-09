@@ -92,6 +92,21 @@ class RiskAgent(Agent):
         self.regime_exposure_map: dict[str, float] = overlay_cfg.get(
             "exposure_map", {"Bull": 1.5, "Bear": 0.5, "Chop": 0.25}
         )
+        # Separation-based damping, mirroring the per-symbol regime_hmm
+        # strategy's guard against label-switching (see
+        # HMMRegimeStrategy.generate's docstring) — confidence blending alone
+        # doesn't protect against a *label* flip near a retrain boundary
+        # where two states are barely distinguishable: the detector can be
+        # highly "confident" in a label that's really noise-level apart from
+        # its neighbour, applying the full playbook factor to a read that
+        # will likely flip again next retrain. Same param names/defaults as
+        # regime_hmm.py for consistency.
+        self._regime_min_state_separation: float = float(
+            overlay_cfg.get("min_state_separation", 0.5)
+        )
+        self._regime_separation_damping_floor: float = float(
+            overlay_cfg.get("separation_damping_floor", 0.15)
+        )
         self._regime_detector = None
 
     def run(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
@@ -676,7 +691,14 @@ class RiskAgent(Agent):
         regime read barely moves sizing while a confident one applies the full
         playbook factor::
 
-            effective = 1 + (factor - 1) * confidence
+            effective = 1 + (factor - 1) * confidence * separation_damping
+
+        ``separation_damping`` guards against label-switching (see
+        ``_regime_min_state_separation``'s comment in ``__init__``): a
+        high-confidence read of a label that's only noise-level distinct
+        from its neighbour gets pulled back toward a no-op (1.0) instead of
+        applying the full playbook factor, mirroring the per-symbol
+        regime_hmm strategy's separation-based damping.
         """
         if regime_state is None:
             return targets, [], ["Regime overlay: no regime detected (no-op)"]
@@ -684,16 +706,25 @@ class RiskAgent(Agent):
         label = regime_state.label
         confidence = float(regime_state.confidence)
         factor = self.regime_exposure_map.get(label, 1.0)
-        effective = 1.0 + (factor - 1.0) * confidence
+        separation = float(getattr(regime_state, "separation", float("inf")))
+        damping = 1.0
+        if self._regime_min_state_separation > 0:
+            damping = max(
+                self._regime_separation_damping_floor,
+                min(1.0, separation / self._regime_min_state_separation),
+            )
+        effective = 1.0 + (factor - 1.0) * confidence * damping
         if abs(effective - 1.0) < 1e-9:
             return targets, [], [f"Regime overlay: {label} (conf {confidence:.2f}) — no change"]
 
         scaled = {s: w * effective for s, w in targets.items()}
-        return (
-            scaled,
-            [],
-            [
-                f"Regime overlay: {label} (conf {confidence:.2f}) "
-                f"scaled gross exposure by {effective:.3f}"
-            ],
+        note = (
+            f"Regime overlay: {label} (conf {confidence:.2f}) "
+            f"scaled gross exposure by {effective:.3f}"
         )
+        if damping < 1.0:
+            note += (
+                f" (damped {damping:.2f}x: separation={separation:.3f} < "
+                f"threshold={self._regime_min_state_separation:.3f}, label-switching risk)"
+            )
+        return scaled, [], [note]

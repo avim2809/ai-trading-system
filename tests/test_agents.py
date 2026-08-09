@@ -383,6 +383,64 @@ class TestTrader:
         proposal = trader.run(ctx, debate_results=results)
         assert len(proposal.targets) == 0
 
+    def test_conviction_smoothing_disabled_by_default(self):
+        """Every other risk-bearing toggle in this file is explicit opt-in —
+        smoothing must not change behavior unless a caller asks for it."""
+        from firm.agents.trader import TraderAgent
+
+        trader = TraderAgent()
+        assert trader.conviction_smoothing_enabled is False
+
+    def test_conviction_smoothing_cold_start_uses_full_signal(self):
+        """A symbol's first-ever appearance has no prior EMA to blend with —
+        it must not be damped toward zero on day one."""
+        from firm.agents.trader import TraderAgent
+
+        trader = TraderAgent(config={"conviction_smoothing_enabled": True})
+        ctx = AgentContext(now=NOW)
+        proposal = trader.run(ctx, debate_results=self._debate_results())
+        assert proposal.targets["AAPL"] > 0
+        assert proposal.targets["GOOG"] < 0
+
+    def test_conviction_smoothing_damps_a_day_to_day_swing(self):
+        """Confirmed live 2026-08-03 through 2026-08-07: unsmoothed
+        conviction swinging day-to-day pushed most of the book to its
+        per-name cap on both sides every cycle. A sign flip the very next
+        cycle must land closer to zero than the raw signal, not fully
+        flip — that's the point of the smoothing."""
+        from firm.agents.trader import TraderAgent
+
+        trader = TraderAgent(
+            config={
+                "allocation_method": "conviction_weighted",
+                "conviction_smoothing_enabled": True,
+                "conviction_smoothing_halflife_days": 3.0,
+            }
+        )
+        ctx = AgentContext(now=NOW)
+        trader.run(ctx, debate_results=[DebateResult(symbol="AAPL", net_conviction=0.8)])
+        trader.run(ctx, debate_results=[DebateResult(symbol="AAPL", net_conviction=-0.8)])
+        smoothed_conviction = trader._conviction_ema["AAPL"]
+        # A 3-day half-life gives one day's reading only ~21% weight, so a
+        # full sign flip in a single cycle is exactly what must NOT happen.
+        assert smoothed_conviction < 0.8  # moved down from the prior EMA...
+        assert smoothed_conviction > 0  # ...but nowhere near the new -0.8
+
+    def test_conviction_smoothing_state_round_trips(self):
+        """get_state/load_state back LiveStateStore persistence (see
+        LiveTradingEngine._persist_live_state) — a restart must resume the
+        EMA memory, not silently reset it to full-strength unsmoothed."""
+        from firm.agents.trader import TraderAgent
+
+        trader = TraderAgent(config={"conviction_smoothing_enabled": True})
+        ctx = AgentContext(now=NOW)
+        trader.run(ctx, debate_results=[DebateResult(symbol="AAPL", net_conviction=0.8)])
+        state = trader.get_state()
+
+        restarted = TraderAgent(config={"conviction_smoothing_enabled": True})
+        restarted.load_state(state)
+        assert restarted._conviction_ema == trader._conviction_ema
+
     def test_risk_parity_uses_inverse_vol(self):
         """Regression: risk_parity must inverse-vol weight, not equal-weight."""
         import pandas as pd

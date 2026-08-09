@@ -9,6 +9,7 @@ number of positions.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 from firm.agents.base import Agent, AgentContext
@@ -31,10 +32,61 @@ class TraderAgent(Agent):
         # Fraction of full Kelly to bet (default half-Kelly, the standard
         # uncertainty haircut). Only used when allocation_method == "kelly".
         self.kelly_fraction: float = float(cfg.get("kelly_fraction", 0.5))
+        # Confirmed live (2026-08-03 through 2026-08-07): with max_positions
+        # (20) sitting at the universe size, the *average* position lands
+        # exactly on risk.max_position_pct (0.05) by construction — so daily
+        # noise in the unsmoothed, freshly-z-scored conviction pushes ~half
+        # the book above/below cap (and can flip sign) every single cycle,
+        # producing 60-95% daily turnover against a nominal 25% cap. EMA
+        # smoothing damps that cycle-to-cycle noise; off by default since it
+        # changes live/backtest trading behavior and every other
+        # risk-bearing toggle in this file is explicit opt-in.
+        self.conviction_smoothing_enabled: bool = bool(
+            cfg.get("conviction_smoothing_enabled", False)
+        )
+        halflife_days = float(cfg.get("conviction_smoothing_halflife_days", 3.0))
+        # EMA weight on today's new reading, derived from the half-life so
+        # the config knob stays interpretable ("days until a shock's
+        # influence halves") instead of a bare, unintuitive alpha.
+        self._conviction_smoothing_alpha: float = (
+            1.0 - 0.5 ** (1.0 / halflife_days) if halflife_days > 0 else 1.0
+        )
+        self._conviction_ema: dict[str, float] = {}
+
+    def get_state(self) -> dict[str, Any]:
+        """Conviction-EMA memory for cross-restart persistence (see
+        ``firm.live.state_store.LiveStateStore.save_trader_state``)."""
+        return {"conviction_ema": dict(self._conviction_ema)}
+
+    def load_state(self, state: dict[str, Any]) -> None:
+        self._conviction_ema = dict(state.get("conviction_ema") or {})
+
+    def _smooth_convictions(
+        self, results: list[DebateResult]
+    ) -> list[DebateResult]:
+        """Blend each symbol's fresh conviction with its running EMA.
+
+        A symbol with no prior EMA (new to the universe, or its first
+        appearance after a gap) starts at full strength rather than being
+        damped toward zero — there is no "yesterday" to blend with yet.
+        """
+        alpha = self._conviction_smoothing_alpha
+        smoothed = []
+        for r in results:
+            prev = self._conviction_ema.get(r.symbol)
+            ema = r.net_conviction if prev is None else (
+                alpha * r.net_conviction + (1.0 - alpha) * prev
+            )
+            self._conviction_ema[r.symbol] = ema
+            smoothed.append(replace(r, net_conviction=ema))
+        return smoothed
 
     def run(self, ctx: AgentContext, **inputs: Any) -> TradeProposal:
         debate_results: list[DebateResult] = inputs.get("debate_results", [])
         blackboard = inputs.get("blackboard")
+
+        if self.conviction_smoothing_enabled:
+            debate_results = self._smooth_convictions(debate_results)
 
         ranked = sorted(debate_results, key=lambda r: abs(r.net_conviction), reverse=True)
         selected = [r for r in ranked if abs(r.net_conviction) > 1e-8][: self.max_positions]

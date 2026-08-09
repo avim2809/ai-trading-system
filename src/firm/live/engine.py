@@ -581,16 +581,64 @@ class LiveTradingEngine:
             self._max_daily_turnover = float(max_daily_turnover)
         log.info("Live engine risk limits updated: %s", self.risk_config)
 
+    @staticmethod
+    def _order_notional(order: dict[str, Any], prices: dict[str, float]) -> float:
+        qty = order.get("quantity", abs(order.get("shares", 0)))
+        return abs(qty * prices.get(order.get("symbol", ""), 0.0))
+
+    def _cap_orders_to_daily_budget(
+        self, orders: list[dict[str, Any]], prices: dict[str, float], nav: float
+    ) -> list[dict[str, Any]]:
+        """Trim and pro-rata scale *orders* to fit the day's remaining budget.
+
+        Confirmed live (2026-08-03 through 2026-08-07): every trading day's
+        turnover ran 60-95% of NAV against a nominal 25% cap, because
+        full_auto let a breach through unchanged — the cap was pure
+        telemetry. Trade count is discrete and can't be scaled, so an excess
+        order count is truncated to the largest-notional orders that fit the
+        remaining slots (the trades most likely to matter for the
+        rebalance). Turnover is continuous: once the count fits, every
+        surviving order's quantity is scaled down by the same factor so
+        total notional lands at (not simply under) the turnover cap, instead
+        of some names rebalancing in full while others are dropped outright.
+        """
+        remaining_slots = max(0, self._max_daily_trades - self._daily_trade_count)
+        kept = sorted(
+            orders, key=lambda o: self._order_notional(o, prices), reverse=True
+        )[:remaining_slots]
+
+        remaining_turnover = max(
+            0.0, self._max_daily_turnover * nav - self._daily_turnover_value
+        )
+        kept_notional = sum(self._order_notional(o, prices) for o in kept)
+        scale = min(1.0, remaining_turnover / kept_notional) if kept_notional > 0 else 1.0
+        if scale >= 1.0:
+            return kept
+
+        scaled = []
+        for o in kept:
+            qty = o.get("quantity", abs(o.get("shares", 0)))
+            new_order = {**o, "quantity": qty * scale}
+            if "shares" in o:
+                new_order["shares"] = o["shares"] * scale
+            if "notional" in o:
+                new_order["notional"] = o["notional"] * scale
+            scaled.append(new_order)
+        return scaled
+
     def _check_daily_limits(
         self, now: datetime, orders: list[dict[str, Any]], prices: dict[str, float]
-    ) -> bool:
-        """Return True when daily caps are exceeded **and** orders must be held
-        for manual approval.
+    ) -> tuple[bool, list[dict[str, Any]]]:
+        """Return ``(force_manual, orders_to_submit)``.
 
         In ``full_auto`` mode the operator has opted out of the approval
-        queue, so a breach still emits a warning alert but returns False so
-        orders proceed to the broker. ``semi_auto`` / manual modes route the
-        whole cycle to the approval queue when limits would be exceeded.
+        queue, so a breach can't route to manual review — but letting it
+        through unchanged made the cap pure telemetry (see
+        ``_cap_orders_to_daily_budget``'s docstring for the live incident).
+        Instead the order list itself is capped to the day's remaining
+        budget. ``semi_auto`` / manual modes still route the whole
+        (uncapped) cycle to the approval queue when limits would be
+        exceeded, since a human reviews it before anything is capped.
         """
         date_str = trading_day_key(now, self._trading_day_timezone)
         if self._daily_date != date_str:
@@ -602,10 +650,7 @@ class LiveTradingEngine:
                 date_str, self._trading_day_timezone,
             )
 
-        turnover_value = sum(
-            abs(o.get("quantity", abs(o.get("shares", 0))) * prices.get(o.get("symbol", ""), 0.0))
-            for o in orders
-        )
+        turnover_value = sum(self._order_notional(o, prices) for o in orders)
         nav = self._portfolio.nav
         projected_trades = self._daily_trade_count + len(orders)
         projected_turnover_frac = (
@@ -616,17 +661,17 @@ class LiveTradingEngine:
             projected_trades > self._max_daily_trades
             or projected_turnover_frac > self._max_daily_turnover
         )
+        result_orders = orders
         if breached:
             if self._approval_mode == "full_auto":
                 msg = (
                     f"Daily limit would be breached (trades {projected_trades}/"
                     f"{self._max_daily_trades}, turnover {projected_turnover_frac:.1%}/"
-                    f"{self._max_daily_turnover:.1%}); full_auto — submitting anyway."
+                    f"{self._max_daily_turnover:.1%}); full_auto — capping to budget."
                 )
-                # full_auto means these orders proceed unchecked past a
-                # configured risk guardrail with no human in the loop — that's
-                # "at risk", not merely noteworthy, unlike the manual-approval
-                # branch below where the same breach is safely held.
+                # full_auto means no human reviews this cycle — the breach is
+                # now contained (capped) rather than bypassed, but a day that
+                # needed capping at all is still worth surfacing loudly.
                 severity = "critical"
             else:
                 msg = (
@@ -636,18 +681,24 @@ class LiveTradingEngine:
                 )
                 severity = "warning"
             self._emit_alert("daily_limit_breach", severity, msg)
-        if not breached or self._approval_mode == "full_auto":
+
+        if breached and self._approval_mode == "full_auto":
+            result_orders = self._cap_orders_to_daily_budget(orders, prices, nav)
+            capped_turnover = sum(self._order_notional(o, prices) for o in result_orders)
+            log.warning(
+                "Daily limit breached but approval_mode=full_auto — capped to budget "
+                "(%d/%d orders kept, turnover would've been %.1f%%, capped to %.1f%%)",
+                len(result_orders), len(orders), projected_turnover_frac * 100,
+                ((self._daily_turnover_value + capped_turnover) / nav * 100) if nav > 0 else 0.0,
+            )
+            self._daily_trade_count += len(result_orders)
+            self._daily_turnover_value += capped_turnover
+        elif not breached:
             self._daily_trade_count = projected_trades
             self._daily_turnover_value += turnover_value
+
         force_manual = breached and self._approval_mode != "full_auto"
-        if breached and self._approval_mode == "full_auto":
-            log.warning(
-                "Daily limit breached but approval_mode=full_auto — submitting anyway "
-                "(trades %d/%d, turnover %.1f%%/%.1f%%)",
-                projected_trades, self._max_daily_trades,
-                projected_turnover_frac * 100, self._max_daily_turnover * 100,
-            )
-        return force_manual
+        return force_manual, result_orders
 
     def _emit_alert(
         self, kind: str, severity: str, message: str, **context: Any
@@ -942,6 +993,18 @@ class LiveTradingEngine:
                 )
         except Exception:
             log.warning("Failed to restore persisted daily trade/turnover counters", exc_info=True)
+        trader = getattr(self._orchestrator, "trader", None)
+        if hasattr(trader, "load_state"):
+            try:
+                trader_state = self._state_store.load_trader_state()
+                if trader_state:
+                    trader.load_state(trader_state)
+                    log.info(
+                        "Restored conviction-EMA state for %d symbols",
+                        len(trader_state.get("conviction_ema") or {}),
+                    )
+            except Exception:
+                log.warning("Failed to restore persisted trader state", exc_info=True)
 
     def _persist_live_state(self) -> None:
         """Save portfolio history + attribution state after a cycle.
@@ -980,6 +1043,12 @@ class LiveTradingEngine:
             })
         except Exception:
             log.warning("Failed to persist daily trade/turnover counters", exc_info=True)
+        trader = getattr(self._orchestrator, "trader", None)
+        if hasattr(trader, "get_state"):
+            try:
+                self._state_store.save_trader_state(trader.get_state())
+            except Exception:
+                log.warning("Failed to persist trader state", exc_info=True)
 
     def reset_kill_switch(self) -> dict[str, Any]:
         """Clear the drawdown kill switch and re-arm trading.
@@ -1303,7 +1372,7 @@ class LiveTradingEngine:
                 return
 
             alerts_before = len(self._alerts)
-            force_manual = self._check_daily_limits(now, orders, prices)
+            force_manual, orders = self._check_daily_limits(now, orders, prices)
             if len(self._alerts) > alerts_before:
                 result.alerts.append(self._alerts[-1])
             if force_manual:
@@ -1637,6 +1706,18 @@ class LiveTradingEngine:
 
         statuses: list[tuple[OrderStatus, str]] = []
         failed: list[dict[str, Any]] = []
+        # Circuit breaker: confirmed live 2026-08-07 that once the broker
+        # connection is in a bad state (IBKR Gateway stalled mid-cycle after
+        # a reconnect), every subsequent submit_order call times out
+        # independently — the loop burned ~6 minutes failing all 19
+        # remaining orders one at a time at 20s each instead of recognizing
+        # the pattern. After a few consecutive submission failures, treat it
+        # as systemic for this cycle and stop trying the broker; the next
+        # cycle's own reconnect-before-generating-orders logic is what
+        # actually recovers it, not more retries here.
+        _MAX_CONSECUTIVE_BROKER_FAILURES = 3
+        consecutive_broker_failures = 0
+        broker_circuit_open = False
         for o in orders:
             safety_order = Order(
                 symbol=o["symbol"], side=o["side"],
@@ -1689,8 +1770,18 @@ class LiveTradingEngine:
                 strategy=o.get("strategy", "composite"),
                 client_order_id=f"c{cycle_id}-{o['symbol']}-{o['side']}",
             )
+            if broker_circuit_open:
+                failed.append({
+                    **o,
+                    "error": (
+                        f"Skipped: broker submission circuit open after "
+                        f"{consecutive_broker_failures} consecutive failures this cycle"
+                    ),
+                })
+                continue
             try:
                 status = self._broker.submit_order(req)
+                consecutive_broker_failures = 0
                 # Paired with req.strategy here (not read back off `status`
                 # later): OrderStatus is a broker-level type with no notion
                 # of which of *our* strategies caused it — this is the only
@@ -1704,6 +1795,15 @@ class LiveTradingEngine:
             except BrokerError as exc:
                 log.error("Failed to submit order for %s", req.symbol, exc_info=True)
                 failed.append({**o, "error": str(exc)})
+                consecutive_broker_failures += 1
+                if consecutive_broker_failures >= _MAX_CONSECUTIVE_BROKER_FAILURES:
+                    broker_circuit_open = True
+                    self._emit_alert(
+                        "broker_submission_circuit_open", "critical",
+                        f"Aborting remaining order submissions this cycle after "
+                        f"{consecutive_broker_failures} consecutive broker failures "
+                        f"(last: {exc})",
+                    )
         return statuses, failed
 
     @staticmethod

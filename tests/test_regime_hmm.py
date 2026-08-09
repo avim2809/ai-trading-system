@@ -330,6 +330,61 @@ class TestRegimeOverlay:
         assert decision.approved
         assert any("Regime overlay" in a for a in decision.actions)
 
+    def test_overlay_damps_low_separation_label(self):
+        """Mirrors the per-symbol regime_hmm strategy's guard against
+        label-switching: a high-confidence read of a label that's only
+        noise-level distinct from its neighbour (thin separation) must be
+        pulled back toward a no-op instead of applying the full playbook
+        factor at full strength."""
+        agent = RiskAgent(config={"regime_overlay": {"enabled": True}})
+        ctx = AgentContext(now=datetime(2023, 6, 1))
+        # Full confidence, but separation (0.1) sits far below the 0.5
+        # threshold -> damping = max(0.15, 0.1/0.5) = 0.2.
+        # effective = 1 + (0.5-1)*1.0*0.2 = 0.9 (vs 0.5 undamped).
+        regime = RegimeState(
+            label=BEAR, confidence=1.0, state_idx=1, posterior=[1.0], separation=0.1,
+        )
+        decision = agent.run(
+            ctx, proposal=self._proposal(), portfolio=None, regime_state=regime
+        )
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.02 * 0.9)
+        assert any("label-switching risk" in a for a in decision.actions)
+
+    def test_overlay_full_separation_undamped(self):
+        """A well-separated label (at/above threshold) applies the full
+        playbook factor, unchanged from before this damping existed."""
+        agent = RiskAgent(config={"regime_overlay": {"enabled": True}})
+        ctx = AgentContext(now=datetime(2023, 6, 1))
+        regime = RegimeState(
+            label=BEAR, confidence=1.0, state_idx=1, posterior=[1.0], separation=0.5,
+        )
+        decision = agent.run(
+            ctx, proposal=self._proposal(), portfolio=None, regime_state=regime
+        )
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.02 * 0.5)
+        assert not any("label-switching risk" in a for a in decision.actions)
+
+    def test_overlay_separation_damping_configurable(self):
+        agent = RiskAgent(
+            config={
+                "regime_overlay": {
+                    "enabled": True,
+                    "min_state_separation": 1.0,
+                    "separation_damping_floor": 0.5,
+                }
+            }
+        )
+        ctx = AgentContext(now=datetime(2023, 6, 1))
+        # separation=0.1 / threshold=1.0 -> raw ratio 0.1, floored to 0.5.
+        # effective = 1 + (0.5-1)*1.0*0.5 = 0.75.
+        regime = RegimeState(
+            label=BEAR, confidence=1.0, state_idx=1, posterior=[1.0], separation=0.1,
+        )
+        decision = agent.run(
+            ctx, proposal=self._proposal(), portfolio=None, regime_state=regime
+        )
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.02 * 0.75)
+
 
 # ---------------------------------------------------------------------------
 # Wiring
