@@ -125,6 +125,49 @@ class TestReflect:
         assert "reflection unavailable" in reflection
         assert log.list_decisions()[0]["verdict"] == "unknown"
 
+    def test_retries_once_before_falling_back_to_unknown(self, tmp_path):
+        """Confirmed live: garbled/degenerate LLM output fails schema
+        validation often enough (~1/3 of reflected decisions) that a
+        single-shot call was silently losing real self-assessment data.
+        Both attempts must be exhausted before giving up."""
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1})
+        llm = MagicMock()
+        llm.chat_json.return_value = "not a dict"
+
+        reflection = log.reflect(
+            date="2026-01-01", raw_return=0.02, benchmark_return=0.01, llm_service=llm,
+        )
+
+        assert llm.chat_json.call_count == 2
+        assert "reflection unavailable" in reflection
+        assert log.list_decisions()[0]["verdict"] == "unknown"
+
+    def test_recovers_on_second_attempt_after_a_bad_first_sample(self, tmp_path):
+        """The whole point of the retry: a bad first sample must not
+        permanently discard a decision's self-assessment when a second
+        attempt would have produced a valid one."""
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1})
+        llm = MagicMock()
+        llm.chat_json.side_effect = [
+            "not a dict",  # first sample: garbled, fails schema validation
+            {
+                "verdict": "correct", "what_worked": "momentum's long AAPL call",
+                "what_failed": "", "lesson": "size up on high-confidence momentum calls",
+            },
+        ]
+
+        reflection = log.reflect(
+            date="2026-01-01", raw_return=0.02, benchmark_return=0.01, llm_service=llm,
+        )
+
+        assert llm.chat_json.call_count == 2
+        assert reflection.startswith("CORRECT")
+        entry = log.list_decisions()[0]
+        assert entry["verdict"] == "correct"
+        assert entry["lesson"] == "size up on high-confidence momentum calls"
+
     def test_per_strategy_attribution_included_in_reflection_prompt(self, tmp_path):
         """The reflection-generating LLM call must actually SEE the
         per-strategy breakdown, not just have it stored for display —

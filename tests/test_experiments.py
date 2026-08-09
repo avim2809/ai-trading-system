@@ -145,6 +145,44 @@ class TestRunRegistry:
         assert comparison["max_drawdown"][run1.run_id] == 0.15
         assert comparison["max_drawdown"][run2.run_id] == 0.20
 
+    def test_compare_runs_missing_metric_is_none_not_nan(self, registry, sample_config):
+        """Confirmed live: comparing two runs with different metric sets
+        (e.g. different strategies) used to fall back to float("nan") for
+        the run missing a metric, which FastAPI's JSON encoder rejects
+        outright (ValueError: Out of range float) — 500ing the endpoint."""
+        run1 = registry.create_run(sample_config)
+        time.sleep(0.01)
+        run2 = registry.create_run(sample_config)
+
+        registry.update_run(run1.run_id, metrics={"sharpe_ratio": 1.2, "profit_factor": 2.0})
+        registry.update_run(run2.run_id, metrics={"sharpe_ratio": 0.9})  # no profit_factor
+
+        comparison = registry.compare_runs([run1.run_id, run2.run_id])
+
+        assert comparison["profit_factor"][run1.run_id] == 2.0
+        assert comparison["profit_factor"][run2.run_id] is None
+        assert not any(
+            isinstance(v, float) and (v != v)  # NaN != NaN is always True
+            for metric in comparison.values()
+            for v in metric.values()
+        )
+
+    def test_compare_runs_infinite_metric_value_is_none(self, registry, sample_config):
+        """A real computed metric can itself be non-finite — e.g.
+        eval.metrics.profit_factor returns inf for a run with wins but no
+        losing trades. inf is just as JSON-invalid as NaN."""
+        run1 = registry.create_run(sample_config)
+        time.sleep(0.01)
+        run2 = registry.create_run(sample_config)
+
+        registry.update_run(run1.run_id, metrics={"profit_factor": float("inf")})
+        registry.update_run(run2.run_id, metrics={"profit_factor": 1.5})
+
+        comparison = registry.compare_runs([run1.run_id, run2.run_id])
+
+        assert comparison["profit_factor"][run1.run_id] is None
+        assert comparison["profit_factor"][run2.run_id] == 1.5
+
     def test_config_hash_determinism(self, sample_config):
         h1 = RunRegistry.config_hash(sample_config)
         h2 = RunRegistry.config_hash(sample_config)

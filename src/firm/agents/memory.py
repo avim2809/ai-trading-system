@@ -64,6 +64,12 @@ _REFLECTION_SYSTEM = (
     "field must stand alone without the others for context."
 )
 
+# Confirmed live: schema-validation failures here (degenerate/garbled LLM
+# output) are common enough that ~1/3 of reflected decisions were losing
+# their self-assessment permanently to a single bad sample. See reflect()'s
+# retry loop.
+_REFLECTION_MAX_ATTEMPTS = 2
+
 
 class TradingMemoryLog:
     """Portfolio-level decision log with outcome-triggered LLM reflection.
@@ -194,16 +200,34 @@ class TradingMemoryLog:
             f"Target weights: {json.dumps(pending.get('proposal_weights', {}), indent=2)}"
             f"{per_strategy_block}"
         )
+        messages = [
+            {"role": "system", "content": _REFLECTION_SYSTEM},
+            {"role": "user", "content": user_prompt},
+        ]
+        # A schema-validation failure here (confirmed live: degenerate
+        # word-repetition loops, garbled JSON) permanently collapses this
+        # decision's self-assessment to "unknown" with no way to recover
+        # it later — unlike every other LLM+schema call site in this
+        # codebase, which falls back to a quant-only value that's still
+        # useful. One retry costs nothing this deferred/off-critical-path
+        # call isn't latency-sensitive, and a bad sample is often a one-off
+        # sampling hiccup rather than a systematic prompt problem.
         parsed: DecisionReflection | None = None
-        try:
-            messages = [
-                {"role": "system", "content": _REFLECTION_SYSTEM},
-                {"role": "user", "content": user_prompt},
-            ]
-            raw = llm_service.chat_json(messages)
-            parsed = parse_llm_response(DecisionReflection, raw, context=f"memory/{date}")
-        except Exception as exc:
-            log.warning("Memory: LLM reflection failed for %s: %s", date, exc, exc_info=True)
+        for attempt in range(1, _REFLECTION_MAX_ATTEMPTS + 1):
+            try:
+                raw = llm_service.chat_json(messages)
+                parsed = parse_llm_response(
+                    DecisionReflection, raw,
+                    context=f"memory/{date} (attempt {attempt}/{_REFLECTION_MAX_ATTEMPTS})",
+                )
+            except Exception as exc:
+                log.warning(
+                    "Memory: LLM reflection call failed for %s (attempt %d/%d): %s",
+                    date, attempt, _REFLECTION_MAX_ATTEMPTS, exc, exc_info=True,
+                )
+                parsed = None
+            if parsed is not None:
+                break
 
         if parsed is not None:
             verdict, what_worked, what_failed, lesson = (

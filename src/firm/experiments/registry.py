@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import threading
 from dataclasses import asdict, dataclass, field
@@ -159,7 +160,20 @@ class RunRegistry:
             return [r for r in self._runs if r.status == status]
 
     def compare_runs(self, run_ids: list[str]) -> dict:
-        """Compare metrics across runs. Returns {metric: {run_id: value}}."""
+        """Compare metrics across runs. Returns {metric: {run_id: value}}.
+
+        Every value is either a finite float or ``None`` — never NaN/inf.
+        Confirmed live: NaN/inf are not valid JSON, so FastAPI's encoder
+        raised ``ValueError: Out of range float`` and this endpoint 500'd
+        two separate ways: a run missing a given metric (e.g. comparing two
+        different strategies whose backtests compute different metric sets)
+        used to fall back to ``float("nan")``, and a metric that's a real
+        computed value can itself be non-finite (e.g. eval.metrics.
+        profit_factor returns ``inf`` for a run with wins but no losing
+        trades). The frontend (Compare.tsx) already treats a missing/None
+        value as "—", so None is also the semantically correct fallback for
+        both cases: the metric isn't a meaningful finite number to compare.
+        """
         with self._lock:
             runs = [self.get_run(rid) for rid in run_ids]
         runs = [r for r in runs if r is not None]
@@ -168,11 +182,14 @@ class RunRegistry:
         for r in runs:
             all_metrics.update(r.metrics.keys())
 
-        result: dict[str, dict[str, float]] = {}
+        result: dict[str, dict[str, float | None]] = {}
         for metric in sorted(all_metrics):
             result[metric] = {}
             for r in runs:
-                result[metric][r.run_id] = r.metrics.get(metric, float("nan"))
+                value = r.metrics.get(metric)
+                result[metric][r.run_id] = (
+                    value if isinstance(value, (int, float)) and math.isfinite(value) else None
+                )
         return result
 
     @staticmethod
