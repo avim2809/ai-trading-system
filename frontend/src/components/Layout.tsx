@@ -1,6 +1,7 @@
 import { Suspense, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import Spinner from './Spinner'
+import { getInstance, setInstance, type LiveInstance } from '../api/client'
 
 const backtestLinks = [
   { to: '/', label: 'Dashboard', icon: '📊' },
@@ -54,6 +55,32 @@ function SidebarLink({
   )
 }
 
+function InstanceSwitcher({ className = '' }: { className?: string }) {
+  const current = getInstance()
+
+  const pick = (instance: LiveInstance) => {
+    if (instance !== current) setInstance(instance)
+  }
+
+  const optionClass = (instance: LiveInstance) =>
+    `flex-1 px-2 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+      current === instance
+        ? 'bg-blue-600 text-white'
+        : 'text-slate-400 hover:text-slate-200'
+    }`
+
+  return (
+    <div className={`flex gap-1 p-1 bg-slate-800 rounded-lg ${className}`}>
+      <button onClick={() => pick('ibkr')} className={optionClass('ibkr')}>
+        IBKR
+      </button>
+      <button onClick={() => pick('alpaca')} className={optionClass('alpaca')}>
+        Alpaca
+      </button>
+    </div>
+  )
+}
+
 export default function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const closeMobile = () => setMobileOpen(false)
@@ -88,6 +115,9 @@ export default function Layout() {
           >
             ✕
           </button>
+        </div>
+        <div className="px-5 pt-4">
+          <InstanceSwitcher />
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {backtestLinks.map((l) => (
@@ -127,7 +157,8 @@ export default function Layout() {
           >
             ☰
           </button>
-          <h1 className="text-sm font-bold text-white">AI Trading System</h1>
+          <h1 className="text-sm font-bold text-white flex-1">AI Trading System</h1>
+          <InstanceSwitcher className="w-32 flex-shrink-0" />
         </header>
 
         <main className="flex-1 overflow-auto">

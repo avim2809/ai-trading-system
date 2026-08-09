@@ -35,10 +35,30 @@ import type {
   SystemResources,
 } from './types'
 
-const BASE = '/api'
+export type LiveInstance = 'ibkr' | 'alpaca'
+
+const INSTANCE_KEY = 'firm_instance'
+
+// Two firm-api processes run behind this one nginx host — 8000 (IBKR) at
+// /api, 8001 (Alpaca) path-proxied at /api/alpaca — so the whole app can
+// point at either without a second link/tab. See deploy nginx config.
+export function getInstance(): LiveInstance {
+  return localStorage.getItem(INSTANCE_KEY) === 'alpaca' ? 'alpaca' : 'ibkr'
+}
+
+// Full reload after switching: simplest way to get every page's already-
+// in-flight/cached fetches to re-run against the newly selected backend.
+export function setInstance(instance: LiveInstance): void {
+  localStorage.setItem(INSTANCE_KEY, instance)
+  window.location.reload()
+}
+
+function getBase(): string {
+  return getInstance() === 'alpaca' ? '/api/alpaca' : '/api'
+}
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${url}`, {
+  const res = await fetch(`${getBase()}${url}`, {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   })
@@ -67,7 +87,7 @@ export const api = {
 
   // Absolute URL to the QuantStats HTML tear-sheet (opened in a new tab /
   // iframe rather than fetched as JSON).
-  tearsheetUrl: (id: string) => `${BASE}/runs/${id}/tearsheet`,
+  tearsheetUrl: (id: string) => `${getBase()}/runs/${id}/tearsheet`,
 
   launchRun: (req: RunRequest) =>
     fetchJson<{ run_id: string }>('/runs', {
