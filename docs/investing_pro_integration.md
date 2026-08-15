@@ -1,5 +1,13 @@
 # Investing.com Pro / Danelfin integration — calendar + Danelfin enabled, FMP analyst-ratings shipped disabled
 
+**2026-08-16 update: DECOMMISSIONED.** The user closed their Danelfin
+account. `danelfin_ai_score`, `danelfin_live_signals`, and
+`danelfin_best_stocks_signal` have been removed from `strategies.enabled` /
+`strategies.auto_approve` in `config/live.yaml` and `config/live_alpaca.yaml`,
+`DANELFIN_API_KEY` has been blanked in `.env`, and the
+`best-stocks-arm.timer` systemd unit has been disabled. The A/B history
+below is preserved for reference if this vendor is ever reinstated.
+
 Session started 2026-07-30 at the user's request to leverage their paid
 Investing.com Pro subscription for trading signals. Investing.com has no
 official API, so this required an authenticated web-scraper session

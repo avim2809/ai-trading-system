@@ -42,42 +42,10 @@ strategies:
     - seasonality
     # gann — permanently disabled; no timing value on any asset class tested
     - regime_hmm
-    # danelfin_ai_score — enabled 2026-07-31 after a 3-window A/B showed
-    # portfolio Sharpe improved in every window (never worse; see
-    # docs/investing_pro_integration.md "Danelfin AI-score" section for the
-    # full honest writeup, including the caveat that the strategy's own
-    # standalone Sharpe was inconsistent across windows — this looks like a
-    # genuine diversification effect under `optimal` combination, not
-    # unambiguous proof of Danelfin's own predictive-power marketing claim).
-    # Monitor live attribution; revert this one line to disable if it
-    # doesn't hold up in live paper trading.
-    - danelfin_ai_score
-    # danelfin_live_signals — enabled 2026-07-31 at the user's explicit
-    # request ("can't you feed all that goodness into my analysts
-    # implementation"). UNLIKE danelfin_ai_score, this one has NEVER been
-    # A/B tested and structurally CANNOT be: it reads Danelfin's /v3/*
-    # trading-parameters + price-forecast + performance endpoints, which
-    # are latest-snapshot-only with no historical dates (confirmed live,
-    # not just per Danelfin's docs) — pit_view.live_signals() is always
-    # empty in a backtest, so the walk-forward promotion gate this project
-    # otherwise relies on is a no-op here. This is a live-only,
-    # unvalidated judgment call, not an evidence-backed one — watch its
-    # live attribution closely and revert this line if it looks bad.
-    - danelfin_live_signals
-    # danelfin_best_stocks_signal — enabled 2026-08-02 at the user's explicit
-    # request to use Danelfin's real /v3/beststocks Top-25 list as a strong
-    # buy signal (not a backtested strategy — same structural reason as
-    # danelfin_live_signals: /v3/beststocks has no historical dates,
-    # confirmed live). Reads the vendor's own curated list directly, unlike
-    # this project's earlier sector-ranking reconstruction (only ~25-30%
-    # match to the real list — see docs/danelfin_best_stocks_arm.md) which
-    # this strategy does NOT use. Will rarely fire against this fixed
-    # ~25-name US-mega-cap universe since Danelfin's real list skews toward
-    # smaller/rotating names — see the danelfin_dynamic_universe: block
-    # below (disabled by default) for the mechanism that can give it more
-    # surface once reviewed and enabled. Live-only, unvalidated judgment
-    # call — watch its attribution and revert this line if it looks bad.
-    - danelfin_best_stocks_signal
+    # danelfin_ai_score / danelfin_live_signals / danelfin_best_stocks_signal —
+    # removed 2026-08-16: user closed their Danelfin account. See
+    # docs/investing_pro_integration.md and docs/danelfin_best_stocks_arm.md
+    # for the prior A/B history if this vendor is ever reinstated.
   auto_approve:
     - momentum
     - trend
@@ -89,9 +57,6 @@ strategies:
     - volatility_breakout
     - seasonality
     - regime_hmm
-    - danelfin_ai_score
-    - danelfin_live_signals
-    - danelfin_best_stocks_signal
 
 # Per-strategy parameters passed to build_orchestrator via strategy_params.
 strategy_params:

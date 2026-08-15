@@ -1,5 +1,11 @@
 # Danelfin "Best Stocks Strategy" — a separate, synthetic paper-tracking arm
 
+**2026-08-16 update: DECOMMISSIONED.** The user closed their Danelfin
+account. The `best-stocks-arm.timer` systemd unit has been disabled (`systemctl
+disable --now`), `danelfin_best_stocks_signal` removed from `config/live.yaml`
+/ `config/live_alpaca.yaml`, and `DANELFIN_API_KEY` blanked in `.env`. Everything
+below is historical.
+
 Status: **live, initialized 2026-07-31**, running on its own daily systemd
 timer. **A full 2018-2026 walk-forward backtest (below) came back decisively
 negative vs. SPY — real broker execution was deliberately NOT built out as a
