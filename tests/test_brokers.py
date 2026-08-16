@@ -185,6 +185,28 @@ class TestMockBrokerConnect:
         assert acct["equity"] == 50_000
 
 
+class TestHealthCheckDefault:
+    """The Broker ABC's default health_check() (used by any broker that
+    doesn't override it) must delegate to is_connected() and never raise —
+    see IBKRBroker/AlpacaBroker for the brokers that DO override it because
+    a plain is_connected() isn't enough for them."""
+
+    def test_true_when_connected(self):
+        b = MockBroker()
+        b.connect()
+        assert b.health_check() is True
+
+    def test_false_when_not_connected(self):
+        b = MockBroker()
+        assert b.health_check() is False
+
+    def test_swallows_is_connected_exceptions(self):
+        b = MockBroker()
+        b.connect()
+        b.is_connected = lambda: (_ for _ in ()).throw(RuntimeError("boom"))  # type: ignore[method-assign]
+        assert b.health_check() is False
+
+
 class TestOrderLifecycle:
     @pytest.fixture()
     def broker(self) -> MockBroker:

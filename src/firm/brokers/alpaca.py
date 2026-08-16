@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from firm.brokers.base import (
@@ -38,6 +39,18 @@ _TIF_MAP = {
     "ioc": "ioc",
     "fok": "fok",
 }
+
+# Bound on waiting for the flatten leg of a position-flip order to fill
+# before submitting the opening leg (see AlpacaBroker.submit_order). Confirmed
+# live: Alpaca rejects a single sell/buy that would cross a position through
+# zero (e.g. sell 7 against a long 3 — "insufficient qty available", error
+# 40310000) and requires two sequential orders instead. Both legs are the
+# *same side*, so if the open leg were sent before the flatten leg actually
+# fills, Alpaca would still see the pre-flatten qty and reject it the same
+# way. A market order fills in well under a second during regular trading
+# hours, so this is generous headroom, not a routine wait.
+_FLATTEN_POLL_INTERVAL = 0.5
+_FLATTEN_MAX_WAIT_SECONDS = 8.0
 
 
 def _require_alpaca() -> None:
@@ -97,6 +110,20 @@ class AlpacaBroker(Broker):
             log.warning("Alpaca connectivity check failed", exc_info=True)
             return False
 
+    def health_check(self) -> bool:
+        """No-op-ish liveness probe for a stateless REST client.
+
+        Alpaca has no persistent socket that can go half-open, so — unlike
+        IBKR — there is nothing here for a proactive per-cycle check to
+        repair; a pure local check is correct and avoids an extra
+        ``get_account()`` REST round-trip every cycle (the base default
+        would call :meth:`is_connected`, which hits the network). Genuine
+        Alpaca outages still surface through the real REST calls in
+        ``refresh()``/reconciliation and are handled by the existing
+        reactive reconnect path.
+        """
+        return self._trading is not None and self._data is not None
+
     def _ensure_connected(self) -> TradingClient:
         if self._trading is None:
             raise BrokerError("Not connected to Alpaca – call connect() first")
@@ -148,6 +175,129 @@ class AlpacaBroker(Broker):
             return None
 
     def submit_order(self, order: OrderRequest) -> OrderStatus:
+        """Submit *order*, transparently splitting it into two legs when it
+        would flip a position's sign (long -> short or short -> long).
+
+        Confirmed live: Alpaca's paper account has shorting enabled
+        (margin multiplier 4x, and it already holds real short positions) —
+        this is not a permissions gap. The rejection is Alpaca's order-level
+        rule that a single sell/buy cannot reduce a position past zero into
+        the opposite side; e.g. long 3 shares + a target of short 4 means
+        the engine submits ``sell qty=7``, and Alpaca rejects the 4 that
+        would open the short with error 40310000 ("insufficient qty
+        available"), even though shorting itself is fully permitted. See
+        :meth:`_plan_flip_split`.
+        """
+        split = None
+        if order.order_type == "market":
+            split = self._plan_flip_split(order)
+
+        if split is None:
+            return self._submit_single(
+                order, qty=order.quantity, client_order_id=order.client_order_id,
+            )
+
+        close_qty, open_qty = split
+        close_coid = self._suffix_coid(order.client_order_id, "close")
+        log.info(
+            "Flip %s: flattening %.0f share(s) first (order_id suffix=%s) "
+            "before opening %.0f in the new direction",
+            order.symbol, close_qty, close_coid, open_qty,
+        )
+        close_status = self._submit_single(order, qty=close_qty, client_order_id=close_coid)
+        log.info(
+            "Flip %s: flatten leg %s submitted -> %s",
+            order.symbol, close_status.order_id, close_status.status,
+        )
+
+        if not self._await_fill(close_status.order_id):
+            log.warning(
+                "Flip %s: flatten leg %s did not fully fill within %.0fs — "
+                "deferring the open leg to next cycle rather than risk "
+                "re-triggering the same rejection or over-shorting",
+                order.symbol, close_status.order_id, _FLATTEN_MAX_WAIT_SECONDS,
+            )
+            return close_status
+
+        open_coid = self._suffix_coid(order.client_order_id, "open")
+        open_status = self._submit_single(order, qty=open_qty, client_order_id=open_coid)
+        log.info(
+            "Flip %s: open leg %s submitted -> %s",
+            order.symbol, open_status.order_id, open_status.status,
+        )
+        return open_status
+
+    def _plan_flip_split(self, order: OrderRequest) -> tuple[int, int] | None:
+        """Return ``(close_qty, open_qty)`` if *order* would flip the
+        symbol's position through zero, else ``None`` (submit as one order,
+        unchanged from today's behavior).
+
+        Reads the current signed position directly rather than relying on
+        the engine's own book, since :meth:`get_position` already reflects
+        real broker state (and already swallows read failures to ``None``,
+        which degrades safely here to "not a flip" — the single-order path,
+        exactly today's behavior, rather than risking a wrong split from a
+        stale read).
+        """
+        pos = self.get_position(order.symbol)
+        current = pos.quantity if pos is not None else 0.0
+        if current == 0.0:
+            return None
+
+        if order.side == "sell" and current > 0 and order.quantity > current:
+            close_qty = current
+        elif order.side == "buy" and current < 0 and order.quantity > abs(current):
+            close_qty = abs(current)
+        else:
+            return None
+
+        close_int = int(round(close_qty))
+        open_int = int(round(order.quantity - close_qty))
+        if close_int <= 0 or open_int <= 0:
+            return None
+        return close_int, open_int
+
+    @staticmethod
+    def _suffix_coid(client_order_id: str | None, suffix: str) -> str | None:
+        """Append *suffix* ("close"/"open") to a client_order_id for one leg
+        of a split order. ``None`` stays ``None`` — Alpaca auto-generates an
+        id in that case, for both legs independently. Re-running the same
+        cycle regenerates identical ids, so Alpaca's own idempotency dedupes
+        each leg rather than double-submitting."""
+        if client_order_id is None:
+            return None
+        return f"{client_order_id}-{suffix}"
+
+    def _await_fill(self, order_id: str) -> bool:
+        """Bounded poll for *order_id* to reach a terminal ``filled`` state.
+
+        Both legs of a flip are the *same side*, so the open leg must not be
+        submitted until the flatten leg has actually settled — otherwise
+        Alpaca still sees the pre-flatten quantity and rejects the open leg
+        with the identical error. Mirrors IBKRBroker's own bounded
+        post-submit poll (`_wait_for_order_resolution`) in spirit: fail safe
+        (``False``) rather than hang, on timeout, rejection/cancellation, or
+        a polling error.
+        """
+        deadline = time.monotonic() + _FLATTEN_MAX_WAIT_SECONDS
+        while time.monotonic() < deadline:
+            try:
+                status = self.get_order_status(order_id)
+            except Exception:
+                log.warning(
+                    "Could not poll flatten-leg order %s status", order_id, exc_info=True,
+                )
+                return False
+            if status.status == "filled":
+                return True
+            if status.status in ("rejected", "cancelled"):
+                return False
+            time.sleep(_FLATTEN_POLL_INTERVAL)
+        return False
+
+    def _submit_single(
+        self, order: OrderRequest, *, qty: float, client_order_id: str | None,
+    ) -> OrderStatus:
         client = self._ensure_connected()
         tif = getattr(TimeInForce, _TIF_MAP.get(order.time_in_force, "day").upper(), TimeInForce.DAY)
 
@@ -157,19 +307,19 @@ class AlpacaBroker(Broker):
                     raise BrokerError("limit_price required for limit orders")
                 req = LimitOrderRequest(
                     symbol=order.symbol,
-                    qty=order.quantity,
+                    qty=qty,
                     side=OrderSide.BUY if order.side == "buy" else OrderSide.SELL,
                     time_in_force=tif,
                     limit_price=order.limit_price,
-                    client_order_id=order.client_order_id,
+                    client_order_id=client_order_id,
                 )
             else:
                 req = MarketOrderRequest(
                     symbol=order.symbol,
-                    qty=order.quantity,
+                    qty=qty,
                     side=OrderSide.BUY if order.side == "buy" else OrderSide.SELL,
                     time_in_force=tif,
-                    client_order_id=order.client_order_id,
+                    client_order_id=client_order_id,
                 )
 
             result = client.submit_order(req)

@@ -11,9 +11,13 @@ already accepts) that posts alerts to a generic webhook. Slack and Microsoft
 Teams incoming webhooks read a top-level ``text`` field; Discord's webhook
 API is stricter — it *requires* at least one of ``content``/``embeds``/
 ``components``/``poll``/a file, and returns a 400 if none are present, so a
-``text``-only body is silently rejected there. Sending both ``text`` and
-``content`` with the same message covers all three with one POST and no
-hard dependency on any vendor SDK.
+``text``-only body is silently rejected there. Sending ``text``/``content``
+(a short plain-text line — what Slack/Teams render, and what Discord shows
+as the notification-preview text) alongside a rich, severity-colored
+``embeds`` card (what Discord actually renders in the channel) covers all
+three with one POST and no hard dependency on any vendor SDK. Unknown extra
+top-level keys (``embeds``, the raw ``alert`` dict) are simply ignored by
+webhook consumers that don't understand them.
 
 Configuration (all optional; the callback is a no-op — returns ``None``
 from :func:`build_alert_callback` — when unset, so silence is the default
@@ -35,21 +39,141 @@ log = logging.getLogger(__name__)
 
 _SEVERITY_RANK = {"info": 0, "warning": 1, "critical": 2}
 
-
 _DISCORD_CONTENT_LIMIT = 2000  # Discord rejects content over this length.
+_DISCORD_TITLE_LIMIT = 256
+_DISCORD_DESCRIPTION_LIMIT = 4096
+_DISCORD_MAX_FIELDS = 25
+
+# Discord embed side-bar colors, one per severity — the primary "is this
+# urgent" signal (a plain [WARNING]/[CRITICAL] text prefix is easy to miss
+# scrolling a busy channel; a red vs. gold vs. blue bar isn't).
+_SEVERITY_COLOR = {
+    "critical": 0xED4245,  # Discord's own "danger" red
+    "warning": 0xFAA61A,   # Discord's own "caution" gold
+    "info": 0x5865F2,      # Discord blurple
+}
+_SEVERITY_EMOJI = {"critical": "🔴", "warning": "🟠", "info": "🔵"}
+
+# Human-friendly titles for every alert `kind` LiveTradingEngine actually
+# emits (src/firm/live/engine.py) — a raw snake_case kind like
+# "cycle_all_orders_failed" reads as a log line, not something an operator
+# skimming Discord on their phone can act on instantly. Anything not listed
+# here (a future alert kind) falls back to a generic title-cased rendering
+# in _alert_title, so this never needs to be kept in perfect lockstep with
+# engine.py to avoid looking broken.
+_ALERT_TITLES = {
+    "daily_limit_breach": "Daily Trade/Turnover Limit Breached",
+    "drawdown_breach": "Kill Switch Tripped — Drawdown Breach",
+    "kill_switch_reset": "Kill Switch Reset",
+    "news_guard_blackout": "News-Guard Blackout — Orders Held",
+    "news_guard_calendar_unavailable": "News-Guard Calendar Unavailable",
+    "news_guard_stale_calendar": "News-Guard Using Stale Calendar",
+    "cycle_hard_timeout": "Cycle Hard Timeout",
+    "cycle_watchdog_timeout": "Cycle Watchdog Timeout",
+    "cycle_all_orders_failed": "All Orders Failed This Cycle",
+    "broker_unavailable": "Broker Unavailable",
+    "broker_reconnected": "Broker Reconnected",
+    "broker_disconnected_sustained": "Broker Disconnected (Sustained)",
+    "broker_submission_circuit_open": "Order Submission Circuit Open",
+    "reconciliation_degraded": "Reconciliation Degraded",
+    "order_risk_cap_blocked": "Order Blocked — Risk Cap",
+    "live_trading_locked": "Live Trading Locked",
+}
+
+# Friendly labels for context kwargs engine.py attaches to specific alerts
+# (see the `**context` calls in LiveTradingEngine._emit_alert). Anything not
+# listed here falls back to a title-cased rendering of the key itself.
+_CONTEXT_LABELS = {
+    "cycle_id": "Cycle",
+    "consecutive_failures": "Consecutive Failures",
+    "reconnected": "Reconnected",
+    "drawdown": "Drawdown",
+    "nav": "NAV",
+    "peak_equity": "Peak Equity",
+    "was_halted": "Was Halted",
+    "new_peak_equity": "New Peak Equity",
+    "symbols": "Symbols",
+    "blocking_event": "Blocking Event",
+    "symbol": "Symbol",
+    "audit_id": "Audit ID",
+}
+
+# Alert-dict keys that already have a dedicated place in the embed (title,
+# description, color) or aren't meaningful to a human as a bare field —
+# everything else in the dict becomes a context field automatically, so a
+# new `**context` kwarg added to some future _emit_alert call is surfaced
+# without this module needing a matching update.
+_NON_CONTEXT_KEYS = {"timestamp", "kind", "severity", "message"}
+
+
+def _alert_title(kind: str) -> str:
+    return _ALERT_TITLES.get(kind, kind.replace("_", " ").title())
+
+
+def _format_field_value(key: str, value: Any) -> str:
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, float):
+        return f"{value:.1%}" if key == "drawdown" else f"{value:,.2f}"
+    if isinstance(value, (list, tuple, set)):
+        rendered = ", ".join(str(v) for v in value)
+        return rendered or "—"
+    if value is None:
+        return "—"
+    return str(value)
+
+
+def _build_fields(alert: dict[str, Any]) -> list[dict[str, Any]]:
+    fields = []
+    for key, value in alert.items():
+        if key in _NON_CONTEXT_KEYS:
+            continue
+        label = _CONTEXT_LABELS.get(key, key.replace("_", " ").title())
+        fields.append({
+            "name": label[:_DISCORD_TITLE_LIMIT],
+            "value": _format_field_value(key, value)[:1024],
+            "inline": True,
+        })
+    return fields[:_DISCORD_MAX_FIELDS]
+
+
+def _build_embed(alert: dict[str, Any]) -> dict[str, Any]:
+    severity = str(alert.get("severity", "warning")).lower()
+    color = _SEVERITY_COLOR.get(severity, _SEVERITY_COLOR["warning"])
+    title = f"{_SEVERITY_EMOJI.get(severity, '⚪')} {_alert_title(str(alert.get('kind', 'alert')))}"
+    embed: dict[str, Any] = {
+        "title": title[:_DISCORD_TITLE_LIMIT],
+        "description": str(alert.get("message", ""))[:_DISCORD_DESCRIPTION_LIMIT],
+        "color": color,
+        "fields": _build_fields(alert),
+        "footer": {"text": "AI Trading System"},
+    }
+    timestamp = alert.get("timestamp")
+    if timestamp:
+        # Already an ISO-8601 string (utcnow().isoformat() in engine.py) —
+        # exactly the format Discord's embed timestamp field expects.
+        embed["timestamp"] = timestamp
+    return embed
 
 
 def _post_webhook(url: str, alert: dict[str, Any], timeout: float) -> None:
     import requests
 
-    text = (
-        f"[{alert.get('severity', '?').upper()}] {alert.get('kind', 'alert')}: "
-        f"{alert.get('message', '')} (cycle={alert.get('cycle_id')})"
-    )
+    severity = str(alert.get("severity", "warning")).lower()
+    emoji = _SEVERITY_EMOJI.get(severity, "⚪")
+    title = _alert_title(str(alert.get("kind", "alert")))
+    # Short plain-text line: what Slack/Teams actually render, and what
+    # Discord shows as the notification-preview/toast text even though the
+    # richer, severity-colored card below (built by _build_embed) is what
+    # actually renders in the channel.
+    text = f"{emoji} [{severity.upper()}] {title}: {alert.get('message', '')}"
     text = text[: _DISCORD_CONTENT_LIMIT - 1] if len(text) > _DISCORD_CONTENT_LIMIT else text
-    # "text" for Slack/Teams, "content" for Discord (required there — see
-    # module docstring) — both carry the identical message.
-    payload = {"text": text, "content": text, "alert": alert}
+    payload = {
+        "text": text,
+        "content": text,
+        "embeds": [_build_embed(alert)],
+        "alert": alert,
+    }
     resp = requests.post(url, json=payload, timeout=timeout)
     resp.raise_for_status()
 

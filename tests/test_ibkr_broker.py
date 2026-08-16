@@ -583,6 +583,77 @@ class TestSubmitOrderWaitsForRealResolution:
         assert state["clock"] >= _ORDER_STATUS_MAX_WAIT_SECONDS
 
 
+class TestHealthCheck:
+    """Regression coverage for the bug this fix closes: IB Gateway restarts
+    nightly (systemd-scheduled) but the broker connection was never
+    proactively refreshed, so the first real request of the next day's
+    cycle discovered the half-open socket only after burning a 20s timeout
+    per symbol across the whole universe — every order lost, every trading
+    day, for 5 consecutive days. is_connected() alone can't catch this (it
+    only reads local socket state, which reports True for a half-open
+    socket), so health_check() must do a real round-trip."""
+
+    def test_true_when_round_trip_succeeds(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=30)
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            reqCurrentTime=lambda: "2026-08-16T00:00:00",
+        )
+        assert broker.health_check() is True
+
+    def test_false_and_does_not_raise_when_round_trip_times_out(self):
+        """The exact stale-socket case: isConnected() still reports True,
+        but the real round-trip fails (TimeoutError from a hung
+        qualifyContracts-style call, or a ConnectionError from
+        socket.send() on a half-open socket — confirmed live as both)."""
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=31)
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            reqCurrentTime=lambda: (_ for _ in ()).throw(TimeoutError("no response")),
+        )
+        assert broker.health_check() is False
+
+    def test_false_when_round_trip_raises_connection_error(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=32)
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            reqCurrentTime=lambda: (_ for _ in ()).throw(ConnectionError("socket.send() raised exception")),
+        )
+        assert broker.health_check() is False
+
+    def test_false_and_short_circuits_when_ib_is_none(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=33)
+        assert broker._ib is None
+        assert broker.health_check() is False
+
+    def test_false_and_short_circuits_when_not_connected_locally(self):
+        """isConnected() already False — must not even attempt the
+        round-trip (nothing to probe)."""
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=34)
+        calls = {"n": 0}
+
+        def _boom():
+            calls["n"] += 1
+            raise AssertionError("must not be called")
+
+        broker._ib = SimpleNamespace(isConnected=lambda: False, reqCurrentTime=_boom)
+        assert broker.health_check() is False
+        assert calls["n"] == 0
+
+    def test_lock_is_released_after_a_failed_round_trip(self):
+        """Companion to TestBoundedIBLockAndRequestTimeout: a failed health
+        check must not leak the lock, or the reconnect attempt that follows
+        it (on the same thread) would deadlock forever."""
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=35)
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            reqCurrentTime=lambda: (_ for _ in ()).throw(TimeoutError("no response")),
+        )
+        assert broker.health_check() is False
+        assert broker._ib_lock.acquire(timeout=0)
+        broker._ib_lock.release()
+
+
 class TestBoundedIBLockAndRequestTimeout:
     """Regression coverage for a real production incident: a submit_order()
     call hung forever inside qualifyContracts() (no response ever arrived

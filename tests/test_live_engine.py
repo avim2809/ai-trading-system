@@ -2335,6 +2335,182 @@ class TestBrokerReconnect:
         assert connected["value"] is True
 
 
+class TestProactiveBrokerHealthCheck:
+    """Coverage for the IBKR hotfix: confirmed live, IB Gateway restarts
+    nightly (systemd-scheduled) but the broker connection was never
+    proactively refreshed — the next day's cycle discovered the resulting
+    stale socket only after ``data_feed.refresh()`` had already burned a 20s
+    timeout per symbol across the whole universe, losing every order that
+    cycle, every single trading day. ``_ensure_broker_healthy`` now runs
+    before ``refresh()`` so a stale connection is caught and repaired (or
+    the cycle is aborted early) before that storm can happen. See
+    ``TestBrokerReconnect`` above for the pre-existing *reactive* path
+    (first broker call inside the cycle raises) — these tests all use
+    MockBroker's default ``health_check()`` (True while connected) unless a
+    subclass overrides it, so none of that existing coverage is affected.
+    """
+
+    @pytest.fixture()
+    def engine_components(self, tmp_path):
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
+        return broker, feed, queue, config
+
+    def _make_engine(self, broker, feed, queue, config, **kwargs):
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, **kwargs,
+        )
+
+    def _spy_refresh(self, feed):
+        """Wrap feed.refresh to count calls without changing its behavior —
+        lets tests assert the per-symbol timeout storm never started
+        (refresh not called) or that the cycle proceeded past the health
+        check (refresh called) without needing a real data provider."""
+        calls = {"n": 0}
+        original = feed.refresh
+
+        def _wrapped(*a, **k):
+            calls["n"] += 1
+            return original(*a, **k)
+
+        feed.refresh = _wrapped
+        return calls
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_stale_connection_is_repaired_before_refresh_and_cycle_proceeds(self, mock_build, engine_components):
+        """The bug's exact daily shape: health_check() fails once (the
+        routine overnight-restart case), reconnect() succeeds, and the SAME
+        cycle proceeds to trade on the now-fresh connection — no full extra
+        day lost waiting for the next cycle."""
+        broker, feed, queue, config = engine_components
+
+        class StaleOnceBroker(MockBroker):
+            def __init__(self):
+                super().__init__()
+                self.reconnect_calls = 0
+                self._checked_once = False
+
+            def health_check(self):
+                if not self._checked_once:
+                    self._checked_once = True
+                    return False
+                return True
+
+            def reconnect(self):
+                self.reconnect_calls += 1
+                super().reconnect()
+
+        broker = StaleOnceBroker()
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+        refresh_calls = self._spy_refresh(feed)
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+        result = engine.run_cycle()
+
+        assert broker.reconnect_calls == 1
+        assert refresh_calls["n"] == 1  # cycle proceeded past the health check
+        assert result.error is None
+        # Routine daily self-heal (counter was 0 going in) must stay quiet —
+        # no broker_unavailable/broker_reconnected noise for something that
+        # never actually broke a cycle's trading.
+        assert not any(
+            a["kind"] in ("broker_unavailable", "broker_reconnected") for a in result.alerts
+        )
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_dead_connection_aborts_cycle_before_refresh_is_ever_called(self, mock_build, engine_components):
+        """When reconnect() itself fails (IB Gateway genuinely down, not
+        just a routine restart), the cycle must abort immediately rather
+        than burning the per-symbol timeout storm against a dead socket."""
+        broker, feed, queue, config = engine_components
+
+        class AlwaysDeadBroker(MockBroker):
+            def health_check(self):
+                return False
+
+            def reconnect(self):
+                raise BrokerError("IB Gateway not reachable")
+
+        broker = AlwaysDeadBroker()
+        mock_build.return_value = MagicMock()
+        refresh_calls = self._spy_refresh(feed)
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+        result = engine.run_cycle()
+
+        assert refresh_calls["n"] == 0  # never entered the per-symbol fetch loop
+        assert result.error == "broker unavailable: proactive health check failed"
+        assert any(a["kind"] == "broker_unavailable" for a in result.alerts)
+        alert = next(a for a in result.alerts if a["kind"] == "broker_unavailable")
+        assert alert["reconnected"] is False
+        assert alert["severity"] == "warning"  # not yet sustained
+        assert engine._consecutive_broker_failures == 1
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_repeated_dead_connection_escalates_to_sustained_alert(self, mock_build, engine_components):
+        """Mirrors TestBrokerReconnect.test_sustained_disconnect_escalates_
+        past_threshold, but via the proactive path — the same escalation
+        bookkeeping (_emit_broker_failure_alert) is shared by both."""
+        broker, feed, queue, config = engine_components
+        config = {**config, "broker_disconnect_alert_threshold": 2}
+
+        class AlwaysDeadBroker(MockBroker):
+            def health_check(self):
+                return False
+
+            def reconnect(self):
+                raise BrokerError("still down")
+
+        broker = AlwaysDeadBroker()
+        mock_build.return_value = MagicMock()
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+
+        result1 = engine.run_cycle()
+        assert not any(a["kind"] == "broker_disconnected_sustained" for a in result1.alerts)
+
+        result2 = engine.run_cycle()
+        sustained = next(
+            a for a in result2.alerts if a["kind"] == "broker_disconnected_sustained"
+        )
+        assert sustained["severity"] == "critical"
+        assert sustained["consecutive_failures"] == 2
+        assert sustained["reconnected"] is False
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_healthy_connection_never_calls_reconnect(self, mock_build, engine_components):
+        """The overwhelming common case (connection is fine) must not pay
+        any reconnect cost, and must not emit any broker alert at all."""
+        broker, feed, queue, config = engine_components
+
+        class ReconnectAssertsBroker(MockBroker):
+            def reconnect(self):
+                raise AssertionError("must not be called when health_check() is healthy")
+
+        broker = ReconnectAssertsBroker()
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+        result = engine.run_cycle()
+
+        assert result.error is None
+        assert not any(
+            a["kind"] in ("broker_unavailable", "broker_reconnected", "broker_disconnected_sustained")
+            for a in result.alerts
+        )
+
+
 # ---------------------------------------------------------------------------
 # Strategy circuit breaker config update (rebuild-on-change knob)
 # ---------------------------------------------------------------------------

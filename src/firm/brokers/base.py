@@ -111,6 +111,27 @@ class Broker(ABC):
             log.debug("Broker disconnect during reconnect failed (%s); proceeding to connect() anyway", exc)
         self.connect()
 
+    def health_check(self) -> bool:
+        """Lightweight liveness probe: True only if the broker is reachable *right now*.
+
+        Concrete default (not abstract) delegates to :meth:`is_connected` —
+        the correct cheap check for brokers whose ``is_connected()`` is
+        either a pure local read (``MockBroker``) or already an active
+        round-trip (``AlpacaBroker``). Brokers whose ``is_connected()`` only
+        inspects local socket state and can therefore report ``True`` for a
+        half-open socket (``IBKRBroker`` after IB Gateway's mandatory nightly
+        restart — confirmed live: the local object thinks it's connected
+        while every real request times out) MUST override this with a real
+        server round-trip. Never raises: any failure is reported as ``False``
+        so the caller (``LiveTradingEngine``, proactively, before each
+        cycle's first data/broker call) can decide whether to reconnect.
+        """
+        try:
+            return self.is_connected()
+        except Exception:
+            log.warning("Broker health_check() failed", exc_info=True)
+            return False
+
     @abstractmethod
     def get_account(self) -> dict:
         """Return account summary: cash, equity, buying_power (at minimum)."""

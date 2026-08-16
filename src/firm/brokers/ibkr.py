@@ -176,6 +176,41 @@ class IBKRBroker(Broker):
     def is_connected(self) -> bool:
         return self._ib is not None and self._ib.isConnected()
 
+    def health_check(self) -> bool:
+        """Real, bounded liveness probe via ``reqCurrentTime()`` — NOT just
+        ``isConnected()``.
+
+        After IB Gateway's mandatory nightly restart the local socket can
+        remain half-open while ``isConnected()`` still returns ``True``, so
+        without this the first real request of the day (``qualifyContracts``,
+        once per symbol) is what discovers the dead socket — 20s timeout per
+        symbol, the whole cycle lost (confirmed live: every order failed for
+        5 consecutive trading days this way). ``reqCurrentTime()`` is the
+        cheapest server round-trip ib_async exposes; routed through
+        ``IB._run()`` it is bounded by ``RequestTimeout``, and ``_locked()``
+        both serialises it against every other broker call and turns a stuck
+        call into a ``BrokerError`` rather than hanging. Swallows every
+        failure to ``False`` so the caller can trigger a single proactive
+        reconnect instead of burning the cycle.
+
+        Must be called on the thread ib_async is bound to (the cycle worker)
+        — the engine only calls this from inside ``_run_cycle_work``, which
+        already runs there.
+        """
+        if self._ib is None or not self._ib.isConnected():
+            return False
+        try:
+            with self._locked():
+                self._ensure_connected().reqCurrentTime()
+            return True
+        except Exception:
+            log.warning(
+                "IBKR health_check round-trip failed — connection likely "
+                "stale (e.g. IB Gateway restarted); will reconnect",
+                exc_info=True,
+            )
+            return False
+
     def _ensure_connected(self) -> IB:
         if self._ib is None or not self._ib.isConnected():
             raise BrokerError("Not connected to IBKR – call connect() first")

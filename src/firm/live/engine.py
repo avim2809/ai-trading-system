@@ -1258,6 +1258,10 @@ class LiveTradingEngine:
             return
 
         try:
+            if not self._ensure_broker_healthy(result):
+                result.error = "broker unavailable: proactive health check failed"
+                return
+
             pit_view = self._data_feed.refresh(asof=now)
 
             prices = self._resolve_cycle_prices(pit_view)
@@ -1443,42 +1447,106 @@ class LiveTradingEngine:
             if isinstance(exc, BrokerError):
                 self._consecutive_broker_failures += 1
                 reconnected = self._try_broker_reconnect()
-                message = f"Broker call failed during cycle: {exc}"
-                # Severity mirrors how urgent this actually is: a self-healed
-                # or not-yet-sustained failure is the exact "single dropped
-                # socket/blip — including IB Gateway's routine daily restart —
-                # shouldn't need a human" case _try_broker_reconnect's own
-                # docstring describes, so it stays "warning". Only the
-                # genuinely sustained case (crossed broker_disconnect_alert_
-                # threshold with reconnect still failing) is "critical" —
-                # previously all three branches hardcoded "critical", which
-                # would have paged the alert webhook for routine, already-
-                # resolved blips.
-                severity = "warning"
-                if reconnected:
-                    message += (
-                        " — reconnected successfully; the next cycle should "
-                        "resume normally."
-                    )
-                    alert_kind = "broker_unavailable"
-                elif self._consecutive_broker_failures >= self._broker_disconnect_alert_threshold:
-                    alert_kind = "broker_disconnected_sustained"
-                    severity = "critical"
-                    message = (
-                        f"Broker has failed {self._consecutive_broker_failures} "
-                        f"consecutive cycle(s) and automatic reconnect did not "
-                        f"succeed: {exc}. Likely needs manual intervention "
-                        "(check IB Gateway is running/logged in, or restart "
-                        "ai-trading.service) — see docs/PROJECT_CONTEXT.md "
-                        "'Broker & host failover'."
-                    )
-                else:
-                    alert_kind = "broker_unavailable"
-                result.alerts.append(self._emit_alert(
-                    alert_kind, severity, message,
-                    consecutive_failures=self._consecutive_broker_failures,
+                self._emit_broker_failure_alert(
+                    result, f"Broker call failed during cycle: {exc}",
                     reconnected=reconnected,
-                ))
+                )
+
+    def _emit_broker_failure_alert(
+        self, result: CycleResult, detail: str, *, reconnected: bool
+    ) -> None:
+        """Emit the broker-unavailable / sustained-disconnect alert.
+
+        Shared by the reactive path (a cycle's first broker call raised
+        ``BrokerError``) and the proactive path (``_ensure_broker_healthy``'s
+        health check failed and reconnect also failed) so the two don't
+        duplicate the same severity/escalation logic. Assumes the caller has
+        already incremented ``_consecutive_broker_failures``.
+
+        Severity mirrors how urgent this actually is: a self-healed or
+        not-yet-sustained failure is the exact "single dropped socket/blip —
+        including IB Gateway's routine daily restart — shouldn't need a
+        human" case ``_try_broker_reconnect``'s own docstring describes, so
+        it stays "warning". Only the genuinely sustained case (crossed
+        ``broker_disconnect_alert_threshold`` with reconnect still failing)
+        is "critical".
+        """
+        severity = "warning"
+        message = detail
+        if reconnected:
+            message += (
+                " — reconnected successfully; the next cycle should "
+                "resume normally."
+            )
+            alert_kind = "broker_unavailable"
+        elif self._consecutive_broker_failures >= self._broker_disconnect_alert_threshold:
+            alert_kind = "broker_disconnected_sustained"
+            severity = "critical"
+            message = (
+                f"Broker has failed {self._consecutive_broker_failures} "
+                f"consecutive cycle(s) and automatic reconnect did not "
+                f"succeed: {detail}. Likely needs manual intervention "
+                "(check IB Gateway is running/logged in, or restart "
+                "ai-trading.service) — see docs/PROJECT_CONTEXT.md "
+                "'Broker & host failover'."
+            )
+        else:
+            alert_kind = "broker_unavailable"
+        result.alerts.append(self._emit_alert(
+            alert_kind, severity, message,
+            consecutive_failures=self._consecutive_broker_failures,
+            reconnected=reconnected,
+        ))
+
+    def _ensure_broker_healthy(self, result: CycleResult) -> bool:
+        """Proactively verify (and if needed repair) the broker connection
+        before the cycle's first data/broker call.
+
+        Confirmed live: IB Gateway restarts nightly (systemd-scheduled), but
+        the broker connection here is never otherwise refreshed — the first
+        real request of the next day's cycle discovers the stale socket only
+        after burning a 20s timeout per symbol across the whole universe,
+        losing that entire day's orders. This runs on the cycle worker
+        thread ib_async is bound to (called from the top of
+        ``_run_cycle_work``), so broker calls are made directly.
+
+        Returns ``True`` if the cycle may proceed — connection healthy, or a
+        single reconnect succeeded. Returns ``False`` if the connection is
+        down and reconnect failed; the caller aborts the cycle early rather
+        than burning the per-symbol timeout storm against a dead socket.
+        """
+        if self._broker.health_check():
+            return True
+
+        log.warning(
+            "Proactive broker health check failed before cycle %d — "
+            "connection likely stale (e.g. IB Gateway restarted overnight); "
+            "reconnecting",
+            self._cycle_count,
+        )
+        reconnected = self._try_broker_reconnect()
+        if reconnected:
+            # Do NOT reset _consecutive_broker_failures or emit
+            # broker_reconnected here: the post-reconciliation recovery block
+            # further down in _run_cycle_work already does both, but only
+            # when prior cycles had actually failed (counter > 0) — reusing
+            # that bookkeeping avoids a duplicate alert on the routine daily
+            # self-heal (counter == 0), which is this bug's normal case and
+            # should stay quiet-but-logged, not paged.
+            log.warning(
+                "Proactive reconnect succeeded before cycle %d — proceeding "
+                "on a fresh connection",
+                self._cycle_count,
+            )
+            return True
+
+        self._consecutive_broker_failures += 1
+        self._emit_broker_failure_alert(
+            result,
+            "Broker unavailable: proactive health check and reconnect both failed",
+            reconnected=False,
+        )
+        return False
 
     def _try_broker_reconnect(self) -> bool:
         """Attempt one inline reconnect after a cycle's broker call failed.
