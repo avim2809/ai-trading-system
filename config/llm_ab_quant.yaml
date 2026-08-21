@@ -6,9 +6,9 @@
 provider:
   default_model: "groq/llama-3.3-70b-versatile"
   fallback_models:
-    - "groq/llama-3.1-8b-instant"
     # gemini-2.5-pro decommissioned for new API keys — see config/llm.yaml.
-    - "gemini/gemini-2.0-flash"
+    - "gemini/gemini-3.7-flash"
+    - "openrouter/openrouter/free"
   load_balance: true
   temperature: 0.3
   max_tokens: 2000

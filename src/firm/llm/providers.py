@@ -61,17 +61,19 @@ PROVIDERS: dict[str, LLMProvider] = {
     ),
     "gemini": LLMProvider(
         "gemini", "Google Gemini", "GEMINI_API_KEY",
-        "gemini/gemini-2.0-flash", "gemini/", True,
+        "gemini/gemini-3.7-flash", "gemini/", True,
         (
-            # gemini-2.5-flash was decommissioned for new API keys (404 from
-            # Google, confirmed live 2026-08-05) — dropped from the chain.
-            # gemini-2.5-pro hit the identical decommissioning (confirmed
-            # live 2026-08-11 through 2026-08-14: every reflection call's
-            # first fallback attempt 404'd against it before falling
-            # through) — dropped for the same reason. gemini-2.0-flash is
-            # the only model in this chain still actually live; re-verify
-            # against current Google docs before adding anything above it.
-            "gemini/gemini-2.0-flash",
+            # gemini-2.5-flash and gemini-2.5-pro were both decommissioned
+            # for new API keys (404 from Google — flash confirmed live
+            # 2026-08-05, pro confirmed live 2026-08-11 through 2026-08-14)
+            # — dropped from the chain. gemini-2.0-flash dropped too
+            # (2026-08-16) as too old to be worth keeping as a fallback.
+            # gemini-3.7-flash confirmed as Google's current newest
+            # free-tier Flash model (ai.google.dev/gemini-api/docs/pricing
+            # — "most capable Flash model for agentic workflows and
+            # multimodal reasoning") and known to the installed litellm
+            # (1.83.7 has cost/routing metadata for it).
+            "gemini/gemini-3.7-flash",
         ),
     ),
     "mistral": LLMProvider(

@@ -1786,7 +1786,7 @@ class LiveTradingEngine:
         _MAX_CONSECUTIVE_BROKER_FAILURES = 3
         consecutive_broker_failures = 0
         broker_circuit_open = False
-        for o in orders:
+        for order_index, o in enumerate(orders):
             safety_order = Order(
                 symbol=o["symbol"], side=o["side"],
                 qty=float(o.get("quantity", abs(o.get("shares", 0)))),
@@ -1836,7 +1836,9 @@ class LiveTradingEngine:
                 order_type=o.get("order_type", "market"),
                 limit_price=o.get("limit_price"),
                 strategy=o.get("strategy", "composite"),
-                client_order_id=f"c{cycle_id}-{o['symbol']}-{o['side']}",
+                # Include the per-cycle order index so two same-symbol/same-side
+                # orders in one cycle still have distinct broker idempotency keys.
+                client_order_id=f"c{cycle_id}-{order_index}-{o['symbol']}-{o['side']}",
             )
             if broker_circuit_open:
                 failed.append({
@@ -1863,16 +1865,44 @@ class LiveTradingEngine:
             except BrokerError as exc:
                 log.error("Failed to submit order for %s", req.symbol, exc_info=True)
                 failed.append({**o, "error": str(exc)})
-                consecutive_broker_failures += 1
-                if consecutive_broker_failures >= _MAX_CONSECUTIVE_BROKER_FAILURES:
-                    broker_circuit_open = True
-                    self._emit_alert(
-                        "broker_submission_circuit_open", "critical",
-                        f"Aborting remaining order submissions this cycle after "
-                        f"{consecutive_broker_failures} consecutive broker failures "
-                        f"(last: {exc})",
-                    )
+                if self._is_systemic_submission_error(exc):
+                    consecutive_broker_failures += 1
+                    if consecutive_broker_failures >= _MAX_CONSECUTIVE_BROKER_FAILURES:
+                        broker_circuit_open = True
+                        self._emit_alert(
+                            "broker_submission_circuit_open", "critical",
+                            f"Aborting remaining order submissions this cycle after "
+                            f"{consecutive_broker_failures} consecutive broker failures "
+                            f"(last: {exc})",
+                        )
+                else:
+                    # Order-level rejections (e.g. duplicate client_order_id,
+                    # quantity/position constraints) should not be treated as
+                    # a broken broker connection for the entire cycle.
+                    consecutive_broker_failures = 0
         return statuses, failed
+
+    @staticmethod
+    def _is_systemic_submission_error(exc: BrokerError) -> bool:
+        """Return True when a submit failure likely reflects broker/path health.
+
+        Keeps the per-cycle submission circuit focused on connection/platform
+        outages (timeouts, disconnects, rate limits, service unavailability)
+        rather than order-specific rejects.
+        """
+        msg = str(exc).lower()
+        systemic_markers = (
+            "timed out",
+            "timeout",
+            "not connected",
+            "connection",
+            "temporarily unavailable",
+            "service unavailable",
+            "rate limit",
+            "too many requests",
+            "429",
+        )
+        return any(marker in msg for marker in systemic_markers)
 
     @staticmethod
     def _orders_to_fills(orders: list[dict[str, Any]]) -> list[dict[str, Any]]:

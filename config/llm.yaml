@@ -1,6 +1,6 @@
 # Default to a FREE model. Options that cost nothing to run:
 #   groq/llama-3.3-70b-versatile               – free Groq tier, needs a free GROQ_API_KEY
-#   gemini/gemini-2.0-flash                    – Google Gemini, needs GEMINI_API_KEY
+#   gemini/gemini-3.7-flash                    – Google Gemini, needs GEMINI_API_KEY
 #   openrouter/nvidia/nemotron-3-ultra-550b-a55b:free – free OpenRouter tier, needs OPENROUTER_API_KEY
 #   openrouter/openrouter/free                 – OpenRouter auto-router over whatever :free model fits
 #   ollama/llama3                              – fully local/offline, needs Ollama running
@@ -18,11 +18,15 @@ provider:
   # if whichever model gets picked errors (e.g. a 429), LiteLLM automatically
   # retries the rest of the list in order before giving up.
   fallback_models:
-    - "groq/llama-3.1-8b-instant"
     # gemini-2.5-pro was decommissioned for new API keys (404 from Google,
-    # confirmed live 2026-08-11 through 2026-08-14) — replaced with the
-    # still-live gemini-2.0-flash (see src/firm/llm/providers.py).
-    - "gemini/gemini-2.0-flash"
+    # confirmed live 2026-08-11 through 2026-08-14). 2026-08-16: replaced
+    # with gemini-3.7-flash — verified against ai.google.dev/gemini-api/
+    # docs/pricing and litellm's own model_cost table (litellm 1.83.7
+    # recognizes it) as Google's current newest free-tier Flash model
+    # ("most capable Flash model for agentic workflows"). gemini-2.0-flash
+    # dropped rather than kept as a fallback — too old to be worth the
+    # extra hop (see src/firm/llm/providers.py).
+    - "gemini/gemini-3.7-flash"
     - "openrouter/openai/gpt-oss-20b:free"
     - "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
     - "openrouter/google/gemma-4-31b-it:free"

@@ -1734,6 +1734,38 @@ class TestLiveEngineHardening:
         assert len(set(broker.client_ids)) == 2, "ids must be distinct per order"
 
     @patch("firm.live.engine.build_orchestrator")
+    def test_same_symbol_same_side_orders_still_get_distinct_client_ids(
+        self, mock_build, engine_components
+    ):
+        broker, feed, queue, config = engine_components
+
+        class RecordingBroker(MockBroker):
+            def __init__(self):
+                super().__init__()
+                self.client_ids = []
+
+            def submit_order(self, order):
+                self.client_ids.append(order.client_order_id)
+                return super().submit_order(order)
+
+        broker = RecordingBroker()
+        queue = ApprovalQueue(broker=broker)
+        orders = [
+            {"symbol": "AAPL", "side": "buy", "quantity": 1, "price": 100.0, "strategy": "momentum"},
+            {"symbol": "AAPL", "side": "buy", "quantity": 2, "price": 100.0, "strategy": "trend"},
+        ]
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (orders, _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config, approval_mode="full_auto")
+        engine.start()
+        engine.run_cycle()
+
+        assert len(broker.client_ids) == 2
+        assert len(set(broker.client_ids)) == 2
+
+    @patch("firm.live.engine.build_orchestrator")
     def test_concurrent_cycle_is_skipped(self, mock_build, engine_components):
         broker, feed, queue, config = engine_components
         mock_orch = MagicMock()
@@ -1838,6 +1870,45 @@ class TestLiveEngineHardening:
         assert result.orders_failed == 5
         skipped = [o for o in result.failed_orders if "circuit open" in o["error"]]
         assert {o["symbol"] for o in skipped} == {"TSLA", "NVDA"}
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_non_systemic_submit_rejections_do_not_open_broker_circuit(
+        self, mock_build, engine_components
+    ):
+        broker, feed, queue, config = engine_components
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT", "GOOG", "TSLA"])
+
+        class PerOrderRejectBroker(MockBroker):
+            def __init__(self):
+                super().__init__()
+                self.submit_calls = []
+
+            def submit_order(self, order):
+                self.submit_calls.append(order.symbol)
+                if order.symbol in {"AAPL", "MSFT", "GOOG"}:
+                    raise BrokerError("Order submission failed: {\"code\":40010001,\"message\":\"client_order_id must be unique\"}")
+                return super().submit_order(order)
+
+        broker = PerOrderRejectBroker()
+        orders = [
+            {"symbol": sym, "side": "buy", "quantity": 1, "price": 100.0, "strategy": "momentum"}
+            for sym in ["AAPL", "MSFT", "GOOG", "TSLA"]
+        ]
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (orders, _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config, approval_mode="full_auto")
+        engine.start()
+        result = engine.run_cycle()
+
+        # All orders should still be attempted; the broker circuit should
+        # remain closed because these are order-level rejects, not systemic
+        # broker-connectivity failures.
+        assert broker.submit_calls == ["AAPL", "MSFT", "GOOG", "TSLA"]
+        assert result.orders_submitted == 1
+        assert result.orders_failed == 3
+        assert not any("circuit open" in o.get("error", "") for o in result.failed_orders)
 
     def test_reconcile_respects_in_flight_orders(self):
         """An unsettled open order must not cause internal holdings to be
