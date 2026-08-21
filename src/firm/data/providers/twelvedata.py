@@ -30,6 +30,10 @@ class TwelveDataProvider(DataProvider):
     """Twelve Data REST adapter (fundamentals snapshot via ``/statistics``)."""
 
     name = "twelvedata"
+    # Some plans do not include /statistics at all. After one confirmed
+    # plan-level 403, skip the rest of the batch (and future calls) to avoid
+    # symbol-by-symbol retries and repeated warning storms every cycle.
+    _fundamentals_plan_blocked: bool = False
 
     def __init__(self, api_key: str = "", settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
@@ -49,8 +53,12 @@ class TwelveDataProvider(DataProvider):
         end: datetime | str,
     ) -> pd.DataFrame:
         start_ts, end_ts = pd.Timestamp(start), pd.Timestamp(end)
+        if self._fundamentals_plan_blocked:
+            return self.empty_fundamentals()
         frames: list[pd.DataFrame] = []
         for symbol in symbols:
+            if self._fundamentals_plan_blocked:
+                break
             if symbol.upper() in ETF_SYMBOLS:
                 continue
             try:
@@ -59,6 +67,15 @@ class TwelveDataProvider(DataProvider):
                     params={"symbol": symbol, "apikey": self._api_key},
                 )
             except ProviderError as exc:
+                msg = str(exc)
+                if "HTTP 403" in msg and "/statistics is available exclusively" in msg:
+                    if not type(self)._fundamentals_plan_blocked:
+                        log.warning(
+                            "twelvedata_fundamentals_unavailable "
+                            "(plan does not include /statistics; skipping TwelveData fundamentals)"
+                        )
+                        type(self)._fundamentals_plan_blocked = True
+                    continue
                 log.warning("twelvedata_fundamentals_failed symbol=%s (%s)", symbol, exc)
                 continue
             row = _statistics_to_row(symbol, stats, start_ts, end_ts)

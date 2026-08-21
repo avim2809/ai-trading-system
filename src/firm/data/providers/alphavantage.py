@@ -14,7 +14,6 @@ from typing import Sequence
 import pandas as pd
 
 from firm.config import Settings, get_settings
-from firm.data import schemas
 from firm.data.providers._rest import RestClient
 from firm.data.providers.base import DataProvider, ProviderError
 from firm.logging_setup import get_logger
@@ -68,14 +67,14 @@ class AlphaVantageProvider(DataProvider):
                     continue
                 records.append(
                     {
-                        schemas.COL_DATE: ts.normalize(),
-                        schemas.COL_SYMBOL: symbol,
-                        schemas.COL_OPEN: float(vals["1. open"]),
-                        schemas.COL_HIGH: float(vals["2. high"]),
-                        schemas.COL_LOW: float(vals["3. low"]),
-                        schemas.COL_CLOSE: float(vals["4. close"]),
-                        schemas.COL_ADJ_CLOSE: float(vals["5. adjusted close"]),
-                        schemas.COL_VOLUME: float(vals["6. volume"]),
+                        "date": ts.normalize(),
+                        "symbol": symbol,
+                        "open": float(vals["1. open"]),
+                        "high": float(vals["2. high"]),
+                        "low": float(vals["3. low"]),
+                        "close": float(vals["4. close"]),
+                        "adj_close": float(vals["5. adjusted close"]),
+                        "volume": float(vals["6. volume"]),
                     }
                 )
             if records:
@@ -84,7 +83,7 @@ class AlphaVantageProvider(DataProvider):
             return self.empty_prices()
         return (
             pd.concat(frames, ignore_index=True)
-            .sort_values([schemas.COL_SYMBOL, schemas.COL_DATE])
+            .sort_values(["symbol", "date"])
             .reset_index(drop=True)
         )
 
@@ -176,24 +175,23 @@ class AlphaVantageProvider(DataProvider):
                         continue
                     rows.append(
                         {
-                            schemas.COL_ASOF: published,
-                            schemas.COL_SYMBOL: sym,
-                            schemas.COL_SENTIMENT: float(
+                            "date": published,
+                            "symbol": sym,
+                            "sentiment_score": float(
                                 ts_obj.get("ticker_sentiment_score", 0.0) or 0.0
                             ),
-                            schemas.COL_RELEVANCE: float(
-                                ts_obj.get("relevance_score", 0.0) or 0.0
-                            ),
-                            schemas.COL_HEADLINE: art.get("title", ""),
-                            schemas.COL_SOURCE: art.get("source", "alphavantage"),
-                            schemas.COL_URL: art.get("url", ""),
+                            # Keep sentiment schema stable across providers;
+                            # relevance and URL are provider-specific extras.
+                            "news_volume": 1,
+                            "source": art.get("source", "alphavantage"),
+                            "headline": art.get("title", ""),
                         }
                     )
         if not rows:
             return self.empty_news()
         return (
             pd.DataFrame(rows)
-            .sort_values([schemas.COL_SYMBOL, schemas.COL_ASOF])
+            .sort_values(["symbol", "date"])
             .reset_index(drop=True)
         )
 

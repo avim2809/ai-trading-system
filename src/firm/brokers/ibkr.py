@@ -293,31 +293,61 @@ class IBKRBroker(Broker):
                 return pos
         return None
 
+    @staticmethod
+    def _is_timeout_broker_error(exc: BrokerError) -> bool:
+        """True when *exc* represents a bounded IBKR request timeout."""
+        return "timed out" in str(exc).lower()
+
+    def _submit_order_once_unlocked(self, order: OrderRequest) -> OrderStatus:
+        """Submit one order on the current IB connection (caller holds lock)."""
+        ib = self._ensure_connected()
+        contract = Stock(order.symbol, "SMART", "USD")
+        ib.qualifyContracts(contract)
+
+        qty = int(round(abs(order.quantity)))
+        if qty <= 0:
+            raise BrokerError(f"invalid quantity for {order.symbol}: {order.quantity!r}")
+        action = "BUY" if order.side == "buy" else "SELL"
+
+        if order.order_type == "limit":
+            if order.limit_price is None:
+                raise BrokerError("limit_price required for limit orders")
+            ib_order = LimitOrder(action, qty, order.limit_price)
+        else:
+            ib_order = MarketOrder(action, qty)
+
+        if order.client_order_id:
+            ib_order.orderRef = order.client_order_id
+
+        trade = ib.placeOrder(contract, ib_order)
+        self._wait_for_order_resolution(ib, trade)
+
+        return self._map_trade(trade)
+
     def submit_order(self, order: OrderRequest) -> OrderStatus:
-        with self._locked():
-            ib = self._ensure_connected()
-            contract = Stock(order.symbol, "SMART", "USD")
-            ib.qualifyContracts(contract)
+        try:
+            with self._locked():
+                return self._submit_order_once_unlocked(order)
+        except BrokerError as exc:
+            if not self._is_timeout_broker_error(exc):
+                raise
 
-            qty = int(round(abs(order.quantity)))
-            if qty <= 0:
-                raise BrokerError(f"invalid quantity for {order.symbol}: {order.quantity!r}")
-            action = "BUY" if order.side == "buy" else "SELL"
-
-            if order.order_type == "limit":
-                if order.limit_price is None:
-                    raise BrokerError("limit_price required for limit orders")
-                ib_order = LimitOrder(action, qty, order.limit_price)
-            else:
-                ib_order = MarketOrder(action, qty)
-
-            if order.client_order_id:
-                ib_order.orderRef = order.client_order_id
-
-            trade = ib.placeOrder(contract, ib_order)
-            self._wait_for_order_resolution(ib, trade)
-
-            return self._map_trade(trade)
+            log.warning(
+                "submit_order timeout for %s; forcing reconnect and retrying once",
+                order.symbol,
+            )
+            with self._locked():
+                # A half-stale local socket can pass isConnected() but still
+                # time out per-request; rebuilding the client is the fastest
+                # way to recover in-cycle without waiting for the next cycle.
+                try:
+                    if self._ib is not None:
+                        self._ib.disconnect()
+                except Exception:
+                    pass
+                self._ib = None
+                self.connect()
+                return self._submit_order_once_unlocked(order)
 
     @staticmethod
     def _wait_for_order_resolution(ib: Any, trade: Any) -> None:

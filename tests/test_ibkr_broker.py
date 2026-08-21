@@ -17,7 +17,7 @@ import pytest
 
 pytest.importorskip("ib_async")
 
-from firm.brokers.base import BrokerError
+from firm.brokers.base import BrokerError, OrderRequest, OrderStatus
 from firm.brokers.ibkr import IBKRBroker
 
 
@@ -581,6 +581,61 @@ class TestSubmitOrderWaitsForRealResolution:
         # Cancelled-looking status immediately.
         from firm.brokers.ibkr import _ORDER_STATUS_MAX_WAIT_SECONDS
         assert state["clock"] >= _ORDER_STATUS_MAX_WAIT_SECONDS
+
+
+class TestSubmitOrderTimeoutRecovery:
+    def test_timeout_triggers_reconnect_then_retry_once(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=40)
+        broker._ib = SimpleNamespace(isConnected=lambda: True, disconnect=lambda: None)
+        calls = {"submit": 0, "connect": 0}
+
+        def _submit_once(_order):
+            calls["submit"] += 1
+            if calls["submit"] == 1:
+                raise BrokerError("IBKR request timed out: no response")
+            return OrderStatus(
+                order_id="1",
+                symbol="AAPL",
+                side="buy",
+                quantity=1,
+                status="filled",
+                filled_quantity=1,
+                avg_fill_price=100.0,
+            )
+
+        def _connect():
+            calls["connect"] += 1
+            broker._ib = SimpleNamespace(isConnected=lambda: True, disconnect=lambda: None)
+
+        broker._submit_order_once_unlocked = _submit_once
+        broker.connect = _connect
+
+        status = broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=1))
+
+        assert status.status == "filled"
+        assert calls["submit"] == 2
+        assert calls["connect"] == 1
+
+    def test_non_timeout_broker_error_is_not_retried(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=41)
+        broker._ib = SimpleNamespace(isConnected=lambda: True, disconnect=lambda: None)
+        calls = {"submit": 0, "connect": 0}
+
+        def _submit_once(_order):
+            calls["submit"] += 1
+            raise BrokerError("Not connected to IBKR")
+
+        def _connect():
+            calls["connect"] += 1
+
+        broker._submit_order_once_unlocked = _submit_once
+        broker.connect = _connect
+
+        with pytest.raises(BrokerError, match="Not connected"):
+            broker.submit_order(OrderRequest(symbol="MSFT", side="buy", quantity=1))
+
+        assert calls["submit"] == 1
+        assert calls["connect"] == 0
 
 
 class TestHealthCheck:
