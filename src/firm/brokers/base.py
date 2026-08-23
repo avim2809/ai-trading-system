@@ -132,6 +132,17 @@ class Broker(ABC):
             log.warning("Broker health_check() failed", exc_info=True)
             return False
 
+    def warm_universe(self, symbols: list[str]) -> None:
+        """Proactively prepare per-symbol broker-side state (e.g. IBKR's
+        qualified contracts) for the whole trading universe in one batched
+        call, right after connect()/reconnect().
+
+        Concrete no-op default: only brokers with a per-symbol lookup step
+        that's otherwise repeated on every order (``IBKRBroker``'s
+        ``qualifyContracts``) need to override this. Alpaca's REST calls
+        take a bare symbol string directly, nothing to warm.
+        """
+
     @abstractmethod
     def get_account(self) -> dict:
         """Return account summary: cash, equity, buying_power (at minimum)."""

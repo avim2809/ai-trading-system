@@ -282,4 +282,5 @@ class BacktestEngine:
             snapshots=snapshots,
             benchmark_returns=benchmark_returns,
             trades=results.get("trade_log", []),
+            turnover=results.get("turnover", {}),
         )

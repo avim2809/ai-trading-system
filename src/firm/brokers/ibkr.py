@@ -93,6 +93,18 @@ class IBKRBroker(Broker):
         # live-cycle worker thread never call qualifyContracts/placeOrder
         # concurrently (that deadlock hangs the whole firm-api process).
         self._ib_lock = threading.Lock()
+        # Per-symbol qualified-contract cache. Confirmed live: every order in
+        # a cycle re-issued its own qualifyContracts round-trip on a fresh
+        # Stock(...) (submit_order, get_current_price(s)) — a 24-order basket
+        # meant 24 sequential requests, each independently exposed to the 20s
+        # RequestTimeout, and a Gateway mid-reconnect-to-its-backend hangs
+        # every one of them. A contract's conId is stable for the life of the
+        # instrument, so once qualified it never needs re-qualifying — not
+        # even across a reconnect (the cache deliberately survives
+        # disconnect()/reconnect(), it's IBKR-side identity, not
+        # connection-state). See warm_universe() for proactively filling this
+        # in one batched call instead of N per-order ones.
+        self._qualified_contracts: dict[str, Any] = {}
 
     @contextmanager
     def _locked(self):
@@ -140,6 +152,7 @@ class IBKRBroker(Broker):
                 self._ib.reqAccountSummary()
                 contract = Stock("SPY", "SMART", "USD")
                 self._ib.qualifyContracts(contract)
+                self._qualified_contracts["SPY"] = contract
                 details = self._ib.reqContractDetails(contract)
                 self._market_hours_details = details[0] if details else None
                 log.info(
@@ -165,7 +178,15 @@ class IBKRBroker(Broker):
                         attempt, exc, delay,
                     )
                     time.sleep(delay)
-        raise BrokerError(f"Failed to connect to IBKR: {last_exc}") from last_exc
+        # "connection" must appear literally in this message (not just
+        # "connect") — the live engine's _is_systemic_submission_error
+        # classifies broker failures by substring-matching "connection", and
+        # an underlying exception whose own text happens to lack every
+        # systemic marker would otherwise get misclassified as an
+        # order-specific reject, resetting its per-cycle failure counter and
+        # never tripping the submission circuit breaker even though every
+        # order will keep failing the same way until a real reconnect.
+        raise BrokerError(f"IBKR connection failed after 3 attempts: {last_exc}") from last_exc
 
     def disconnect(self) -> None:
         if self._ib is not None:
@@ -177,36 +198,56 @@ class IBKRBroker(Broker):
         return self._ib is not None and self._ib.isConnected()
 
     def health_check(self) -> bool:
-        """Real, bounded liveness probe via ``reqCurrentTime()`` — NOT just
-        ``isConnected()``.
+        """Real, bounded, two-stage liveness probe — NOT just ``isConnected()``.
 
         After IB Gateway's mandatory nightly restart the local socket can
         remain half-open while ``isConnected()`` still returns ``True``, so
         without this the first real request of the day (``qualifyContracts``,
         once per symbol) is what discovers the dead socket — 20s timeout per
         symbol, the whole cycle lost (confirmed live: every order failed for
-        5 consecutive trading days this way). ``reqCurrentTime()`` is the
-        cheapest server round-trip ib_async exposes; routed through
-        ``IB._run()`` it is bounded by ``RequestTimeout``, and ``_locked()``
-        both serialises it against every other broker call and turns a stuck
-        call into a ``BrokerError`` rather than hanging. Swallows every
-        failure to ``False`` so the caller can trigger a single proactive
-        reconnect instead of burning the cycle.
+        5 consecutive trading days this way).
+
+        Two stages, cheapest first:
+
+        1. ``reqCurrentTime()`` — the cheapest server round-trip ib_async
+           exposes. Catches a fully dead socket, but confirmed live to NOT
+           catch a Gateway that answers this ping locally while its own
+           upstream connection to IB's *contract-resolution* backend is
+           degraded — that Gateway state passed this check and then hung
+           every ``qualifyContracts`` call for the rest of the cycle anyway.
+        2. ``reqContractDetails()`` on the SPY contract already qualified in
+           ``connect()`` — exercises the exact backend ``qualifyContracts``
+           depends on, so a mid-reconnect-to-backend Gateway is caught here
+           instead of minutes later inside the order-submission loop. Skipped
+           (degrades to stage-1-only) if ``connect()`` hasn't run yet.
+
+        Both stages are routed through ``IB._run()`` so both are bounded by
+        ``RequestTimeout``, and ``_locked()`` serialises each against every
+        other broker call and turns a stuck call into a ``BrokerError``
+        rather than hanging. Swallows every failure to ``False`` so the
+        caller can trigger a single proactive reconnect instead of burning
+        the cycle.
 
         Must be called on the thread ib_async is bound to (the cycle worker)
-        — the engine only calls this from inside ``_run_cycle_work``, which
-        already runs there.
+        — the engine calls this both at the top of ``_run_cycle_work`` and
+        again immediately before the order-submission loop, which already
+        run there.
         """
         if self._ib is None or not self._ib.isConnected():
             return False
         try:
             with self._locked():
-                self._ensure_connected().reqCurrentTime()
+                ib = self._ensure_connected()
+                ib.reqCurrentTime()
+                spy = self._qualified_contracts.get("SPY")
+                if spy is not None:
+                    ib.reqContractDetails(spy)
             return True
         except Exception:
             log.warning(
                 "IBKR health_check round-trip failed — connection likely "
-                "stale (e.g. IB Gateway restarted); will reconnect",
+                "stale (e.g. IB Gateway restarted, or mid-reconnect to its "
+                "own contract-resolution backend); will reconnect",
                 exc_info=True,
             )
             return False
@@ -215,6 +256,41 @@ class IBKRBroker(Broker):
         if self._ib is None or not self._ib.isConnected():
             raise BrokerError("Not connected to IBKR – call connect() first")
         return self._ib
+
+    def _get_qualified_contract_unlocked(self, symbol: str) -> Any:
+        """Return a qualified ``Stock`` contract for *symbol*, from the cache
+        if present, else qualify-and-cache it now (caller holds ``_ib_lock``).
+        """
+        cached = self._qualified_contracts.get(symbol)
+        if cached is not None:
+            return cached
+        ib = self._ensure_connected()
+        contract = Stock(symbol, "SMART", "USD")
+        ib.qualifyContracts(contract)
+        self._qualified_contracts[symbol] = contract
+        return contract
+
+    def warm_universe(self, symbols: list[str]) -> None:
+        """Proactively qualify every not-yet-cached symbol in *one* batched
+        ``qualifyContracts`` call, instead of leaving each to be discovered
+        (and separately round-tripped) the first time an order needs it.
+
+        Call this right after a successful ``connect()``/``reconnect()`` with
+        the live universe — collapses what would otherwise be up to N
+        sequential per-order qualifyContracts round-trips (each exposed to
+        the 20s ``RequestTimeout``) into a single request. Safe to call with
+        an already-fully-cached universe (no-op) or repeatedly (idempotent).
+        """
+        with self._locked():
+            ib = self._ensure_connected()
+            missing = [s for s in symbols if s not in self._qualified_contracts]
+            if not missing:
+                return
+            contracts = [Stock(s, "SMART", "USD") for s in missing]
+            ib.qualifyContracts(*contracts)
+            for sym, contract in zip(missing, contracts):
+                self._qualified_contracts[sym] = contract
+            log.info("Warm-qualified %d IBKR contract(s): %s", len(missing), missing)
 
     @contextmanager
     def shared_connection(self):
@@ -301,8 +377,7 @@ class IBKRBroker(Broker):
     def _submit_order_once_unlocked(self, order: OrderRequest) -> OrderStatus:
         """Submit one order on the current IB connection (caller holds lock)."""
         ib = self._ensure_connected()
-        contract = Stock(order.symbol, "SMART", "USD")
-        ib.qualifyContracts(contract)
+        contract = self._get_qualified_contract_unlocked(order.symbol)
 
         qty = int(round(abs(order.quantity)))
         if qty <= 0:
@@ -445,16 +520,14 @@ class IBKRBroker(Broker):
     def get_current_price(self, symbol: str) -> float:
         with self._locked():
             ib = self._ensure_connected()
-            contract = Stock(symbol, "SMART", "USD")
-            ib.qualifyContracts(contract)
+            contract = self._get_qualified_contract_unlocked(symbol)
             [ticker] = ib.reqTickers(contract)
             return self._resolve_price(ticker, symbol)
 
     def get_current_prices(self, symbols: list[str]) -> dict[str, float]:
         with self._locked():
             ib = self._ensure_connected()
-            contracts = [Stock(s, "SMART", "USD") for s in symbols]
-            ib.qualifyContracts(*contracts)
+            contracts = [self._get_qualified_contract_unlocked(s) for s in symbols]
             tickers = ib.reqTickers(*contracts)
             return {
                 contract.symbol: self._resolve_price(ticker, contract.symbol)

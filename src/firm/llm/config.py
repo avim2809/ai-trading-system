@@ -64,6 +64,16 @@ _ENHANCEMENT_DEFAULTS: dict[str, Any] = {
     "max_debate_symbols": 5,
     # RAG chunks per retrieval (Voyage query-embed cost is 1/call regardless).
     "rag_n_results": 2,
+    # Per-call sampling temperature override for enhancement/scoring calls
+    # (None = use LLMService's global provider.temperature default,
+    # unchanged prior behavior). Enhancement calls feed straight into the
+    # z-scored analyst signal / bull-bear conviction / debate net_conviction
+    # the rest of the pipeline treats as a quant-grade number — a genuinely
+    # different (but similarly-worded) day's prompt sampled at a high
+    # temperature can swing an otherwise-stable signal on pure LLM sampling
+    # noise, on top of whatever real information changed. See
+    # LLMAgentMixin._call_llm.
+    "temperature": None,
     # Portfolio-level agents (off by default — 1 call each when enabled).
     "enhance_portfolio_review": False,
     "enhance_risk_review": False,

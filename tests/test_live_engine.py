@@ -858,6 +858,50 @@ class TestDurableLiveState:
         )
         assert real_trader2._conviction_ema == real_trader._conviction_ema
 
+    @patch("firm.live.engine.build_orchestrator")
+    def test_cycle_counter_persists_across_restart(self, mock_build, tmp_path):
+        """Regression coverage for a real, confirmed-live bug: client_order_id
+        is f"c{cycle_id}-{order_index}-{symbol}-{side}"
+        (LiveTradingEngine._execute_orders), and _cycle_count used to reset
+        to 0 on every process restart — unlike portfolio history, attribution,
+        daily limits, and trader state, all of which this state store already
+        persisted. A same-day restart regenerating "cycle 1" at the same
+        order-list position then collided with an already-submitted id from
+        before the restart. Confirmed live: Alpaca rejected the repeat with
+        "client_order_id must be unique" and tripped the submission circuit
+        breaker (2026-08-17)."""
+        db_path = tmp_path / "live_state.db"
+        broker = MockBroker(initial_cash=100_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            state_db_path=db_path,
+        )
+        engine.start()
+        engine.run_cycle()
+        engine.run_cycle()
+        engine.run_cycle()
+        assert engine._cycle_count == 3
+        engine.stop()
+
+        # A fresh engine instance (simulating a same-day restart) must pick
+        # up the counter where the last one left off, not reset to 0 — the
+        # next client_order_id must never repeat one already submitted today.
+        engine2 = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            state_db_path=db_path,
+        )
+        assert engine2._cycle_count == 3
+
     def test_no_state_db_path_never_creates_file(self, tmp_path, engine_components):
         broker, feed, queue, config = engine_components
         would_be_path = tmp_path / "should_not_exist.db"
@@ -2580,6 +2624,153 @@ class TestProactiveBrokerHealthCheck:
             a["kind"] in ("broker_unavailable", "broker_reconnected", "broker_disconnected_sustained")
             for a in result.alerts
         )
+
+
+class TestWarmBrokerUniverse:
+    """Coverage for LiveTradingEngine._warm_broker_universe -- the engine-
+    level wrapper around Broker.warm_universe(), called on start(), on a
+    successful _try_broker_reconnect(), and right before order submission
+    each cycle. A warm-up failure must never crash the caller: the fallback
+    (per-order qualifyContracts on first use) is exactly the pre-fix
+    behavior, not a new failure mode."""
+
+    @pytest.fixture()
+    def engine_components(self, tmp_path):
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
+        return broker, feed, queue, config
+
+    def _make_engine(self, broker, feed, queue, config, **kwargs):
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, **kwargs,
+        )
+
+    def test_start_calls_warm_universe_with_the_live_universe(self, engine_components):
+        broker, feed, queue, config = engine_components
+        calls = []
+        broker.warm_universe = lambda symbols: calls.append(list(symbols))
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+
+        assert calls == [["AAPL", "MSFT"]]
+
+    def test_a_warm_universe_failure_does_not_crash_start(self, engine_components):
+        broker, feed, queue, config = engine_components
+        broker.warm_universe = MagicMock(side_effect=RuntimeError("boom"))
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()  # must not raise
+
+        assert engine.is_running
+
+
+class TestPreSubmissionHealthReprobe:
+    """Coverage for the second health-check checkpoint added right before
+    the order-submission loop. Confirmed live: the top-of-cycle health check
+    (TestProactiveBrokerHealthCheck above) can pass while the Gateway is
+    still fine, and then degrade during the minutes-long orchestrator.step()
+    LLM pipeline — by the time _execute_orders ran, every qualifyContracts
+    call hung anyway. This re-probes immediately before submission so that
+    degradation is caught as one clean abort instead of a per-order
+    timeout+circuit-breaker storm."""
+
+    @pytest.fixture()
+    def engine_components(self, tmp_path):
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
+        return broker, feed, queue, config
+
+    def _make_engine(self, broker, feed, queue, config, **kwargs):
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, **kwargs,
+        )
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_degradation_after_top_of_cycle_check_is_repaired_before_submission(
+        self, mock_build, engine_components
+    ):
+        """Health check passes at top-of-cycle (1st call), degrades by the
+        time orchestrator.step() returns, is repaired by the pre-submission
+        reconnect (2nd health call + reconnect) — orders still go through on
+        the now-fresh connection, in the same cycle."""
+        broker, feed, queue, config = engine_components
+
+        class DegradesAfterFirstCheckBroker(MockBroker):
+            def __init__(self):
+                super().__init__()
+                self.health_check_calls = 0
+                self.reconnect_calls = 0
+
+            def health_check(self):
+                self.health_check_calls += 1
+                return self.health_check_calls == 1
+
+            def reconnect(self):
+                self.reconnect_calls += 1
+                super().reconnect()
+
+        broker = DegradesAfterFirstCheckBroker()
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config, approval_mode="full_auto")
+        engine.start()
+        result = engine.run_cycle()
+
+        assert broker.health_check_calls == 2  # top-of-cycle + pre-submission
+        assert broker.reconnect_calls == 1
+        assert result.error is None
+        assert result.orders_submitted > 0
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_degradation_with_failed_reconnect_aborts_before_submitting_anything(
+        self, mock_build, engine_components
+    ):
+        """When the pre-submission reconnect also fails, the cycle must abort
+        cleanly with zero orders submitted rather than letting _execute_orders
+        run its own per-order timeout storm against a dead connection."""
+        broker, feed, queue, config = engine_components
+
+        class DegradesAndStaysDeadBroker(MockBroker):
+            def __init__(self):
+                super().__init__()
+                self.health_check_calls = 0
+                self.submit_calls = []
+
+            def health_check(self):
+                self.health_check_calls += 1
+                return self.health_check_calls == 1
+
+            def reconnect(self):
+                raise BrokerError("IB Gateway not reachable")
+
+            def submit_order(self, order):
+                self.submit_calls.append(order.symbol)
+                return super().submit_order(order)
+
+        broker = DegradesAndStaysDeadBroker()
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config, approval_mode="full_auto")
+        engine.start()
+        result = engine.run_cycle()
+
+        assert broker.submit_calls == []  # never even attempted
+        assert result.orders_submitted == 0
+        assert result.error == (
+            "broker unavailable: pre-submission health check and reconnect both failed"
+        )
+        assert any(a["kind"] == "broker_unavailable" for a in result.alerts)
 
 
 # ---------------------------------------------------------------------------

@@ -36,6 +36,7 @@ class BacktestReport:
         snapshots: list[PortfolioSnapshot],
         benchmark_returns: pd.Series | None = None,
         trades: list[dict] | None = None,
+        turnover: dict | None = None,
     ) -> None:
         self.returns = returns
         self.attribution = attribution
@@ -44,6 +45,15 @@ class BacktestReport:
             benchmark_returns if benchmark_returns is not None else pd.Series(dtype=float)
         )
         self.trades = trades or []
+        # avg_turnover / total_turnover / rebalance_count from
+        # firm.backtest.analyzers.TurnoverAnalyzer. Previously computed by
+        # BacktestEngine.get_results() but never threaded into the report —
+        # turnover is exactly the metric needed to validate a construction
+        # change (no-trade bands, turnover-aware sizing, max_positions, etc.)
+        # against a live-faithful backtest, so it belongs in report.json
+        # alongside Sharpe/drawdown, not only reachable via a separate
+        # programmatic get_results() call.
+        self.turnover = turnover or {}
 
     # ------------------------------------------------------------------
     # Benchmark-relative
@@ -141,6 +151,12 @@ class BacktestReport:
                 lines.append(f"  {k:30s}: {v:>12.6f}")
             lines.append("")
 
+        if self.turnover:
+            lines.append("--- Turnover ---")
+            for k, v in self.turnover.items():
+                lines.append(f"  {k:30s}: {v:>12.6f}" if isinstance(v, float) else f"  {k:30s}: {v}")
+            lines.append("")
+
         strat = self.strategy_summary()
         if not strat.empty:
             lines.append("--- Strategy Attribution ---")
@@ -171,6 +187,9 @@ class BacktestReport:
         trade_metrics = self.trade_metrics_summary()
         if trade_metrics:
             result["trade_metrics"] = trade_metrics
+
+        if self.turnover:
+            result["turnover"] = self.turnover
 
         monte_carlo = self.monte_carlo_summary()
         if monte_carlo:

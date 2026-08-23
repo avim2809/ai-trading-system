@@ -16,13 +16,29 @@ from firm.contracts.models import Signal
 log = logging.getLogger(__name__)
 
 
-def zscore_signals(signals: list[Signal]) -> list[Signal]:
-    """Cross-sectional z-score normalisation, applied per strategy.
+def zscore_signals(signals: list[Signal], demean: bool = True) -> list[Signal]:
+    """Cross-sectional score normalisation, applied per strategy.
 
-    Groups signals by ``strategy`` name, then within each group replaces
-    ``score`` with its z-score across the symbols in that group.  Groups
-    with fewer than two signals or zero standard deviation are passed
-    through unchanged.
+    Groups signals by ``strategy`` name, then within each group rescales
+    ``score`` by the cross-sectional dispersion (sample std, ddof=1) across
+    the symbols in that group.  Groups with fewer than two signals or zero
+    standard deviation are passed through unchanged.
+
+    ``demean`` (default ``True``, unchanged prior behavior) subtracts the
+    cross-sectional mean before dividing by std -- a true z-score, forcing
+    every strategy's output to mean 0 across the universe *every bar*, which
+    destroys aggregate level/direction information: a strategy that
+    genuinely reads the whole universe as bullish (all raw scores positive)
+    gets rescaled into "half the universe is above average, half below"
+    regardless. That's a real, confirmed contributor to live turnover/
+    whipsaw -- mid-ranked names whose demeaned score sits near zero flip
+    sign on noise (day-to-day drift in *other* names' raw scores, via the
+    shared mean) even when their own signal didn't meaningfully change.
+    ``demean=False`` divides by the same std but skips the mean subtraction,
+    so a one-sided universe stays one-sided (a genuine net-long or net-short
+    read is preserved) while cross-strategy scale stays comparable. Opt-in
+    (see ``zscore_demean`` in TechnicalAnalyst/FundamentalAnalyst/
+    SentimentAnalyst) pending a backtest A/B against the true-z-score default.
     """
     by_strategy: dict[str, list[Signal]] = {}
     for sig in signals:
@@ -39,17 +55,20 @@ def zscore_signals(signals: list[Signal]) -> list[Signal]:
         # Sample std (ddof=1) to match the pandas convention strategies use
         # for their own z-scoring, so the two normalization stages are
         # consistent rather than mixing population and sample variance.
+        # Always computed around the true mean (a measure of dispersion),
+        # regardless of whether that mean is then subtracted from the output.
         var = sum((x - mean) ** 2 for x in scores) / (n - 1)
         std = var**0.5
         if std < 1e-10:
             result.extend(strat_signals)
             continue
+        offset = mean if demean else 0.0
         for s in strat_signals:
             result.append(
                 Signal(
                     symbol=s.symbol,
                     strategy=s.strategy,
-                    score=(s.score - mean) / std,
+                    score=(s.score - offset) / std,
                     confidence=s.confidence,
                     horizon=s.horizon,
                     asof=s.asof,

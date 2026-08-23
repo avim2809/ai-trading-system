@@ -322,6 +322,79 @@ class TestExperimentRunner:
         results_path = Path(result.artifacts_dir) / "results.json"
         assert results_path.exists()
 
+    def test_run_metrics_includes_turnover(self, tmp_runs_dir, sample_config):
+        """TurnoverAnalyzer's avg_turnover/total_turnover/rebalance_count were
+        already computed by BacktestEngine.get_results() but never threaded
+        into ExperimentRunner's metrics -- without this, a construction change
+        can't be validated against the metric it's actually meant to move."""
+        runner = ExperimentRunner(registry=RunRegistry(base_dir=tmp_runs_dir))
+        result = runner.run(sample_config)
+
+        assert "avg_turnover" in result.metrics
+        assert "total_turnover" in result.metrics
+        assert "rebalance_count" in result.metrics
+
+    def test_flatten_config_passes_through_conviction_smoothing(self):
+        """Backtest parity with live for TraderAgent's conviction-EMA
+        smoothing -- previously silently dropped by _flatten_config's
+        explicit key allowlist even after being added to the config dict."""
+        flat = ExperimentRunner._flatten_config({
+            "backtest": {"start_date": "2020-01-01", "end_date": "2020-06-30"},
+            "strategies": {"enabled": ["momentum"]},
+            "conviction_smoothing_enabled": True,
+            "conviction_smoothing_halflife_days": 5.0,
+        })
+
+        assert flat["conviction_smoothing_enabled"] is True
+        assert flat["conviction_smoothing_halflife_days"] == 5.0
+
+    def test_flatten_config_omits_conviction_smoothing_when_absent(self):
+        flat = ExperimentRunner._flatten_config({
+            "backtest": {"start_date": "2020-01-01", "end_date": "2020-06-30"},
+            "strategies": {"enabled": ["momentum"]},
+        })
+
+        assert "conviction_smoothing_enabled" not in flat
+
+    def test_top_level_rebalance_overrides_win_over_the_nested_backtest_value(self):
+        """Regression: a param_grid candidate overriding rebalance_band_pct/
+        rebalance_fraction must actually take effect, not get shadowed by the
+        (un-overridden) value already sitting inside the nested "backtest"
+        sub-dict. _merge_override is a shallow top-level merge, so these two
+        fields are deliberately also surfaced as top-level keys -- this locks
+        in that _flatten_config applies the top-level override *after*
+        spreading "backtest", so the override wins."""
+        flat = ExperimentRunner._flatten_config({
+            "backtest": {
+                "start_date": "2020-01-01", "end_date": "2020-06-30",
+                "rebalance_band_pct": 0.05, "rebalance_fraction": 0.7,
+            },
+            "strategies": {"enabled": ["momentum"]},
+            # Simulates what _merge_override produces when a param_grid
+            # candidate overrides just these two top-level keys.
+            "rebalance_band_pct": 0.0,
+            "rebalance_fraction": 1.0,
+        })
+
+        assert flat["rebalance_band_pct"] == 0.0
+        assert flat["rebalance_fraction"] == 1.0
+
+    def test_flatten_config_passes_through_rebalance_knobs_from_backtest_block(self):
+        """Without any top-level override, the values already inside the
+        nested "backtest" sub-dict (the normal, non-override path) must
+        still reach the flat config via bt's own spread."""
+        flat = ExperimentRunner._flatten_config({
+            "backtest": {
+                "start_date": "2020-01-01", "end_date": "2020-06-30",
+                "rebalance_band_pct": 0.05, "rebalance_fraction": 0.7,
+            },
+            "strategies": {"enabled": ["momentum"]},
+        })
+
+        assert flat["rebalance_band_pct"] == 0.05
+        assert flat["rebalance_fraction"] == 0.7
+        assert "conviction_smoothing_halflife_days" not in flat
+
     def test_walk_forward_split_logic(self):
         splits = ExperimentRunner._compute_walk_forward_splits(
             "2020-01-01", "2022-12-31", n_splits=3, train_pct=0.7

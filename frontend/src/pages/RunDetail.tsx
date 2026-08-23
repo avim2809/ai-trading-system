@@ -182,6 +182,19 @@ export default function RunDetail() {
             </div>
           )}
 
+          {report.turnover && Object.keys(report.turnover).length > 0 && (
+            <div className="mb-6">
+              <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-3">
+                Turnover
+              </h2>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <MetricCard label="Avg Turnover / Rebalance" value={report.turnover['avg_turnover'] ?? 0} format="pct" />
+                <MetricCard label="Total Turnover" value={report.turnover['total_turnover'] ?? 0} format="pct" />
+                <MetricCard label="Rebalance Count" value={report.turnover['rebalance_count'] ?? 0} format="number" />
+              </div>
+            </div>
+          )}
+
           {report.monte_carlo && (
             <div className="mb-6 bg-slate-800 rounded-xl border border-slate-700 p-5">
               <h2 className="text-sm font-medium text-slate-400 uppercase tracking-wider mb-1">

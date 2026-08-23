@@ -25,9 +25,11 @@ class MockLLMService:
     def __init__(self, config=None):
         self.usage_stats = {}
         self.calls = 0
+        self.last_kwargs: dict = {}
 
     def chat_json(self, messages, **kw):
         self.calls += 1
+        self.last_kwargs = kw
         return {"score": 0.9, "confidence": 0.9, "rationale": "mock"}
 
     def get_cached(self, messages, **kw):
@@ -98,6 +100,56 @@ class TestEnhancementGating:
         result = agent.run(AgentContext(now=NOW, pit_view=MagicMock()))
         assert agent._llm.calls == 0
         assert result.signals[0].score == pytest.approx(0.8)
+
+    def test_configured_temperature_reaches_the_llm_call(self, monkeypatch):
+        """Regression: enhancement.temperature must reach chat_json/get_cached
+        as an explicit per-call override -- these scoring calls feed straight
+        into the z-scored analyst signal, so sampling noise from the global
+        provider.temperature (0.3) is a real, avoidable source of day-to-day
+        signal wobble independent of any genuine information change."""
+        monkeypatch.setattr(
+            "firm.llm.config.enhancement_config",
+            lambda overrides=None: {
+                "policy": "live_calls",
+                "min_abs_score": 0.0,
+                "max_signals_per_agent": 8,
+                "rag_n_results": 2,
+                "temperature": 0.1,
+            },
+        )
+        strat = MagicMock()
+        strat.name = "news"
+        strat.generate.return_value = [_sig("AAPL", "news", 0.8)]
+        agent = LLMSentimentAnalyst(strategies=[strat], llm_config={})
+        agent._llm = MockLLMService()
+        agent._retrieve_context = lambda *a, **k: "ctx"
+
+        agent.run(AgentContext(now=NOW, pit_view=MagicMock()))
+        assert agent._llm.calls == 1
+        assert agent._llm.last_kwargs.get("temperature") == 0.1
+
+    def test_unset_temperature_does_not_override_llm_service_default(self, monkeypatch):
+        """Backward compatibility: temperature absent/None (the default) must
+        not pass an explicit override at all, preserving byte-identical
+        behavior for every existing caller."""
+        monkeypatch.setattr(
+            "firm.llm.config.enhancement_config",
+            lambda overrides=None: {
+                "policy": "live_calls",
+                "min_abs_score": 0.0,
+                "max_signals_per_agent": 8,
+                "rag_n_results": 2,
+            },
+        )
+        strat = MagicMock()
+        strat.name = "news"
+        strat.generate.return_value = [_sig("AAPL", "news", 0.8)]
+        agent = LLMSentimentAnalyst(strategies=[strat], llm_config={})
+        agent._llm = MockLLMService()
+        agent._retrieve_context = lambda *a, **k: "ctx"
+
+        agent.run(AgentContext(now=NOW, pit_view=MagicMock()))
+        assert "temperature" not in agent._llm.last_kwargs
 
 
 class _OutOfBoundsLLMService:

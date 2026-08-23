@@ -58,6 +58,26 @@ DEFAULT_PARAM_GRID: list[dict] = [
         "signal_combination": {"method": "optimal"},
         "allocation_method": "equal_weight",
     },
+    {
+        # PART 2 redesign candidate: joint mean-variance-with-costs QP
+        # (firm.portfolio.optimizer) replacing L1-normalize-to-full-
+        # investment sizing + RiskAgent's sequential clip passes. See PART 2
+        # of the remediation plan — this is the mandatory walk-forward+PBO
+        # gate before any live promotion.
+        "signal_combination": {"method": "optimal"},
+        "allocation_method": "joint_optimizer",
+        # The optimizer's native transaction-cost term already produces an
+        # endogenous no-trade region and partial rebalancing (see PART 2's
+        # design doc) -- leaving the #58 bolt-ons (no-trade band, turnover-
+        # aware sizing fraction, conviction-EMA smoothing) on top would
+        # double-damp the same effect and bias this candidate's turnover/
+        # Sharpe away from what the native cost model alone actually does.
+        # Both are surfaced as flat top-level keys specifically so a
+        # param_grid candidate can override them (see _build_config below).
+        "rebalance_band_pct": 0.0,
+        "rebalance_fraction": 1.0,
+        "conviction_smoothing_enabled": False,
+    },
 ]
 
 
@@ -81,6 +101,21 @@ def _build_config(
         "allocation_method": settings.allocation_method,
         "kelly_fraction": settings.kelly_fraction,
         "signal_combination": settings.signal_combination,
+        # Backtest parity with live for TraderAgent's conviction-EMA
+        # smoothing — see firm.config.Settings' field docstring.
+        "conviction_smoothing_enabled": settings.conviction_smoothing_enabled,
+        "conviction_smoothing_halflife_days": settings.conviction_smoothing_halflife_days,
+        # Backtest parity with live for analyst cross-sectional
+        # normalization — see the field docstring in firm.config.Settings.
+        "zscore_demean": settings.zscore_demean,
+        # Also surfaced as explicit top-level keys (in addition to living
+        # inside the "backtest" sub-dict via bt above) so a param_grid
+        # candidate can override them: ExperimentRunner._merge_override is a
+        # shallow top-level merge, so an override nested under "backtest"
+        # would replace the *entire* backtest sub-dict (clobbering start/end
+        # dates, commission_pct, etc.) instead of just these two fields.
+        "rebalance_band_pct": settings.backtest.rebalance_band_pct,
+        "rebalance_fraction": settings.backtest.rebalance_fraction,
         "strategy_circuit_breaker": settings.strategy_circuit_breaker,
         "strategy_regime_weights": settings.strategy_regime_weights,
         "data_source": "cache",

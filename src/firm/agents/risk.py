@@ -40,6 +40,23 @@ class RiskAgent(Agent):
         self.max_net_exposure: float = cfg.get("max_net_exposure", 0.5)
         self.max_sector_pct: float = cfg.get("max_sector_pct", 0.25)
         self.vol_target: float = cfg.get("vol_target", 0.15)
+        # vol_target above had a numeric default and was *always* set in
+        # every deployed config, but _vol_targeting only ever ran when the
+        # caller separately passed inputs["vol_estimates"] -- nothing in the
+        # orchestrator ever did, so this was silently dead code: config/
+        # live.yaml documented "12% annualised vol target - conservative
+        # live baseline" as if it were an active control while it did
+        # nothing. Fixed to self-compute vol estimates from ctx.pit_view
+        # (matching _cap_correlated_exposure/_cvar_overlay's own pattern
+        # below, both of which are already self-sufficient this way) instead
+        # of depending on an input nothing supplies. Given an explicit
+        # opt-in flag anyway, consistent with every other risk-bearing
+        # toggle in this class defaulting to off (correlation_threshold,
+        # cvar_limit, regime_overlay) -- this is a behavior change (it will
+        # actually de-risk now) even though it looks like a bugfix, so it
+        # gets the same "must be turned on deliberately" treatment.
+        self.vol_targeting_enabled: bool = bool(cfg.get("vol_targeting_enabled", False))
+        self.vol_lookback_days: int = int(cfg.get("vol_lookback_days", 60))
         self.max_drawdown_pct: float = cfg.get("max_drawdown_pct", 0.20)
         self.veto_threshold: float = cfg.get("veto_threshold", 0.5)
         # Optional static sector map used when none is supplied per-call.
@@ -160,7 +177,13 @@ class RiskAgent(Agent):
             violations.extend(v)
             actions.extend(a)
 
+        # Explicit inputs["vol_estimates"] (if a caller ever supplies it)
+        # takes precedence; otherwise self-compute from ctx.pit_view when
+        # enabled -- see vol_targeting_enabled's docstring above for why
+        # this used to be unreachable in the real orchestrator path.
         vol_estimates = inputs.get("vol_estimates")
+        if vol_estimates is None and self.vol_targeting_enabled:
+            vol_estimates = self._estimate_vol_estimates(targets, ctx)
         if vol_estimates:
             targets, v, a = self._vol_targeting(targets, vol_estimates)
             violations.extend(v)
@@ -572,6 +595,41 @@ class RiskAgent(Agent):
             ],
             [f"Scaled all weights by {scale:.4f} (CVaR tail-risk overlay)"],
         )
+
+    def _estimate_vol_estimates(
+        self, targets: dict[str, float], ctx: AgentContext,
+    ) -> dict[str, float] | None:
+        """Realised annualised vol per symbol from ``ctx.pit_view``, for
+        ``_vol_targeting`` when no explicit ``vol_estimates`` input is
+        supplied. Mirrors ``_cap_correlated_exposure``'s own
+        prices-→pivot-→pct_change idiom; returns ``None`` (no-op) on any
+        missing pit_view/history, same fail-open posture as that method.
+        """
+        pit_view = getattr(ctx, "pit_view", None)
+        if pit_view is None or not targets:
+            return None
+        symbols = list(targets.keys())
+        try:
+            price_df = pit_view.prices(symbols, lookback_days=self.vol_lookback_days)
+        except Exception as exc:
+            log.warning(
+                "Vol targeting skipped: failed to load price history (%s)",
+                exc, exc_info=True,
+            )
+            return None
+        if price_df is None or price_df.empty or "close" not in price_df.columns:
+            return None
+        try:
+            pivot = price_df.pivot_table(index="date", columns="symbol", values="close")
+            daily_vol = pivot.pct_change().std()
+        except Exception as exc:
+            log.warning(
+                "Vol targeting skipped: malformed price history (%s)",
+                exc, exc_info=True,
+            )
+            return None
+        annualised = (daily_vol * (252 ** 0.5)).to_dict()
+        return {s: v for s, v in annualised.items() if v == v}  # drop NaN
 
     def _vol_targeting(
         self,

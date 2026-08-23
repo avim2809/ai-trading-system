@@ -6,7 +6,14 @@
 provider:
   default_model: "groq/llama-3.3-70b-versatile"
   fallback_models:
-    - "groq/llama-3.1-8b-instant"
+    # Kept in sync with config/llm.yaml's fallback_models -- this arm must
+    # exercise the same real provider chain the production path uses, not a
+    # stale one. groq/llama-3.1-8b-instant removed: confirmed 404
+    # ("model does not exist") live 2026-08-17, already dropped from
+    # config/llm.yaml. With load_balance's deterministic-hash routing, a
+    # decommissioned model sitting here isn't just an inert fallback -- some
+    # fraction of prompts hash directly to it as the *primary* pick every
+    # time, forcing the full remaining chain to be walked on every such call.
     # gemini-2.5-pro decommissioned for new API keys — see config/llm.yaml.
     - "gemini/gemini-3.7-flash"
     - "openrouter/openai/gpt-oss-20b:free"
@@ -53,6 +60,11 @@ enhancement:
   max_theses_per_agent: 5
   max_debate_symbols: 5
   rag_n_results: 2
+  # Kept in sync with config/llm.yaml -- this arm's enhancement calls must
+  # sample at the same low temperature the production path uses, or the A/B
+  # would be partly measuring sampling noise instead of LLM-vs-quant signal
+  # quality. See firm.llm.config._ENHANCEMENT_DEFAULTS' "temperature" docstring.
+  temperature: 0.1
   enhance_portfolio_review: false
   enhance_risk_review: false
 

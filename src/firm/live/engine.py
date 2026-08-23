@@ -993,6 +993,17 @@ class LiveTradingEngine:
                 )
         except Exception:
             log.warning("Failed to restore persisted daily trade/turnover counters", exc_info=True)
+        try:
+            saved_cycle_count = self._state_store.load_cycle_counter()
+            if saved_cycle_count is not None:
+                self._cycle_count = saved_cycle_count
+                log.info(
+                    "Restored cycle counter at %d — client_order_ids will "
+                    "stay unique across this restart",
+                    self._cycle_count,
+                )
+        except Exception:
+            log.warning("Failed to restore persisted cycle counter", exc_info=True)
         trader = getattr(self._orchestrator, "trader", None)
         if hasattr(trader, "load_state"):
             try:
@@ -1043,6 +1054,10 @@ class LiveTradingEngine:
             })
         except Exception:
             log.warning("Failed to persist daily trade/turnover counters", exc_info=True)
+        try:
+            self._state_store.save_cycle_counter(self._cycle_count)
+        except Exception:
+            log.warning("Failed to persist cycle counter", exc_info=True)
         trader = getattr(self._orchestrator, "trader", None)
         if hasattr(trader, "get_state"):
             try:
@@ -1093,6 +1108,20 @@ class LiveTradingEngine:
         account = self._broker.get_account()
         log.info("Live engine started – account equity: $%.2f", account.get("equity", 0))
         self._portfolio.cash = account.get("cash", self._portfolio.cash)
+        self._warm_broker_universe()
+
+    def _warm_broker_universe(self) -> None:
+        """Ask the broker to proactively prepare per-symbol state (IBKR's
+        qualified contracts) for the whole trading universe in one batched
+        call. No-op for brokers that don't need it (see
+        ``Broker.warm_universe``'s default). Never raises: a warm-up failure
+        just means the next per-symbol call pays its own lookup cost, same as
+        before this cache existed — not worth failing a cycle over.
+        """
+        try:
+            self._broker.warm_universe(list(self._data_feed._universe))
+        except Exception:
+            log.warning("Broker universe warm-up failed", exc_info=True)
 
     def _disconnect_broker_on_worker(self) -> None:
         self._broker.disconnect()
@@ -1385,6 +1414,40 @@ class LiveTradingEngine:
                 auto_orders, manual_orders = self._split_by_approval(orders)
 
             if auto_orders:
+                # Re-probe right before submission, not just at top-of-cycle:
+                # confirmed live that a Gateway mid-reconnect-to-its-own-
+                # contract-resolution-backend answers the top-of-cycle health
+                # check fine (it only proves the *local* socket is live), then
+                # every qualifyContracts call inside _execute_orders times out
+                # anyway — minutes have usually passed by here (orchestrator.
+                # step() is the slow LLM pipeline), plenty of time for the
+                # backend to degrade after the earlier check passed. Catching
+                # it here means one clean "broker unavailable" for the cycle
+                # instead of burning the per-order timeout+circuit-breaker
+                # storm inside _execute_orders. Purely a second checkpoint —
+                # does not replace _ensure_broker_healthy's cycle-start gate.
+                if not self._broker.health_check():
+                    log.warning(
+                        "Broker health check failed immediately before order "
+                        "submission (cycle %d) — connection degraded since "
+                        "the top-of-cycle check; reconnecting instead of "
+                        "burning a per-order timeout storm",
+                        self._cycle_count,
+                    )
+                    if not self._try_broker_reconnect():
+                        result.error = (
+                            "broker unavailable: pre-submission health check "
+                            "and reconnect both failed"
+                        )
+                        self._consecutive_broker_failures += 1
+                        self._emit_broker_failure_alert(
+                            result,
+                            "Broker unavailable: pre-submission health check "
+                            "and reconnect both failed",
+                            reconnected=False,
+                        )
+                        return
+                self._warm_broker_universe()
                 statuses, failed = self._execute_orders(
                     auto_orders, cycle_id=self._cycle_count
                 )
@@ -1571,6 +1634,12 @@ class LiveTradingEngine:
             "Broker reconnected after %d consecutive failure(s)",
             self._consecutive_broker_failures,
         )
+        # Cheap/idempotent even though most symbols are usually still cached
+        # from before the reconnect (the qualified-contract cache is IBKR-side
+        # identity, not connection state, so it deliberately survives a
+        # reconnect) — only guards the edge case where the universe changed
+        # since the last warm-up.
+        self._warm_broker_universe()
         return True
 
     def _on_cycle_watchdog_timeout(self, cycle_id: int) -> None:
@@ -1889,6 +1958,19 @@ class LiveTradingEngine:
         Keeps the per-cycle submission circuit focused on connection/platform
         outages (timeouts, disconnects, rate limits, service unavailability)
         rather than order-specific rejects.
+
+        This is a best-effort substring classifier over the exception's own
+        text, so it's only as good as that text. Confirmed live: IBKR's
+        ``connect()`` failure (retried 3x, then raised) used to read "Failed
+        to connect to IBKR: {last_exc}" — if the wrapped ``last_exc`` didn't
+        itself happen to contain any marker below, a genuine connection
+        failure was misclassified as an order-specific reject, resetting the
+        per-cycle failure counter every time and letting every remaining
+        order in the basket run its own full timeout+reconnect+retry storm
+        instead of the circuit opening after 3. Fixed at the source
+        (``IBKRBroker.connect()`` now always includes the literal word
+        "connection"), but the marker list here is broadened too as a second
+        line of defense against other brokers'/libraries' wording.
         """
         msg = str(exc).lower()
         systemic_markers = (
@@ -1896,11 +1978,17 @@ class LiveTradingEngine:
             "timeout",
             "not connected",
             "connection",
+            "disconnect",
             "temporarily unavailable",
             "service unavailable",
+            "unavailable",
             "rate limit",
             "too many requests",
             "429",
+            "refused",
+            "reset by peer",
+            "broken pipe",
+            "no response",
         )
         return any(marker in msg for marker in systemic_markers)
 

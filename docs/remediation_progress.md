@@ -10,7 +10,7 @@ done, in progress, and left, plus context/detail beyond what the plan file's
 todo list captures, so work can resume in a fresh session/chat without the
 prior conversation history.
 
-Last updated: 2026-08-02.
+Last updated: 2026-08-23.
 
 ## How to resume
 
@@ -782,8 +782,348 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     modules — recommended as its own dedicated project (subscription
     decision first) rather than an overnight add-on. Full writeup in
     docs/investing_pro_integration.md's "Phase 7" section. No code changes.
+57. **IBKR execution-reliability remediation** (2026-08-23) — user-reported
+    "trades break, and when they work they're not profitable" led to a
+    from-scratch investigation of real live logs (not assumptions), which
+    found IBKR cycles routinely logging `24 generated, 0 submitted, 24
+    failed` even after the earlier proactive-reconnect fix (#24 above). Root
+    cause: `IBKRBroker.health_check()` pings via `reqCurrentTime()` — proves
+    the local socket is live but not that the Gateway's upstream
+    contract-resolution backend is, so a Gateway mid-reconnect-to-its-own-
+    backend passes the top-of-cycle health gate, then every
+    `qualifyContracts` call in the submit loop (minutes later, after
+    `orchestrator.step()`) times out anyway. Fixed:
+    - Per-symbol **qualified-contract cache** on `IBKRBroker`
+      (`_qualified_contracts`, `warm_universe()`) — conId is stable once
+      qualified, so a 24-order cycle no longer means 24 sequential
+      `qualifyContracts` round-trips, each exposed to the 20s
+      `RequestTimeout`. Warmed on `connect()`/reconnect and via a new
+      pre-submission checkpoint (below).
+    - `health_check()` is now **two-stage**: the existing `reqCurrentTime()`
+      ping, then `reqContractDetails()` on the cached SPY contract —
+      exercises the actual backend `qualifyContracts` depends on.
+    - New **pre-submission re-probe** in `_run_cycle_work`, immediately
+      before `_execute_orders` (not just at top-of-cycle) — catches
+      degradation that happens during the multi-minute LLM pipeline between
+      the two checkpoints; reconnects and aborts the cycle cleanly instead of
+      burning a per-order timeout storm.
+    - Broadened `_is_systemic_submission_error`'s marker list and fixed
+      `IBKRBroker.connect()`'s failure message to always contain the literal
+      word "connection" — a connect failure whose wrapped exception text
+      lacked every marker was being misclassified as a non-systemic
+      order-reject, resetting the per-cycle circuit-breaker counter every
+      time instead of ever tripping it.
+    - **`_cycle_count` now persists** via `LiveStateStore` (new
+      `save_cycle_counter`/`load_cycle_counter`) — it previously reset to 0
+      on every restart, and since `client_order_id =
+      f"c{cycle_id}-{order_index}-{symbol}-{side}"`, a same-day restart could
+      regenerate an id already submitted pre-restart. Confirmed live: Alpaca
+      rejected exactly this with `"client_order_id must be unique"` on
+      2026-08-17, tripping the submission circuit breaker.
+    - **Separately found, unrelated to the above**: `conviction_smoothing_enabled`/
+      `conviction_smoothing_halflife_days` (the TraderAgent EMA-smoothing fix
+      from `config/live.yaml`, "confirmed live 2026-08-03 through
+      2026-08-07") were never in `resolve_live_startup()`'s YAML→
+      engine_config allowlist (`src/firm/live/provider_utils.py`) — silently
+      OFF in every real deployment via both the systemd auto-start path and
+      manual `POST /api/live/start`, despite config and docs describing it
+      as active. Fixed (added to the allowlist).
+    - Tests: `tests/test_ibkr_broker.py` (contract cache, `warm_universe`,
+      two-stage health check, connect-failure message), `tests/test_live_engine.py`
+      (pre-submission re-probe, cycle-counter persistence),
+      `tests/test_live_provider_utils.py` (conviction-smoothing +
+      rebalance-knob allowlist regressions).
+    - Both paper-trading engines (`ai-trading.service`, IBKR;
+      `ai-trading-alpaca.service`, Alpaca) were stopped via
+      `POST /api/live/stop` for the duration of this remediation and had not
+      been restarted as of this writing (see "In progress" below).
+58. **Turnover/no-trade-band remediation + Track C (LLM path)** (2026-08-23,
+    same session as #57) — the live logs above also showed both brokers
+    breaching the 25% daily-turnover cap on nearly every trading day (15
+    `daily_limit_breach` CRITICAL alerts each) and chronic position-sign
+    whipsaw (`Position mismatch <SYM>: internal=X broker=-X`, 169x/226x).
+    Root cause chain confirmed by direct code trace: `ExecutionAgent` had
+    **no no-trade band at all** (`abs(diff_w) < 1e-6`, i.e. ~$1 on $1M);
+    `zscore_signals` forces every strategy to mean-0/std-1 across the
+    universe every bar (destroys aggregate level/direction, mid-ranked names
+    flip sign on noise); `TraderAgent` L1-normalizes to Σ|w|=1 every bar
+    (always fully invested, magnitude discarded); `max_positions=20` on a
+    25-name universe forces ~half the book to its per-name cap every cycle.
+    The 25% daily cap itself is a live-engine-only post-hoc scaler
+    (`_cap_orders_to_daily_budget`) that doesn't exist in backtests at all —
+    `config/settings.yaml` was also not live-faithful (`rebalance_frequency:
+    weekly` vs live's `daily`; conviction smoothing off; correlation cap off),
+    so no existing backtest could have validated any of this.
+
+    Shipped, each validated via a 3-window backtest comparison
+    (2024-Q1/2022-Q1/2023-Q3, live-faithful config — **see #59/`docs/
+    formal_pbo_audit.md`'s 2026-08-23 section for why this ad hoc check was
+    later found insufficient as the sole gate**):
+    - **`rebalance_band_pct`** (`ExecutionAgent`, default 0.0/no-op): skip
+      trades below this fraction of NAV. `0.05` cut turnover 44-73% and
+      improved/held drawdown in all 3 windows. **Shipped.**
+    - **`rebalance_fraction`** (`ExecutionAgent`, default 1.0/no-op):
+      turnover-aware sizing, trade only this fraction of the (already
+      above-band) gap to target. `0.7` beat both `1.0` (band-only) and `0.5`
+      on Sharpe in all 3 windows while cutting turnover another 34-54% beyond
+      the band. **Shipped.**
+    - Fixed dead code: `RiskAgent`'s `vol_target` had a numeric default in
+      every deployed config but `_vol_targeting` only ran when a caller
+      separately supplied `inputs["vol_estimates"]` — nothing in the real
+      orchestrator path did. Added `RiskAgent._estimate_vol_estimates`
+      (self-computes from `ctx.pit_view`, mirrors `_cap_correlated_exposure`'s
+      pattern) behind a new `vol_targeting_enabled` flag (opt-in, matching
+      every other risk-bearing toggle in this class). **Shipped** (enabled in
+      live.yaml/live_alpaca.yaml/settings.yaml) — de-risk only, provably
+      `scale = min(vol_target/port_vol, 1.0)`, can't lever up.
+    - `settings.yaml` made live-faithful: `rebalance_frequency: daily`,
+      conviction smoothing + correlation cap enabled to match `live.yaml`.
+    - Turnover (`avg_turnover`/`total_turnover`/`rebalance_count` from the
+      existing `TurnoverAnalyzer`) now surfaced in `report.json` and the
+      walk-forward aggregate metrics — previously computed but never
+      threaded through, so no backtest could report the metric any of this
+      work needed to be validated against. Frontend: new "Turnover" section
+      in `RunDetail.tsx` + `ReportData.turnover` type.
+    - **Tested and honestly rejected** (kept in code, off by default, per
+      this codebase's established pattern — see #25's circuit-breaker item):
+      `max_positions` 20→25 (small/inconsistent turnover improvement, Sharpe
+      *worse* in 2/3 windows — the band already absorbs most of the
+      "5-name churn" cost this was meant to fix); `zscore_demean=False` (a
+      `zscore_signals(demean:)` flag to preserve aggregate level info instead
+      of forcing mean-0 — inconsistent across windows, and mechanistically
+      wrong: removing the per-strategy mean also strips each strategy's own
+      natural raw-score scale/offset, so strategies combine unfairly;
+      confirmed by a net-exposure-cap breach appearing in the log and
+      turnover collapsing to near-zero in every window).
+    - **Track C (LLM path)**: added `enhancement.temperature` config knob
+      (`config/llm.yaml`, `llm_ab_llm.yaml`) as an explicit per-call override
+      in `LLMAgentMixin._call_llm` — enhancement calls feed straight into the
+      z-scored analyst signal, so `provider.temperature`'s 0.3 sampling noise
+      was avoidable noise on top of any genuine signal change. Set to `0.1`,
+      shipped. Also found `llm_ab_llm.yaml`'s fallback chain still had
+      `groq/llama-3.1-8b-instant`, confirmed 404'd live 2026-08-17 and
+      already dropped from production `config/llm.yaml` but never synced to
+      this A/B arm — under hash-based model routing this isn't just an inert
+      fallback, a fraction of prompts route to it as the *primary* pick every
+      time. Fixed (synced to match production). Verified (no code change
+      needed): per-signal LLM failures already degrade cleanly to the quant
+      score (`LLMFundamentalAnalyst.run()`'s per-signal `try/except`), and
+      `cycle_hard_timeout_seconds` already backstops a slow/degraded fallback
+      chain eating a whole cycle.
+    - Also fixed, needed to make the above properly testable via
+      `scripts/run_walk_forward_pbo_audit.py`'s `param_grid`:
+      `ExperimentRunner._merge_override` is a shallow top-level merge, so
+      `rebalance_band_pct`/`rebalance_fraction` (which live nested inside the
+      `backtest:` sub-dict) couldn't be overridden by a grid candidate without
+      clobbering the whole sub-dict. Surfaced both as explicit top-level keys
+      in `_build_config` + `ExperimentRunner._flatten_config`'s allowlist
+      (same pattern as `conviction_smoothing_enabled`/`zscore_demean`).
+    - Tests: `tests/test_agents.py` (rebalance band/fraction composition,
+      vol-targeting self-compute, zscore demean/no-demean, analyst wiring),
+      `tests/test_llm_enhancement.py` (temperature threading), `tests/
+      test_experiments.py` (turnover metrics, top-level override precedence),
+      `tests/test_eval.py` (turnover in `BacktestReport`). Full suite green
+      throughout (1460 passed at last full run).
+59. **Formal walk-forward PBO audit of #58's turnover fix — `fail`**
+    (2026-08-23) — see `docs/formal_pbo_audit.md`'s "Results (2026-08-23):
+    turnover-fix candidates" section for full detail. Headline: PBO=0.464,
+    DSR=0.0031, verdict `fail`, mean OOS Sharpe ≈ −0.32 across 4
+    non-overlapping folds (2020-2026). Turnover reduction confirmed again
+    (85-93% lower OOS turnover whenever the shipped candidate wins), but the
+    underlying combined-signal edge is weak/unstable regardless of turnover
+    treatment — 3/4 OOS folds negative, including one where the shipped
+    candidate still lost. Reinforces the standing, unresolved
+    `portfolio_construction_diagnosis.md` finding (blended portfolio never
+    beats its own best single strategy). **Practical takeaway: keep #58's
+    turnover fix (real, mechanical, no downside observed), but this does not
+    validate live profitability — that's what "In progress" below is for.**
+    Process note: this formal gate ran *after* #58 was already shipped based
+    on a faster ad hoc check, not before — flagged as a process gap, not
+    repeated for the concentration work below.
+60. **Phase 4 concentration audit — also `fail`, worse than #59** (2026-08-23)
+    — tested the most direct fix for the standing `portfolio_construction_
+    diagnosis.md` finding (blend never beats its own best strategy): drop
+    persistently weak strategies (`momentum`, `seasonality` — see
+    `docs/formal_pbo_audit.md`'s "Results (2026-08-23): strategy-concentration
+    candidates" for full detail, including a correction that the supporting
+    per-fold attribution evidence was thinner than first characterized once
+    cross-checked against actual trade counts in `trades.parquet`). Same
+    walk-forward+PBO harness/setup as #59; candidate 0 = full 10-strategy
+    roster, candidate 1 = drop `momentum`+`seasonality` (8 strategies).
+    **Result: PBO=0.571 (worse than #59's 0.464), DSR=0.0003 (worse than
+    0.0031), mean OOS Sharpe ≈ −0.63 (worse than −0.32) — still `fail`, and
+    worse on every metric.** The two folds that selected the concentrated set
+    in-sample didn't outperform the two that kept the full set, and the one
+    genuinely good OOS period (fold 4) actually preferred the *full* roster
+    in-sample, undercutting "momentum is a universal drag."
+
+    **Session conclusion**: this is the third consecutive negative result on
+    the core profitability question (alongside #58's `zscore_demean` reject
+    and #59's turnover-fix gate), against a run of clean, validated wins on
+    every execution-reliability (#57) and turnover/cost fix (#58's
+    `rebalance_band_pct`/`rebalance_fraction`). That pattern is itself the
+    finding: mechanical, one-knob-at-a-time changes to this architecture
+    (turnover control, this particular strategy subset, the z-score demean
+    detail) don't move the profitability needle. The likely structural cause
+    is the analyst/combination layer itself — forced mean-0 cross-sectional
+    z-scoring (destroys aggregate level info) → `TraderAgent`'s L1-normalized
+    always-fully-invested sizing (discards conviction magnitude) →
+    sequential risk-clipping (`RiskAgent` runs ~9 constraint passes) — the
+    same layer `portfolio_construction_diagnosis.md` originally flagged, not
+    yet redesigned, only worked around at the edges so far.
+
+    Both paper-trading engines (`ai-trading.service`, `ai-trading-alpaca.
+    service`) remain stopped as of this writing — the user's own call on
+    whether to resume now (execution + cost layers are genuinely fixed;
+    profitability is an open, longer-running problem either way) or hold for
+    a design-level rethink of the combination layer before going back live.
+61. **Joint constrained portfolio optimizer — Increment 0 (scaffolding)**
+    (2026-08-23) — following
+    #60's conclusion, the user chose to stay paused and scope a real
+    combination-layer redesign rather than another one-knob tweak. Full
+    design in the session plan (PART 2, `docs/PROJECT_CONTEXT.md`-adjacent);
+    summary:
+    - New pure module `src/firm/portfolio/optimizer.py` (`cvxpy`+Clarabel):
+      `solve_portfolio` replaces `TraderAgent`'s L1-normalize-to-full-
+      investment sizing + `RiskAgent`'s sequential clip passes with one joint
+      `max_w alpha.w - (lambda/2) w'Sigma w - kappa*TC(w-w0)` QP. Ledoit-Wolf
+      shrunk covariance (`sklearn`), a shrunk realized-IR IC proxy
+      (`estimate_ic`, Path B — no signal/forward-return history store exists
+      yet for a genuine rank-IC), transaction costs matching `_liquidity.py`'s
+      existing sqrt-impact model exactly, and a documented graceful-
+      degradation cascade (primary solve → diagonal-covariance fallback →
+      closed-form `Sigma^-1 alpha` fallback → hold current weights) that
+      never raises and self-bounds its own 5s solve budget. `cvxpy` added to
+      `pyproject.toml` core dependencies.
+    - Two bugs caught by hand-testing before any pytest existed (deliberately
+      cheap-fail-fast on the new math): (1) comparing single-day alpha
+      directly against one-time transaction costs meant the optimizer never
+      traded despite real signal — fixed via `holding_horizon_days` (alpha
+      scaled by an assumed holding horizon; lambda recalibrates so book size
+      stays anchored to `target_avg_vol` regardless); (2) the Michaud ridge
+      term was ~4 orders of magnitude out of scale vs. the risk term (raw
+      weight units vs. covariance/variance units) — fixed by scaling it by
+      the covariance's own average variance.
+    - Wired into `TraderAgent` as a 5th `allocation_method` value
+      (`"joint_optimizer"`), same seam as `equal_weight`/`risk_parity`/
+      `kelly` (after `_smooth_convictions`, before `_attribute_to_strategies`)
+      — `TradeProposal`/`RiskDecision` contracts unchanged, `RiskAgent` still
+      runs its existing clips as an unconditional backstop (Increment 2, not
+      yet started, is what would make those explicit no-ops on a feasible
+      book). `orchestrator.py`'s trader stage now also passes `prices=` (used
+      to mark `ctx.portfolio.get_weights()` for `w0`; every other allocation
+      method ignores the extra kwarg via `**inputs`, so this is additive).
+    - Initial unit coverage (`tests/test_portfolio_optimizer.py`: degradation
+      cascade, hard-cap enforcement, determinism, IC/alpha/covariance
+      helpers) + `TestTraderJointOptimizer` wiring tests
+      (`tests/test_agents.py`) — dispatch reaches the optimizer (not the
+      default L1-normalize path), degrades cleanly with no `pit_view`/
+      `portfolio`/on a `pit_view` exception, respects position/gross caps,
+      sign matches conviction, current weights reach the cost term. Full
+      suite reconfirmed green after wiring. (Final counts — 30 + 10 — after
+      #62's additional bug-fix regression tests below.)
+    - Added `allocation_method: "joint_optimizer"` as a 4th
+      `DEFAULT_PARAM_GRID` candidate in `scripts/run_walk_forward_pbo_audit.py`
+      and the 5 new `optimizer_*` config knobs to both
+      `ExperimentRunner._flatten_config`'s allowlist and
+      `resolve_live_startup()`'s live allowlist (proactively — not live yet,
+      but avoids repeating the `conviction_smoothing_enabled` silent-drop bug
+      class if/when this is promoted).
+62. **Joint optimizer walk-forward+PBO gate — `fail`, two real bugs found and
+    fixed during validation, both real fixes but insufficient to pass**
+    (2026-08-23/24) — full detail in `docs/formal_pbo_audit.md`'s
+    "`joint_optimizer` redesign candidate" section; summary:
+    - **Bug 1 — IC daily/annualized-IR units mismatch**
+      (`estimate_ic`/`src/firm/portfolio/optimizer.py`): a daily mean/std
+      return ratio was compared directly against annualized-IR-scale
+      thresholds (`ir_ref=1.0`/`ir_cap=2.0`), chronically starving `alpha`'s
+      magnitude for any book with a genuinely decent track record (an
+      annualized Sharpe of 1.5 has a *daily* ratio of only ~0.09). Fixed by
+      annualizing before the comparison.
+    - **Bug 2 — Path-B's data source (`ctx.portfolio.history`) is never
+      populated during a backtest**: confirmed via an existing comment in
+      `firm.backtest.engine` — `PortfolioState.record_snapshot()` is only
+      ever called from the live path (`firm.live.portfolio_sync`), never
+      from the backtest loop. This made the entire realized-IR trust-
+      building mechanism permanently inert (pinned at `ic_prior=0.03`) in
+      every backtest — a genuine, previously-undiscovered instance of this
+      session's recurring "backtest≠live" divergence class (alongside the
+      LLM `cache_only`/`live_calls` policy split and the originally-dead
+      `_vol_targeting` wiring). Surfaced specifically because re-running the
+      gate after fixing bug 1 alone came back **bit-for-bit identical** to
+      the buggy run — a green light that didn't move when it should have.
+      Fixed by having `TraderAgent` maintain its own rolling NAV history as
+      instance state (`_book_nav_history`, fed from `ctx.portfolio.nav` —
+      available in both backtest and live, with `get_state`/`load_state`
+      persistence and a verified no-look-ahead guarantee) instead of reading
+      the backtest-empty `.history`. 10 new regression tests added (2
+      pre-existing bug classes + look-ahead + state round-trip), bringing
+      the module's total to 40 (30 + 10).
+    - **Three full 4-fold gate runs were needed for an honest result**: v1
+      (neither fix) PBO=0.4429/DSR=0.00526; v2 (bug-1 fix only)
+      **bit-identical to v1** (the tell that surfaced bug 2); v3 (both
+      fixes) PBO=0.4214/DSR=0.00061. All three `fail`. v3's per-fold
+      in-sample `joint_optimizer` Sharpes: `[1.786, -2.437, -0.437,
+      -0.588]` — it never wins the in-sample candidate selection in any of
+      the 4 folds (winners were exclusively pre-existing
+      `conviction_weighted`/`equal_weight` variants), and is meaningfully
+      negative in 3 of 4.
+    - **vs. #59's baseline** (PBO=0.464/DSR=0.0031): PBO nudges marginally
+      better (0.421 vs 0.464) but **DSR is worse** (0.00061 vs 0.0031) — no
+      material, honest improvement; both required thresholds (PBO<0.5 *and*
+      DSR>0.95) remain unmet by a wide margin.
+    - **A plausible (not fixed — flagged for a future increment) mechanism**
+      for fold 2's especially bad result (train window spanning the 2022
+      bear market): Path-B's realized-IR trust-builder sizes the book up as
+      its own trailing Sharpe improves — a textbook performance-chasing
+      dynamic with no regime-awareness, capable of levering into a position
+      right before a reversal. Deliberately not fixed in this session — a
+      third fix here would risk the exact "keep tuning until it passes"
+      pattern this whole redesign was scoped to escape.
+    - **Decision: `joint_optimizer` does not clear the gate.** Not promoted
+      to `config/settings.yaml`/`live.yaml`; every shipped
+      `allocation_method` default is unchanged. Both paper-trading engines
+      remain stopped. The module ships as validated, tested,
+      **off-by-default** infrastructure — same "built, honestly negative,
+      left off" pattern as `zscore_demean`, `strategy_circuit_breaker`, and
+      the regime ensemble. Increment 2 (slimming `RiskAgent`'s clips to
+      explicit backstops) and Increment 3 (live promotion) are out of scope
+      per the plan's own gating — both require Increment 1 to pass first.
+
+    **Session-ending conclusion (fourth consecutive negative result on the
+    core profitability question this session)**: turnover-fix formal gate
+    (#59), `zscore_demean` (#58), strategy concentration (#60), and now a
+    genuine combination-layer redesign (#61-62) have all failed to move
+    PBO/DSR into passing territory, despite each being investigated
+    honestly and, in this last case, despite finding and fixing two real
+    implementation bugs along the way. Every execution-reliability (#57) and
+    turnover/cost-efficiency fix (#58's shipped `rebalance_band_pct`/
+    `rebalance_fraction`) remains a clean, validated win with no observed
+    downside — the split between "plumbing/cost fixes: consistently
+    positive" and "combination-layer/sizing changes: consistently fail the
+    formal gate" has now held across four independent attempts at the
+    latter, using three fundamentally different approaches (a demeaning
+    toggle, capital concentration, and a full QP redesign). This is a
+    stronger signal than any single negative result: the standing
+    `portfolio_construction_diagnosis.md` finding (the blended portfolio
+    never beats its own best single strategy) is very likely a property of
+    the **12-strategy signal set's aggregate quality on this specific
+    25-name universe and 2020-2026 window**, not of any particular
+    combination mechanism tried so far. Both paper-trading engines remain
+    stopped; the user's own explicit decision to stay paused pending this
+    redesign's result is honored — nothing here justifies resuming live
+    trading. A useful next research direction, not attempted this session,
+    would be interrogating the strategies/data/universe themselves (e.g.
+    per-strategy standalone OOS Sharpe stability, whether the 25-name
+    universe is simply too small/correlated for real diversification
+    benefit, or whether longer/delisting-inclusive history changes the
+    picture — see the still-`pending` `longer-dataset`/`formal-pbo-
+    correction` items below) rather than another combination-layer
+    mechanism.
 
 ## In progress
+
+(none — see #62 above for the open decision this session ended on)
 
 ### Research roadmap — partial progress (2026-07-27)
 

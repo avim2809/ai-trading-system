@@ -30,6 +30,10 @@ class SentimentAnalyst(Agent):
     ) -> None:
         super().__init__(name="sentiment_analyst", config=config)
         self.strategies = strategies or []
+        # See zscore_signals' docstring: True (default) is a true z-score
+        # (destroys aggregate level/direction); False preserves a one-sided
+        # universe's net long/short read instead of forcing 50/50.
+        self._zscore_demean: bool = bool((config or {}).get("zscore_demean", True))
 
     def run(self, ctx: AgentContext, **inputs: Any) -> SignalSet:
         strategies = inputs.get("strategies", self.strategies)
@@ -47,5 +51,5 @@ class SentimentAnalyst(Agent):
                 log.warning("Strategy %s failed in sentiment analyst", strat.name, exc_info=True)
                 self._last_errors.append({"strategy": strat.name, "error": str(exc)})
 
-        zscored = zscore_signals(all_signals)
+        zscored = zscore_signals(all_signals, demean=self._zscore_demean)
         return SignalSet(domain="sentiment", asof=ctx.now, signals=zscored)

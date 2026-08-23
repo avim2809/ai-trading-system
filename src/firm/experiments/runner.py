@@ -115,6 +115,28 @@ class ExperimentRunner:
             "allocation_method", "kelly_fraction", "signal_combination",
             "strategy_circuit_breaker",
             "strategy_regime_weights",
+            "conviction_smoothing_enabled",
+            "conviction_smoothing_halflife_days",
+            "zscore_demean",
+            # See run_walk_forward_pbo_audit.py's _build_config comment:
+            # surfaced as top-level keys specifically so a param_grid
+            # candidate can override just these two fields without a
+            # shallow top-level merge clobbering the whole nested
+            # "backtest" sub-dict they normally live in.
+            "rebalance_band_pct",
+            "rebalance_fraction",
+            # allocation_method == "joint_optimizer" knobs (see
+            # firm.agents.trader.TraderAgent.__init__ / firm.portfolio.
+            # optimizer). Not nested under "risk"/"backtest" in any existing
+            # config, so without this explicit entry a param_grid candidate
+            # overriding one of these would be silently dropped by this
+            # allowlist -- the same bug class hit twice already this session
+            # (conviction_smoothing_enabled, rebalance_band_pct/fraction).
+            "optimizer_cost_aversion",
+            "optimizer_target_avg_vol",
+            "optimizer_ridge_frac",
+            "optimizer_holding_horizon_days",
+            "optimizer_cov_lookback_days",
         ):
             if key in config:
                 flat[key] = config[key]
@@ -144,6 +166,12 @@ class ExperimentRunner:
         report_dict = report.to_dict()
         metrics: dict[str, Any] = dict(report_dict.get("portfolio", {}))
         metrics.update(report_dict.get("benchmark", {}))
+        # avg_turnover/total_turnover/rebalance_count — needed to validate a
+        # construction change (no-trade bands, turnover-aware sizing, ...)
+        # against the metric it's actually meant to move, with the same
+        # per-fold mean/std/min/max treatment aggregate_walk_forward gives
+        # every other metric here.
+        metrics.update(report_dict.get("turnover", {}))
 
         results: dict[str, Any] = {"metrics": metrics}
         (artifacts / "results.json").write_text(

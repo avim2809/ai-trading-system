@@ -98,6 +98,23 @@ def test_resolve_live_startup_uses_yaml_universe_and_risk():
     rw = resolved["engine_config"].get("strategy_regime_weights")
     assert rw is not None
     assert rw.get("enabled") is False
+    # Regression: conviction-EMA smoothing (TraderAgent._smooth_convictions)
+    # is set in config/live.yaml and documented/relied upon as "confirmed
+    # live 2026-08-03 through 2026-08-07" to fix 60-95%/day turnover from
+    # unsmoothed signal noise -- but the allowlist below used to omit it
+    # entirely, so neither the systemd auto-start path
+    # (bootstrap_live_from_yaml) nor manual POST /api/live/start ever
+    # actually carried it from the YAML into TraderAgent's config. It was
+    # silently OFF in every real deployment despite the config and
+    # operational docs describing it as active.
+    assert resolved["engine_config"].get("conviction_smoothing_enabled") is True
+    assert resolved["engine_config"].get("conviction_smoothing_halflife_days") == 3.0
+    # Regression: rebalance_band_pct lives in config/live.yaml's costs:
+    # block (same convention as commission_pct/slippage_pct above) and needs
+    # the same explicit flattening, or it would suffer the identical
+    # silent-drop bug conviction_smoothing_enabled had.
+    assert resolved["engine_config"].get("rebalance_band_pct") == 0.05
+    assert resolved["engine_config"].get("rebalance_fraction") == 0.7
 
 
 def test_resolve_live_startup_costs_from_yaml_are_flattened():
@@ -109,7 +126,8 @@ def test_resolve_live_startup_costs_from_yaml_are_flattened():
         "risk": {"max_position_pct": 0.05},
         "costs": {
             "commission_pct": 0.0012, "slippage_pct": 0.0007, "spread_pct": 0.0003,
-            "market_impact_coefficient": 0.008,
+            "market_impact_coefficient": 0.008, "rebalance_band_pct": 0.03,
+            "rebalance_fraction": 0.6,
         },
     }
     with _patch("firm.live.provider_utils.load_live_yaml_defaults", return_value=fake_yaml):
@@ -118,6 +136,22 @@ def test_resolve_live_startup_costs_from_yaml_are_flattened():
     assert resolved["engine_config"]["slippage_pct"] == 0.0007
     assert resolved["engine_config"]["spread_pct"] == 0.0003
     assert resolved["engine_config"]["market_impact_coefficient"] == 0.008
+    assert resolved["engine_config"]["rebalance_band_pct"] == 0.03
+    assert resolved["engine_config"]["rebalance_fraction"] == 0.6
+
+
+def test_resolve_live_startup_carries_zscore_demean_when_set():
+    """Regression coverage: zscore_demean lives in the top-level behavioral-
+    knob allowlist (not the costs: block), same silent-drop risk class as
+    conviction_smoothing_enabled -- added deliberately this time."""
+    from unittest.mock import patch as _patch
+
+    from firm.live.provider_utils import resolve_live_startup
+
+    fake_yaml = {"risk": {"max_position_pct": 0.05}, "zscore_demean": False}
+    with _patch("firm.live.provider_utils.load_live_yaml_defaults", return_value=fake_yaml):
+        resolved = resolve_live_startup()
+    assert resolved["engine_config"]["zscore_demean"] is False
 
 
 def test_resolve_live_startup_costs_absent_from_yaml_leaves_execution_agent_defaults():

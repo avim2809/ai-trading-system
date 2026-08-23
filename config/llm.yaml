@@ -107,6 +107,14 @@ enhancement:
   max_theses_per_agent: 5
   max_debate_symbols: 5
   rag_n_results: 2              # smaller RAG context → fewer LLM tokens
+  # Sampling temperature for enhancement/scoring calls specifically (overrides
+  # provider.temperature above, which stays 0.3 for non-scoring LLM uses e.g.
+  # reflection). These calls feed straight into the z-scored analyst signal /
+  # bull-bear conviction / debate net_conviction the rest of the pipeline
+  # treats as a quant-grade number -- 0.1 keeps sampling noise low without
+  # going to a literal 0 (some providers behave oddly/repetitively at exactly
+  # zero temperature).
+  temperature: 0.1
   enhance_portfolio_review: false
   enhance_risk_review: false
 

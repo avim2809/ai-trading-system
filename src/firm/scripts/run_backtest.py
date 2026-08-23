@@ -133,6 +133,15 @@ def main() -> None:
     merged_config["kelly_fraction"] = settings.kelly_fraction
     if settings.signal_combination:
         merged_config["signal_combination"] = settings.signal_combination
+    # Backtest parity with live for TraderAgent's conviction-EMA smoothing —
+    # see the field docstring in firm.config.Settings.
+    merged_config["conviction_smoothing_enabled"] = settings.conviction_smoothing_enabled
+    merged_config["conviction_smoothing_halflife_days"] = (
+        settings.conviction_smoothing_halflife_days
+    )
+    # Backtest parity with live for analyst cross-sectional normalization —
+    # see the field docstring in firm.config.Settings.
+    merged_config["zscore_demean"] = settings.zscore_demean
     orchestrator = build_orchestrator(merged_config)
 
     from firm.backtest.engine import BacktestEngine

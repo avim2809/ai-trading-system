@@ -145,6 +145,50 @@ class TestZscoring:
         raw = [_sig("AAPL", "momentum", 5.0)]
         assert zscore_signals(raw)[0].score == 5.0
 
+    def test_demean_false_preserves_a_one_sided_universe(self):
+        """Regression: a strategy that genuinely reads the whole universe
+        as bullish (every raw score positive) must stay net-positive with
+        demean=False, instead of being forced to mean 0 (half above, half
+        below) the way the true z-score (demean=True, default) does."""
+        from firm.agents.analysts import zscore_signals
+
+        raw = [
+            _sig("AAPL", "momentum", 10.0),
+            _sig("GOOG", "momentum", 20.0),
+            _sig("MSFT", "momentum", 30.0),
+        ]
+        demeaned = zscore_signals(raw, demean=True)
+        assert all(s.score < 0 for s in demeaned if s.symbol == "AAPL")
+        assert sum(s.score for s in demeaned) == pytest.approx(0.0, abs=1e-9)
+
+        level_preserved = zscore_signals(raw, demean=False)
+        # Same relative ordering (dispersion still normalized by the same
+        # std), but every score stays positive -- the aggregate bullish read
+        # survives instead of being demeaned away.
+        scores = {s.symbol: s.score for s in level_preserved}
+        assert scores["AAPL"] < scores["GOOG"] < scores["MSFT"]
+        assert all(v > 0 for v in scores.values())
+
+    def test_demean_false_still_normalizes_dispersion_by_the_same_std(self):
+        """demean=False must only skip the mean subtraction, not the std
+        scaling -- relative magnitudes between demean=True/False outputs
+        should differ by exactly the (constant) mean/std offset."""
+        from firm.agents.analysts import zscore_signals
+
+        raw = [
+            _sig("AAPL", "momentum", 10.0),
+            _sig("GOOG", "momentum", 20.0),
+            _sig("MSFT", "momentum", 30.0),
+        ]
+        demeaned = {s.symbol: s.score for s in zscore_signals(raw, demean=True)}
+        level_preserved = {s.symbol: s.score for s in zscore_signals(raw, demean=False)}
+        offsets = {sym: level_preserved[sym] - demeaned[sym] for sym in demeaned}
+        # mean=20, sample std (ddof=1) = 10 -> offset = mean/std = 2.0 for
+        # every symbol.
+        assert offsets["AAPL"] == pytest.approx(offsets["GOOG"], abs=1e-9)
+        assert offsets["GOOG"] == pytest.approx(offsets["MSFT"], abs=1e-9)
+        assert offsets["AAPL"] == pytest.approx(2.0, rel=0.01)
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Analysts
@@ -220,6 +264,63 @@ class TestAnalysts:
         ctx = AgentContext(now=NOW, pit_view=None)
         result = analyst.run(ctx)
         assert result.signals == []
+
+    def _one_sided_signals(self, strategy: str) -> list[Signal]:
+        return [
+            _sig("AAPL", strategy, 10.0),
+            _sig("GOOG", strategy, 20.0),
+            _sig("MSFT", strategy, 30.0),
+        ]
+
+    def test_fundamental_analyst_zscore_demean_config_reaches_output(self):
+        """Wiring check: zscore_demean=False must reach zscore_signals and
+        preserve a one-sided (all-positive) universe read, not just default
+        to the true z-score."""
+        from firm.agents.analysts.fundamental import FundamentalAnalyst
+
+        signals = self._one_sided_signals("multi_factor")
+        strat = self._mock_strategy("multi_factor", signals)
+        analyst = FundamentalAnalyst(strategies=[strat], config={"zscore_demean": False})
+        ctx = AgentContext(now=NOW, pit_view=MagicMock())
+        result = analyst.run(ctx)
+        assert all(s.score > 0 for s in result.signals)
+
+    def test_technical_analyst_zscore_demean_config_reaches_output(self):
+        from firm.agents.analysts.technical import TechnicalAnalyst
+
+        signals = self._one_sided_signals("momentum")
+        analyst = TechnicalAnalyst(
+            strategies=[self._mock_strategy("momentum", signals)],
+            config={"zscore_demean": False},
+        )
+        ctx = AgentContext(now=NOW, pit_view=MagicMock())
+        result = analyst.run(ctx)
+        assert all(s.score > 0 for s in result.signals)
+
+    def test_sentiment_analyst_zscore_demean_config_reaches_output(self):
+        from firm.agents.analysts.sentiment import SentimentAnalyst
+
+        signals = self._one_sided_signals("news")
+        analyst = SentimentAnalyst(
+            strategies=[self._mock_strategy("news", signals)],
+            config={"zscore_demean": False},
+        )
+        ctx = AgentContext(now=NOW, pit_view=MagicMock())
+        result = analyst.run(ctx)
+        assert all(s.score > 0 for s in result.signals)
+
+    def test_analysts_default_to_true_zscore_no_behavior_change(self):
+        """Backward compatibility: every existing caller that doesn't pass
+        zscore_demean must see identical (true z-score) output to before
+        this knob existed."""
+        from firm.agents.analysts.fundamental import FundamentalAnalyst
+
+        signals = self._one_sided_signals("multi_factor")
+        analyst = FundamentalAnalyst(strategies=[self._mock_strategy("multi_factor", signals)])
+        assert analyst._zscore_demean is True
+        ctx = AgentContext(now=NOW, pit_view=MagicMock())
+        result = analyst.run(ctx)
+        assert sum(s.score for s in result.signals) == pytest.approx(0.0, abs=1e-9)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -477,6 +578,261 @@ class TestTrader:
 
 
 # ══════════════════════════════════════════════════════════════════════
+# Trader — allocation_method == "joint_optimizer"
+#
+# Unit coverage for the solver math itself (degradation cascade, hard-cap
+# enforcement, determinism) lives in tests/test_portfolio_optimizer.py.
+# These tests only cover the TraderAgent-level wiring: does "joint_optimizer"
+# actually dispatch to the optimizer, does it gather ctx.pit_view/
+# ctx.portfolio/prices correctly, and does it degrade cleanly when those
+# aren't available (most existing tests/backtests without a real pit_view).
+# ══════════════════════════════════════════════════════════════════════
+class TestTraderJointOptimizer:
+    @staticmethod
+    def _debate_results() -> list[DebateResult]:
+        return [
+            DebateResult(symbol="AAPL", net_conviction=0.6),
+            DebateResult(symbol="GOOG", net_conviction=-0.4),
+            DebateResult(symbol="MSFT", net_conviction=0.2),
+        ]
+
+    @staticmethod
+    def _price_history(symbols_vols: dict[str, float], n: int = 140):
+        """Synthetic daily OHLCV history for each symbol at a given
+        annualized vol, high enough (>60 overlapping obs) for
+        estimate_covariance to accept it rather than degrade to diagonal."""
+        import numpy as np
+        import pandas as pd
+
+        rng = np.random.default_rng(7)
+        dates = pd.bdate_range("2024-01-01", periods=n)
+        frames = []
+        for sym, ann_vol in symbols_vols.items():
+            daily_vol = ann_vol / (252 ** 0.5)
+            px = 100 * np.cumprod(1 + rng.standard_normal(n) * daily_vol)
+            vol = rng.uniform(1e6, 5e6, n)
+            frames.append(pd.DataFrame({
+                "date": dates, "symbol": sym,
+                "close": px, "adj_close": px, "volume": vol,
+            }))
+        return pd.concat(frames, ignore_index=True)
+
+    def _pit_view(self, price_df):
+        class _PV:
+            asof = NOW
+            def prices(self, symbols=None, lookback_days=252):
+                return price_df[price_df["symbol"].isin(symbols)]
+        return _PV()
+
+    def test_dispatches_to_optimizer_not_default_conviction_weighted(self):
+        """The default allocation_method (conviction_weighted) always
+        L1-normalizes to sum(|w|)==1 (see test_conviction_weighted above).
+        joint_optimizer must NOT do that -- it must actually reach
+        _joint_optimizer, whose book size floats with conviction/risk
+        budget instead of always summing to 1."""
+        from firm.agents.trader import TraderAgent
+
+        price_df = self._price_history({"AAPL": 0.20, "GOOG": 0.20, "MSFT": 0.20})
+        trader = TraderAgent(config={"allocation_method": "joint_optimizer"})
+        ctx = AgentContext(now=NOW, pit_view=self._pit_view(price_df))
+        proposal = trader.run(ctx, debate_results=self._debate_results())
+
+        assert isinstance(proposal, TradeProposal)
+        gross = sum(abs(w) for w in proposal.targets.values())
+        assert gross != pytest.approx(1.0, abs=0.01)
+        assert "Method: joint_optimizer" in proposal.notes
+
+    def test_degrades_cleanly_without_pit_view_or_portfolio(self):
+        """Most existing tests/backtests construct a bare AgentContext(now=
+        NOW) with no pit_view/portfolio -- joint_optimizer must never raise
+        in that case, just degrade (diagonal covariance, cold-start IC)."""
+        from firm.agents.trader import TraderAgent
+
+        trader = TraderAgent(config={"allocation_method": "joint_optimizer"})
+        ctx = AgentContext(now=NOW)
+        proposal = trader.run(ctx, debate_results=self._debate_results())
+
+        assert isinstance(proposal, TradeProposal)
+        assert all(
+            w == w and abs(w) != float("inf") for w in proposal.targets.values()
+        )  # finite, no NaN
+
+    def test_empty_debate_results_returns_empty_proposal(self):
+        from firm.agents.trader import TraderAgent
+
+        trader = TraderAgent(config={"allocation_method": "joint_optimizer"})
+        ctx = AgentContext(now=NOW)
+        proposal = trader.run(ctx, debate_results=[])
+        assert proposal.targets == {}
+
+    def test_respects_position_and_gross_caps(self):
+        from firm.agents.trader import TraderAgent
+
+        price_df = self._price_history({"AAPL": 0.15, "GOOG": 0.25, "MSFT": 0.35, "AMZN": 0.20})
+        trader = TraderAgent(config={
+            "allocation_method": "joint_optimizer",
+            "max_position_pct": 0.05,
+            "max_gross_exposure": 1.0,
+            "max_positions": 20,
+        })
+        ctx = AgentContext(now=NOW, pit_view=self._pit_view(price_df))
+        results = [
+            DebateResult(symbol="AAPL", net_conviction=0.9),
+            DebateResult(symbol="GOOG", net_conviction=-0.8),
+            DebateResult(symbol="MSFT", net_conviction=0.7),
+            DebateResult(symbol="AMZN", net_conviction=-0.6),
+        ]
+        proposal = trader.run(ctx, debate_results=results)
+
+        for w in proposal.targets.values():
+            assert abs(w) <= 0.05 + 1e-4
+        assert sum(abs(w) for w in proposal.targets.values()) <= 1.0 + 1e-3
+
+    def test_sign_matches_conviction_direction(self):
+        from firm.agents.trader import TraderAgent
+
+        price_df = self._price_history({"AAPL": 0.20, "GOOG": 0.20})
+        trader = TraderAgent(config={"allocation_method": "joint_optimizer"})
+        ctx = AgentContext(now=NOW, pit_view=self._pit_view(price_df))
+        results = [
+            DebateResult(symbol="AAPL", net_conviction=0.9),
+            DebateResult(symbol="GOOG", net_conviction=-0.9),
+        ]
+        proposal = trader.run(ctx, debate_results=results)
+
+        if proposal.targets.get("AAPL", 0.0) != 0.0:
+            assert proposal.targets["AAPL"] > 0
+        if proposal.targets.get("GOOG", 0.0) != 0.0:
+            assert proposal.targets["GOOG"] < 0
+
+    def test_uses_portfolio_current_weights_as_w0_for_transaction_costs(self):
+        """A real (non-empty) starting position plus real transaction
+        costs must pull targets toward the current book, not just toward
+        an unconstrained mean-variance optimum -- confirms current_weights
+        actually reaches solve_portfolio rather than defaulting to all-0."""
+        from firm.agents.trader import TraderAgent
+        from firm.portfolio.state import PortfolioState
+
+        price_df = self._price_history({"AAPL": 0.20, "GOOG": 0.20, "MSFT": 0.20})
+        portfolio = PortfolioState(initial_capital=1_000_000)
+        portfolio.holdings = {"AAPL": 500}  # a real existing long position
+        portfolio.get_weights({"AAPL": 100.0})  # mark _last_prices so nav is sane
+
+        trader = TraderAgent(config={
+            "allocation_method": "joint_optimizer",
+            # Large costs so the "stay near current book" pull is visible
+            # regardless of the (cold-start, small) alpha magnitude.
+            "commission_pct": 0.02, "slippage_pct": 0.02, "spread_pct": 0.02,
+        })
+        ctx = AgentContext(now=NOW, pit_view=self._pit_view(price_df), portfolio=portfolio)
+        results = [
+            DebateResult(symbol="AAPL", net_conviction=0.05),  # weak, shouldn't override costs
+            DebateResult(symbol="GOOG", net_conviction=0.05),
+            DebateResult(symbol="MSFT", net_conviction=0.05),
+        ]
+        proposal = trader.run(
+            ctx, debate_results=results, prices={"AAPL": 100.0, "GOOG": 100.0, "MSFT": 100.0},
+        )
+        # AAPL started with a real position (50000/1_000_000 = 5% weight);
+        # high costs should keep it close to that rather than flattening it
+        # to chase a weak, oppositely-costed rebalance into GOOG/MSFT.
+        assert proposal.targets.get("AAPL", 0.0) > 0.0
+
+    def test_never_raises_on_pit_view_exception(self):
+        """A pit_view that raises (e.g. a transient data-provider error)
+        must degrade to the no-history fallback, not crash the trader
+        stage -- matching every other agent's fail-open posture here."""
+        from firm.agents.trader import TraderAgent
+
+        class _BrokenPV:
+            def prices(self, symbols=None, lookback_days=252):
+                raise RuntimeError("simulated data provider outage")
+
+        trader = TraderAgent(config={"allocation_method": "joint_optimizer"})
+        ctx = AgentContext(now=NOW, pit_view=_BrokenPV())
+        proposal = trader.run(ctx, debate_results=self._debate_results())
+        assert isinstance(proposal, TradeProposal)
+
+    def test_ic_builds_from_self_maintained_nav_history_not_portfolio_history(self):
+        """Regression for a real gap found via the first walk-forward+PBO
+        gate run of this module: ctx.portfolio.history is NEVER populated
+        during a backtest (PortfolioState.record_snapshot() is only called
+        from the live path -- see firm.backtest.engine's own comment on
+        this), so reading it would make the Path-B IC-trust mechanism
+        permanently inert (pinned at ic_prior) in every backtest, silently
+        never actually exercised by the very harness meant to validate it.
+        TraderAgent must instead track its own NAV history from
+        ctx.portfolio.nav (available in both backtest and live) -- confirm
+        a steadily growing NAV over many cycles pushes ic_eff meaningfully
+        above the cold-start prior (0.03)."""
+        import numpy as np
+
+        from firm.agents.trader import TraderAgent
+
+        class _FakePortfolio:
+            def __init__(self, nav):
+                self._nav = nav
+            def get_weights(self, prices):
+                return {}
+            @property
+            def nav(self):
+                return self._nav
+
+        # estimate_ic treats an exactly-zero-variance return series as
+        # degenerate (guards div-by-zero) and returns the cold-start prior
+        # -- a real book always has some day-to-day noise, so use a
+        # realistic small amount rather than deterministic growth.
+        rng = np.random.default_rng(4)
+        trader = TraderAgent(config={"allocation_method": "joint_optimizer"})
+        nav = 1_000_000.0
+        ics = []
+        for i in range(200):
+            nav *= 1.0 + rng.normal(0.0009, 0.006)  # ~ann. Sharpe ~1.9, realistic daily noise
+            ics.append(trader._update_and_estimate_ic(_FakePortfolio(nav).nav))
+
+        assert ics[0] == pytest.approx(0.03)  # cold start: exactly the prior
+        assert ics[-1] > 0.04  # a real, strong track record must build real trust
+        assert ics[-1] > ics[10]  # monotonically more convinced with more evidence
+
+    def test_ic_history_round_trips_via_get_state_load_state(self):
+        """Cross-restart persistence for the Path-B NAV history, same
+        contract as conviction_ema (see LiveTradingEngine._persist_live_state)."""
+        from firm.agents.trader import TraderAgent
+
+        trader = TraderAgent(config={"allocation_method": "joint_optimizer"})
+        for nav in (1_000_000.0, 1_001_000.0, 1_002_500.0):
+            trader._update_and_estimate_ic(nav)
+        state = trader.get_state()
+        assert state["book_nav_history"] == [1_000_000.0, 1_001_000.0, 1_002_500.0]
+
+        restarted = TraderAgent(config={"allocation_method": "joint_optimizer"})
+        restarted.load_state(state)
+        assert restarted._book_nav_history == trader._book_nav_history
+
+    def test_ic_nav_history_never_leaks_look_ahead(self):
+        """This cycle's own nav must not influence this cycle's own ic_eff
+        -- only navs recorded in *prior* cycles. Two traders with identical
+        history seed a divergent, wildly different nav on the same next
+        call; if that value leaked into its own estimate, the two results
+        would differ, since a 10x jump vs. a small move are very different
+        "returns" to include."""
+        from firm.agents.trader import TraderAgent
+
+        seed = [1_000_000.0, 1_001_000.0, 1_002_000.0, 1_003_000.0]
+
+        trader_a = TraderAgent(config={"allocation_method": "joint_optimizer"})
+        trader_b = TraderAgent(config={"allocation_method": "joint_optimizer"})
+        for nav in seed:
+            trader_a._update_and_estimate_ic(nav)
+            trader_b._update_and_estimate_ic(nav)
+        assert trader_a._book_nav_history == trader_b._book_nav_history == seed
+
+        ic_a = trader_a._update_and_estimate_ic(1_004_000.0)  # small, in-line move
+        ic_b = trader_b._update_and_estimate_ic(10_000_000.0)  # huge, unrelated jump
+        assert ic_a == ic_b  # neither value was visible to its own estimate yet
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Risk Manager
 # ══════════════════════════════════════════════════════════════════════
 class TestRiskManager:
@@ -618,6 +974,76 @@ class TestRiskManager:
         gross = sum(abs(w) for w in decision.adjusted_targets.values())
         assert gross <= 0.20 + 1e-9
         assert all(abs(w) <= 0.05 + 1e-9 for w in decision.adjusted_targets.values())
+
+    @staticmethod
+    def _volatile_pit_view(n_days: int = 30):
+        """A single symbol alternating +/-10% daily moves -- annualised vol
+        far above any realistic vol_target, so a self-computed vol estimate
+        must trigger a real de-risk scale-down."""
+        import pandas as pd
+
+        dates = pd.bdate_range("2023-01-01", periods=n_days)
+        rows = []
+        price = 100.0
+        for i, d in enumerate(dates):
+            price *= 1.10 if i % 2 == 0 else (1 / 1.10)
+            rows.append({"date": d, "symbol": "V", "close": price, "volume": 1_000_000})
+        return pd.DataFrame(rows)
+
+    def test_vol_targeting_self_computes_from_pit_view_when_enabled(self):
+        """Regression: vol_target had a numeric default in every deployed
+        config but _vol_targeting only ever ran when a caller separately
+        supplied inputs["vol_estimates"] -- nothing in the real orchestrator
+        path did, so this was silently dead code. With vol_targeting_enabled
+        and no explicit vol_estimates input, RiskAgent must now compute its
+        own estimate from ctx.pit_view and actually de-risk."""
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["V"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._volatile_pit_view()
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "max_gross_exposure": 10.0,
+            "vol_target": 0.15,
+            "vol_targeting_enabled": True,
+        })
+        proposal = TradeProposal(asof=NOW, targets={"V": 0.5})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        decision = risk.run(ctx, proposal=proposal)
+
+        assert abs(decision.adjusted_targets["V"]) < 0.5
+        assert any("vol targeting" in a.lower() for a in decision.actions)
+
+    def test_vol_targeting_disabled_by_default_does_not_self_compute(self):
+        """Backward compatibility: without the explicit opt-in, a caller
+        that supplies pit_view but no vol_estimates input must see identical
+        (unscaled) output to before this fix -- consistent with every other
+        risk-bearing toggle in this class defaulting to off."""
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["V"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._volatile_pit_view()
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "max_gross_exposure": 10.0,
+            "vol_target": 0.15,
+        })
+        assert risk.vol_targeting_enabled is False
+        proposal = TradeProposal(asof=NOW, targets={"V": 0.5})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        decision = risk.run(ctx, proposal=proposal)
+
+        assert decision.adjusted_targets["V"] == pytest.approx(0.5)
 
     def test_sector_scaling_does_not_leave_net_breach(self):
         """Regression: non-uniform sector scaling must not leave net > cap."""
@@ -1003,6 +1429,140 @@ class TestExecution:
         aapl_orders = [o for o in report.fills if o["symbol"] == "AAPL"]
         assert len(aapl_orders) == 1
         assert aapl_orders[0]["side"] == "sell"
+
+    def test_rebalance_band_skips_noise_level_drift(self):
+        """A deviation smaller than rebalance_band_pct must not generate an
+        order at all -- the highest-leverage turnover fix identified from
+        real live logs: with no band, every noise-level target-weight wiggle
+        (the z-scored/L1-normalized construction pipeline re-derives a fresh
+        target every cycle) became a real trade."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(config={"rebalance_band_pct": 0.02})
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 1000}  # ~0.2308 weight
+        prices = {"AAPL": 150.0}
+
+        # Target only 1pp away from current (0.2308 -> 0.24) -- inside the
+        # 2% band, must be skipped entirely.
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.24})
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+        )
+        assert report.fills == []
+        assert report.turnover == pytest.approx(0.0)
+        assert report.costs == 0.0
+
+    def test_rebalance_band_still_trades_deviations_above_the_band(self):
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(config={"rebalance_band_pct": 0.02})
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 1000}  # ~0.2308 weight
+        prices = {"AAPL": 150.0}
+
+        # Target 10pp away -- well outside the 2% band, must still trade.
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.10})
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+        )
+        assert len(report.fills) == 1
+        assert report.fills[0]["side"] == "sell"
+
+    def test_rebalance_fraction_trades_only_a_fraction_of_the_gap(self):
+        """Turnover-aware sizing: with rebalance_fraction=0.5, only half the
+        (already above-band) gap to target should be traded this cycle --
+        validated via a 3-window backtest comparison to give a clean Sharpe
+        improvement over band-only at fraction=0.7, while still cutting
+        turnover well beyond the band alone."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(config={"rebalance_fraction": 0.5})
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 1000}  # ~0.2308 weight
+        prices = {"AAPL": 150.0}
+
+        # Full gap to target is -0.1308 (0.2308 -> 0.10); at fraction=0.5
+        # only half of that (-0.0654) should actually be traded.
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.10})
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+        )
+
+        assert len(report.fills) == 1
+        traded_notional = abs(report.fills[0]["notional"])
+        full_gap_notional = 85_000.0  # |0.10*650_000 - 1000*150|; NAV = cash + holdings value
+        assert traded_notional == pytest.approx(full_gap_notional * 0.5, rel=0.01)
+        current_w = (1000 * 150.0) / 650_000  # NAV = cash (500k) + holdings value (150k)
+        assert report.turnover == pytest.approx(abs(current_w - 0.10) * 0.5, rel=0.01)
+
+    def test_rebalance_fraction_defaults_to_one_no_behavior_change(self):
+        """Backward compatibility: every existing caller that doesn't pass
+        rebalance_fraction must see byte-identical (full-rebalance) behavior
+        to before this knob existed."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent()
+        assert execution.rebalance_fraction == 1.0
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 1000}
+        prices = {"AAPL": 150.0}
+
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.10})
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+        )
+
+        full_gap_notional = 85_000.0  # |0.10*650_000 - 1000*150|; NAV = cash + holdings value
+        assert abs(report.fills[0]["notional"]) == pytest.approx(full_gap_notional, rel=0.01)
+
+    def test_rebalance_fraction_and_band_compose(self):
+        """The band and the fraction are orthogonal: the band decides
+        whether a deviation is worth trading AT ALL (based on the full gap),
+        the fraction then decides how much of it to trade -- a deviation
+        that clears the band should still only be partially closed."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(config={"rebalance_band_pct": 0.02, "rebalance_fraction": 0.5})
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 1000}  # ~0.2308 weight
+        prices = {"AAPL": 150.0}
+
+        # Full gap (-0.1308) clears the 2% band easily -- must still trade,
+        # but only half of it.
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.10})
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+        )
+        assert len(report.fills) == 1
+        full_gap_notional = 85_000.0  # |0.10*650_000 - 1000*150|; NAV = cash + holdings value
+        assert abs(report.fills[0]["notional"]) == pytest.approx(full_gap_notional * 0.5, rel=0.01)
+
+    def test_rebalance_band_defaults_to_zero_no_behavior_change(self):
+        """Backward compatibility: every existing caller that doesn't pass
+        rebalance_band_pct must see byte-identical behavior to before this
+        knob existed."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent()
+        assert execution.rebalance_band_pct == 0.0
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 1000}
+        prices = {"AAPL": 150.0}
+
+        # A tiny 0.1pp deviation -- would be inside any real band, but with
+        # the default (0.0 = disabled) it must still generate an order.
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.2318})
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+        )
+        assert len(report.fills) == 1
 
     def test_no_orders_when_on_target(self):
         from firm.agents.execution import ExecutionAgent

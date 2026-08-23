@@ -54,6 +54,18 @@ class BacktestConfig(BaseModel):
     # pure square-root law at every size, unchanged). See
     # firm.agents._liquidity.market_impact_pct.
     market_impact_crossover_participation: float | None = None
+    # No-trade / rebalance band (see firm.agents.execution.ExecutionAgent):
+    # |target_w - current_w| must exceed this fraction of NAV before an
+    # order is generated at all. 0.0 (Python-level default) preserves prior
+    # behavior exactly for every existing direct-construction/test backtest;
+    # config/settings.yaml opts in with a real value once A/B'd against a
+    # live-faithful baseline.
+    rebalance_band_pct: float = 0.0
+    # Turnover-aware sizing (see firm.agents.execution.ExecutionAgent): trade
+    # only this fraction of the gap to target each cycle. 1.0 (Python-level
+    # default) preserves prior behavior exactly; complementary to
+    # rebalance_band_pct above.
+    rebalance_fraction: float = 1.0
     rebalance_frequency: str = "weekly"
 
 
@@ -63,6 +75,13 @@ class RiskConfig(BaseModel):
     max_net_exposure: float = 0.5
     max_sector_pct: float = 0.25
     vol_target: float = 0.15
+    # See RiskAgent's field docstring: vol_target above was silently dead
+    # code in the real orchestrator path (nothing ever supplied
+    # inputs["vol_estimates"]) until RiskAgent gained the ability to
+    # self-compute it from ctx.pit_view -- gated behind this explicit
+    # opt-in like every other risk-bearing toggle in this schema.
+    vol_targeting_enabled: bool = False
+    vol_lookback_days: int = 60
     max_drawdown_pct: float = 0.20
     # Optional ADV/participation-rate liquidity cap (None = disabled). See
     # firm.agents.risk.RiskAgent._cap_liquidity.
@@ -149,6 +168,23 @@ class Settings(BaseSettings):
     # risk_parity | kelly. ``kelly_fraction`` only used when method == kelly.
     allocation_method: str = "conviction_weighted"
     kelly_fraction: float = 0.5
+    # EMA smoothing on TraderAgent's net_conviction (see
+    # firm.agents.trader.TraderAgent._smooth_convictions) — enabled in
+    # config/live.yaml but previously absent from this schema entirely, so
+    # every backtest ran with conviction smoothing OFF regardless of the live
+    # default. That divergence meant backtest numbers didn't predict the live
+    # turnover/whipsaw behavior smoothing is meant to damp. Declared here (and
+    # set to match live.yaml in settings.yaml) so the standard backtest/
+    # walk-forward path is live-faithful by default.
+    conviction_smoothing_enabled: bool = False
+    conviction_smoothing_halflife_days: float = 3.0
+    # Cross-sectional analyst normalization (see firm.agents.analysts.
+    # zscore_signals). True (default) is a true z-score, forcing every
+    # strategy's output to mean 0 across the universe every bar -- destroys
+    # aggregate level/direction, a confirmed contributor to live turnover
+    # (mid-ranked names flip sign on noise). False preserves a one-sided
+    # universe's net long/short read; opt-in pending a backtest A/B.
+    zscore_demean: bool = True
     # Research signal combination: {"method": "confidence"|"optimal"|"hrp"}.
     # "hrp" (Hierarchical Risk Parity) is an opt-in alternative to "optimal"
     # that never inverts the correlation matrix — see

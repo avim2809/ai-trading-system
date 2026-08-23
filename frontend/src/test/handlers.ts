@@ -16,7 +16,11 @@ export const handlers = [
 
   http.get(`${API}/runs`, () => HttpResponse.json(m.mockRuns)),
   http.get(`${API}/runs/:id`, () => HttpResponse.json({ ...m.mockRuns[0], config: {}, config_hash: 'abc', seed: 42, artifacts_dir: 'runs/run-1' })),
-  http.get(`${API}/runs/:id/report`, () => HttpResponse.json({ portfolio: { sharpe: 1.2 }, data_points: 100 })),
+  http.get(`${API}/runs/:id/report`, () => HttpResponse.json({
+    portfolio: { sharpe: 1.2 },
+    data_points: 100,
+    turnover: { avg_turnover: 0.05, total_turnover: 1.2, rebalance_count: 24 },
+  })),
   http.get(`${API}/runs/:id/equity`, () => HttpResponse.json({ dates: ['2026-01-01'], values: [100000], drawdown: [0] })),
   http.post(`${API}/runs`, () => HttpResponse.json({ run_id: 'new-run-1' })),
   http.delete(`${API}/runs`, () => HttpResponse.json({ cleared: m.mockRuns.length })),

@@ -50,6 +50,33 @@ class ExecutionAgent(Agent):
             "market_impact_crossover_participation"
         )
         self.adv_lookback_days: int = int(cfg.get("adv_lookback_days", 20))
+        # No-trade / rebalance band: |target_w - current_w| must exceed this
+        # fraction of NAV before an order is generated at all. 0.0 (default)
+        # preserves prior behavior exactly -- every existing test and any
+        # caller that hasn't opted in sees identical output. Confirmed live:
+        # with no band at all, the z-scored/L1-normalized construction
+        # pipeline re-derives a fresh target for every name each cycle, so
+        # even noise-level drift (a few basis points) generated a real order
+        # -- one contributor to the 60-95%/day turnover this system's own
+        # docs/live.yaml comments already diagnosed. This is expected to be
+        # the highest-leverage single turnover fix pending a live-faithful
+        # backtest confirmation: it doesn't change *what* the strategies/
+        # risk stack decides, only whether a decision small enough to be
+        # noise gets acted on.
+        self.rebalance_band_pct: float = float(cfg.get("rebalance_band_pct", 0.0))
+        # Turnover-aware sizing: trade only this fraction of the gap to
+        # target each cycle (1.0 = full rebalance, unchanged prior
+        # behavior). Complementary to rebalance_band_pct above -- the band
+        # decides whether a deviation is worth trading AT ALL, this decides
+        # how much of a real (above-band) deviation to close in one cycle.
+        # Since TraderAgent re-derives target weights fresh every cycle from
+        # the day's z-scored/L1-normalized conviction, partial rebalancing
+        # lets the position drift toward target over several cycles instead
+        # of snapping fully each time signal noise moves the target —
+        # directly reduces the per-cycle trade size on every above-band
+        # deviation, not just the sub-band ones the rebalance band already
+        # filters out.
+        self.rebalance_fraction: float = float(cfg.get("rebalance_fraction", 1.0))
 
     def run(self, ctx: AgentContext, **inputs: Any) -> ExecutionReport:
         decision: RiskDecision = inputs["decision"]
@@ -101,10 +128,26 @@ class ExecutionAgent(Agent):
             if abs(diff_w) < 1e-6:
                 continue
 
+            # No-trade band: a deviation smaller than this is treated as
+            # noise, not a real rebalance signal -- skip it entirely (no
+            # order, no cost estimate, no turnover contribution). A target
+            # of exactly 0.0 with a small leftover current_w is deliberately
+            # tolerated here too (not force-closed), matching standard
+            # drift-band rebalancing practice: liquidating dust costs more
+            # in commission/spread than leaving it is worth.
+            if self.rebalance_band_pct > 0 and abs(diff_w) < self.rebalance_band_pct:
+                continue
+
             price = prices.get(sym, 0.0)
             if price <= 0:
                 log.warning("No price for %s – skipping order", sym)
                 continue
+
+            # Turnover-aware sizing: close only a fraction of the (already
+            # above-band) gap this cycle. 1.0 (default) is a no-op --
+            # byte-identical behavior to before this knob existed.
+            if self.rebalance_fraction < 1.0:
+                diff_w *= self.rebalance_fraction
 
             dollar_amount = diff_w * nav
             quantity = abs(dollar_amount / price)

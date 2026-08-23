@@ -277,6 +277,13 @@ class Orchestrator(Agent):
                 debate_results=debate_results,
                 blackboard=bb,
                 memory=memory,
+                # Needed by allocation_method="joint_optimizer" to compute
+                # current weights (w0) for the native transaction-cost term
+                # -- ctx.portfolio has holdings but PortfolioState.get_weights
+                # needs fresh prices to mark them. Existing allocation
+                # methods ignore this kwarg (TraderAgent.run uses **inputs),
+                # so this is backward-compatible.
+                prices=prices,
             )
         except StageTimeoutError as exc:
             early = self._record_stage_failure(bb, self.trader, exc)

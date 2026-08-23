@@ -22,6 +22,14 @@ dependencies = [
     "pyarrow",
     "requests",
     "statsmodels",
+    # Joint constrained portfolio optimizer (src/firm/portfolio/optimizer.py)
+    # -- expresses the L1 transaction-cost term, the sqrt-market-impact
+    # (3/2-power) term, and the SOC vol constraint exactly, with real solver
+    # status/failure reporting. See PART 2 of the remediation plan
+    # (docs/remediation_progress.md) for why this was chosen over
+    # scipy.optimize (already a dependency but needs manual reformulation of
+    # the convex terms).
+    "cvxpy",
 ]
 
 [project.optional-dependencies]

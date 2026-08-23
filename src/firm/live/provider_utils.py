@@ -170,6 +170,19 @@ def resolve_live_startup(
             "market_impact_crossover_participation",
             costs["market_impact_crossover_participation"],
         )
+    # No-trade / rebalance band (see firm.agents.execution.ExecutionAgent) —
+    # same flat-top-level-key convention as the other ExecutionAgent knobs
+    # above, so it needs the same explicit costs-block flattening or it
+    # would suffer the identical silent-drop bug conviction_smoothing_enabled
+    # had: present in config/live.yaml, never reaching the agent. Validated
+    # via a 3-window backtest comparison (2024-Q1/2022-Q1/2023-Q3, live-
+    # faithful config): 0.05 cut daily turnover 44-73% and improved/held
+    # drawdown in every window, with Sharpe improving in 2/3 (one flipping
+    # negative to positive) and a noise-level wash in the third.
+    if "rebalance_band_pct" in costs:
+        engine_config.setdefault("rebalance_band_pct", costs["rebalance_band_pct"])
+    if "rebalance_fraction" in costs:
+        engine_config.setdefault("rebalance_fraction", costs["rebalance_fraction"])
 
     # Optional behavioural knobs from live.yaml → engine/orchestrator config.
     # All default OFF/unchanged when absent (news-guard, optimal signal
@@ -181,7 +194,35 @@ def resolve_live_startup(
         "strategy_regime_weights",
         "allocation_method",
         "kelly_fraction",
+        # TraderAgent's conviction-EMA smoothing (see
+        # firm.agents.trader.TraderAgent._smooth_convictions). Confirmed live
+        # 2026-08-03 through 2026-08-07 and documented in config/live.yaml as
+        # the fix for 60-95%/day turnover from unsmoothed signal noise — but
+        # this allowlist never included it, so neither the systemd auto-start
+        # path (bootstrap_live_from_yaml) nor manual POST /api/live/start ever
+        # actually copied it from config/live.yaml into the TraderAgent's
+        # config. It's been silently OFF in every real deployment since this
+        # switched to firm-api's resolve_live_startup()-based boot, despite
+        # config/live.yaml and the operational docs describing it as an
+        # active, confirmed fix.
+        "conviction_smoothing_enabled",
+        "conviction_smoothing_halflife_days",
+        # Analyst cross-sectional normalization (see firm.agents.analysts.
+        # zscore_signals) — same silent-drop risk class as the conviction-
+        # smoothing keys above, added deliberately rather than by accident.
+        "zscore_demean",
         "max_positions",
+        # allocation_method == "joint_optimizer" knobs (see
+        # firm.agents.trader.TraderAgent.__init__ / firm.portfolio.optimizer).
+        # Not live yet (allocation_method stays "conviction_weighted" in
+        # every shipped config until the walk-forward+PBO gate passes) but
+        # added here proactively so wiring this up later doesn't repeat the
+        # conviction_smoothing_enabled/zscore_demean silent-drop bug class.
+        "optimizer_cost_aversion",
+        "optimizer_target_avg_vol",
+        "optimizer_ridge_frac",
+        "optimizer_holding_horizon_days",
+        "optimizer_cov_lookback_days",
         "cycle_hard_timeout_seconds",
         "cycle_watchdog_seconds",
         "broker_disconnect_alert_threshold",

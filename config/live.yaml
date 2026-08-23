@@ -143,6 +143,14 @@ risk:
   max_net_exposure: 0.50        # 50% net long — mild long bias, not market-neutral
   max_sector_pct: 0.25          # 25% sector cap — diversification guardrail
   vol_target: 0.12              # 12% annualised vol target — conservative live baseline
+  # Was silently dead code: nothing in the real orchestrator path ever
+  # supplied inputs["vol_estimates"], so vol_target above never actually
+  # enforced anything despite reading like an active control. RiskAgent
+  # now self-computes vol estimates from ctx.pit_view when this is true
+  # (see RiskAgent._estimate_vol_estimates) -- de-risk only, never levers
+  # up past the other caps, so safe to enable unconditionally.
+  vol_targeting_enabled: true
+  vol_lookback_days: 60
   max_drawdown_pct: 0.15        # 15% per-strategy drawdown before it is sized down
 
   # ADV/participation-rate liquidity cap: clips the implied trade size (not
@@ -281,6 +289,30 @@ costs:
   # borrow costs against the account directly, so there is nothing to
   # estimate here (unlike the backtest, which has no real broker to charge
   # it). See firm.config.BacktestConfig.short_borrow_annual_pct.
+  # No-trade / rebalance band (see firm.agents.execution.ExecutionAgent):
+  # |target_w - current_w| must exceed this fraction of NAV before an order
+  # is generated at all. Without any band, every noise-level target-weight
+  # wiggle from the daily conviction-weighted re-derivation became a real
+  # trade — a direct contributor to the 60-95%/day turnover this file's
+  # conviction_smoothing_enabled comment already diagnosed. Validated via a
+  # 3-window backtest comparison (2024-Q1/2022-Q1/2023-Q3, live-faithful
+  # config): 0.05 cut daily turnover 44-73% and improved/held drawdown in
+  # every window, with Sharpe improving in 2/3 (one flipping negative to
+  # positive) and a noise-level wash in the third. Keep below 2x
+  # risk.max_position_pct (0.05 below) — a band at or above that is
+  # mechanically unreachable (no single-name swing can exceed 2x the
+  # per-name cap) and would silently freeze the book forever; confirmed via
+  # the same calibration (0.10 produced zero trades all quarter).
+  rebalance_band_pct: 0.05
+  # Turnover-aware sizing (see firm.agents.execution.ExecutionAgent): trade
+  # only this fraction of the gap to target each cycle, on top of the band
+  # above (1.0 = full rebalance). Validated via the same 3-window comparison
+  # (2024-Q1/2022-Q1/2023-Q3): 0.7 gave a clean Sharpe improvement over the
+  # band-only baseline in ALL 3 windows (2.88->3.45, -0.03->0.32, 0.43->0.55)
+  # while cutting turnover another 34-54% beyond the band. 0.5 cut turnover/
+  # drawdown further still but gave up Sharpe in 2/3 windows — 0.7 is the
+  # better risk-adjusted-return trade-off.
+  rebalance_fraction: 0.7
 
 # ──────────────────────────────────────────────────────────────
 # Macro-event blackout (news-guard) — pre-trade gate

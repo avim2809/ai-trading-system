@@ -419,6 +419,26 @@ class TestBacktestReport:
         assert "benchmark" in rep.to_dict()
         assert "Benchmark-Relative" in rep.to_text()
 
+    def test_turnover_omitted_when_not_supplied(self, report):
+        """Backward compatibility: existing callers that don't pass
+        turnover= must see the same to_dict()/to_text() shape as before."""
+        assert report.turnover == {}
+        assert "turnover" not in report.to_dict()
+        assert "Turnover" not in report.to_text()
+
+    def test_turnover_surfaced_in_report_when_supplied(self):
+        """Regression coverage: TurnoverAnalyzer's avg_turnover/total_turnover/
+        rebalance_count were already computed by BacktestEngine.get_results()
+        but never threaded into report.json — without this, a construction
+        change (no-trade band, turnover-aware sizing, ...) can't be validated
+        against the metric it's actually meant to move."""
+        r = _daily_returns(100, seed=13)
+        turnover = {"avg_turnover": 0.42, "total_turnover": 12.6, "rebalance_count": 30}
+        rep = BacktestReport(r, PerformanceAttribution(), [], turnover=turnover)
+        assert rep.to_dict()["turnover"] == turnover
+        assert "Turnover" in rep.to_text()
+        assert "avg_turnover" in rep.to_text()
+
 
 # ======================================================================
 # 4. eval/plots.py

@@ -104,6 +104,10 @@ export interface ReportData {
   data_points: number
   trade_metrics?: Record<string, number>
   monte_carlo?: MonteCarloSummary
+  // avg_turnover / total_turnover (fraction of NAV) / rebalance_count, from
+  // firm.backtest.analyzers.TurnoverAnalyzer. Omitted when the report has no
+  // rebalance activity to measure.
+  turnover?: Record<string, number>
 }
 
 export interface WalkForwardAggMetric {

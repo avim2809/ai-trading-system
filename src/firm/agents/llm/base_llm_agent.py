@@ -308,9 +308,18 @@ class LLMAgentMixin:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
-        policy = self._enhancement_cfg().get("policy", "live_calls")
+        cfg = self._enhancement_cfg()
+        policy = cfg.get("policy", "live_calls")
+        # None (default) preserves prior behavior exactly (LLMService's own
+        # provider.temperature default). See _ENHANCEMENT_DEFAULTS'
+        # "temperature" docstring for why a low value is recommended for
+        # these scoring/enhancement calls specifically.
+        temperature = cfg.get("temperature")
+        call_kwargs: dict[str, Any] = {}
+        if temperature is not None:
+            call_kwargs["temperature"] = float(temperature)
         if policy == "cache_only":
-            cached = llm.get_cached(messages, json_mode=json_mode)
+            cached = llm.get_cached(messages, json_mode=json_mode, **call_kwargs)
             if cached is None:
                 log.debug("enhancement policy=cache_only: cache miss, skipping LLM")
                 raise LLMEnhancementSkipped("cache_only miss")
@@ -320,9 +329,9 @@ class LLMAgentMixin:
             return cached
 
         if json_mode:
-            result = llm.chat_json(messages)
+            result = llm.chat_json(messages, **call_kwargs)
         else:
-            result = llm.chat(messages)
+            result = llm.chat(messages, **call_kwargs)
         self._llm_log.append({
             "system_preview": system[:100],
             "tokens": getattr(llm, "usage_stats", {}).get("last_tokens", 0),

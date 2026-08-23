@@ -40,6 +40,7 @@ ATTRIBUTION_STATE_KEY = "attribution_state"
 KILL_SWITCH_KEY = "kill_switch"
 DAILY_LIMITS_KEY = "daily_limits"
 TRADER_STATE_KEY = "trader_state"
+CYCLE_COUNTER_KEY = "cycle_counter"
 
 
 class LiveStateStore:
@@ -216,6 +217,30 @@ class LiveStateStore:
 
     def load_trader_state(self) -> dict[str, Any] | None:
         return self._load_blob(TRADER_STATE_KEY)
+
+    # ------------------------------------------------------------------
+    # Cycle counter (see LiveTradingEngine._cycle_count). Unlike daily_limits
+    # above, this is a *global monotonic* counter, never reset by trading-day
+    # rollover — it seeds each order's client_order_id
+    # (f"c{cycle_id}-{order_index}-{symbol}-{side}"). Without persisting it,
+    # every restart resets cycle_id back to 1, so a same-day restart can
+    # regenerate the exact client_order_id an earlier (pre-restart) cycle
+    # already submitted for the same symbol/side/list-position — confirmed
+    # live: Alpaca rejected the repeat with "client_order_id must be unique"
+    # and tripped the submission circuit breaker.
+    # ------------------------------------------------------------------
+
+    def save_cycle_counter(self, cycle_count: int) -> None:
+        self._save_blob(CYCLE_COUNTER_KEY, {"cycle_count": cycle_count})
+
+    def load_cycle_counter(self) -> int | None:
+        blob = self._load_blob(CYCLE_COUNTER_KEY)
+        if not blob:
+            return None
+        try:
+            return int(blob.get("cycle_count", 0))
+        except (TypeError, ValueError):
+            return None
 
     # ------------------------------------------------------------------
 

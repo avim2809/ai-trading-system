@@ -708,6 +708,207 @@ class TestHealthCheck:
         assert broker._ib_lock.acquire(timeout=0)
         broker._ib_lock.release()
 
+    def test_stage1_only_when_no_contract_cached_yet(self):
+        """Before connect() has cached anything (or in these older-style
+        tests that set `_ib` directly), stage 2 must be skipped rather than
+        crashing on a missing SPY contract — degrades to the original
+        stage-1-only behavior."""
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=36)
+        calls = {"contract_details": 0}
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            reqCurrentTime=lambda: "2026-08-21T00:00:00",
+            reqContractDetails=lambda *_a: calls.__setitem__(
+                "contract_details", calls["contract_details"] + 1
+            ),
+        )
+        assert broker.health_check() is True
+        assert calls["contract_details"] == 0
+
+    def test_stage2_catches_a_backend_degraded_gateway_that_passes_stage1(self):
+        """The exact failure mode this fix closes: a Gateway that answers
+        reqCurrentTime (stage 1 passes — the local socket is fine) while its
+        own upstream connection to IB's contract-resolution backend is
+        degraded, so qualifyContracts-style calls hang/fail. Confirmed live
+        as the reason the proactive reconnect fix alone didn't stop orders
+        failing — this second stage exercises that same backend via
+        reqContractDetails on the already-qualified SPY contract, so it's
+        caught here instead of minutes later inside the order-submission loop."""
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=37)
+        spy_contract = SimpleNamespace(symbol="SPY")
+        broker._qualified_contracts["SPY"] = spy_contract
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            reqCurrentTime=lambda: "2026-08-21T00:00:00",
+            reqContractDetails=lambda *_a: (_ for _ in ()).throw(TimeoutError("no response")),
+        )
+        assert broker.health_check() is False
+
+    def test_stage2_probes_the_cached_spy_contract_specifically(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=38)
+        spy_contract = SimpleNamespace(symbol="SPY")
+        broker._qualified_contracts["SPY"] = spy_contract
+        seen = {"contract": None}
+
+        def _req_contract_details(contract):
+            seen["contract"] = contract
+
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            reqCurrentTime=lambda: "2026-08-21T00:00:00",
+            reqContractDetails=_req_contract_details,
+        )
+        assert broker.health_check() is True
+        assert seen["contract"] is spy_contract
+
+
+class TestQualifiedContractCache:
+    """Regression coverage for the fix to the "24 generated, 0 submitted, 24
+    failed" live incident: every order used to re-issue its own
+    qualifyContracts round-trip on a fresh Stock(...), so a 24-order basket
+    meant 24 sequential requests each independently exposed to the 20s
+    RequestTimeout. A contract's conId is stable once qualified, so it never
+    needs re-qualifying — this cache eliminates the per-order lookup."""
+
+    def test_submit_order_qualifies_once_then_reuses_the_cache(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=50)
+        calls = {"qualify": 0}
+
+        def _qualify(*contracts):
+            calls["qualify"] += 1
+
+        ib, _state = _fake_ib(["Filled"])
+        ib.qualifyContracts = _qualify
+        broker._ib = ib
+
+        from firm.brokers.base import OrderRequest
+
+        broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=1))
+        ib2, _state2 = _fake_ib(["Filled"])
+        ib2.qualifyContracts = _qualify
+        broker._ib = ib2
+        broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=1))
+
+        # Only the first order for AAPL should have triggered a real
+        # qualifyContracts round-trip; the second reused the cache.
+        assert calls["qualify"] == 1
+        assert "AAPL" in broker._qualified_contracts
+
+    def test_get_current_price_reuses_a_contract_qualified_by_submit_order(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=51)
+        cached_contract = SimpleNamespace(symbol="MSFT")
+        broker._qualified_contracts["MSFT"] = cached_contract
+        calls = {"qualify": 0}
+        seen_contract = {}
+
+        def _req_tickers(*contracts):
+            seen_contract["contract"] = contracts[0]
+            return [_ticker(midpoint=50.0)]
+
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            qualifyContracts=lambda *_c: calls.__setitem__("qualify", calls["qualify"] + 1),
+            reqTickers=_req_tickers,
+        )
+
+        price = broker.get_current_price("MSFT")
+
+        assert price == 50.0
+        assert calls["qualify"] == 0
+        assert seen_contract["contract"] is cached_contract
+
+    def test_cache_survives_disconnect_and_reconnect(self):
+        """conId is IBKR-side instrument identity, not connection state — a
+        reconnect must not force every symbol to be re-qualified."""
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=52)
+        broker._qualified_contracts["AAPL"] = SimpleNamespace(symbol="AAPL")
+        broker._ib = SimpleNamespace(isConnected=lambda: True, disconnect=lambda: None)
+
+        broker.disconnect()
+
+        assert "AAPL" in broker._qualified_contracts
+
+
+class TestWarmUniverse:
+    """warm_universe() batch-qualifies the whole trading universe in one
+    call right after connect()/reconnect(), instead of leaving each symbol
+    to be discovered (and separately round-tripped) the first time an order
+    needs it."""
+
+    def test_qualifies_all_uncached_symbols_in_one_batched_call(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=60)
+        calls = {"batches": []}
+
+        def _qualify(*contracts):
+            calls["batches"].append([c.symbol for c in contracts])
+
+        broker._ib = SimpleNamespace(isConnected=lambda: True, qualifyContracts=_qualify)
+
+        with patch(
+            "firm.brokers.ibkr.Stock",
+            side_effect=lambda sym, *_a: SimpleNamespace(symbol=sym),
+        ):
+            broker.warm_universe(["AAPL", "MSFT", "GOOG"])
+
+        assert calls["batches"] == [["AAPL", "MSFT", "GOOG"]]
+        assert set(broker._qualified_contracts) == {"AAPL", "MSFT", "GOOG"}
+
+    def test_already_cached_symbols_are_not_requalified(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=61)
+        broker._qualified_contracts["AAPL"] = SimpleNamespace(symbol="AAPL")
+        calls = {"batches": []}
+
+        def _qualify(*contracts):
+            calls["batches"].append([c.symbol for c in contracts])
+
+        broker._ib = SimpleNamespace(isConnected=lambda: True, qualifyContracts=_qualify)
+
+        with patch(
+            "firm.brokers.ibkr.Stock",
+            side_effect=lambda sym, *_a: SimpleNamespace(symbol=sym),
+        ):
+            broker.warm_universe(["AAPL", "MSFT"])
+
+        assert calls["batches"] == [["MSFT"]]
+
+    def test_fully_cached_universe_makes_no_call_at_all(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=62)
+        broker._qualified_contracts["AAPL"] = SimpleNamespace(symbol="AAPL")
+        calls = {"n": 0}
+        broker._ib = SimpleNamespace(
+            isConnected=lambda: True,
+            qualifyContracts=lambda *_c: calls.__setitem__("n", calls["n"] + 1),
+        )
+
+        broker.warm_universe(["AAPL"])
+
+        assert calls["n"] == 0
+
+
+class TestConnectFailureMessageIsSystemic:
+    """The live engine's per-cycle submission circuit breaker classifies
+    broker failures by substring-matching the exception text for markers
+    like "connection"/"timeout" (see LiveTradingEngine.
+    _is_systemic_submission_error). A connect() failure whose wrapped
+    exception text happened to lack every marker used to be misclassified as
+    a mere order-specific reject — this locks in that the wrapping message
+    itself always carries an unambiguous marker, regardless of what the
+    underlying exception says."""
+
+    def test_connect_failure_message_always_contains_the_word_connection(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=70)
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("some opaque low-level failure with no obvious keyword")
+
+        fake_ib = SimpleNamespace(connect=_boom, disconnect=lambda: None)
+
+        with patch("firm.brokers.ibkr.IB", return_value=fake_ib), \
+             patch("firm.brokers.ibkr.time.sleep"):
+            with pytest.raises(BrokerError, match="connection") as excinfo:
+                broker.connect()
+        assert "connection" in str(excinfo.value).lower()
+
 
 class TestBoundedIBLockAndRequestTimeout:
     """Regression coverage for a real production incident: a submit_order()
