@@ -215,3 +215,40 @@ def fetch_macro_bundle(
         except Exception as exc:
             log.warning("FRED: could not load %s: %s", s, exc)
     return bundle
+
+
+def macro_bundle_to_long_frame(bundle: dict[str, pd.DataFrame]) -> pd.DataFrame:
+    """Flatten a :func:`fetch_macro_bundle` result into the long
+    ``(date, symbol, value)`` shape ``ParquetCache.merge_combined`` dedupes/
+    sorts by -- ``symbol`` here is the FRED series ID (e.g. ``T10Y2Y``), not
+    an equity ticker; reusing that column name lets ``combined/macro`` share
+    the existing combined-cache dedup logic instead of needing a parallel
+    one. See :func:`macro_bundle_from_cache` for the inverse.
+    """
+    frames = []
+    for series_id, df in bundle.items():
+        if df.empty:
+            continue
+        value_col = series_id if series_id in df.columns else df.columns[-1]
+        frames.append(pd.DataFrame({
+            "date": pd.to_datetime(df["date"]),
+            "symbol": series_id,
+            "value": df[value_col].astype(float),
+        }))
+    if not frames:
+        return pd.DataFrame(columns=["date", "symbol", "value"])
+    return pd.concat(frames, ignore_index=True)
+
+
+def macro_bundle_from_cache(cache_df: pd.DataFrame | None) -> dict[str, pd.DataFrame]:
+    """Inverse of :func:`macro_bundle_to_long_frame`: rebuilds the
+    ``{series_id: DataFrame[date, series_id]}`` shape
+    :meth:`firm.data.pit_store.PointInTimeDataStore.load_macro` expects from
+    a cached ``combined/macro`` long-format frame.
+    """
+    if cache_df is None or cache_df.empty:
+        return {}
+    bundle: dict[str, pd.DataFrame] = {}
+    for series_id, grp in cache_df.groupby("symbol"):
+        bundle[str(series_id)] = grp[["date", "value"]].rename(columns={"value": str(series_id)})
+    return bundle

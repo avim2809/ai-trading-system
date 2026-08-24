@@ -110,7 +110,8 @@ class ExperimentRunner:
             flat.update(risk)
 
         for key in (
-            "strategy_params", "regime_overlay", "agent_modes",
+            "strategy_params", "regime_overlay", "seasonality_overlay",
+            "macro_overlay", "agent_modes",
             "llm_config", "universe_symbols",
             "allocation_method", "kelly_fraction", "signal_combination",
             "strategy_circuit_breaker",

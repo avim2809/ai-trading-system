@@ -151,6 +151,52 @@ def execute_backtest(config: dict) -> BacktestReport:
                 exc_info=True,
             )
 
+    # Optional FRED macro data (PART 3 Phase 4 of the remediation plan).
+    # Prefers the cache (`scripts/backfill_macro.py` -> `combined/macro`)
+    # over a live fetch -- every backtest with FRED_API_KEY set used to make
+    # a live, uncached, non-deterministic network call on every single run,
+    # regardless of whether anything downstream even consumed the result.
+    # Falls back to a live fetch only when no cache exists at all for this
+    # cache_dir (`load_macro` returns None, not an empty dict, in that
+    # specific case). This is the actual entry point every walk-forward
+    # audit/calibration script/API job uses (`firm.experiments.runner`,
+    # `firm.api.jobs`, `scripts/*calibrate*.py` all call `execute_backtest`
+    # directly) -- an earlier version of this macro-loading block was added
+    # to the now-dead `firm.runtime.run_backtest_from_config`, which nothing
+    # actually calls; moved here where it's genuinely reachable.
+    if data_source != "synthetic":
+        macro_bundle = None
+        try:
+            from firm.config import get_settings
+            from firm.runtime import load_macro
+
+            macro_bundle = load_macro(get_settings())
+        except Exception:
+            log.warning("Macro cache load failed", exc_info=True)
+
+        if macro_bundle:
+            pit_store.load_macro(macro_bundle)
+        elif macro_bundle is None:
+            fred_api_key = config.get("fred_api_key", "")
+            if not fred_api_key:
+                try:
+                    from firm.config import get_settings
+
+                    fred_api_key = get_settings().fred_api_key
+                except Exception:
+                    log.warning(
+                        "fred_key_lookup_failed — macro data will be skipped", exc_info=True,
+                    )
+            if fred_api_key:
+                try:
+                    from firm.data.providers.fred import fetch_macro_bundle
+
+                    live_bundle = fetch_macro_bundle(fred_api_key, start_date, end_date)
+                    if live_bundle:
+                        pit_store.load_macro(live_bundle)
+                except Exception:
+                    log.warning("FRED macro load failed — no macro features", exc_info=True)
+
     pit_store.load(
         prices=prices_df, fundamentals=fund_df, sentiment=sentiment_df,
         estimates=estimates_df, ai_scores=ai_scores_df,

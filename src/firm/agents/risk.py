@@ -17,6 +17,7 @@ If the cumulative adjustments are too severe the proposal is **vetoed**
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 from firm.agents._liquidity import estimate_adv_dollars
@@ -125,6 +126,63 @@ class RiskAgent(Agent):
             overlay_cfg.get("separation_damping_floor", 0.15)
         )
         self._regime_detector = None
+
+        # Optional calendar/seasonality exposure overlay (off by default).
+        # PART 3 of the remediation plan: `seasonality` used to run as an
+        # ordinary strategy, but its own docstring says it's a market-wide
+        # timing signal (one scalar per day, applied identically to every
+        # symbol) -- fundamentally a different *shape* of signal than the
+        # per-symbol stock-picker pipeline expects. zscore_signals'
+        # zero-cross-sectional-std pass-through (see agents/analysts/
+        # __init__.py) let that identical score survive unchanged into
+        # combine_signals_by_symbol and TraderAgent's sizing as if it were
+        # real per-symbol information -- not "silently disabled" as one
+        # early research report guessed (confirmed by reading the actual
+        # zscore_signals code: std<1e-10 passes the raw score through,
+        # it does not zero it), but genuinely the wrong mechanism for a
+        # signal that can't discriminate between symbols. Rerouted here as
+        # a multiplicative gross-exposure scalar, the same pattern
+        # `_regime_exposure_overlay` already uses for the HMM regime
+        # signal -- a new sibling method, not folded into `regime_state`'s
+        # discrete label/confidence contract, since this signal is
+        # continuous in [-1, 1], not a 3-state label.
+        seasonality_cfg = cfg.get("seasonality_overlay", {}) or {}
+        self.seasonality_overlay_enabled: bool = bool(seasonality_cfg.get("enabled", False))
+        # Scale applied to the raw [-1, 1] seasonality score to get an
+        # exposure multiplier: effective = 1 + scale * score. 0.15 caps the
+        # tilt at ±15% gross exposure at the signal's most extreme reading --
+        # seasonality.py's own docstring calls this "a supplementary
+        # overlay, not a primary alpha source," so this stays modest by
+        # default, well inside the regime overlay's own factor range.
+        self.seasonality_overlay_scale: float = float(seasonality_cfg.get("scale", 0.15))
+        self._seasonality_params: dict[str, Any] = {
+            "tom_days_before": seasonality_cfg.get("tom_days_before", 1),
+            "tom_days_after": seasonality_cfg.get("tom_days_after", 3),
+        }
+
+        # Optional macro/rate exposure overlay (off by default). PART 3
+        # Phase 4 of the remediation plan: none of the 10 live strategies
+        # capture interest-rate direction/yield-curve shape -- the primary
+        # driver of the 2022 bear market (fold 2 in every walk-forward audit
+        # this session, consistently the worst OOS result regardless of
+        # combination mechanism). T10Y2Y (the 10Y-2Y Treasury spread, a
+        # heavily documented recession-warning signal) is fetched via
+        # firm.data.providers.fred + cached in combined/macro
+        # (scripts/backfill_macro.py) -- see ctx.pit_view.macro(). Same
+        # multiplicative-gross-exposure seam as the regime/seasonality
+        # overlays above; a *level* threshold, not a z-score, since an
+        # inverted curve (T10Y2Y < 0) is an absolute, economically
+        # meaningful signal, not a relative one.
+        macro_cfg = cfg.get("macro_overlay", {}) or {}
+        self.macro_overlay_enabled: bool = bool(macro_cfg.get("enabled", False))
+        self.macro_overlay_series_id: str = macro_cfg.get("series_id", "T10Y2Y")
+        # Neutral level: at or above this, no de-risking (effective=1.0).
+        self.macro_overlay_neutral_level: float = float(macro_cfg.get("neutral_level", 0.0))
+        # Risk-off level: at or below this (a meaningfully inverted curve),
+        # the full de-risk factor applies. Linear interpolation between the
+        # two levels, matching how the regime overlay blends by confidence.
+        self.macro_overlay_risk_off_level: float = float(macro_cfg.get("risk_off_level", -0.5))
+        self.macro_overlay_risk_off_scale: float = float(macro_cfg.get("risk_off_scale", 0.5))
 
     def run(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
         proposal: TradeProposal = inputs["proposal"]
@@ -241,6 +299,24 @@ class RiskAgent(Agent):
             log.info("Risk regime overlay asof=%s: %s", ctx.now, a)
             actions.extend(a)
             targets, _v2, _a2 = self._enforce_hard_caps(targets)
+
+        # Same "intentional sizing policy, not a constraint breach" posture
+        # as the regime overlay above -- applied post-veto, re-capped after.
+        # Composing multiple multiplicative overlays has no lower floor
+        # today (see PART 3 of the remediation plan); if a future overlay
+        # is added alongside this one, add a composed-scaler floor before
+        # enabling both together.
+        if self.seasonality_overlay_enabled:
+            targets, _v3, a = self._seasonality_exposure_overlay(targets, ctx)
+            log.info("Risk seasonality overlay asof=%s: %s", ctx.now, a)
+            actions.extend(a)
+            targets, _v4, _a4 = self._enforce_hard_caps(targets)
+
+        if self.macro_overlay_enabled:
+            targets, _v5, a = self._macro_exposure_overlay(targets, ctx)
+            log.info("Risk macro overlay asof=%s: %s", ctx.now, a)
+            actions.extend(a)
+            targets, _v6, _a6 = self._enforce_hard_caps(targets)
 
         if violations:
             log.info(
@@ -785,4 +861,111 @@ class RiskAgent(Agent):
                 f" (damped {damping:.2f}x: separation={separation:.3f} < "
                 f"threshold={self._regime_min_state_separation:.3f}, label-switching risk)"
             )
+        return scaled, [], [note]
+
+    def _seasonality_exposure_overlay(
+        self, targets: dict[str, float], ctx: AgentContext
+    ) -> tuple[dict[str, float], list[str], list[str]]:
+        """Scale gross exposure by the calendar/seasonality signal.
+
+        Reuses ``SeasonalityStrategy.generate()`` directly (not a
+        reimplementation) purely for its day-of-week + turn-of-month score
+        -- every symbol in its output carries the identical value by
+        construction (see ``seasonality.py``'s own docstring: "applied as a
+        uniform tilt to all symbols"), so any one signal's ``score`` is the
+        whole answer::
+
+            effective = 1 + seasonality_overlay_scale * score
+
+        ``score`` is already clipped to ``[-1, 1]`` by the strategy itself,
+        so ``effective`` is bounded to
+        ``[1 - scale, 1 + scale]`` -- no separate damping needed here (no
+        label-switching risk on a continuous calendar signal, unlike the
+        discrete regime read above).
+        """
+        pit_view = getattr(ctx, "pit_view", None)
+        if pit_view is None:
+            return targets, [], ["Seasonality overlay: no pit_view available (no-op)"]
+
+        from firm.strategies.seasonality import SeasonalityStrategy
+
+        try:
+            signals = SeasonalityStrategy(self._seasonality_params).generate(pit_view)
+        except Exception:
+            log.warning("Seasonality overlay: signal generation failed", exc_info=True)
+            return targets, [], ["Seasonality overlay: signal generation failed (no-op)"]
+        if not signals:
+            return targets, [], ["Seasonality overlay: no signal (no-op)"]
+
+        score = float(signals[0].score)
+        effective = 1.0 + self.seasonality_overlay_scale * score
+        if abs(effective - 1.0) < 1e-9:
+            return targets, [], [f"Seasonality overlay: score={score:.3f} — no change"]
+
+        scaled = {s: w * effective for s, w in targets.items()}
+        note = f"Seasonality overlay: score={score:.3f} scaled gross exposure by {effective:.3f}"
+        return scaled, [], [note]
+
+    def _macro_exposure_overlay(
+        self, targets: dict[str, float], ctx: AgentContext
+    ) -> tuple[dict[str, float], list[str], list[str]]:
+        """Scale gross exposure by a macro/rate signal (default: T10Y2Y,
+        the 10Y-2Y Treasury yield-curve spread).
+
+        A *level* threshold, not a z-score against the series' own trailing
+        history: curve inversion (``T10Y2Y < 0``) is an absolute,
+        economically meaningful signal (one of the most robustly documented
+        recession-warning indicators), not something whose interpretation
+        should shift with how the series happened to behave recently::
+
+            level >= neutral_level                       -> effective = 1.0
+            level <= risk_off_level                       -> effective = risk_off_scale
+            otherwise                                      -> linear blend
+
+        Requires ``ctx.pit_view`` to expose a ``.macro(series_id,
+        lookback_days)`` method (``PitViewAdapter`` in backtest,
+        ``LivePitViewAdapter`` in live) backed by cached FRED data
+        (``scripts/backfill_macro.py`` -> ``combined/macro``); degrades to a
+        no-op wherever that isn't available (older code paths, tests, or a
+        live deployment before ``LivePitViewAdapter`` gained a ``.macro()``
+        method) rather than raising.
+        """
+        pit_view = getattr(ctx, "pit_view", None)
+        if pit_view is None or not hasattr(pit_view, "macro"):
+            return targets, [], ["Macro overlay: pit_view has no macro data (no-op)"]
+
+        try:
+            series = pit_view.macro(self.macro_overlay_series_id, lookback_days=5)
+        except Exception:
+            log.warning("Macro overlay: signal lookup failed", exc_info=True)
+            return targets, [], ["Macro overlay: signal lookup failed (no-op)"]
+        if series is None or series.empty:
+            return targets, [], [f"Macro overlay: no {self.macro_overlay_series_id} data (no-op)"]
+
+        level = float(series.iloc[-1])
+        if not math.isfinite(level):
+            return targets, [], ["Macro overlay: non-finite reading (no-op)"]
+
+        neutral = self.macro_overlay_neutral_level
+        risk_off = self.macro_overlay_risk_off_level
+        risk_off_scale = self.macro_overlay_risk_off_scale
+        if level >= neutral:
+            effective = 1.0
+        elif level <= risk_off:
+            effective = risk_off_scale
+        else:
+            span = neutral - risk_off
+            frac = (neutral - level) / span if span > 0 else 1.0
+            effective = 1.0 + (risk_off_scale - 1.0) * frac
+
+        if abs(effective - 1.0) < 1e-9:
+            return targets, [], [
+                f"Macro overlay: {self.macro_overlay_series_id}={level:.3f} — no change"
+            ]
+
+        scaled = {s: w * effective for s, w in targets.items()}
+        note = (
+            f"Macro overlay: {self.macro_overlay_series_id}={level:.3f} "
+            f"scaled gross exposure by {effective:.3f}"
+        )
         return scaled, [], [note]

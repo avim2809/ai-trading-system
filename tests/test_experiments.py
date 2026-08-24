@@ -379,6 +379,35 @@ class TestExperimentRunner:
         assert flat["rebalance_band_pct"] == 0.0
         assert flat["rebalance_fraction"] == 1.0
 
+    def test_flatten_config_passes_through_seasonality_overlay(self):
+        """PART 3 of the remediation plan: a param_grid candidate overriding
+        seasonality_overlay at the top level (rather than nested under
+        "risk", which _merge_override's shallow top-level merge would
+        otherwise clobber wholesale) must actually reach RiskAgent's config,
+        not be silently dropped by _flatten_config's explicit allowlist --
+        the same bug class this session has hit repeatedly for other new
+        knobs (conviction_smoothing_enabled, optimizer_* keys)."""
+        flat = ExperimentRunner._flatten_config({
+            "backtest": {"start_date": "2020-01-01", "end_date": "2020-06-30"},
+            "strategies": {"enabled": ["momentum"]},
+            "seasonality_overlay": {"enabled": True, "scale": 0.15},
+        })
+
+        assert flat["seasonality_overlay"] == {"enabled": True, "scale": 0.15}
+
+    def test_flatten_config_passes_through_macro_overlay(self):
+        """PART 3 Phase 4 of the remediation plan: same top-level-key
+        treatment as seasonality_overlay, for the same reason -- a
+        param_grid candidate overriding macro_overlay must actually reach
+        RiskAgent's config."""
+        flat = ExperimentRunner._flatten_config({
+            "backtest": {"start_date": "2020-01-01", "end_date": "2020-06-30"},
+            "strategies": {"enabled": ["momentum"]},
+            "macro_overlay": {"enabled": True, "risk_off_scale": 0.5},
+        })
+
+        assert flat["macro_overlay"] == {"enabled": True, "risk_off_scale": 0.5}
+
     def test_flatten_config_passes_through_rebalance_knobs_from_backtest_block(self):
         """Without any top-level override, the values already inside the
         nested "backtest" sub-dict (the normal, non-override path) must

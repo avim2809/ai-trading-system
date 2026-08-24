@@ -214,6 +214,27 @@ def load_fundamentals(settings: Settings) -> pd.DataFrame | None:
     return None
 
 
+def load_macro(settings: Settings) -> dict[str, pd.DataFrame] | None:
+    """Load cached FRED macro series when ``scripts/backfill_macro.py`` wrote
+    them, in the ``{series_id: DataFrame[date, series_id]}`` shape
+    :meth:`firm.data.pit_store.PointInTimeDataStore.load_macro` expects.
+
+    Returns ``None`` (not an empty dict) when the cache key is entirely
+    absent, so callers can distinguish "no cache yet, fall back to a live
+    fetch" (this function's return) from "cache exists but every series was
+    empty" (an empty dict) -- only the former should trigger the live-fetch
+    fallback in :func:`run_backtest_from_config`.
+    """
+    from firm.data.cache import ParquetCache
+    from firm.data.providers.fred import macro_bundle_from_cache
+
+    cache = ParquetCache(settings.data.cache_dir)
+    df = cache.get("combined/macro")
+    if df is None:
+        return None
+    return macro_bundle_from_cache(df)
+
+
 def load_sentiment(settings: Settings) -> pd.DataFrame | None:
     """Load cached news-sentiment panels when ``fetch-data`` wrote them.
 
@@ -470,24 +491,41 @@ def run_backtest_from_config(
         market_percentile=market_percentile_df,
     )
 
-    # Optionally load FRED macro data — gracefully skipped when key is absent.
-    fred_api_key = config.get("fred_api_key", "")
-    if not fred_api_key:
-        try:
-            from firm.config import get_settings
-            fred_api_key = get_settings().fred_api_key
-        except Exception:
-            log.warning("fred_key_lookup_failed — macro data will be skipped", exc_info=True)
-    if fred_api_key:
-        try:
-            from firm.data.providers.fred import fetch_macro_bundle
-            start = config.get("start_date", "2010-01-01")
-            end = config.get("end_date", "2030-12-31")
-            macro_bundle = fetch_macro_bundle(fred_api_key, start, end)
-            if macro_bundle:
-                pit_store.load_macro(macro_bundle)
-        except Exception:
-            log.warning("FRED macro load failed — no macro features", exc_info=True)
+    # Optionally load FRED macro data. Prefers the cache (`scripts/
+    # backfill_macro.py` -> `combined/macro`) over a live fetch -- every
+    # backtest with FRED_API_KEY set used to make a live, uncached,
+    # non-deterministic network call on every single run regardless of
+    # whether anything downstream even consumed the result (PART 3 Phase 4
+    # of the remediation plan). Falls back to the original live fetch only
+    # when no cache exists at all for this cache_dir (load_macro returns
+    # None, not an empty dict, in that specific case).
+    macro_bundle = None
+    try:
+        from firm.config import get_settings
+        macro_bundle = load_macro(get_settings())
+    except Exception:
+        log.warning("Macro cache load failed", exc_info=True)
+
+    if macro_bundle:
+        pit_store.load_macro(macro_bundle)
+    elif macro_bundle is None:
+        fred_api_key = config.get("fred_api_key", "")
+        if not fred_api_key:
+            try:
+                from firm.config import get_settings
+                fred_api_key = get_settings().fred_api_key
+            except Exception:
+                log.warning("fred_key_lookup_failed — macro data will be skipped", exc_info=True)
+        if fred_api_key:
+            try:
+                from firm.data.providers.fred import fetch_macro_bundle
+                start = config.get("start_date", "2010-01-01")
+                end = config.get("end_date", "2030-12-31")
+                live_bundle = fetch_macro_bundle(fred_api_key, start, end)
+                if live_bundle:
+                    pit_store.load_macro(live_bundle)
+            except Exception:
+                log.warning("FRED macro load failed — no macro features", exc_info=True)
 
     orchestrator = build_orchestrator(config)
 

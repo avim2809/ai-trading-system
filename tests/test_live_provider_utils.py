@@ -140,6 +140,32 @@ def test_resolve_live_startup_costs_from_yaml_are_flattened():
     assert resolved["engine_config"]["rebalance_fraction"] == 0.6
 
 
+def test_resolve_live_startup_carries_seasonality_overlay_via_risk_block():
+    """PART 3 of the remediation plan: RiskAgent's new seasonality exposure
+    overlay (_seasonality_exposure_overlay) is configured under
+    risk.seasonality_overlay in config/live.yaml, same as regime_overlay --
+    both rely on resolve_live_startup's existing `engine_config.update(risk)`
+    splat (no separate allowlist entry needed for the live path), but that
+    reliance needs its own regression test, not just an assumption, given
+    this session's repeated silent-drop bug class on new config knobs."""
+    from unittest.mock import patch as _patch
+
+    from firm.live.provider_utils import resolve_live_startup
+
+    fake_yaml = {
+        "risk": {
+            "max_position_pct": 0.05,
+            "seasonality_overlay": {"enabled": True, "scale": 0.15},
+        },
+    }
+    with _patch("firm.live.provider_utils.load_live_yaml_defaults", return_value=fake_yaml):
+        resolved = resolve_live_startup()
+    overlay = resolved["engine_config"].get("seasonality_overlay")
+    assert overlay is not None
+    assert overlay.get("enabled") is True
+    assert overlay.get("scale") == 0.15
+
+
 def test_resolve_live_startup_carries_zscore_demean_when_set():
     """Regression coverage: zscore_demean lives in the top-level behavioral-
     knob allowlist (not the costs: block), same silent-drop risk class as

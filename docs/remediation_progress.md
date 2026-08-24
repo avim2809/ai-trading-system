@@ -1120,10 +1120,227 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     picture — see the still-`pending` `longer-dataset`/`formal-pbo-
     correction` items below) rather than another combination-layer
     mechanism.
+63. **PART 3 Phase 0 — data-integrity findings + single-fold sentiment
+    ablation** (2026-08-24) — following #62's conclusion, the user asked two
+    independent research agents (a general-purpose agent + a separate Glean
+    research agent) to investigate the standing signal-quality hypothesis.
+    Both reports were cross-checked against the actual code before trusting
+    them (one had a real mechanism error — see PART 3 of the plan doc for
+    detail); the surviving findings became a 4-phase plan (PART 3, prepended
+    to the plan file). Phase 0 (this entry) is the foundational analysis:
+    - **Confirmed via `ParquetCache`**: `combined/sentiment` in `data/cache`
+      only starts 2025-11-17, and `combined/fundamentals` only starts
+      2020-07-30 (22/25 symbols) — so every 2020-2026 walk-forward+PBO gate
+      run this session (#59, #60, #61-62) actually ran a **9-strategy**
+      roster in the earliest 3 of 4 folds, and fold 1's `event_driven`/
+      `multi_factor` were fundamentals-starved for ~7 months. `sentiment.py`
+      degrades cleanly to `[]` on empty data (confirmed in source — not a
+      poison/uniform value), so this didn't bias folds 1-3, but it means
+      every "10-strategy roster" claim in those audits was imprecise.
+      Annotated `docs/formal_pbo_audit.md` with a top-of-file caveat.
+    - **Single-fold sentiment ablation** (replayed fold 4's exact saved
+      config — `runs/20260823_214519_301474_b609ea50/config.json` — via
+      `execute_backtest` directly, once as-is and once with `sentiment`
+      removed from `strategies.enabled`, same test window 2026-01-04→
+      2026-06-30, same seed): baseline reproduced exactly (Sharpe
+      3.8654687913383157, confirming the replication is faithful).
+      Sentiment-removed: Sharpe 3.435, total_return 0.108 (vs 0.107),
+      turnover roughly 1.5x higher (avg 0.0197 vs 0.0152). **Sentiment
+      contributed a real, moderate improvement (+0.43 Sharpe) but fold 4's
+      positive OOS result is not purely a sentiment artifact** — it stays
+      strongly positive without it. The "one genuinely good OOS period"
+      framing in #59-60 holds up under this specific test.
+    - **New finding, not surfaced by either research agent**: `src/firm/
+      runtime.py` (lines ~473-490) fetches FRED macro data **live, over the
+      network, inside every single backtest** whenever `FRED_API_KEY` is set
+      (confirmed set in this deployment's `.env`) — silently, via a
+      try/except fallback that logs a warning and continues on any failure.
+      No strategy or agent currently consumes this data (its only intended
+      consumer, `ml_prediction`, is disabled), so it hasn't biased any
+      Sharpe/PBO number this session, but every backtest run this session —
+      dozens, across 4 full gate runs plus every point-check smoke test —
+      made an uncached, non-deterministic external network call for zero
+      benefit. Scoped as part of PART 3 Phase 4 (cache the panel, prefer
+      cache over live fetch) rather than fixed ad hoc here, since Phase 4
+      touches this exact code path anyway to add a real macro-overlay
+      consumer.
+    - **Methodology decision**: retiring trade-count-based "isolated Sharpe"
+      claims (event_driven 2.372, seasonality 2.486, gann 4.089, from the
+      original July diagnosis) as statistically underpowered — saved
+      `runs/*/trades.parquet` show a median of 1-5 trades per strategy per
+      6-month fold. Going forward, per-strategy stability claims should use
+      daily attributed-strategy returns (`PerformanceAttribution.
+      get_all_strategy_returns()`, already computed unconditionally every
+      backtest) through `MonteCarloAnalyzer.confidence_interval`
+      (`src/firm/eval/robustness.py`) for a real bootstrap CI, not a raw
+      trade-level Sharpe. This is Phase 2's methodology going forward, not
+      a retroactive fix to already-published numbers.
+    - No source code changed in this phase — analysis + doc annotations +
+      one throwaway comparison script (`fold4_sentiment_ablation.py` in
+      scratchpad, not checked in). Full plan (Phases 1-4: stat_arb's ETF
+      pairs, strategy-signal correlation measurement, seasonality's
+      re-architecture into an exposure overlay, and the macro-overlay
+      buildout) in `PART 3` of the plan file.
+64. **PART 3 Phase 1 — stat_arb ETF-pair removal, `fail`** (2026-08-24) —
+    tested dropping `[SPY,QQQ]`/`[SPY,IWM]` from `stat_arb`'s 6 predefined
+    pairs (keeping the 4 single-name pairs), added as a 5th
+    `DEFAULT_PARAM_GRID` candidate in `scripts/run_walk_forward_pbo_audit.py`
+    (no allowlist changes needed — `strategy_params` already flows through
+    `ExperimentRunner._flatten_config` and is deep-merged per-strategy by
+    `_merge_override`, confirmed by reading both directly). Same 4-fold
+    2020-2026 harness as every prior audit.
+    - **Result: `fail`.** PBO=0.604 (worse than the #59 baseline's 0.464 —
+      expected in part, since a 5th genuine competing candidate mechanically
+      raises the in-sample-overfitting surface PBO measures), DSR=0.00115
+      (still ≈0, no material change).
+    - The new candidate *did* win fold 2's in-sample selection (train Sharpe
+      0.411, the specific window this was targeting — 2021-08→2022-10, the
+      2022 rate-driven regime break) — but fold 2's **OOS test Sharpe barely
+      moved**: -2.518 vs the #59 baseline's -2.56, a ~1.6% relative change,
+      noise-level. The hypothesis (ETF pairs mechanically holding "long
+      QQQ/short SPY" through the whole regime break) did not translate into
+      a measurable OOS improvement in this fold.
+    - **Honest conclusion**: this is the free, zero-code, purely-correctness
+      fix the plan expected it to be (still worth keeping the non-ETF pairs
+      going forward as a matter of correctness — a 60-day cointegration
+      test genuinely can't distinguish a structural break from noise), but
+      it is not a profitability fix. Not promoted to `config/live.yaml`
+      pending Phase 2's broader diagnostic work — no reason yet to believe
+      this alone justifies a config change given the null OOS result.
+    - This is the **5th** consecutive null/negative result on a
+      combination/parameter-level change this session (after
+      `zscore_demean`, concentration, `joint_optimizer`, and now this),
+      reinforcing Phase 2's priority: diagnose before building anything
+      else. Raw JSON: `phase1_statarb_gate.json` (scratchpad, not committed).
+65. **PART 3 Phase 2 — strategy-signal correlation: the "momentum-family
+    redundancy" hypothesis is refuted, not confirmed** (2026-08-24) — ran one
+    full 2020-2026 backtest with all 10 live strategies active, pulled real
+    daily per-strategy attributed returns directly from `BacktestEngine.
+    _attribution.get_all_strategy_returns()` (bypassing the public
+    `execute_backtest()` wrapper, which discards the engine reference), and
+    fed the resulting `periods × strategies` frame into the same
+    `_valid_correlation_matrix` (`src/firm/agents/analysts/__init__.py`)
+    `optimal` signal combination already uses.
+    - **A real bug caught in the analysis script itself before trusting any
+      number**: the first run showed `momentum`/`stat_arb`/`event_driven`/
+      `sentiment` — every strategy with even one missing daily observation
+      out of 1630 possible — correlating at *exactly* 0.0 with literally
+      everything, including their own diagonal (mathematically impossible
+      for a real correlation matrix). Root cause: `np.corrcoef` propagates
+      NaN through the whole covariance sum for any column with a gap,
+      zeroing that entire row/column after `nan_to_num`. Fixed by
+      `fillna(0.0)` before computing correlations — a missing day means the
+      strategy held no position that day (no fill ever recorded, so no
+      entry in `PerformanceAttribution._strategy_holdings`), a legitimate 0
+      contribution, not missing data. Re-ran; diagonal is now correctly
+      1.00 everywhere.
+    - **Corrected result directly contradicts both research reports' H2/#6
+      hypothesis** that `momentum`/`trend`/`multi_factor`/`regime_hmm` form
+      a redundant, highly-correlated cluster explaining why no combination
+      mechanism can extract more edge. Real pairwise correlations:
+      momentum↔trend **−0.81** (strongly *anti*-correlated), momentum↔
+      multi_factor 0.02 (~zero), momentum↔regime_hmm 0.46, trend↔
+      multi_factor 0.23, trend↔regime_hmm −0.41, multi_factor↔regime_hmm
+      −0.40. **Mean off-diagonal correlation within the proposed cluster:
+      −0.151** — mildly *diversifying* on average, not redundant. The
+      hypothesis, as stated by either research report, does not hold up
+      against real measurement.
+    - **A different, narrower hypothesis from the same reports (H6/#7) is
+      confirmed**: `momentum`↔`event_driven` correlation is **0.74** (strong
+      positive) — consistent with `event_driven`'s 5x-scaled price-move
+      proxy path (confirmed in code: `min(abs(surprise)*5, 1.0)`) actually
+      being a disguised momentum echo for a large fraction of its signal,
+      not genuine post-earnings drift. Estimated (not directly instrumented
+      — see below) that the proxy path fires for roughly **~70% of
+      symbol-days**: 3 of 25 universe symbols (SPY/QQQ/IWM — no EPS data
+      exists for ETFs) use it 100% of the time, and the other 22 symbols
+      (24-54 EPS observations each over the cached 2020-07-30→2026-06-30
+      fundamentals window) are only inside a real 21-trading-day drift
+      window ~33% of the time by construction — so ~(22×0.67+3×1.0)/25≈71%
+      of symbol-days fall to the proxy path even with perfect fundamentals
+      coverage. This is inherent to how PEAD signals work (only "active" in
+      a drift window post-event) plus the ETFs having no earnings at all,
+      not a data-coverage bug like #63's findings.
+    - `sentiment`'s correlations with everything are weak (−0.18 to 0.18) —
+      expected and not very informative given #63's finding that real
+      sentiment data only covers the last ~7 months of the 6.5-year window;
+      most of its series is legitimately zero-filled.
+    - **Horizon/cadence check (the plan's 3rd Phase 2 item) deliberately
+      deferred, not fabricated**: isolating per-strategy trade frequency
+      cleanly would need new target-weight-change instrumentation per
+      strategy, a real cost for the lowest-priority of the three Phase 2
+      questions given the other two already produced decisive, actionable
+      results. Left as a legitimate open question rather than forcing a
+      low-quality proxy measurement.
+    - **What this changes**: the "signal set is one big redundant blob"
+      framing that motivated Phase 3/4 (via H2/#6) is not well supported —
+      real correlations are mixed (both strongly positive *and* strongly
+      negative pairs), which argues against low effective dimensionality as
+      the dominant explanation. Phase 3 (seasonality re-architecture) and
+      Phase 4 (macro overlay) remain independently justified on their own
+      terms — Phase 3 by seasonality's confirmed architectural mismatch
+      (a uniform per-symbol score surviving `zscore_signals`' zero-std
+      pass-through, not a redundancy argument), Phase 4 by a genuinely
+      missing signal *class* (macro/rate) rather than more of the existing
+      equity signal types — but neither should be sold on the redundancy
+      story anymore. Raw data: `phase2_signal_correlation.json` (scratchpad,
+      not committed).
+
+66. **PART 3 Phase 3 — seasonality re-architecture, `fail`, worse than
+    baseline on the one fold it won** (2026-08-24) — implemented exactly as
+    scoped: `RiskAgent._seasonality_exposure_overlay` (new sibling method to
+    `_regime_exposure_overlay`, same multiplicative-gross-exposure seam,
+    off by default via `risk.seasonality_overlay.enabled`), reusing
+    `SeasonalityStrategy.generate()` directly (no duplicated scoring logic)
+    for its single per-day score. Added the config knob to both
+    `ExperimentRunner._flatten_config` and confirmed it flows through
+    `resolve_live_startup` via the existing `risk` dict splat (no separate
+    entry needed there, same as `regime_overlay` — added a regression test
+    confirming this rather than just assuming it). 8 new unit tests in
+    `TestRiskManager` (disabled-by-default, no-op without `pit_view`,
+    uniform scaling across symbols, hard-cap re-enforcement after scaling,
+    graceful degradation on a broken `pit_view`) + 2 allowlist regression
+    tests. Full suite reconfirmed green (1510 passed) before the gate run.
+    A 6th `param_grid` candidate (roster minus `seasonality`, overlay
+    enabled, `scale=0.15`) added to `scripts/run_walk_forward_pbo_audit.py`.
+    - **Result: `fail`.** PBO=0.539 (worse than #59's 0.464 baseline — a 6th
+      genuine candidate further raises the in-sample-overfitting surface
+      PBO measures, same mechanical effect as Phase 1's 5th-candidate
+      result), DSR=0.0045 (still ≈0).
+    - The new candidate *won* fold 2's in-sample selection (train Sharpe
+      0.568 — the **highest in-sample fold-2 result seen anywhere this
+      session**, ahead of every prior candidate including Phase 1's
+      stat_arb fix at 0.411) — but its **OOS test Sharpe was −2.858**,
+      *worse* than the #59 baseline's −2.56 for that same fold, and worse
+      than every other candidate tried on fold 2 all session. This is a
+      clean, textbook example of exactly what PBO/CSCV exists to catch: a
+      candidate that looks best in-sample does not generalize, and can
+      generalize *worse* than simpler alternatives — not just a null
+      result, an active warning against trusting in-sample selection here.
+    - **Honest conclusion**: the seasonality→overlay re-architecture is a
+      genuine, correctly-implemented fix for the confirmed architectural
+      mismatch (a market-wide timing signal no longer forced through a
+      per-symbol z-scoring pipeline), and the code is worth keeping as
+      validated, tested, off-by-default infrastructure — but it does not
+      improve, and on this evidence actively degrades, out-of-sample
+      profitability on this specific fold. Not promoted to `config/
+      live.yaml`; `seasonality` strategy stays in the live roster unchanged,
+      overlay stays disabled.
+    - **This is the 5th consecutive `fail` on a combination/architecture-
+      layer change this session** (`zscore_demean`, concentration,
+      `joint_optimizer`, stat_arb ETF pairs, now this) — the pattern from
+      #62's session-ending conclusion holds even stronger after two more
+      genuinely distinct, carefully-verified attempts. Raw JSON:
+      `phase3_seasonality_gate.json` (scratchpad, not committed).
 
 ## In progress
 
-(none — see #62 above for the open decision this session ended on)
+- **PART 3, Phase 4** (macro overlay) — next up, staged by cost: build and
+  gate-test the backtest-only pieces first (cache the FRED panel, add
+  `_macro_exposure_overlay`), and only build the live-side wiring (`.macro()`
+  on `LivePitViewAdapter`, a scheduled refresh job) if that clears the gate
+  — given the pattern above, no reason to sink the full multi-surface build
+  into something unvalidated first.
 
 ### Research roadmap — partial progress (2026-07-27)
 

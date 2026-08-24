@@ -1,5 +1,39 @@
 # Formal PBO walk-forward audit
 
+> **Data-coverage caveat, added 2026-08-24 (PART 3 of the remediation plan,
+> Phase 0) — read before trusting any 2020-2026 gate result below.**
+> `data/cache`'s `combined/sentiment` panel only starts **2025-11-17**, not
+> 2020 (confirmed directly against the cache). Every "10-strategy" roster
+> claim in every audit below actually ran a **9-strategy** roster in the
+> earliest 3 of 4 walk-forward folds — `sentiment.py` degrades cleanly to no
+> signals on empty data (confirmed in source: not a poison/uniform value),
+> so this did not bias those 3 folds' results, but it means `sentiment`
+> contributed real signal in exactly **one** fold across this entire
+> document: fold 4 (test window 2026-01-04→2026-06-30) — which is also the
+> **only positive OOS result across all four gate runs run this session**.
+> A single-fold ablation (sentiment removed from fold 4's exact config, same
+> test window, same seed — see `docs/remediation_progress.md` #63) found
+> sentiment contributed a real, moderate improvement (Sharpe 3.435→3.865,
+> +0.43) but the fold's positive result **is not purely a sentiment
+> artifact** — it stays strongly positive (3.435) with sentiment removed.
+> So the "one genuinely good OOS period" framing used throughout this
+> document holds up, but the roster-size inconsistency across folds is
+> still real and should be kept in mind when comparing PBO/DSR across
+> audits. Separately, `combined/fundamentals` only starts
+> **2020-07-30** (22 of 25 symbols), so fold 1 (train start 2020-01-01) ran
+> `event_driven`/`multi_factor` fundamentals-starved for their first ~7
+> months in every audit below too.
+>
+> Also worth knowing: `src/firm/runtime.py` fetches FRED macro data **live,
+> over the network**, inside every backtest whenever `FRED_API_KEY` is set
+> (it is, in this deployment's `.env`) — silently, via a try/except fallback.
+> No strategy or agent currently consumes that data (its only intended
+> consumer, `ml_prediction`, is disabled), so it did not bias any result in
+> this document, but every backtest referenced below made an uncached,
+> non-deterministic external network call for zero benefit. See PART 3 of
+> the remediation plan for the fix (cache the panel, prefer cache over live
+> fetch).
+
 First end-to-end run of `scripts/run_walk_forward_pbo_audit.py` on the cache
 panel (2020-01-01 → 2026-06-30), using a **genuine** `param_grid` that mirrors
 real firm tuning choices:

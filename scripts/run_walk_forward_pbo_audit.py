@@ -78,6 +78,60 @@ DEFAULT_PARAM_GRID: list[dict] = [
         "rebalance_fraction": 1.0,
         "conviction_smoothing_enabled": False,
     },
+    {
+        # PART 3 Phase 1 candidate: drop stat_arb's 2 ETF pairs (SPY/QQQ,
+        # SPY/IWM) from its 6 predefined pairs, keeping the 4 single-name
+        # pairs. An ETF pair's 60-day cointegration test can't distinguish
+        # a temporary mean-reverting dislocation from a structural regime
+        # break (e.g. 2022's rate-driven tech underperformance vs. the
+        # broader market) -- it would mechanically hold "long QQQ / short
+        # SPY" through the whole break. See PART 3 of the remediation plan.
+        # No allowlist changes needed: strategy_params already flows
+        # through ExperimentRunner._flatten_config and is deep-merged (not
+        # shallow-clobbered) by _merge_override.
+        "signal_combination": {"method": "optimal"},
+        "allocation_method": "conviction_weighted",
+        "strategy_params": {
+            "stat_arb": {
+                "predefined_pairs": [
+                    ["AAPL", "MSFT"],
+                    ["JPM", "BAC"],
+                    ["XOM", "CVX"],
+                    ["GOOG", "META"],
+                ],
+            },
+        },
+    },
+    {
+        # PART 3 Phase 3 candidate: reroute `seasonality` from a per-symbol
+        # strategy (identical score across every symbol, a market-wide
+        # timing signal wrongly shaped for the stock-picker pipeline -- see
+        # PART 3 of the remediation plan) to a RiskAgent multiplicative
+        # gross-exposure overlay (_seasonality_exposure_overlay), the same
+        # pattern already used for the HMM regime signal. Drop it from the
+        # strategy roster here (not a shared default -- see _STRATEGIES
+        # above, left unchanged pending this gate) and enable the overlay
+        # via the flat top-level `seasonality_overlay` key (explicitly
+        # allowlisted in ExperimentRunner._flatten_config) rather than
+        # nesting it under "risk", which _merge_override's shallow top-level
+        # merge would otherwise clobber wholesale.
+        "signal_combination": {"method": "optimal"},
+        "allocation_method": "conviction_weighted",
+        "strategies": {"enabled": [s for s in _STRATEGIES if s != "seasonality"]},
+        "seasonality_overlay": {"enabled": True, "scale": 0.15},
+    },
+    {
+        # PART 3 Phase 4 candidate: macro/rate exposure overlay
+        # (_macro_exposure_overlay) -- none of the 10 live strategies
+        # capture interest-rate direction, the primary driver of the 2022
+        # bear market that's been the worst OOS fold in every audit this
+        # session regardless of combination mechanism. Full strategy roster
+        # unchanged (this overlay is orthogonal to the signal set, not a
+        # replacement for anything). See PART 3 of the remediation plan.
+        "signal_combination": {"method": "optimal"},
+        "allocation_method": "conviction_weighted",
+        "macro_overlay": {"enabled": True},
+    },
 ]
 
 

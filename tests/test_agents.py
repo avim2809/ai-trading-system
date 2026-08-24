@@ -1378,6 +1378,216 @@ class TestRiskManager:
         decision = risk.run(ctx, proposal=proposal)
         assert decision.adjusted_targets["TAIL"] == pytest.approx(0.3)
 
+    # ── Seasonality exposure overlay (PART 3 of the remediation plan) ──
+
+    @staticmethod
+    def _seasonality_pit_view(asof):
+        """Enough real daily price history for SeasonalityStrategy's own
+        day-of-week/turn-of-month scoring to produce a real, nonzero score
+        -- reused by RiskAgent._seasonality_exposure_overlay directly, not
+        reimplemented."""
+        import pandas as pd
+
+        symbols = ["AAPL", "MSFT"]
+        dates = pd.bdate_range(end=asof, periods=260)
+        rng = __import__("numpy").random.default_rng(3)
+        frames = []
+        for s in symbols:
+            px = 100 * (1 + rng.standard_normal(len(dates)) * 0.01).cumprod()
+            frames.append(pd.DataFrame({
+                "date": dates, "symbol": s, "close": px, "adj_close": px,
+            }))
+        price_df = pd.concat(frames, ignore_index=True)
+
+        class _PV:
+            universe = symbols
+            def __init__(self):
+                self.asof = asof
+            def prices(self, symbols=None, lookback_days=252):
+                return price_df[price_df["symbol"].isin(symbols or self.universe)]
+
+        return _PV()
+
+    def test_seasonality_overlay_disabled_by_default(self):
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent()
+        assert risk.seasonality_overlay_enabled is False
+
+    def test_seasonality_overlay_noop_when_disabled(self):
+        """Every other risk-bearing toggle in this file is explicit opt-in —
+        the overlay must not change behavior unless a caller asks for it."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={"max_position_pct": 1.0})
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.03, "MSFT": 0.03})
+        ctx = AgentContext(now=NOW, pit_view=self._seasonality_pit_view(NOW))
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.03)
+        assert decision.adjusted_targets["MSFT"] == pytest.approx(0.03)
+
+    def test_seasonality_overlay_noop_without_pit_view(self):
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "seasonality_overlay": {"enabled": True, "scale": 0.15},
+        })
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.03})
+        ctx = AgentContext(now=NOW, pit_view=None)
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.03)
+
+    def test_seasonality_overlay_scales_uniformly_across_symbols(self):
+        """The overlay's whole point: seasonality is a market-wide timing
+        signal, so its effect must be the *same multiplier* applied to
+        every symbol -- not a per-symbol adjustment (that's exactly the
+        architectural mismatch PART 3 is fixing)."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0, "max_gross_exposure": 10.0,
+            "seasonality_overlay": {"enabled": True, "scale": 0.15},
+        })
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.03, "MSFT": 0.05})
+        ctx = AgentContext(now=NOW, pit_view=self._seasonality_pit_view(NOW))
+        decision = risk.run(ctx, proposal=proposal)
+
+        ratio_aapl = decision.adjusted_targets["AAPL"] / 0.03
+        ratio_msft = decision.adjusted_targets["MSFT"] / 0.05
+        assert ratio_aapl == pytest.approx(ratio_msft, abs=1e-9)
+        # scale=0.15 bounds the multiplier to [0.85, 1.15].
+        assert 0.85 - 1e-9 <= ratio_aapl <= 1.15 + 1e-9
+
+    def test_seasonality_overlay_respects_hard_caps_after_scaling(self):
+        """A scale-up must still be re-capped -- the overlay is an
+        intentional sizing policy, not a bypass of the hard position cap."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={
+            "max_position_pct": 0.045, "max_gross_exposure": 10.0,
+            "seasonality_overlay": {"enabled": True, "scale": 0.5},
+        })
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.04, "MSFT": 0.04})
+        ctx = AgentContext(now=NOW, pit_view=self._seasonality_pit_view(NOW))
+        decision = risk.run(ctx, proposal=proposal)
+        for w in decision.adjusted_targets.values():
+            assert abs(w) <= 0.045 + 1e-9
+
+    def test_seasonality_overlay_handles_generation_failure_gracefully(self):
+        """A pit_view present but broken (e.g. a transient data-provider
+        error) must degrade to a no-op, matching every other agent's
+        fail-open posture in this file -- not crash the risk stage."""
+        from firm.agents.risk import RiskAgent
+
+        class _BrokenPV:
+            universe = ["AAPL"]
+            asof = NOW
+            def prices(self, symbols=None, lookback_days=252):
+                raise RuntimeError("simulated data provider outage")
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "seasonality_overlay": {"enabled": True, "scale": 0.15},
+        })
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.03})
+        ctx = AgentContext(now=NOW, pit_view=_BrokenPV())
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.03)
+
+    # ── Macro (yield-curve) exposure overlay (PART 3 Phase 4) ──
+
+    @staticmethod
+    def _macro_pit_view(level: float):
+        class _PV:
+            def macro(self, series_id, lookback_days=5):
+                import pandas as pd
+                return pd.Series([level], index=[pd.Timestamp(NOW)], name=series_id)
+        return _PV()
+
+    def test_macro_overlay_disabled_by_default(self):
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent()
+        assert risk.macro_overlay_enabled is False
+
+    def test_macro_overlay_noop_when_disabled(self):
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={"max_position_pct": 1.0})
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.03})
+        ctx = AgentContext(now=NOW, pit_view=self._macro_pit_view(-1.0))
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.03)
+
+    def test_macro_overlay_noop_above_neutral_level(self):
+        """A healthy, non-inverted curve must not change sizing at all."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={"max_position_pct": 1.0, "macro_overlay": {"enabled": True}})
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.03})
+        ctx = AgentContext(now=NOW, pit_view=self._macro_pit_view(1.5))
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.03)
+
+    def test_macro_overlay_derisks_on_full_inversion(self):
+        """At or below risk_off_level, the full de-risk scale applies."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "macro_overlay": {"enabled": True, "risk_off_level": -0.5, "risk_off_scale": 0.5},
+        })
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.04, "MSFT": -0.04})
+        ctx = AgentContext(now=NOW, pit_view=self._macro_pit_view(-0.8))
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.02)
+        assert decision.adjusted_targets["MSFT"] == pytest.approx(-0.02)
+
+    def test_macro_overlay_interpolates_between_neutral_and_risk_off(self):
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "macro_overlay": {
+                "enabled": True, "neutral_level": 0.0,
+                "risk_off_level": -1.0, "risk_off_scale": 0.5,
+            },
+        })
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.04})
+        # Halfway between neutral (0.0) and risk_off (-1.0) -> halfway
+        # between effective=1.0 and effective=0.5 -> 0.75.
+        ctx = AgentContext(now=NOW, pit_view=self._macro_pit_view(-0.5))
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.03, abs=1e-6)
+
+    def test_macro_overlay_noop_without_macro_method(self):
+        """Live's pit_view adapter doesn't have .macro() yet (PART 3 Phase 4
+        defers that live-side wiring) -- must degrade cleanly, not crash."""
+        from firm.agents.risk import RiskAgent
+
+        class _NoMacroPV:
+            pass
+
+        risk = RiskAgent(config={"max_position_pct": 1.0, "macro_overlay": {"enabled": True}})
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.03})
+        ctx = AgentContext(now=NOW, pit_view=_NoMacroPV())
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.03)
+
+    def test_macro_overlay_handles_lookup_failure_gracefully(self):
+        from firm.agents.risk import RiskAgent
+
+        class _BrokenMacroPV:
+            def macro(self, series_id, lookback_days=5):
+                raise RuntimeError("simulated FRED outage")
+
+        risk = RiskAgent(config={"max_position_pct": 1.0, "macro_overlay": {"enabled": True}})
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.03})
+        ctx = AgentContext(now=NOW, pit_view=_BrokenMacroPV())
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.03)
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Execution Agent
