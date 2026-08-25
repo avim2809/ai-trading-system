@@ -1332,15 +1332,97 @@ have no `plan-id` and don't appear in the "Full task list" block below.
       #62's session-ending conclusion holds even stronger after two more
       genuinely distinct, carefully-verified attempts. Raw JSON:
       `phase3_seasonality_gate.json` (scratchpad, not committed).
+67. **PART 3 Phase 4 — macro overlay, `fail`; discovered and reverted a
+    no-trade-band lockout bug along the way** (2026-08-25) — implemented as
+    scoped: `scripts/backfill_macro.py` caches FRED's `T10Y2Y`/`FEDFUNDS`/
+    `CPIAUCSL`/`VIXCLS`/`UNRATE` into `combined/macro` (long format);
+    `src/firm/backtest/run.py`'s `execute_backtest` (the *actual* entry
+    point every walk-forward audit/calibration script/API job uses) now
+    prefers that cache over a live fetch — closing a real, independently-
+    discovered reproducibility hole: every backtest with `FRED_API_KEY` set
+    was making an uncached, non-deterministic live network call on every
+    run, for zero benefit, since nothing consumed the data before this
+    (its intended consumer, `firm.runtime.run_backtest_from_config`, turned
+    out to be dead code nothing calls — the fix landed in the real function
+    instead). `RiskAgent._macro_exposure_overlay` (new sibling to
+    `_regime_exposure_overlay`/`_seasonality_exposure_overlay`) maps the
+    `T10Y2Y` level to a gross-exposure scalar via a level threshold (not a
+    z-score — curve inversion is an absolute, not relative, signal).
+    Verified against real history: correctly no-ops through 2021 (steep
+    positive curve) and correctly de-risks to 0.50-0.68x through the real
+    Sept-Oct 2022 inversion. 13 new tests + 7 in a new
+    `tests/test_fred_macro_cache.py`. Full suite green (1525) before the
+    gate run (7 candidates × 4 folds).
+    - **Result: `fail`.** PBO=0.564, DSR=0.0034 (mechanically similar to
+      Phase 3, from the same "more candidates raises the measured
+      overfitting surface" effect). `macro_overlay` (candidate 6) never won
+      the in-sample selection in any of the 4 folds.
+    - **A real, separate bug surfaced while investigating why fold 3's
+      candidate-6 in-sample score was suspiciously exactly `0.0`** (not a
+      small number, not `NaN` — 285 consecutive days of exactly-zero
+      portfolio return). Traced via `ExecutionAgent` instrumentation (not
+      guessed): with `regime_overlay` already enabled (shipped, live) and
+      `macro_overlay` also firing, the two multiplicative scalars compound
+      enough that every single name's post-overlay target weight fell to
+      ~0.018 — *below* the shipped `rebalance_band_pct=0.05` no-trade band.
+      Since the band compares against `current_w` and the book started at
+      0% invested, every cycle's `diff_w` (== the target itself) stayed
+      under the band forever — the portfolio never opened a single
+      position for the entire fold, a **permanent lockout**, not a
+      "smaller but real" de-risked book. This is the exact composed-
+      overlay risk PART 3's Phase 3 section already flagged in the abstract
+      ("composing multiple multiplicative overlays has no lower floor
+      today"), now confirmed as a concrete, reproducible failure mode —
+      and one that means **Phase 3's fold-level numbers may also carry
+      this same artifact** (seasonality_overlay was tested with
+      regime_overlay also enabled), not just Phase 4's.
+    - **Attempted fix, empirically disproven, reverted**: exempting
+      `current_w == 0` from the band (a brand-new position's target is the
+      actual signal, not drift on an existing one) is well-reasoned in the
+      abstract, but a 3-window A/B against the already-shipped, live-
+      validated band (2024-Q1, matching Part 1's own original validation
+      window) showed a real regression: turnover roughly **8x higher**
+      (2.5%→19.8% avg) and Sharpe dropped from **3.45 to 0.80** on that
+      window alone. In practice, a large share of what the band suppresses
+      *is* small new-position churn as names rotate in and out of the
+      top-N conviction ranking every cycle — not just drift on existing
+      positions. The "obviously correct" fix broke the band's actual job.
+      **Reverted in full** (`src/firm/agents/execution.py` and its two new
+      tests) — confirmed via a clean test-suite re-run (1525 passed,
+      matching the pre-attempt baseline). `rebalance_band_pct` behaves
+      exactly as originally shipped; the lockout risk is now a documented,
+      understood limitation of composing multiple exposure overlays
+      together, not something fixed here.
+    - **Decision**: `macro_overlay` does not clear the gate; not promoted.
+      `seasonality_overlay`'s #66 `fail` verdict stands too, but should be
+      read with the same lockout-artifact caveat — neither conclusion is
+      reversed by it (both were already `fail` on their *winning* folds,
+      which weren't the locked-out ones), but a clean re-test in true
+      isolation (each new overlay alone, `regime_overlay` off) was not run
+      this session and would be needed to fully separate "the overlay
+      itself doesn't help" from "the overlay interacting with regime_
+      overlay can lock the book." Both overlays ship off by default,
+      validated infrastructure, same as `joint_optimizer`. Raw JSON:
+      `phase4_macro_gate.json` (scratchpad, not committed).
+
+    **Session-ending note**: PART 3 ran 4 phases (data-integrity findings,
+    stat_arb pairs, a real momentum-family-redundancy hypothesis refuted by
+    direct measurement, seasonality re-architecture, macro overlay) and
+    found two genuine, real bugs along the way (a FRED reproducibility
+    hole, a no-trade-band lockout) — but none of the four testable
+    combination/architecture-layer changes cleared the walk-forward+PBO
+    gate, extending the pattern from #62 to 6 consecutive attempts across
+    two full sessions. Both paper-trading engines remain running on the
+    PART 1/2 shipped config (resumed by explicit user request mid-session);
+    nothing in PART 3 changes that config. The strongest remaining lead,
+    not pursued this session, is the standing `longer-dataset`/universe-
+    size question (#65's ~0.429 avg pairwise correlation / ~2.2 effective
+    independent bets on the current 25-name universe) — genuinely testing
+    it needs the pending Sharadar purchase, not more code.
 
 ## In progress
 
-- **PART 3, Phase 4** (macro overlay) — next up, staged by cost: build and
-  gate-test the backtest-only pieces first (cache the FRED panel, add
-  `_macro_exposure_overlay`), and only build the live-side wiring (`.macro()`
-  on `LivePitViewAdapter`, a scheduled refresh job) if that clears the gate
-  — given the pattern above, no reason to sink the full multi-surface build
-  into something unvalidated first.
+(none — see #67 above for the session-ending state)
 
 ### Research roadmap — partial progress (2026-07-27)
 

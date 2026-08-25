@@ -135,6 +135,22 @@ class ExecutionAgent(Agent):
             # tolerated here too (not force-closed), matching standard
             # drift-band rebalancing practice: liquidating dust costs more
             # in commission/spread than leaving it is worth.
+            #
+            # An exemption for current_w == 0 (never held) was tried and
+            # reverted (PART 3 of the remediation plan): reasonable in
+            # theory (a brand-new position's target is signal, not drift),
+            # but a 3-window A/B against the already-shipped, live-validated
+            # band showed a real regression -- turnover roughly 8x higher
+            # and Sharpe dropped from 3.45 to 0.80 on the 2024-Q1 window
+            # alone. In practice, a large share of what the band suppresses
+            # *is* small new-position churn as names rotate in/out of the
+            # top-N conviction ranking every cycle, not just drift on
+            # existing positions -- the "obviously correct" fix broke the
+            # band's actual job. Left as originally shipped; the known
+            # side effect (a multiplicative RiskAgent overlay stacking with
+            # regime_overlay can shrink every target below the band and
+            # lock the book at 0% invested) is a real, understood
+            # limitation of composing overlays, not fixed here.
             if self.rebalance_band_pct > 0 and abs(diff_w) < self.rebalance_band_pct:
                 continue
 

@@ -307,3 +307,61 @@ conclusion in `docs/remediation_progress.md` #61/#62.
 Raw JSON: local run artifacts (not committed) —
 `joint_optimizer_walk_forward_pbo_audit_v3.json` (final/authoritative),
 `_v2.json`/(v1, overwritten) kept only as the bug-fix trail described above.
+
+## Results (2026-08-24/25): PART 3 signal-quality investigation — stat_arb
+## ETF pairs, seasonality overlay, macro overlay — all `fail`
+
+Following #61-62's session-ending conclusion, a signal-quality investigation
+(PART 3 of the remediation plan; full detail in `docs/remediation_progress.md`
+#63-67) added three more candidates to the same 4-fold 2020-2026 harness,
+one per phase:
+
+| Phase | Candidate | PBO | DSR | Verdict | Winning fold(s) |
+|---|---|---|---|---|---|
+| 1 | stat_arb: drop 2 ETF pairs (SPY/QQQ, SPY/IWM) | 0.604 | 0.00115 | fail | fold 2 (OOS Sharpe -2.518, ~unchanged from -2.56 baseline) |
+| 3 | `seasonality` → RiskAgent exposure overlay | 0.539 | 0.0045 | fail | fold 2 (OOS Sharpe -2.858, *worse* than baseline despite the **highest in-sample fold-2 score seen all session**, 0.568) |
+| 4 | macro (`T10Y2Y` yield-curve) exposure overlay | 0.564 | 0.0034 | fail | none (never won any fold) |
+
+PBO rising across these three (0.464 baseline → 0.604 → 0.539 → 0.564) is
+partly mechanical (each adds a genuine competing candidate to the same
+grid, which is what PBO/CSCV is supposed to be sensitive to) — not, on its
+own, evidence any one candidate is worse than the last.
+
+**A real bug was found and fixed during Phase 2's analysis** (not a
+profitability finding): the "momentum-family redundancy" hypothesis both a
+general-purpose research agent and a separate Glean research agent
+proposed (`momentum`/`trend`/`multi_factor`/`regime_hmm` forming a
+correlated, redundant cluster) does not hold up against a direct
+correlation-matrix measurement of real daily attributed strategy returns —
+mean off-diagonal correlation within that group is **-0.151** (mildly
+diversifying), with `momentum`↔`trend` at **-0.81**. A genuinely different,
+narrower hypothesis from the same reports — that `event_driven`'s 5x-scaled
+price-proxy path is largely a disguised momentum echo — is supported
+(`momentum`↔`event_driven` correlation **0.74**).
+
+**A real bug was found and fixed during Phase 4, then found NOT to be
+safely fixable and reverted**: stacking the (already-shipped, live)
+`regime_overlay` with a new overlay (seasonality or macro) can shrink every
+name's target weight below the `rebalance_band_pct=0.05` no-trade band,
+permanently locking the book at 0% invested once it starts from empty —
+confirmed exactly (Phase 4 fold 3, 285 consecutive days of exactly-zero
+return). The obvious-looking fix (exempt a never-held symbol's first entry
+from the band) was tried and **empirically disproven** via a 3-window A/B
+against the shipped, live-validated band: turnover rose ~8x and Sharpe fell
+from 3.45 to 0.80 on the 2024-Q1 window alone. Reverted in full; the lockout
+risk is a documented, understood limitation of composing overlays, not
+fixed. This means Phase 3's `seasonality_overlay` result should be read
+with the same caveat, though its "worse than baseline" verdict came from
+its *winning* fold (2), not a locked-out one, so the headline verdict is
+unaffected.
+
+**Session-ending conclusion**: 6 consecutive `fail` results across two
+sessions on every combination/architecture-layer change attempted
+(`zscore_demean`, concentration, `joint_optimizer`, stat_arb pairs,
+seasonality overlay, macro overlay) — a genuinely diverse set of
+mechanisms, all landing in the same place. Neither engine's shipped config
+changes as a result of PART 3; both remain on the PART 1/2 configuration
+(the live engines themselves were separately resumed mid-session by
+explicit user request). Raw JSON: `phase1_statarb_gate.json`,
+`phase2_signal_correlation.json`, `phase3_seasonality_gate.json`,
+`phase4_macro_gate.json` (all scratchpad, not committed).
