@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +91,36 @@ class TradeHistoryStore:
         if limit <= 0:
             return []
         return list(reversed(self._orders[-limit:]))
+
+    def count_orders(
+        self, *, status: str | None = None, since: datetime | None = None,
+    ) -> int:
+        """Count orders across the **full** history, not just the capped
+        ``list_orders(limit=500)`` window — used by the capital-allocation
+        gate (``firm.live.capital_gate``), where undercounting total
+        executed orders once history exceeds 500 would understate real
+        track record. ``status`` filters to an exact match (e.g.
+        ``"filled"`` — see ``firm.live.order_reconciliation._TERMINAL_STATUSES``
+        for the full status vocabulary); ``since`` filters to orders
+        timestamped on/after that cutoff. Both are ANDed when given;
+        omitting both counts every order.
+        """
+        count = 0
+        for entry in self._orders:
+            if status is not None and entry.get("status") != status:
+                continue
+            if since is not None:
+                ts = entry.get("timestamp")
+                if not ts:
+                    continue
+                try:
+                    ts_dt = datetime.fromisoformat(ts)
+                except (TypeError, ValueError):
+                    continue
+                if ts_dt < since:
+                    continue
+            count += 1
+        return count
 
     def list_cycles(self, limit: int = 50) -> list[dict[str, Any]]:
         if limit <= 0:

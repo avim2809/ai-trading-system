@@ -209,6 +209,47 @@ class AlphaVantageProvider(DataProvider):
             "AlphaVantageProvider does not supply index constituents; use FMPProvider."
         )
 
+    def get_sector(self, symbol: str) -> str | None:
+        """Return a normalized sector tag for *symbol*, or ``None`` on
+        failure/rate-limit/missing data.
+
+        Reads the ``Sector`` field from the same ``OVERVIEW`` call
+        :meth:`get_fundamentals` already makes — no new endpoint. Optional
+        backfill source for ``firm.live.sp500_sector_cache`` when FMP's own
+        constituent-list sector field is unavailable/premium-gated: unlike
+        FMP's constituent endpoint, this has no way to *enumerate* an
+        index's members (it only looks up an already-known symbol), so it
+        stays a bounded per-symbol backfill rather than a substitute for the
+        missing candidate list. Verified live 2026-08-30: AAPL's OVERVIEW
+        call returns ``Sector: "TECHNOLOGY"`` — Alpha Vantage's taxonomy is
+        the same as FMP's, just upper-cased, so it shares
+        ``firm.data.providers.fmp._normalize_gics_sector``.
+        """
+        from firm.data.providers.fmp import _normalize_gics_sector
+
+        try:
+            payload = self._client.get_json(
+                "/query",
+                params={"function": "OVERVIEW", "symbol": symbol, "apikey": self._api_key},
+            )
+        except ProviderError as exc:
+            log.warning("alphavantage_get_sector_failed symbol=%s (%s)", symbol, exc)
+            return None
+        except Exception:
+            log.exception("alphavantage_get_sector_failed symbol=%s", symbol)
+            return None
+        if "Information" in payload or "Note" in payload:
+            log.warning(
+                "alphavantage_get_sector_unavailable symbol=%s (%s)",
+                symbol, payload.get("Information") or payload.get("Note"),
+            )
+            return None
+        raw = payload.get("Sector")
+        if not raw:
+            return None
+        normalized = _normalize_gics_sector(raw)
+        return normalized if normalized != "unknown" else None
+
     def get_analyst_ratings(
         self, symbols: Sequence[str], start: datetime, end: datetime
     ) -> pd.DataFrame:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -257,6 +258,24 @@ class TradingScheduler:
         dynamic_universe_max_symbols: int = 10,
         dynamic_universe_min_dwell_days: int = 5,
         dynamic_universe_sync_hour: int | None = None,
+        # FMP-sourced alternative to the danelfin_* dynamic-universe fields
+        # above (see firm.live.sp500_universe_sync / sp500_sector_cache) —
+        # mutually-exclusive A/B toggle with the Danelfin source, per
+        # config/live.yaml's sp500_dynamic_universe block.
+        sp500_dynamic_universe_enabled: bool = False,
+        sp500_dynamic_universe_state_path: str = "data/dynamic_universe_state.json",
+        sp500_sector_cache_path: str = "data/sp500_sector_map.json",
+        sp500_dynamic_universe_max_symbols: int = 10,
+        sp500_dynamic_universe_min_dwell_days: int = 5,
+        sp500_liquidity_lookback_days: int = 30,
+        sp500_sync_hour: int | None = None,
+        sp500_sector_cache_refresh_day: str = "sun",
+        # Snapshot of the *static* universe's symbol->sector map (e.g.
+        # config/live.yaml's risk.sector_map), passed straight through to
+        # sp500_universe_sync.sync_once's water-fill selection — not part
+        # of danelfin_universe_sync's sync_once signature (it has no notion
+        # of sector-balancing), so it has no equivalent kwarg above.
+        sp500_static_sector_map: dict[str, str] | None = None,
     ) -> None:
         if not _HAS_APSCHEDULER:
             raise ImportError(
@@ -280,10 +299,25 @@ class TradingScheduler:
             if dynamic_universe_sync_hour is not None
             else max(0, self._fundamentals_refresh_hour - 1)
         )
+        self._sp500_dynamic_universe_enabled = bool(sp500_dynamic_universe_enabled)
+        self._sp500_dynamic_universe_state_path = sp500_dynamic_universe_state_path
+        self._sp500_sector_cache_path = sp500_sector_cache_path
+        self._sp500_dynamic_universe_max_symbols = int(sp500_dynamic_universe_max_symbols)
+        self._sp500_dynamic_universe_min_dwell_days = int(sp500_dynamic_universe_min_dwell_days)
+        self._sp500_liquidity_lookback_days = int(sp500_liquidity_lookback_days)
+        self._sp500_sync_hour = (
+            int(sp500_sync_hour)
+            if sp500_sync_hour is not None
+            else max(0, self._fundamentals_refresh_hour - 1)
+        )
+        self._sp500_sector_cache_refresh_day = sp500_sector_cache_refresh_day
+        self._sp500_static_sector_map = dict(sp500_static_sector_map or {})
         self._scheduler: BackgroundScheduler | None = None
         self._job_id = "live_cycle"
         self._fundamentals_job_id = "fundamentals_refresh"
         self._dynamic_universe_job_id = "danelfin_universe_sync"
+        self._sp500_sync_job_id = "sp500_universe_sync"
+        self._sp500_sector_refresh_job_id = "sp500_sector_cache_refresh"
         self._lost_cycle_retry_job_id = "lost_cycle_retry"
         self._order_reconciliation_job_id = "order_reconciliation"
 
@@ -340,6 +374,44 @@ class TradingScheduler:
                 max_instances=1,
                 coalesce=True,
             )
+        if self._sp500_dynamic_universe_enabled and self._universe:
+            from firm.live import sp500_universe_sync
+
+            self._scheduler.add_job(
+                lambda: sp500_universe_sync.sync_once(
+                    self._engine,
+                    state_path=self._sp500_dynamic_universe_state_path,
+                    sector_cache_path=self._sp500_sector_cache_path,
+                    static_universe=self._universe,
+                    static_sector_map=self._sp500_static_sector_map,
+                    max_dynamic_symbols=self._sp500_dynamic_universe_max_symbols,
+                    min_dwell_days=self._sp500_dynamic_universe_min_dwell_days,
+                    liquidity_lookback_days=self._sp500_liquidity_lookback_days,
+                ),
+                trigger=CronTrigger(
+                    hour=self._sp500_sync_hour,
+                    minute=0,
+                    day_of_week="mon-fri",
+                    timezone=self._timezone,
+                ),
+                id=self._sp500_sync_job_id,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+            self._scheduler.add_job(
+                self._refresh_sp500_sector_cache_safe,
+                trigger=CronTrigger(
+                    hour=self._sp500_sync_hour,
+                    minute=0,
+                    day_of_week=self._sp500_sector_cache_refresh_day,
+                    timezone=self._timezone,
+                ),
+                id=self._sp500_sector_refresh_job_id,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
         self._scheduler.add_job(
             lambda: run_order_reconciliation(self._engine),
             trigger=IntervalTrigger(minutes=15),
@@ -364,10 +436,13 @@ class TradingScheduler:
             )
         if self._universe:
             log.info(
-                "Scheduler started: schedule=%s, tz=%s, fundamentals_refresh=%02d:00%s",
+                "Scheduler started: schedule=%s, tz=%s, fundamentals_refresh=%02d:00%s%s",
                 self._schedule_spec, self._timezone, self._fundamentals_refresh_hour,
                 f", danelfin_universe_sync={self._dynamic_universe_sync_hour:02d}:00"
                 if self._dynamic_universe_enabled else "",
+                f", sp500_universe_sync={self._sp500_sync_hour:02d}:00"
+                f" (sector_cache_refresh={self._sp500_sector_cache_refresh_day})"
+                if self._sp500_dynamic_universe_enabled else "",
             )
         else:
             log.info("Scheduler started: schedule=%s, tz=%s", self._schedule_spec, self._timezone)
@@ -396,6 +471,38 @@ class TradingScheduler:
 
     def is_running(self) -> bool:
         return self._scheduler is not None and self._scheduler.running
+
+    def _refresh_sp500_sector_cache_safe(self) -> None:
+        """Weekly sp500 sector-cache refresh, wrapped so a transient/
+        premium-gated FMP failure never kills the scheduler (mirrors
+        ``_run_cycle_safe``). Alpha Vantage is used as a bounded per-symbol
+        backfill only when ``ALPHAVANTAGE_API_KEY`` is configured — see
+        ``firm.live.sp500_sector_cache.refresh_sector_cache``.
+        """
+        try:
+            from firm.data.providers.fmp import FMPProvider
+            from firm.live import sp500_sector_cache
+
+            backfill_provider = None
+            backfill_limit = 0
+            if os.getenv("ALPHAVANTAGE_API_KEY"):
+                from firm.data.providers.alphavantage import AlphaVantageProvider
+
+                backfill_provider = AlphaVantageProvider()
+                # Bounded, never the full ~500-name pool — see
+                # sp500_sector_cache.refresh_sector_cache's docstring.
+                backfill_limit = 25
+
+            sp500_sector_cache.refresh_sector_cache(
+                self._sp500_sector_cache_path,
+                fmp_provider=FMPProvider(),
+                seed_map=self._sp500_static_sector_map,
+                backfill_provider=backfill_provider,
+                backfill_limit=backfill_limit,
+                today=datetime.now(ZoneInfo(self._timezone)).date().isoformat(),
+            )
+        except Exception:
+            log.error("sp500 sector-cache refresh job failed", exc_info=True)
 
     def _run_cycle_safe(self) -> None:
         """Wrapper that catches exceptions to avoid killing the scheduler."""

@@ -15,6 +15,7 @@ import type {
   PositionsSummary,
   AccountInfo,
   LivePortfolioHistory,
+  CapitalGateStatus,
   LiveAttribution,
   OrderRecord,
   CycleRecord,
@@ -148,6 +149,9 @@ export const api = {
 
   getPortfolioHistory: () =>
     fetchJson<LivePortfolioHistory>('/live/portfolio-history'),
+
+  getCapitalGate: () =>
+    fetchJson<CapitalGateStatus>('/live/capital-gate'),
 
   getLiveAttribution: () => fetchJson<LiveAttribution>('/live/attribution'),
 

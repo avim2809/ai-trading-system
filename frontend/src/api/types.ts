@@ -356,6 +356,40 @@ export interface LivePortfolioHistory {
 
 export type LiveAttribution = Record<string, Record<string, number>>
 
+export interface CapitalGateCriterion {
+  label: string
+  threshold?: string
+  value: number | null
+  passing: boolean | null
+  /** Present only on `realized_sharpe`: the non-bootstrapped point estimate. */
+  point_estimate?: number
+  /** Present only on `realized_sharpe`: daily-return observation count. */
+  n_observations?: number
+  /** Present only on `kill_switch_trips`: not persisted across restarts. */
+  durable?: boolean
+  currently_halted?: boolean
+  /** Present only on `llm_ab`: always false — a manual runbook item. */
+  applicable?: boolean
+  /** Human-readable caveat, shown when `passing` is null. */
+  caveat?: string
+}
+
+export interface CapitalGateStatus {
+  engine_running: boolean
+  broker: string | null
+  overall_passing: boolean
+  n_passing: number
+  blocking: string[]
+  criteria: {
+    duration?: CapitalGateCriterion
+    trade_count?: CapitalGateCriterion
+    realized_sharpe?: CapitalGateCriterion
+    max_drawdown?: CapitalGateCriterion
+    kill_switch_trips?: CapitalGateCriterion
+    llm_ab?: CapitalGateCriterion
+  }
+}
+
 export interface AccountInfo {
   cash: number
   equity: number

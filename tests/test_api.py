@@ -903,3 +903,49 @@ class TestKillSwitchResetEndpoint:
         assert json.loads(state_path.read_text())["halted"] is False
 
         client.post("/api/live/stop")
+
+
+class TestCapitalGateEndpoint:
+    @pytest.fixture(autouse=True)
+    def _mock_broker(self, monkeypatch, tmp_path):
+        import firm.api.routers.live as live_mod
+        from tests.test_brokers import MockBroker
+
+        monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: MockBroker())
+        monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_ORDERS_PATH", str(tmp_path / "order_history.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
+        monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
+        monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
+        monkeypatch.setattr(live_mod, "_MEMORY_LOG_PATH", str(tmp_path / "decisions.jsonl"))
+
+    def test_no_engine_returns_safe_default(self, client):
+        resp = client.get("/api/live/capital-gate")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["engine_running"] is False
+        assert body["broker"] is None
+        assert body["overall_passing"] is False
+        assert body["n_passing"] == 0
+        assert body["blocking"] == []
+        assert body["criteria"] == {}
+
+    def test_engine_running_returns_gate_shape(self, client):
+        resp = client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+        assert resp.status_code == 200, resp.text
+
+        resp = client.get("/api/live/capital-gate")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["engine_running"] is True
+        assert body["broker"] == "alpaca_paper"
+        assert set(body["criteria"]) == {
+            "duration", "trade_count", "realized_sharpe", "max_drawdown",
+            "kill_switch_trips", "llm_ab",
+        }
+        # No cycles have run yet — safe zeroed-out criteria, not a crash.
+        assert body["criteria"]["duration"]["value"] == 0
+        assert body["criteria"]["trade_count"]["value"] == 0
+        assert body["overall_passing"] is False
+
+        client.post("/api/live/stop")

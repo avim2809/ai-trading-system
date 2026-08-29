@@ -59,6 +59,7 @@ def _start_live_scheduler(
     universe = list(engine_config.get("symbols") or [])
     refresh_hour = int(engine_config.get("fundamentals_refresh_hour", 8))
     dynamic_universe_cfg = engine_config.get("danelfin_dynamic_universe") or {}
+    sp500_dynamic_universe_cfg = engine_config.get("sp500_dynamic_universe") or {}
     try:
         from firm.live.fundamentals_refresh import maybe_refresh_fundamentals_cache_on_start
         from firm.live.pipeline_warmup import PipelineWarmupGate, warmup_wait_seconds
@@ -96,6 +97,28 @@ def _start_live_scheduler(
                     dynamic_universe_min_dwell_days=int(
                         dynamic_universe_cfg.get("min_dwell_days_before_removal", 5)
                     ),
+                    sp500_dynamic_universe_enabled=bool(
+                        sp500_dynamic_universe_cfg.get("enabled", False)
+                    ),
+                    sp500_dynamic_universe_state_path=sp500_dynamic_universe_cfg.get(
+                        "state_path", f"{_DATA_DIR}/dynamic_universe_state.json"
+                    ),
+                    sp500_sector_cache_path=sp500_dynamic_universe_cfg.get(
+                        "sector_cache_path", f"{_DATA_DIR}/sp500_sector_map.json"
+                    ),
+                    sp500_dynamic_universe_max_symbols=int(
+                        sp500_dynamic_universe_cfg.get("max_dynamic_symbols", 10)
+                    ),
+                    sp500_dynamic_universe_min_dwell_days=int(
+                        sp500_dynamic_universe_cfg.get("min_dwell_days_before_removal", 5)
+                    ),
+                    sp500_liquidity_lookback_days=int(
+                        sp500_dynamic_universe_cfg.get("liquidity_lookback_days", 30)
+                    ),
+                    sp500_sector_cache_refresh_day=sp500_dynamic_universe_cfg.get(
+                        "sector_cache_refresh_day", "sun"
+                    ),
+                    sp500_static_sector_map=engine_config.get("sector_map") or {},
                 )
                 scheduler.start()
                 app.state.live_scheduler = scheduler
@@ -782,6 +805,38 @@ def live_portfolio_history(request: Request) -> dict[str, Any]:
         "dates": dates, "values": values, "drawdown": drawdown,
         "metrics": metrics, "n_observations": len(returns),
     }
+
+
+@router.get("/capital-gate")
+def live_capital_gate(request: Request) -> dict[str, Any]:
+    """Real-capital allocation gate status — the automated version of the
+    manual promotion checklist in docs/PROJECT_CONTEXT.md (~L670-694):
+    duration, executed trade count, realized-Sharpe bootstrap CI, max
+    drawdown, and (best-effort, session-scoped) kill-switch trip history,
+    plus an always-manual LLM A/B item. Pure computation lives in
+    firm.live.capital_gate.compute_capital_gate so it's unit-testable
+    without a running engine."""
+    from firm.live.capital_gate import compute_capital_gate
+
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        return {
+            "engine_running": False,
+            "broker": None,
+            "overall_passing": False,
+            "n_passing": 0,
+            "blocking": [],
+            "criteria": {},
+        }
+
+    result = compute_capital_gate(
+        snapshots=engine._portfolio.history,
+        executed_order_count=engine._trade_history.count_orders(status="filled"),
+        alerts=engine.alerts,
+        halted=engine.halted,
+        broker=getattr(engine, "_broker_type", None),
+    )
+    return {"engine_running": True, **result}
 
 
 @router.get("/attribution")

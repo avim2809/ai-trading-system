@@ -16,6 +16,8 @@ import logging
 import numpy as np
 import pandas as pd
 
+from firm.eval.metrics import sharpe_ratio
+
 log = logging.getLogger(__name__)
 
 
@@ -131,6 +133,49 @@ class MonteCarloAnalyzer:
             "lower_bound": float(np.percentile(total, lower * 100)),
             "upper_bound": float(np.percentile(total, upper * 100)),
             "std": float(total.std(ddof=1)),
+        }
+
+    def sharpe_confidence_interval(
+        self,
+        returns: pd.Series | np.ndarray,
+        periods_per_year: int = 252,
+        risk_free_rate: float = 0.0,
+    ) -> dict[str, float]:
+        """Bootstrap confidence interval for the annualized Sharpe ratio.
+
+        Resamples via :meth:`bootstrap_returns` and computes the annualized
+        Sharpe per path (vectorized, matching ``firm.eval.metrics.
+        sharpe_ratio``'s formula), then reports the same two-sided
+        percentile interval as :meth:`confidence_interval` — e.g.
+        ``MonteCarloAnalyzer(confidence=0.90).sharpe_confidence_interval(...)``
+        gives a 90% CI whose ``lower_bound`` is the 5th percentile.
+        ``point_estimate`` is the actual (non-bootstrapped) Sharpe of
+        ``returns`` itself, for comparison against the bootstrap distribution.
+        """
+        arr = np.asarray(returns, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        if arr.size < 2:
+            return {}
+        sims = self.bootstrap_returns(arr)
+        daily_rf = (1 + risk_free_rate) ** (1 / periods_per_year) - 1
+        excess = sims - daily_rf
+        std = sims.std(axis=1, ddof=1)
+        safe_std = np.where(std < 1e-14, 1.0, std)
+        sharpes = np.where(
+            std < 1e-14, 0.0, excess.mean(axis=1) / safe_std * np.sqrt(periods_per_year),
+        )
+        lower = (1 - self.confidence) / 2
+        upper = 1 - lower
+        return {
+            "expected": float(sharpes.mean()),
+            "lower_bound": float(np.percentile(sharpes, lower * 100)),
+            "upper_bound": float(np.percentile(sharpes, upper * 100)),
+            "std": float(sharpes.std(ddof=1)),
+            "point_estimate": sharpe_ratio(
+                pd.Series(arr),
+                risk_free_rate=risk_free_rate,
+                periods_per_year=periods_per_year,
+            ),
         }
 
     def summary(self, returns: pd.Series | np.ndarray) -> dict[str, object]:

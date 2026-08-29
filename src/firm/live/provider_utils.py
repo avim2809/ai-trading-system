@@ -112,6 +112,32 @@ def resolve_live_startup(
             if dynamic_universe_symbols:
                 symbols = list(symbols) + dynamic_universe_symbols
 
+        # Mirrors the danelfin_dynamic_universe restart-persistence merge
+        # immediately above — same hazard, different source (see
+        # firm.live.sp500_universe_sync): a restart must not silently drop
+        # symbols this scanner dynamically added, or it reopens the
+        # "unknown"-bucket sector-cap-bypass. Both sources are documented as
+        # a mutually-exclusive A/B toggle (config/live.yaml), but this merge
+        # is written defensively in case both are ever enabled at once —
+        # already-merged symbols/sectors from the danelfin block above are
+        # not re-added.
+        sp500_cfg = yaml_cfg.get("sp500_dynamic_universe") or {}
+        if sp500_cfg.get("enabled"):
+            from firm.live.dynamic_universe_state import load_dynamic_universe_state
+
+            sp500_state = load_dynamic_universe_state(
+                sp500_cfg.get("state_path", "data/dynamic_universe_state.json")
+            )
+            sp500_dynamic_symbols = [
+                s for s in sp500_state if s not in symbols and s not in dynamic_universe_symbols
+            ]
+            sp500_dynamic_sector_map = {
+                sym: entry.get("sector", "unknown") for sym, entry in sp500_state.items()
+            }
+            if sp500_dynamic_symbols:
+                symbols = list(symbols) + sp500_dynamic_symbols
+            dynamic_universe_sector_map = {**dynamic_universe_sector_map, **sp500_dynamic_sector_map}
+
     if not strategies:
         strategies = list(strategies_block.get("enabled") or []) or None
 
@@ -232,6 +258,7 @@ def resolve_live_startup(
         "schedule_timezone",
         "fundamentals_refresh_hour",
         "danelfin_dynamic_universe",
+        "sp500_dynamic_universe",
     ):
         if key in yaml_cfg:
             engine_config[key] = yaml_cfg[key]

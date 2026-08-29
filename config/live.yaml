@@ -259,6 +259,53 @@ danelfin_dynamic_universe:
   min_dwell_days_before_removal: 5   # consecutive absent days before a dynamic symbol is dropped
 
 # ──────────────────────────────────────────────────────────────
+# Sector-balanced FMP dynamic universe — alternative dynamic-universe
+# source to danelfin_dynamic_universe above (same general-purpose
+# persistence/engine API — firm.live.dynamic_universe_state,
+# LiveTradingEngine.update_universe/update_sector_map), driven instead by
+# FMP's S&P 500 constituent list, sector water-filled against sectors
+# thin/absent in the static 25-name universe below (materials, industrials,
+# utilities, staples, real estate) rather than this system's own alpha
+# signals (avoids look-ahead/circularity — see firm.live.sp500_universe_sync
+# for the full design). Live-only: no backtest validation is possible for
+# this mechanism, so it ships disabled and must be reviewed via at least
+# one real cycle's dry-run log output before flipping enabled: true, then
+# validated via a forward paper A/B on one engine only (Alpaca), same
+# pattern as the running LLM A/B split.
+#
+# CONFIRMED (2026-08-30, live check against the current FMP_API_KEY): FMP's
+# /stable/sp500-constituent endpoint returns HTTP 402 ("Restricted
+# Endpoint... upgrade your plan") for BOTH the symbol list and the sector
+# field — not merely a missing sector column as originally suspected. Until
+# the FMP plan is upgraded, firm.live.sp500_universe_sync.sync_once has no
+# way to enumerate S&P 500 membership and will always skip (logged,
+# skipped: "fetch_failed" — a no-op, never a crash). Alpha Vantage's
+# OVERVIEW endpoint (get_sector) DOES return a usable Sector field live,
+# but it can only look up the sector for an already-known symbol — it has
+# no index-constituent-list endpoint of its own — so it remains a bounded
+# per-symbol backfill for the weekly sector-cache refresh below, not a
+# substitute for FMP's missing enumeration.
+#
+# Unknown-sector candidates are always excluded from selection (never
+# added with a guessed/"unknown" sector — RiskAgent._cap_sector_concentration
+# buckets by exact string match, so an unnormalized/guessed label would
+# silently create a second bucket bypassing max_sector_pct), so dynamic
+# slots may go under-filled until the sector cache is populated.
+#
+# Only one of danelfin_dynamic_universe / sp500_dynamic_universe should be
+# enabled at a time — both drive the same state_path and the same engine
+# setters, so this is the A/B toggle between the two dynamic-universe
+# sources.
+sp500_dynamic_universe:
+  enabled: false
+  state_path: "data/dynamic_universe_state.json"
+  sector_cache_path: "data/sp500_sector_map.json"
+  max_dynamic_symbols: 10
+  min_dwell_days_before_removal: 5
+  liquidity_lookback_days: 30
+  sector_cache_refresh_day: "sun"
+
+# ──────────────────────────────────────────────────────────────
 # Transaction costs — must match your actual broker schedule
 # IBKR Tiered: ~$0.005/share; modelled here as pct of notional
 # ──────────────────────────────────────────────────────────────

@@ -40,6 +40,52 @@ _FMP_QUERY_ALIASES: dict[str, str] = {"GOOG": "GOOGL"}
 # ETFs have no issuer fundamentals — skip to avoid premium-tier 402 noise.
 _FMP_ETF_SYMBOLS: frozenset[str] = frozenset({"SPY", "QQQ", "IWM"})
 
+# Maps FMP's title-case GICS-style sector labels (and Alpha Vantage's
+# upper-cased equivalents, both drawn from the same underlying taxonomy) to
+# this repo's lowercase-underscore vocabulary, matching config/live.yaml's
+# risk.sector_map values exactly (technology/communication/healthcare/
+# financials/energy/...). Keys are matched case-insensitively.
+_SECTOR_NORMALIZE_MAP: dict[str, str] = {
+    "information technology": "technology",
+    "technology": "technology",
+    "communication services": "communication",
+    "communication": "communication",
+    "consumer discretionary": "consumer_discretionary",
+    "consumer cyclical": "consumer_discretionary",
+    "consumer staples": "consumer_staples",
+    "consumer defensive": "consumer_staples",
+    "financials": "financials",
+    "financial services": "financials",
+    "financial": "financials",
+    "health care": "healthcare",
+    "healthcare": "healthcare",
+    "energy": "energy",
+    "industrials": "industrials",
+    "materials": "materials",
+    "basic materials": "materials",
+    "real estate": "real_estate",
+    "utilities": "utilities",
+}
+
+
+def _normalize_gics_sector(raw: str) -> str:
+    """Normalize a raw FMP/Alpha Vantage sector label to this repo's
+    lowercase-underscore vocabulary (see ``_SECTOR_NORMALIZE_MAP`` above).
+
+    Returns ``"unknown"`` for missing/unmapped labels. **This normalization
+    is a hard correctness requirement, not cosmetic**: ``RiskAgent.
+    _cap_sector_concentration`` (``risk.py``) buckets symbols by exact
+    string match against ``risk.sector_map``: an un-normalized label (e.g.
+    a raw ``"Information Technology"`` never mapped to this repo's
+    ``"technology"``) would silently create a second bucket that bypasses
+    ``max_sector_pct`` entirely instead of being caught by the real cap.
+    Callers must treat ``"unknown"`` as *excluded from selection*, never a
+    guessed bucket to add anyway (see ``firm.live.sp500_sector_cache``).
+    """
+    if not raw:
+        return "unknown"
+    return _SECTOR_NORMALIZE_MAP.get(str(raw).strip().lower(), "unknown")
+
 
 class FMPProvider(DataProvider):
     """Adapter for the FMP REST API (fundamentals, prices, constituents)."""
@@ -321,3 +367,47 @@ class FMPProvider(DataProvider):
             raise NotImplementedError(
                 f"FMP constituent endpoint returned an error (may require premium plan): {exc}"
             ) from exc
+
+    def get_universe_constituents_with_sectors(self, index: str) -> pd.DataFrame:
+        """Return today's index constituents with a normalized ``sector`` tag.
+
+        Columns: ``symbol``, ``sector``. Reuses the exact same
+        ``/stable/{index}-constituent`` endpoint and premium-gated-plan
+        fallback as :meth:`get_universe_constituents` (a non-2xx response
+        raises ``NotImplementedError`` rather than crashing callers) — FMP's
+        docs advertise a ``sector`` field per row on this endpoint, so this
+        is the same one daily call, not a second rate-limited one.
+
+        **Verified live 2026-08-30** against the project's current
+        ``FMP_API_KEY``: ``/stable/sp500-constituent`` returns HTTP 402
+        ("Restricted Endpoint... upgrade your plan") — i.e. the *entire*
+        endpoint is premium-gated on this key, not merely missing the
+        ``sector`` field, so this currently always raises
+        ``NotImplementedError`` here too. See
+        ``firm.live.sp500_universe_sync.sync_once``'s graceful
+        skip-on-fetch-failure handling and ``config/live.yaml``'s
+        ``sp500_dynamic_universe`` block for how this is expected to
+        degrade (a logged no-op skip, never a crash) until the plan is
+        upgraded.
+        """
+        endpoint = {
+            "sp500": "/stable/sp500-constituent",
+            "nasdaq": "/stable/nasdaq-constituent",
+            "dowjones": "/stable/dowjones-constituent",
+        }.get(index.lower())
+        if endpoint is None:
+            raise NotImplementedError(f"FMPProvider has no constituent endpoint for '{index}'.")
+        try:
+            data = self._client.get_json(endpoint, params=self._params())
+        except ProviderError as exc:
+            raise NotImplementedError(
+                f"FMP constituent endpoint returned an error (may require premium plan): {exc}"
+            ) from exc
+        rows = [
+            {"symbol": r["symbol"], "sector": _normalize_gics_sector(r.get("sector", ""))}
+            for r in (data if isinstance(data, list) else [])
+            if r.get("symbol")
+        ]
+        if not rows:
+            return pd.DataFrame(columns=["symbol", "sector"])
+        return pd.DataFrame(rows, columns=["symbol", "sector"])

@@ -44,3 +44,34 @@ class TestMonteCarlo:
     def test_empty_returns_degrade(self):
         mc = MonteCarloAnalyzer()
         assert mc.summary(pd.Series([], dtype=float)) == {}
+
+
+class TestSharpeConfidenceInterval:
+    def test_ordered(self):
+        mc = MonteCarloAnalyzer(n_simulations=500, confidence=0.90, seed=42)
+        ci = mc.sharpe_confidence_interval(_returns())
+        assert ci["lower_bound"] <= ci["expected"] <= ci["upper_bound"]
+
+    def test_positive_drift_lower_bound_positive(self):
+        rng = np.random.default_rng(1)
+        returns = pd.Series(rng.normal(0.003, 0.005, size=500))
+        mc = MonteCarloAnalyzer(n_simulations=1000, confidence=0.90, seed=42)
+        ci = mc.sharpe_confidence_interval(returns)
+        assert ci["lower_bound"] > 0
+
+    def test_negative_drift_lower_bound_not_positive(self):
+        rng = np.random.default_rng(2)
+        returns = pd.Series(rng.normal(-0.003, 0.01, size=500))
+        mc = MonteCarloAnalyzer(n_simulations=1000, confidence=0.90, seed=42)
+        ci = mc.sharpe_confidence_interval(returns)
+        assert ci["lower_bound"] <= 0
+
+    def test_stable_under_fixed_seed(self):
+        a = MonteCarloAnalyzer(n_simulations=300, seed=7).sharpe_confidence_interval(_returns())
+        b = MonteCarloAnalyzer(n_simulations=300, seed=7).sharpe_confidence_interval(_returns())
+        assert a == b
+
+    def test_too_few_observations_returns_empty(self):
+        mc = MonteCarloAnalyzer()
+        assert mc.sharpe_confidence_interval(pd.Series([0.01])) == {}
+        assert mc.sharpe_confidence_interval(pd.Series([], dtype=float)) == {}
