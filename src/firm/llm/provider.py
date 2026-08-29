@@ -16,8 +16,10 @@ class LLMService:
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         config = config or {}
         # Free-by-default: Groq's free tier. Override in config/llm.yaml.
+        # groq/llama-3.3-70b-versatile deprecated by Groq 2026-06-17,
+        # confirmed dead live 2026-08-29 — see src/firm/llm/providers.py.
         self.default_model: str = config.get(
-            "default_model", "groq/llama-3.3-70b-versatile"
+            "default_model", "groq/openai/gpt-oss-120b"
         )
         self.temperature: float = config.get("temperature", 0.3)
         self.max_tokens: int = config.get("max_tokens", 2000)

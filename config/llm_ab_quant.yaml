@@ -4,7 +4,10 @@
 # See docs/llm_ab_test_runbook.md.
 
 provider:
-  default_model: "groq/llama-3.3-70b-versatile"
+  # groq/llama-3.3-70b-versatile deprecated by Groq 2026-06-17, confirmed
+  # dead live 2026-08-29 — replaced with Groq's recommended openai/gpt-oss-120b
+  # (verified live). See config/llm.yaml for detail.
+  default_model: "groq/openai/gpt-oss-120b"
   fallback_models:
     # gemini-2.5-pro decommissioned for new API keys — see config/llm.yaml.
     - "gemini/gemini-3.7-flash"

@@ -36,7 +36,9 @@ _RAG_DEFAULTS: dict[str, Any] = {
 }
 
 _PROVIDER_DEFAULTS: dict[str, Any] = {
-    "default_model": "groq/llama-3.3-70b-versatile",
+    # groq/llama-3.3-70b-versatile deprecated by Groq 2026-06-17, confirmed
+    # dead live 2026-08-29 — see src/firm/llm/providers.py's groq entry.
+    "default_model": "groq/openai/gpt-oss-120b",
     "fallback_models": [],
     "load_balance": False,
     "temperature": 0.3,

@@ -1,5 +1,5 @@
 # Default to a FREE model. Options that cost nothing to run:
-#   groq/llama-3.3-70b-versatile               – free Groq tier, needs a free GROQ_API_KEY
+#   groq/openai/gpt-oss-120b                   – free Groq tier, needs a free GROQ_API_KEY
 #   gemini/gemini-3.7-flash                    – Google Gemini, needs GEMINI_API_KEY
 #   openrouter/nvidia/nemotron-3-ultra-550b-a55b:free – free OpenRouter tier, needs OPENROUTER_API_KEY
 #   openrouter/openrouter/free                 – OpenRouter auto-router over whatever :free model fits
@@ -11,7 +11,12 @@ provider:
   # Groq primary: direct inference (not a marketplace), fast, and its free
   # tier is meaningfully more generous than OpenRouter's zero-balance tier.
   # OpenRouter's free models absorb overflow once Groq's cap is hit.
-  default_model: "groq/llama-3.3-70b-versatile"
+  # groq/llama-3.3-70b-versatile was deprecated by Groq (free/developer tier)
+  # 2026-06-17 — confirmed dead ("model_not_found") live 2026-08-29. Replaced
+  # with Groq's own recommended successor, openai/gpt-oss-120b (120B MoE,
+  # matches the old model's class); verified live against the real Groq API
+  # 2026-08-29 including a realistic json_mode enhancement-style call.
+  default_model: "groq/openai/gpt-oss-120b"
   # Spread requests across two independent free tiers (Groq + OpenRouter) so
   # one provider's rate cap doesn't stall the whole run. With load_balance
   # on, every call round-robins across this list (default_model included);

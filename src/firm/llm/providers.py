@@ -45,8 +45,18 @@ class LLMProvider:
 PROVIDERS: dict[str, LLMProvider] = {
     "groq": LLMProvider(
         "groq", "Groq (free tier)", "GROQ_API_KEY",
-        "groq/llama-3.3-70b-versatile", "groq/", False,
-        ("groq/llama-3.3-70b-versatile", "groq/llama-3.1-8b-instant"),
+        "groq/openai/gpt-oss-120b", "groq/", False,
+        (
+            # llama-3.3-70b-versatile deprecated by Groq (free/developer
+            # tier) 2026-06-17, confirmed dead ("model_not_found") live
+            # 2026-08-29. llama-3.1-8b-instant (the old fallback listed
+            # here) is dead too, confirmed live the same day. Replaced with
+            # Groq's own recommended successors — openai/gpt-oss-120b as
+            # default (120B MoE, matches the old model's class) and
+            # openai/gpt-oss-20b as the lighter option — both verified live
+            # 2026-08-29 including a realistic json_mode enhancement call.
+            "groq/openai/gpt-oss-120b", "groq/openai/gpt-oss-20b",
+        ),
     ),
     "anthropic": LLMProvider(
         "anthropic", "Anthropic Claude", "ANTHROPIC_API_KEY",
