@@ -1,31 +1,38 @@
-"""Dynamic universe growth driven by FMP's S&P 500 constituent list,
+"""Dynamic universe growth driven by the S&P 500 constituent list,
 sector-balanced against the static universe rather than ranked by any of
 this system's own alpha signals (that would be circular/look-ahead-biased
 against what then trades them — see the module docstring in
 ``firm.live.danelfin_universe_sync`` for the sibling design this reuses).
 
-This is the FMP-sourced alternative to ``danelfin_universe_sync`` (Danelfin
-is dead — account closed 2026-08-16): same capped-growth, dwell-based-removal
-machinery (``compute_universe_update``, imported unchanged from
-``danelfin_universe_sync``), fed by a different daily candidate list —
-sector water-fill against ``config/live.yaml``'s static 25-name universe,
-picking whichever sector is currently least-represented there, then the
-most-liquid name (highest trailing dollar volume) within that sector.
+This is the FMP/GitHub-sourced alternative to ``danelfin_universe_sync``
+(Danelfin is dead — account closed 2026-08-16): same capped-growth,
+dwell-based-removal machinery (``compute_universe_update``, imported
+unchanged from ``danelfin_universe_sync``), fed by a different daily
+candidate list — sector water-fill against ``config/live.yaml``'s static
+25-name universe, picking whichever sector is currently least-represented
+there, then the most-liquid name (highest trailing dollar volume) within
+that sector.
 
 Two data dependencies, kept deliberately separate:
-  - ``FMPProvider.get_universe_constituents_with_sectors`` — today's *fresh*
-    S&P 500 membership list (who is currently in the index at all).
+  - Today's *fresh* S&P 500 membership list (who is currently in the index
+    at all): tries ``FMPProvider.get_universe_constituents_with_sectors``
+    first, falling back to the free, keyless
+    ``firm.live.sp500_sector_cache.fetch_sp500_constituents_from_github`` —
+    FMP's endpoint is confirmed premium-gated (HTTP 402) on this project's
+    current key (verified live 2026-08-30), so in practice this is what
+    actually runs today; FMP is tried first anyway since it costs nothing
+    to try and starts working for real the moment the plan is upgraded.
   - ``firm.live.sp500_sector_cache`` — the curated, backfilled, fail-soft
     sector tag for each candidate (refreshed on its own weekly cadence, see
-    ``firm.live.scheduler``), preferred over whatever a single day's raw FMP
+    ``firm.live.scheduler``), preferred over whatever a single day's raw
     pull happened to return, since the cache degrades gracefully across an
-    FMP outage while a single day's call does not.
+    outage of either source while a single day's call does not.
 
-Both a failed FMP fetch and an empty/not-yet-populated sector cache cause a
-graceful no-op skip, never a crash and never a spurious absence-counter
-bump on already-held dynamic symbols (mirroring the exact caution
-``danelfin_universe_sync.sync_once`` already takes on its own fetch
-failures).
+A failure of *both* constituent sources, or an empty/not-yet-populated
+sector cache, cause a graceful no-op skip, never a crash and never a
+spurious absence-counter bump on already-held dynamic symbols (mirroring
+the exact caution ``danelfin_universe_sync.sync_once`` already takes on its
+own fetch failures).
 """
 
 from __future__ import annotations
@@ -39,7 +46,7 @@ import pandas as pd
 from firm.data.providers.fmp import FMPProvider
 from firm.live.danelfin_universe_sync import compute_universe_update
 from firm.live.dynamic_universe_state import load_dynamic_universe_state, save_dynamic_universe_state
-from firm.live.sp500_sector_cache import load_sector_cache
+from firm.live.sp500_sector_cache import fetch_sp500_constituents_from_github, load_sector_cache
 from firm.time_utils import utcnow
 
 log = logging.getLogger(__name__)
@@ -180,14 +187,29 @@ def sync_once(
 
     try:
         constituents = FMPProvider().get_universe_constituents_with_sectors("sp500")
+        if constituents is None or constituents.empty:
+            raise ValueError("FMP returned no constituents")
     except Exception:
-        log.warning(
-            "sp500_universe_sync: failed to fetch FMP sp500 constituents "
-            "(missing FMP_API_KEY, premium-gated endpoint, or transient "
-            "outage) — skipping this run (avoids spuriously incrementing "
-            "absence counters on a transient/degraded API)", exc_info=True,
+        # FMP's /stable/sp500-constituent is confirmed premium-gated (HTTP
+        # 402) on this project's current key (verified live 2026-08-30) —
+        # tried first anyway (no cost to trying, and it starts working for
+        # real the moment the plan is ever upgraded) before falling back to
+        # the free, keyless GitHub S&P 500 dataset. Only if *both* fail do
+        # we skip this run (avoids spuriously incrementing absence counters
+        # on a transient/degraded pair of APIs).
+        log.info(
+            "sp500_universe_sync: FMP sp500 constituents unavailable — "
+            "falling back to the free GitHub S&P 500 dataset", exc_info=True,
         )
-        return {"skipped": "fetch_failed"}
+        try:
+            constituents = fetch_sp500_constituents_from_github()
+        except Exception:
+            log.warning(
+                "sp500_universe_sync: GitHub fallback also failed — "
+                "skipping this run (avoids spuriously incrementing absence "
+                "counters on a transient/degraded pair of APIs)", exc_info=True,
+            )
+            return {"skipped": "fetch_failed"}
 
     sector_cache = load_sector_cache(sector_cache_path)
     if not sector_cache:

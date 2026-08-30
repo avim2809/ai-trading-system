@@ -20,6 +20,7 @@ from firm.data.providers.base import ProviderError
 from firm.data.providers.fmp import FMPProvider, _normalize_gics_sector
 from firm.live.dynamic_universe_state import save_dynamic_universe_state
 from firm.live.sp500_sector_cache import (
+    fetch_sp500_constituents_from_github,
     load_sector_cache,
     merge_sector_records,
     refresh_sector_cache,
@@ -146,6 +147,52 @@ class TestBuildDiversifiedCandidates:
         assert list(first["symbol"]) == list(second["symbol"])
 
 
+class TestGithubFallback:
+    """firm.live.sp500_sector_cache.fetch_sp500_constituents_from_github —
+    the free, keyless fallback used because FMP's constituent endpoint is
+    confirmed premium-gated (HTTP 402) on this project's current key."""
+
+    def _mock_response(self, csv_text: str, status: int = 200):
+        resp = MagicMock()
+        resp.text = csv_text
+        if status >= 400:
+            resp.raise_for_status.side_effect = Exception(f"HTTP {status}")
+        else:
+            resp.raise_for_status.return_value = None
+        return resp
+
+    def test_parses_symbol_and_normalizes_sector(self):
+        csv_text = (
+            "Symbol,Security,GICS Sector,GICS Sub-Industry\n"
+            "NVDA,NVIDIA,Information Technology,Semiconductors\n"
+            "XOM,Exxon Mobil,Energy,Integrated Oil & Gas\n"
+        )
+        with patch("requests.get") as mock_get:
+            mock_get.return_value = self._mock_response(csv_text)
+            df = fetch_sp500_constituents_from_github()
+        assert list(df["symbol"]) == ["NVDA", "XOM"]
+        assert list(df["sector"]) == ["technology", "energy"]
+
+    def test_missing_expected_columns_raises(self):
+        with patch("requests.get") as mock_get:
+            mock_get.return_value = self._mock_response("Ticker,Name\nNVDA,NVIDIA\n")
+            with pytest.raises(ValueError):
+                fetch_sp500_constituents_from_github()
+
+    def test_http_error_propagates(self):
+        with patch("requests.get") as mock_get:
+            mock_get.return_value = self._mock_response("", status=402)
+            with pytest.raises(Exception):
+                fetch_sp500_constituents_from_github()
+
+    def test_blank_symbol_rows_dropped(self):
+        csv_text = "Symbol,Security,GICS Sector,GICS Sub-Industry\n,Empty,Energy,X\nNVDA,NVIDIA,Information Technology,Y\n"
+        with patch("requests.get") as mock_get:
+            mock_get.return_value = self._mock_response(csv_text)
+            df = fetch_sp500_constituents_from_github()
+        assert list(df["symbol"]) == ["NVDA"]
+
+
 class TestSectorCache:
     def test_load_missing_file_returns_empty(self, tmp_path):
         assert load_sector_cache(tmp_path / "nope.json") == {}
@@ -214,14 +261,47 @@ class TestSectorCache:
         assert load_sector_cache(path) == result
 
     def test_refresh_sector_cache_handles_fetch_failure_preserves_prior(self, tmp_path):
+        """Both FMP and its GitHub fallback fail — total failure must
+        preserve the prior cache, never wipe it, never crash."""
         path = tmp_path / "sectors.json"
         save_sector_cache(
             path, {"AAPL": {"sector": "technology", "source": "static", "as_of": "2026-08-01"}}
         )
         provider = MagicMock()
         provider.get_universe_constituents_with_sectors.side_effect = RuntimeError("boom")
-        result = refresh_sector_cache(path, fmp_provider=provider, today="2026-08-02")
+        with patch(
+            "firm.live.sp500_sector_cache.fetch_sp500_constituents_from_github",
+            side_effect=RuntimeError("github also down"),
+        ):
+            result = refresh_sector_cache(path, fmp_provider=provider, today="2026-08-02")
         assert result["AAPL"]["sector"] == "technology"
+
+    def test_refresh_sector_cache_falls_back_to_github_when_fmp_fails(self, tmp_path):
+        """The actual fix: FMP is premium-gated (raises), so the free
+        GitHub dataset must be tried next and its rows merged in, tagged
+        with source='github'."""
+        path = tmp_path / "sectors.json"
+        provider = MagicMock()
+        provider.get_universe_constituents_with_sectors.side_effect = RuntimeError("402 restricted")
+        with patch(
+            "firm.live.sp500_sector_cache.fetch_sp500_constituents_from_github",
+            return_value=_constituents_df([("NVDA", "technology")]),
+        ) as mock_github:
+            result = refresh_sector_cache(path, fmp_provider=provider, today="2026-08-02")
+        mock_github.assert_called_once()
+        assert result["NVDA"] == {"sector": "technology", "source": "github", "as_of": "2026-08-02"}
+
+    def test_refresh_sector_cache_does_not_call_github_when_fmp_succeeds(self, tmp_path):
+        path = tmp_path / "sectors.json"
+        provider = MagicMock()
+        provider.get_universe_constituents_with_sectors.return_value = _constituents_df(
+            [("NVDA", "technology")]
+        )
+        with patch(
+            "firm.live.sp500_sector_cache.fetch_sp500_constituents_from_github",
+        ) as mock_github:
+            refresh_sector_cache(path, fmp_provider=provider, today="2026-08-02")
+        mock_github.assert_not_called()
 
     def test_refresh_sector_cache_backfill_bounded(self, tmp_path):
         path = tmp_path / "sectors.json"
@@ -332,9 +412,14 @@ class TestSyncOnce:
         engine.update_universe.assert_not_called()
 
     def test_fetch_failure_skips_without_touching_state(self, tmp_path):
+        """Both FMP and its GitHub fallback fail — total failure, no state
+        write, no engine mutation."""
         engine = self._make_engine()
         state_path = tmp_path / "state.json"
-        with patch("firm.live.sp500_universe_sync.FMPProvider") as mock_fmp_cls:
+        with patch("firm.live.sp500_universe_sync.FMPProvider") as mock_fmp_cls, patch(
+            "firm.live.sp500_universe_sync.fetch_sp500_constituents_from_github",
+            side_effect=RuntimeError("github also down"),
+        ):
             mock_fmp_cls.return_value.get_universe_constituents_with_sectors.side_effect = RuntimeError("boom")
             result = sync_once(
                 engine,
@@ -348,6 +433,39 @@ class TestSyncOnce:
         assert result == {"skipped": "fetch_failed"}
         engine.update_universe.assert_not_called()
         assert not state_path.exists()
+
+    def test_fmp_failure_falls_back_to_github_and_proceeds(self, tmp_path):
+        """The actual fix: FMP is premium-gated (raises), so the free
+        GitHub dataset must be tried next — and the sync proceeds normally
+        (additions happen) using its data instead of skipping."""
+        sector_cache_path = tmp_path / "sectors.json"
+        save_sector_cache(
+            sector_cache_path,
+            {"NVDA": {"sector": "technology", "source": "github", "as_of": "2026-08-01"}},
+        )
+        prices_df = pd.DataFrame(
+            [{"symbol": "NVDA", "date": "2026-08-01", "close": 100.0, "volume": 1000.0}]
+        )
+        engine = self._make_engine(prices_df)
+        with patch("firm.live.sp500_universe_sync.FMPProvider") as mock_fmp_cls, patch(
+            "firm.live.sp500_universe_sync.fetch_sp500_constituents_from_github",
+            return_value=_constituents_df([("NVDA", "technology")]),
+        ) as mock_github:
+            mock_fmp_cls.return_value.get_universe_constituents_with_sectors.side_effect = RuntimeError(
+                "402 restricted"
+            )
+            result = sync_once(
+                engine,
+                state_path=tmp_path / "state.json",
+                sector_cache_path=sector_cache_path,
+                static_universe=["AAPL"],
+                static_sector_map={"AAPL": "technology"},
+                max_dynamic_symbols=10,
+                min_dwell_days=5,
+            )
+        mock_github.assert_called_once()
+        assert result["additions"] == ["NVDA"]
+        engine.update_universe.assert_called_once()
 
     def test_empty_sector_cache_skips(self, tmp_path):
         engine = self._make_engine()
@@ -445,8 +563,13 @@ class TestSyncOnce:
         )
         engine = self._make_engine()
         with patch("firm.live.sp500_universe_sync.FMPProvider") as mock_fmp_cls:
-            # NVDA no longer appears in today's fresh FMP pull at all.
-            mock_fmp_cls.return_value.get_universe_constituents_with_sectors.return_value = _constituents_df([])
+            # NVDA no longer appears in today's fresh FMP pull — still a
+            # non-empty response (some other real member) so this exercises
+            # genuine membership loss, not the empty-response fetch-failure
+            # path (which now triggers the GitHub fallback instead).
+            mock_fmp_cls.return_value.get_universe_constituents_with_sectors.return_value = _constituents_df(
+                [("MSFT", "technology")]
+            )
             result = sync_once(
                 engine,
                 state_path=state_path,
