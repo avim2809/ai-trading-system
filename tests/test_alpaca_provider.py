@@ -8,6 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from alpaca.data.enums import DataFeed
+
 from firm.data.providers.alpaca import AlpacaProvider
 from firm.data.providers.base import ProviderError
 
@@ -55,6 +57,25 @@ def test_get_prices_maps_bars_to_price_cols(mock_stock_cls, mock_news_cls):
     assert row["date"] == date(2026, 8, 3)
     assert row["close"] == 211.5
     assert row["adj_close"] == row["close"]
+
+
+@patch("firm.data.providers.alpaca.NewsClient")
+@patch("firm.data.providers.alpaca.StockHistoricalDataClient")
+def test_get_prices_requests_iex_feed(mock_stock_cls, mock_news_cls):
+    """Free/paper accounts have no SIP subscription — the default feed
+    raises "subscription does not permit querying recent SIP data" whenever
+    the requested end date is close to now (confirmed live 2026-08-30).
+    IEX is free-tier-accessible and must be requested explicitly."""
+    mock_stock_client = mock_stock_cls.return_value
+    barset = MagicMock()
+    barset.data = {}
+    mock_stock_client.get_stock_bars.return_value = barset
+
+    provider = AlpacaProvider(api_key="k", secret_key="s")
+    provider.get_prices(["AAPL"], "2026-08-01", "2026-08-05")
+
+    request = mock_stock_client.get_stock_bars.call_args[0][0]
+    assert request.feed == DataFeed.IEX
 
 
 @patch("firm.data.providers.alpaca.NewsClient")

@@ -35,7 +35,7 @@ from firm.data.schemas import PRICE_COLS, SENTIMENT_COLS
 log = logging.getLogger("firm.data.providers.alpaca")
 
 try:
-    from alpaca.data.enums import Adjustment
+    from alpaca.data.enums import Adjustment, DataFeed
     from alpaca.data.historical.news import NewsClient
     from alpaca.data.historical.stock import StockHistoricalDataClient
     from alpaca.data.requests import NewsRequest, StockBarsRequest
@@ -77,6 +77,13 @@ class AlpacaProvider(DataProvider):
                 start=pd.Timestamp(start).to_pydatetime(),
                 end=pd.Timestamp(end).to_pydatetime(),
                 adjustment=Adjustment.ALL,
+                # Free/paper accounts have no SIP subscription; the default
+                # feed raises "subscription does not permit querying recent
+                # SIP data" whenever *end* is close to now (confirmed live
+                # 2026-08-30 — surfaced by a caller requesting data up to
+                # utcnow() for the first time). IEX is free-tier-accessible
+                # and sufficient for daily bars.
+                feed=DataFeed.IEX,
             )
             barset = self._stock_client.get_stock_bars(request)
         except Exception as exc:

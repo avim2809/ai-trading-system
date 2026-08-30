@@ -267,6 +267,24 @@ danelfin_dynamic_universe:
   min_dwell_days_before_removal: 5   # consecutive absent days before a dynamic symbol is dropped
 
 # ──────────────────────────────────────────────────────────────
+# Sector-balanced dynamic universe — see config/live.yaml's twin block for
+# the full design/rationale (firm.live.sp500_universe_sync). Enabled HERE,
+# on this engine only, per the forward paper A/B this was scoped for: this
+# Alpaca book runs the sector-balanced dynamic universe, the IBKR book
+# (config/live.yaml) stays on the static 25-name universe as the control —
+# same pattern as the existing LLM A/B split. Reviewed via a real dry-run
+# simulation before enabling (2026-08-30, real AlpacaProvider prices + a
+# live GitHub sector-cache refresh — see project memory for the picks).
+sp500_dynamic_universe:
+  enabled: true
+  state_path: "data_alpaca/dynamic_universe_state.json"
+  sector_cache_path: "data_alpaca/sp500_sector_map.json"
+  max_dynamic_symbols: 10
+  min_dwell_days_before_removal: 5
+  liquidity_lookback_days: 30
+  sector_cache_refresh_day: "sun"
+
+# ──────────────────────────────────────────────────────────────
 # Transaction costs — must match your actual broker schedule
 # IBKR Tiered: ~$0.005/share; modelled here as pct of notional
 # ──────────────────────────────────────────────────────────────
