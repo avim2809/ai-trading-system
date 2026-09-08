@@ -1057,6 +1057,74 @@ class TestReflectionPersistence:
         assert any("Skipping reflection" in r.message for r in caplog.records)
 
 
+class TestBenchmarkReturnLookup:
+    """`_lookup_benchmark_return` replaces `_maybe_reflect`'s previously
+    hardcoded `benchmark_return=0.0` with a real lookup against the cycle's
+    already-loaded PIT price panel (docs/remediation_progress.md #50's
+    "decorative alpha figure" follow-up)."""
+
+    @staticmethod
+    @patch("firm.live.engine.build_orchestrator")
+    def _make_engine(tmp_path, mock_build):
+        mock_build.return_value = MagicMock()
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["SPY"])
+        queue = ApprovalQueue(broker=broker)
+        config = {
+            "initial_capital": 100_000,
+            "memory_log_path": str(tmp_path / "decisions.jsonl"),
+        }
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+
+    def test_computes_real_return_between_decision_date_and_now(self, tmp_path):
+        engine = self._make_engine(tmp_path)
+        price_df = pd.DataFrame([
+            {"symbol": "SPY", "date": pd.Timestamp("2026-08-28"), "close": 500.0},
+            {"symbol": "SPY", "date": pd.Timestamp("2026-09-01"), "close": 510.0},
+            {"symbol": "SPY", "date": pd.Timestamp("2026-09-05"), "close": 520.0},
+        ])
+        pit_view = MagicMock()
+        pit_view.prices.return_value = price_df
+        result = engine._lookup_benchmark_return(pit_view, "2026-09-01", datetime(2026, 9, 5))
+        assert result == pytest.approx(520.0 / 510.0 - 1.0)
+
+    def test_falls_back_to_zero_on_empty_price_data(self, tmp_path):
+        engine = self._make_engine(tmp_path)
+        pit_view = MagicMock()
+        pit_view.prices.return_value = pd.DataFrame()
+        result = engine._lookup_benchmark_return(pit_view, "2026-09-01", datetime(2026, 9, 5))
+        assert result == 0.0
+
+    def test_falls_back_to_zero_when_decision_date_predates_available_data(self, tmp_path):
+        """No price row on or before decision_date -- can't compute a start
+        price, so this must degrade to flat 0.0, not raise or misprice."""
+        engine = self._make_engine(tmp_path)
+        price_df = pd.DataFrame([
+            {"symbol": "SPY", "date": pd.Timestamp("2026-09-05"), "close": 520.0},
+        ])
+        pit_view = MagicMock()
+        pit_view.prices.return_value = price_df
+        result = engine._lookup_benchmark_return(pit_view, "2026-08-01", datetime(2026, 9, 5))
+        assert result == 0.0
+
+    def test_falls_back_to_zero_on_lookup_exception(self, tmp_path):
+        engine = self._make_engine(tmp_path)
+        pit_view = MagicMock()
+        pit_view.prices.side_effect = RuntimeError("simulated PIT failure")
+        result = engine._lookup_benchmark_return(pit_view, "2026-09-01", datetime(2026, 9, 5))
+        assert result == 0.0
+
+    def test_uses_adj_close_when_close_is_nan(self):
+        row = pd.Series({"close": float("nan"), "adj_close": 510.0})
+        assert LiveTradingEngine._closing_price(row) == pytest.approx(510.0)
+
+    def test_closing_price_none_when_both_missing(self):
+        row = pd.Series({"close": None, "adj_close": None})
+        assert LiveTradingEngine._closing_price(row) is None
+
+
 class TestEngineConfigUpdates:
     """Regression tests: strategies/risk must be genuinely mutable on a
     running engine, not silently ignored (previously PUT /live/config

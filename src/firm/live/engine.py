@@ -22,6 +22,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
 from firm.brokers.base import Broker, BrokerError, OrderRequest, OrderStatus
 from firm.live.approval import ApprovalQueue
 from firm.live.data_feed import LiveDataFeed
@@ -1328,7 +1330,7 @@ class LiveTradingEngine:
                 result.error = "halted: drawdown kill switch tripped"
                 return
 
-            self._maybe_reflect(now)
+            self._maybe_reflect(now, pit_view)
 
             if not self._cycle_token_active(token):
                 log.warning(
@@ -1704,7 +1706,7 @@ class LiveTradingEngine:
 
         return self._broker.get_current_prices(universe)
 
-    def _maybe_reflect(self, now: datetime) -> None:
+    def _maybe_reflect(self, now: datetime, pit_view: Any) -> None:
         """Trigger deferred LLM reflection on any decisions whose P&L is now known.
 
         Called at the start of each cycle — before this cycle's own decision
@@ -1713,6 +1715,10 @@ class LiveTradingEngine:
         diff against) are read back from the persisted memory log rather
         than an in-memory pointer, so a process restart between the decision
         and this call doesn't silently drop the reflection.
+
+        ``pit_view`` is this cycle's already-loaded PIT price panel (from
+        ``self._data_feed.refresh``) — reused for the benchmark lookup below
+        rather than issuing a separate fetch.
         """
         pending = self._memory.find_all_pending()
         if not pending:
@@ -1736,17 +1742,69 @@ class LiveTradingEngine:
                 )
                 continue
             raw_return = (current_nav / prev_nav) - 1.0
-            # Use a flat 0.0 benchmark when SPY price is unavailable — the
-            # reflection is still useful even without alpha decomposition.
+            benchmark_return = self._lookup_benchmark_return(pit_view, entry["date"], now)
             try:
                 self._memory.reflect(
                     date=entry["date"],
                     raw_return=raw_return,
-                    benchmark_return=0.0,
+                    benchmark_return=benchmark_return,
                     llm_service=llm,
                 )
             except Exception:
                 log.warning("Memory reflection failed for %s", entry["date"], exc_info=True)
+
+    def _lookup_benchmark_return(
+        self, pit_view: Any, decision_date: str, now: datetime,
+    ) -> float:
+        """Real benchmark (e.g. SPY) return over the same period as ``raw_return``.
+
+        Looks up the benchmark's close on ``decision_date`` (when the
+        reflected-on decision was made) and its most recent close as-of
+        ``now``, both from this cycle's already-loaded PIT price panel — no
+        separate fetch. The benchmark symbol defaults to "SPY" (already a
+        universe member in both live configs, and the same default used
+        elsewhere in this codebase, e.g. regime_overlay/strategy_regime_
+        weights). Falls back to a flat 0.0 (no alpha decomposition, but the
+        reflection is still useful) on any lookup failure — same fail-open
+        posture this method always had.
+        """
+        benchmark_symbol = self._config.get("benchmark_symbol", "SPY")
+        try:
+            decision_ts = pd.Timestamp(decision_date)
+            lookback_days = max(5, (pd.Timestamp(now).normalize() - decision_ts).days + 5)
+            price_df = pit_view.prices([benchmark_symbol], lookback_days=lookback_days)
+            if price_df.empty or "symbol" not in price_df.columns:
+                return 0.0
+            sym_rows = price_df[price_df["symbol"] == benchmark_symbol].sort_values("date")
+            if sym_rows.empty:
+                return 0.0
+            prior_rows = sym_rows[sym_rows["date"] <= decision_ts]
+            if prior_rows.empty:
+                return 0.0
+            start_price = self._closing_price(prior_rows.iloc[-1])
+            end_price = self._closing_price(sym_rows.iloc[-1])
+            if not start_price or not end_price or start_price <= 0:
+                return 0.0
+            return (end_price / start_price) - 1.0
+        except Exception:
+            log.warning(
+                "Benchmark return lookup failed for %s — using flat 0.0",
+                decision_date, exc_info=True,
+            )
+            return 0.0
+
+    @staticmethod
+    def _closing_price(row: Any) -> float | None:
+        raw = row.get("close")
+        if raw is None or (isinstance(raw, float) and raw != raw):
+            raw = row.get("adj_close")
+        if raw is None:
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
 
     def _get_llm_service(self) -> Any:
         """Lazy-initialise the LLM service for reflection calls.
