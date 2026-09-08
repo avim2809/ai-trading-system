@@ -96,10 +96,52 @@ function LLMUsageSummary({ usage }: { usage: { total_tokens?: number; total_cost
   )
 }
 
+function asNum(value: unknown): number | undefined {
+  return typeof value === 'number' && !Number.isNaN(value) ? value : undefined
+}
+
+/** Chart-pattern detail line for pattern_recognition signals — its meta
+ * shape (pattern/entry/stop/target/quality_score/risk_reward) is otherwise
+ * invisible here, same as most strategies' meta, but these fields are the
+ * whole point of that strategy's output so they get a dedicated line
+ * rather than staying buried in an unrendered object. */
+function PatternDetails({ meta }: { meta: Signal['meta'] }) {
+  const pattern = asString(meta?.pattern, '')
+  if (!pattern) return null
+  const direction = asString(meta?.direction, '')
+  const entry = asNum(meta?.entry)
+  const stop = asNum(meta?.stop)
+  const target = asNum(meta?.target)
+  const qualityScore = asNum(meta?.quality_score)
+  const riskReward = asNum(meta?.risk_reward)
+  return (
+    <div className="mt-1 ml-4 text-[11px] text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+      <span className="font-semibold text-slate-300">{pattern.replace(/_/g, ' ')}</span>
+      {direction && <span className={direction === 'long' ? 'text-emerald-400' : 'text-red-400'}>{direction}</span>}
+      {entry != null && (
+        <span className="font-mono">
+          {fmtNum(stop, 2)} <span className="text-slate-600">→</span> {fmtNum(entry, 2)} <span className="text-slate-600">→</span> {fmtNum(target, 2)}
+        </span>
+      )}
+      {qualityScore != null && (
+        <span>
+          quality <span className="font-mono text-slate-300">{qualityScore.toFixed(0)}</span>
+        </span>
+      )}
+      {riskReward != null && (
+        <span>
+          R:R <span className="font-mono text-slate-300">{riskReward.toFixed(1)}</span>
+        </span>
+      )}
+    </div>
+  )
+}
+
 function SignalRow({ sig }: { sig: Signal }) {
   const isLLMEnhanced = sig.meta?.llm_enhanced === true
   const rationale = asString(sig.meta?.llm_rationale, '')
   const regime = typeof sig.meta?.regime === 'string' ? (sig.meta.regime as string) : undefined
+  const isPattern = sig.strategy === 'pattern_recognition'
   const score = sig.score ?? 0
   return (
     <>
@@ -115,6 +157,13 @@ function SignalRow({ sig }: { sig: Signal }) {
         </td>
         <td className="pr-4 py-0.5 text-right font-mono">{fmtNum(sig.confidence, 2)}</td>
       </tr>
+      {isPattern && (
+        <tr>
+          <td colSpan={4} className="pb-1">
+            <PatternDetails meta={sig.meta} />
+          </td>
+        </tr>
+      )}
       {rationale && (
         <tr>
           <td colSpan={4} className="pb-2">

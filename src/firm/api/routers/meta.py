@@ -59,6 +59,10 @@ STRATEGY_INFO: dict[str, dict[str, str]] = {
         "summary": "HMM market-regime detection",
         "description": "Fits a per-symbol Gaussian Hidden Markov Model on stationarised features (log returns, 5-day cumulative log return, ATR, volume-spike ratio), decodes the hidden regime via the forward posterior, and labels states Bull/Chop/Bear by mean return. Emits directional signals (long in Bull, short in Bear, damped in Chop) weighted by regime confidence. Pairs with the RiskAgent market-regime exposure overlay (Chen, Yi & Zhao, 2020).",
     },
+    "pattern_recognition": {
+        "summary": "Multi-bar chart pattern recognition",
+        "description": "Scans for classical chart patterns (Head & Shoulders, Double/Triple Top & Bottom, triangles, wedges, flags, pennants, Cup & Handle) via zigzag pivot extraction, only signalling patterns that have actually confirmed (a closed breakout through the neckline/trendline/handle-high) and cleared a quality-score and risk:reward floor. Per-signal entry/stop/target/pattern-type detail is in the signal's meta. See docs/pattern_recognition_plan.md.",
+    },
 }
 
 

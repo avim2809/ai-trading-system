@@ -386,7 +386,7 @@ export default function NewBacktest() {
             </div>
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Kelly sizes positions by edge/odds; optimal combination blends the 12 signals by
+            Kelly sizes positions by edge/odds; optimal combination blends each strategy's signal by
             inverse variance instead of a simple confidence mean.
           </p>
         </section>
