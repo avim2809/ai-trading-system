@@ -1109,6 +1109,29 @@ class TestBenchmarkReturnLookup:
         result = engine._lookup_benchmark_return(pit_view, "2026-08-01", datetime(2026, 9, 5))
         assert result == 0.0
 
+    def test_falls_back_to_zero_when_no_completed_session_after_decision_date(self, tmp_path):
+        """Reflection commonly fires the very next session after a decision,
+        before that session's own bar has closed -- so the "most recent"
+        completed bar is still the decision day's own bar. Must degrade to
+        an honest flat 0.0 (data not available yet), not silently reuse the
+        decision day's price as both start and end and report a
+        misleadingly precise-looking 0.0 as if it were real alpha (real
+        production bug found live 2026-09-08: two consecutive reflections
+        both landed here and were indistinguishable from genuine zero
+        alpha)."""
+        engine = self._make_engine(tmp_path)
+        price_df = pd.DataFrame([
+            {"symbol": "SPY", "date": pd.Timestamp("2026-08-28"), "close": 500.0},
+            {"symbol": "SPY", "date": pd.Timestamp("2026-09-04"), "close": 510.0},
+        ])
+        pit_view = MagicMock()
+        pit_view.prices.return_value = price_df
+        # "now" is 9/8, but 9/8's own bar is excluded upstream as still-forming
+        # (LiveDataFeed's exclude_forming_bar) -- so 9/4 is the last row the
+        # PIT panel actually has, same as the decision date itself.
+        result = engine._lookup_benchmark_return(pit_view, "2026-09-04", datetime(2026, 9, 8))
+        assert result == 0.0
+
     def test_falls_back_to_zero_on_lookup_exception(self, tmp_path):
         engine = self._make_engine(tmp_path)
         pit_view = MagicMock()

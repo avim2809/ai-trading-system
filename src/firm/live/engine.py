@@ -1767,6 +1767,19 @@ class LiveTradingEngine:
         weights). Falls back to a flat 0.0 (no alpha decomposition, but the
         reflection is still useful) on any lookup failure — same fail-open
         posture this method always had.
+
+        The PIT panel excludes today's still-forming bar (``exclude_forming_bar``
+        in ``LiveDataFeed`` — required for IBKR, whose quotes can't be pulled
+        off the worker thread; see ``_resolve_cycle_prices``), so its "most
+        recent" row is really the last *completed* session. Reflection
+        commonly fires the very next session after a decision, before that
+        session's own bar has closed — at that point the last completed bar
+        IS still the decision day's own bar, so a naive "most recent row"
+        lookup silently returns the decision-day price as both start and
+        end, producing an exact (and misleadingly precise-looking) 0.0 that
+        looks like real computed alpha rather than a data-availability gap.
+        Guarding for a row strictly after ``decision_date`` keeps the 0.0
+        fallback honest about which case it is.
         """
         benchmark_symbol = self._config.get("benchmark_symbol", "SPY")
         try:
@@ -1781,8 +1794,16 @@ class LiveTradingEngine:
             prior_rows = sym_rows[sym_rows["date"] <= decision_ts]
             if prior_rows.empty:
                 return 0.0
+            later_rows = sym_rows[sym_rows["date"] > decision_ts]
+            if later_rows.empty:
+                log.debug(
+                    "Benchmark return for %s: no completed session after the "
+                    "decision date yet — using flat 0.0 (not a lookup failure)",
+                    decision_date,
+                )
+                return 0.0
             start_price = self._closing_price(prior_rows.iloc[-1])
-            end_price = self._closing_price(sym_rows.iloc[-1])
+            end_price = self._closing_price(later_rows.iloc[-1])
             if not start_price or not end_price or start_price <= 0:
                 return 0.0
             return (end_price / start_price) - 1.0
