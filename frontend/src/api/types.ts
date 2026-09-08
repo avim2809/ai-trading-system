@@ -568,6 +568,79 @@ export interface LogTailResponse {
   reset: boolean
 }
 
+// ── Pattern Recognition (Phase 3: on-demand scan API) ──
+
+export interface PatternPivot {
+  index: number
+  price: number
+  kind: 'peak' | 'trough'
+}
+
+export interface PatternMatchRecord {
+  symbol: string
+  asof: string
+  pattern: string
+  direction: 'long' | 'short'
+  confirmed: boolean
+  confirm_index: number
+  entry: number | null
+  stop: number | null
+  target: number | null
+  fit_quality: number | null
+  geometry_tolerance_used: number | null
+  volume_ratio: number | null
+  duration_bars: number
+  follow_through_atr: number | null
+  risk_reward: number | null
+  quality_score: number | null
+  score_breakdown: Record<string, number>
+  pivots: PatternPivot[]
+  meta: Record<string, unknown>
+}
+
+export interface PatternScanQuery {
+  pattern?: string
+  min_score?: number
+  direction?: 'long' | 'short'
+}
+
+export interface PatternScanTriggerRequest {
+  symbols: string[]
+  asof: string
+  data_source: 'cache' | 'synthetic'
+  lookback_days?: number
+  zigzag_pct?: number
+  min_score?: number
+  confirm_lookback_bars?: number
+  stop_atr_floor?: number
+  enabled_patterns?: string[] | null
+  seed?: number
+}
+
+export interface PatternScanMeta {
+  asof: string
+  data_source: string
+  symbols_requested: string[]
+  symbols_scanned: number
+  symbols_missing_data: string[]
+  symbols_failed: string[]
+  triggered_at: string
+  match_count: number
+}
+
+export interface PatternScanTriggerResponse {
+  scanned: number
+  matches: number
+  last_scan: PatternScanMeta
+}
+
+export interface PatternSummary {
+  total: number
+  by_pattern: Record<string, number>
+  by_direction: Record<string, number>
+  last_scan: PatternScanMeta | null
+}
+
 // ── System Resources ──
 
 export interface SystemResources {

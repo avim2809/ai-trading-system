@@ -8,7 +8,7 @@ import type {
   BrokerPosition, AccountInfo, CycleRecord, PendingApproval, ApprovalDetail, DecisionEntry,
   LessonsDigest,
   LLMProvider, LLMConfig, LLMCacheStats, RAGStats, EmbeddingModelInfo, LogTailResponse,
-  BlackboardView, OrderRecord, SystemResources,
+  BlackboardView, OrderRecord, SystemResources, PatternMatchRecord, PatternSummary,
 } from '../api/types'
 
 export const mockStrategies: StrategyInfo[] = [
@@ -161,4 +161,41 @@ export const mockLessons: LessonsDigest = {
   total: 3,
   counts: { correct: 2, incorrect: 1, partial: 0, unknown: 0 },
   recent_lessons: ['Trust the signal in trending regimes', 'Wait for confirmation before sizing up'],
+}
+
+// GET /patterns/scan returns [] until a scan has been triggered at least
+// once in that backend process (in-memory cache, no persistence) — these
+// fixtures represent the *post-trigger* state, used by PatternScanner.test.tsx
+// via server.use() overrides, not the default handlers (which mirror the
+// real pre-trigger empty state instead).
+export const mockPatternMatches: PatternMatchRecord[] = [
+  {
+    symbol: 'AAPL', asof: '2024-01-15', pattern: 'cup_handle', direction: 'long',
+    confirmed: true, confirm_index: 42, entry: 187.5, stop: 179.2, target: 204.1,
+    fit_quality: 0.91, geometry_tolerance_used: 0.05, volume_ratio: 1.8,
+    duration_bars: 38, follow_through_atr: 1.2, risk_reward: 2.4, quality_score: 82,
+    score_breakdown: { geometry: 30, trendline_fit: 18, volume_confirmation: 12, duration: 12, follow_through: 10, total: 82 },
+    pivots: [{ index: 4, price: 182.1, kind: 'trough' }, { index: 40, price: 187.5, kind: 'peak' }],
+    meta: {},
+  },
+  {
+    symbol: 'MSFT', asof: '2024-01-15', pattern: 'head_shoulders_top', direction: 'short',
+    confirmed: true, confirm_index: 30, entry: 402.0, stop: 415.5, target: 372.0,
+    fit_quality: 0.86, geometry_tolerance_used: 0.05, volume_ratio: 2.1,
+    duration_bars: 26, follow_through_atr: 1.5, risk_reward: 2.2, quality_score: 76,
+    score_breakdown: { geometry: 28, trendline_fit: 16, volume_confirmation: 14, duration: 10, follow_through: 8, total: 76 },
+    pivots: [{ index: 2, price: 398.0, kind: 'peak' }, { index: 30, price: 402.0, kind: 'peak' }],
+    meta: {},
+  },
+]
+
+export const mockPatternSummary: PatternSummary = {
+  total: 2,
+  by_pattern: { cup_handle: 1, head_shoulders_top: 1 },
+  by_direction: { long: 1, short: 1 },
+  last_scan: {
+    asof: '2024-01-15', data_source: 'synthetic', symbols_requested: ['AAPL', 'MSFT'],
+    symbols_scanned: 2, symbols_missing_data: [], symbols_failed: [],
+    triggered_at: '2026-07-21T19:49:04', match_count: 2,
+  },
 }

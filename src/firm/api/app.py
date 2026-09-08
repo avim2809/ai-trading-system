@@ -82,7 +82,7 @@ def create_app() -> FastAPI:
 
     import firm.strategies  # noqa: F401 — ensure @register decorators fire at startup
 
-    from firm.api.routers import agents, decisions, live, logs, meta, runs, system
+    from firm.api.routers import agents, decisions, live, logs, meta, patterns, runs, system
     application.include_router(meta.router, prefix="/api", tags=["meta"])
     application.include_router(runs.router, prefix="/api", tags=["runs"])
     application.include_router(agents.router, prefix="/api", tags=["agents"])
@@ -90,6 +90,7 @@ def create_app() -> FastAPI:
     application.include_router(logs.router, prefix="/api", tags=["logs"])
     application.include_router(decisions.router, prefix="/api", tags=["memory"])
     application.include_router(system.router, prefix="/api", tags=["system"])
+    application.include_router(patterns.router, prefix="/api", tags=["patterns"])
 
     try:
         from firm.api.routers import llm

@@ -7,6 +7,7 @@ const backtestLinks = [
   { to: '/', label: 'Dashboard', icon: '📊' },
   { to: '/new', label: 'New Backtest', icon: '🚀' },
   { to: '/inspector', label: 'Agent Inspector', icon: '🔍' },
+  { to: '/patterns', label: 'Pattern Scanner', icon: '📐' },
 ]
 
 const liveLinks = [

@@ -128,3 +128,46 @@ class StepRequest(BaseModel):
 
 class CompareRequest(BaseModel):
     run_ids: list[str]
+
+
+class PatternScanRequest(BaseModel):
+    """Body for ``POST /api/patterns/scan/trigger``.
+
+    Mirrors ``StepRequest``'s data_source/asof/symbols shape (a synchronous,
+    single-shot call — not a backtest run); the scan-tuning fields default to
+    exactly ``PatternRecognitionStrategy.default_params`` (see
+    ``firm/strategies/pattern_recognition.py``) so a trigger with an empty
+    body reproduces what the live/backtest strategy would scan for. Defaults
+    to ``data_source="synthetic"`` like every other request schema here, so
+    the endpoint works out of the box with no cached market data required.
+    """
+
+    symbols: list[str] = ["AAPL", "MSFT", "GOOG", "AMZN", "META"]
+    asof: str = "2023-12-31"
+    data_source: str = "synthetic"
+    lookback_days: int = Field(default=252, ge=20, le=2000)
+    zigzag_pct: float = Field(default=0.03, gt=0, lt=1)
+    min_score: float = Field(default=60.0, ge=0, le=100)
+    confirm_lookback_bars: int = Field(default=3, ge=1, le=50)
+    stop_atr_floor: float = Field(default=1.5, ge=0)
+    # None = all patterns enabled; else a list of pattern names from
+    # firm.patterns.match.PatternMatch.pattern to restrict the scan to.
+    enabled_patterns: list[str] | None = None
+    seed: int = 42
+
+    @field_validator("asof")
+    @classmethod
+    def _valid_iso_date(cls, v: str) -> str:
+        try:
+            date.fromisoformat(v)
+        except ValueError as exc:
+            raise ValueError(f"invalid date {v!r}; expected YYYY-MM-DD") from exc
+        return v
+
+    @field_validator("data_source")
+    @classmethod
+    def _valid_data_source(cls, v: str) -> str:
+        allowed = {"cache", "synthetic"}
+        if v not in allowed:
+            raise ValueError(f"data_source must be one of {sorted(allowed)}")
+        return v

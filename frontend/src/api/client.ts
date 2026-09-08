@@ -34,6 +34,11 @@ import type {
   DecisionEntry,
   LessonsDigest,
   SystemResources,
+  PatternMatchRecord,
+  PatternScanQuery,
+  PatternScanTriggerRequest,
+  PatternScanTriggerResponse,
+  PatternSummary,
 } from './types'
 
 export type LiveInstance = 'ibkr' | 'alpaca'
@@ -260,6 +265,33 @@ export const api = {
 
   getLessons: (limit = 10) =>
     fetchJson<LessonsDigest>(`/memory/lessons?limit=${limit}`),
+
+  // ── Pattern Recognition (Phase 3: on-demand scan API) ──
+  //
+  // No frontend page consumes these yet (that's a later phase) — this is
+  // just the typed client plumbing so one can be built without touching
+  // this file again. Scans only ever run when triggerPatternScan() is
+  // called explicitly; there is no polling/scheduled scan anywhere here.
+
+  getPatternScan: (query?: PatternScanQuery) => {
+    const params = new URLSearchParams()
+    if (query?.pattern) params.set('pattern', query.pattern)
+    if (query?.min_score !== undefined) params.set('min_score', String(query.min_score))
+    if (query?.direction) params.set('direction', query.direction)
+    const qs = params.toString()
+    return fetchJson<PatternMatchRecord[]>(`/patterns/scan${qs ? `?${qs}` : ''}`)
+  },
+
+  getPatternsForSymbol: (symbol: string) =>
+    fetchJson<PatternMatchRecord[]>(`/patterns/${symbol}`),
+
+  getPatternSummary: () => fetchJson<PatternSummary>('/patterns/summary'),
+
+  triggerPatternScan: (req: PatternScanTriggerRequest) =>
+    fetchJson<PatternScanTriggerResponse>('/patterns/scan/trigger', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
 
   // ── System Resources ──
 

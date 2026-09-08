@@ -77,4 +77,16 @@ export const handlers = [
   http.get(`${API}/system/resources`, () => HttpResponse.json(m.mockSystemResources)),
   http.post(`${API}/system/restart`, () => HttpResponse.json({ status: 'restarting' })),
   http.post(`${API}/system/kill`, () => HttpResponse.json({ status: 'killing' })),
+
+  // Pattern recognition scan cache is in-memory/per-process with no
+  // persistence — the real default (before any trigger) is empty, so that's
+  // what these defaults mirror; PatternScanner.test.tsx overrides them with
+  // server.use() for the post-trigger cases.
+  http.get(`${API}/patterns/scan`, () => HttpResponse.json([])),
+  http.get(`${API}/patterns/summary`, () => HttpResponse.json({ total: 0, by_pattern: {}, by_direction: {}, last_scan: null })),
+  http.post(`${API}/patterns/scan/trigger`, () => HttpResponse.json({
+    scanned: 0,
+    matches: 0,
+    last_scan: { asof: '2024-01-15', data_source: 'synthetic', symbols_requested: [], symbols_scanned: 0, symbols_missing_data: [], symbols_failed: [], triggered_at: '2026-07-21T19:49:04', match_count: 0 },
+  })),
 ]

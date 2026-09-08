@@ -9,6 +9,7 @@ const NewBacktest = lazy(() => import('./pages/NewBacktest'))
 const RunDetail = lazy(() => import('./pages/RunDetail'))
 const Compare = lazy(() => import('./pages/Compare'))
 const AgentInspector = lazy(() => import('./pages/AgentInspector'))
+const PatternScanner = lazy(() => import('./pages/PatternScanner'))
 const LiveDashboard = lazy(() => import('./pages/LiveDashboard'))
 const LiveConfig = lazy(() => import('./pages/LiveConfig'))
 const Approvals = lazy(() => import('./pages/Approvals'))
@@ -26,6 +27,7 @@ export default function App() {
         <Route path="runs/:runId" element={<RunDetail />} />
         <Route path="compare" element={<Compare />} />
         <Route path="inspector" element={<AgentInspector />} />
+        <Route path="patterns" element={<PatternScanner />} />
         <Route path="live" element={<LiveDashboard />} />
         <Route path="live/config" element={<LiveConfig />} />
         <Route path="live/approvals" element={<Approvals />} />
