@@ -163,7 +163,9 @@ class DanelfinProvider(DataProvider):
                 if "402" in str(exc) or "403" in str(exc):
                     log.warning("danelfin_ai_scores_unavailable symbol=%s (%s)", symbol, exc)
                 else:
-                    log.warning("danelfin_ai_scores_failed symbol=%s (%s)", symbol, exc)
+                    log.warning(
+                        "danelfin_ai_scores_failed symbol=%s (%s)", symbol, exc, exc_info=True
+                    )
                 continue
             except Exception:
                 log.exception("danelfin_ai_scores_failed symbol=%s", symbol)
@@ -380,6 +382,7 @@ class DanelfinProvider(DataProvider):
                         log.warning(
                             "danelfin_historical_sector_scan_failed sector=%s date=%s low_risk=%d page=%d (%s)",
                             sector, date, low_risk, page, exc,
+                            exc_info=True,
                         )
                     break
                 inner = data.get(date, {}) if isinstance(data, dict) else {}

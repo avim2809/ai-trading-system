@@ -109,7 +109,10 @@ class AlphaVantageProvider(DataProvider):
                     },
                 )
             except ProviderError as exc:
-                log.warning("alphavantage_fundamentals_failed symbol=%s (%s)", symbol, exc)
+                log.warning(
+                    "alphavantage_fundamentals_failed symbol=%s (%s)",
+                    symbol, exc, exc_info=True,
+                )
                 continue
             if "Information" in payload or "Note" in payload:
                 log.warning(
@@ -233,7 +236,9 @@ class AlphaVantageProvider(DataProvider):
                 params={"function": "OVERVIEW", "symbol": symbol, "apikey": self._api_key},
             )
         except ProviderError as exc:
-            log.warning("alphavantage_get_sector_failed symbol=%s (%s)", symbol, exc)
+            log.warning(
+                "alphavantage_get_sector_failed symbol=%s (%s)", symbol, exc, exc_info=True
+            )
             return None
         except Exception:
             log.exception("alphavantage_get_sector_failed symbol=%s", symbol)

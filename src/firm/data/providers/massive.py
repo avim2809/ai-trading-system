@@ -277,8 +277,16 @@ class MassiveProvider(DataProvider):
                                 }
                             )
             except ProviderError as exc:
-                log.warning("massive_news_failed symbol=%s (%s)", sym, exc)
-                if "429" in str(exc):
+                is_rate_limited = "429" in str(exc)
+                # A traceback adds no value for the routine/expected
+                # rate-limit case (the raise site is right next to the HTTP
+                # call, one line up) but does help diagnose a genuinely
+                # unrecognized ProviderError.
+                log.warning(
+                    "massive_news_failed symbol=%s (%s)", sym, exc,
+                    exc_info=not is_rate_limited,
+                )
+                if is_rate_limited:
                     log.warning(
                         "massive_news_rate_limited — stopping batch after %s "
                         "(remaining symbols will use cache/fallback)",
@@ -363,7 +371,9 @@ class MassiveProvider(DataProvider):
                         )
                         type(self)._fundamentals_plan_blocked = True
                     continue
-                log.warning("massive_fundamentals_failed symbol=%s (%s)", sym, exc)
+                log.warning(
+                    "massive_fundamentals_failed symbol=%s (%s)", sym, exc, exc_info=True
+                )
             except Exception:
                 log.exception("massive_fundamentals_failed symbol=%s", sym)
         if not frames:

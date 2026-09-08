@@ -76,7 +76,9 @@ class TwelveDataProvider(DataProvider):
                         )
                         type(self)._fundamentals_plan_blocked = True
                     continue
-                log.warning("twelvedata_fundamentals_failed symbol=%s (%s)", symbol, exc)
+                log.warning(
+                    "twelvedata_fundamentals_failed symbol=%s (%s)", symbol, exc, exc_info=True
+                )
                 continue
             row = _statistics_to_row(symbol, stats, start_ts, end_ts)
             if row:

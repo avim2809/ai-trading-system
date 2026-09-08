@@ -61,7 +61,9 @@ class FinnhubProvider(DataProvider):
                     params={"symbol": symbol, "metric": "all", "token": self._api_key},
                 )
             except ProviderError as exc:
-                log.warning("finnhub_fundamentals_failed symbol=%s (%s)", symbol, exc)
+                log.warning(
+                    "finnhub_fundamentals_failed symbol=%s (%s)", symbol, exc, exc_info=True
+                )
                 continue
             rows = _metric_payload_to_rows(symbol, payload, start_ts, end_ts)
             if rows:
@@ -95,7 +97,9 @@ class FinnhubProvider(DataProvider):
                     },
                 )
             except ProviderError as exc:
-                log.warning("finnhub_news_failed symbol=%s (%s)", sym, exc)
+                log.warning(
+                    "finnhub_news_failed symbol=%s (%s)", sym, exc, exc_info=True
+                )
                 continue
             if not isinstance(articles, list):
                 log.warning("finnhub_news_unexpected_payload symbol=%s", sym)

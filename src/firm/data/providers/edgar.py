@@ -88,7 +88,9 @@ class EdgarProvider(DataProvider):
                     headers={"User-Agent": self._user_agent, "Accept": "application/json"},
                 )
             except ProviderError as exc:
-                log.warning("edgar_fundamentals_failed symbol=%s (%s)", symbol, exc)
+                log.warning(
+                    "edgar_fundamentals_failed symbol=%s (%s)", symbol, exc, exc_info=True
+                )
                 continue
             rows = _companyfacts_to_rows(symbol, payload, start_ts, end_ts)
             if rows:
@@ -153,7 +155,10 @@ class EdgarProvider(DataProvider):
                 with open(cache_path, "w") as f:
                     json.dump(raw, f)
             except ProviderError as exc:
-                log.warning("SEC CIK map refresh failed (%s); using cache if present", exc)
+                log.warning(
+                    "SEC CIK map refresh failed (%s); using cache if present",
+                    exc, exc_info=True,
+                )
         if cache_path.exists():
             with open(cache_path) as f:
                 raw = json.load(f)

@@ -240,7 +240,9 @@ class FMPProvider(DataProvider):
                         symbol,
                     )
                 else:
-                    log.warning("fmp_fundamentals_failed symbol=%s (%s)", symbol, exc)
+                    log.warning(
+                        "fmp_fundamentals_failed symbol=%s (%s)", symbol, exc, exc_info=True
+                    )
             except Exception:
                 log.exception("fmp_fundamentals_failed symbol=%s", symbol)
         if not frames:
@@ -290,7 +292,9 @@ class FMPProvider(DataProvider):
                         symbol,
                     )
                 else:
-                    log.warning("fmp_analyst_ratings_failed symbol=%s (%s)", symbol, exc)
+                    log.warning(
+                        "fmp_analyst_ratings_failed symbol=%s (%s)", symbol, exc, exc_info=True
+                    )
                 continue
             except Exception:
                 log.exception("fmp_analyst_ratings_failed symbol=%s", symbol)
