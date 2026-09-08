@@ -27,6 +27,7 @@ class PipelineWarmupGate:
         self._ready = threading.Event()
         self._started = False
         self._lock = threading.Lock()
+        self._thread: threading.Thread | None = None
 
     @property
     def is_ready(self) -> bool:
@@ -34,6 +35,23 @@ class PipelineWarmupGate:
 
     def wait_ready(self, timeout: float | None = None) -> bool:
         return self._ready.wait(timeout=timeout)
+
+    def join_background(self, timeout: float | None = None) -> None:
+        """Block until the background warmup thread has fully terminated.
+
+        For callers (tests, mainly) that need the thread genuinely gone —
+        not just its work done — before proceeding: ``wait_ready()`` alone
+        only guarantees ``_run``'s ``finally`` has set the event, which
+        happens just *before* the thread's last frame returns, not after.
+        A real production caller never needs this (the thread is daemon and
+        the process doesn't care), but tests that spawn one directly should
+        join it rather than guess with a sleep — see the 2026-08-02
+        full-suite-hang investigation this exists to avoid a recurrence of
+        (docs/remediation_progress.md #52).
+        """
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=timeout)
 
     def start_background(self, config: dict[str, Any]) -> None:
         with self._lock:
@@ -44,12 +62,13 @@ class PipelineWarmupGate:
                 log.info("Pipeline warmup disabled (pipeline_warmup=false)")
                 self._ready.set()
                 return
-            threading.Thread(
+            self._thread = threading.Thread(
                 target=self._run,
                 args=(config,),
                 name="pipeline-warmup",
                 daemon=True,
-            ).start()
+            )
+            self._thread.start()
 
     def _run(self, config: dict[str, Any]) -> None:
         try:

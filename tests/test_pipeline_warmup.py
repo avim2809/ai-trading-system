@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock, patch
 
 from firm.live.pipeline_warmup import PipelineWarmupGate, warm_pipeline_dependencies
@@ -55,6 +54,11 @@ def test_warmup_gate_background_sets_ready():
     with patch("firm.live.pipeline_warmup.warm_pipeline_dependencies") as mock_warm:
         gate.start_background({"pipeline_warmup": True, "strategies": []})
         assert gate.wait_ready(timeout=2.0)
+        # Join, not just wait_ready -- the thread genuinely exits here rather
+        # than merely having set the ready event moments before its last
+        # frame returns (see join_background's docstring; a real test-hygiene
+        # fix, not the previous ad hoc time.sleep proxy for "probably done").
+        gate.join_background(timeout=2.0)
     mock_warm.assert_called_once()
 
 
@@ -64,4 +68,20 @@ def test_warmup_gate_start_is_idempotent():
         gate.start_background({"pipeline_warmup": True})
         gate.start_background({"pipeline_warmup": True})
         assert gate.wait_ready(timeout=2.0)
-    time.sleep(0.05)
+    gate.join_background(timeout=2.0)
+
+
+def test_join_background_is_a_noop_before_start():
+    """No thread was ever spawned (disabled path never creates one) -- must
+    return immediately, not hang waiting on a thread that doesn't exist."""
+    gate = PipelineWarmupGate()
+    gate.join_background(timeout=1.0)
+
+
+def test_join_background_waits_for_real_thread_completion():
+    gate = PipelineWarmupGate()
+    with patch("firm.live.pipeline_warmup.warm_pipeline_dependencies"):
+        gate.start_background({"pipeline_warmup": True})
+        gate.join_background(timeout=2.0)
+    assert gate._thread is not None
+    assert not gate._thread.is_alive()
