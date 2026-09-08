@@ -72,6 +72,19 @@ local = [
 report = [
     "quantstats>=0.0.62",
 ]
+# Optional: XGBoost confirmation classifier for the pattern-recognition
+# strategy's ML layer (firm.patterns.ml -- Phase 4 of
+# docs/pattern_recognition_plan.md, deliberately scoped to just this
+# classifier: no CNN/GAF image validator, no PPO RL sizer, which would need
+# torch/stable-baselines3/gymnasium/pyts). See scripts/train_pattern_ml.py.
+# NOTE: on Linux, xgboost's PyPI wheel pulls in `nvidia-nccl-cu13` (~290MB) as
+# a transitive dependency even for pure-CPU use -- it's an unused multi-GPU
+# communication library. `pip uninstall -y nvidia-nccl-cu13` right after
+# installing this extra is safe and recommended, especially on a
+# disk/RAM-constrained host: CPU training/inference never touches it.
+patterns_ml = [
+    "xgboost>=2.0",
+]
 # Optional: Investing.com Pro authenticated scraper (firm.data.investing).
 # Off by default (INVESTING_SCRAPER_ENABLED unset) — this extra is only
 # needed once that feature is actually enabled. See
