@@ -1,10 +1,29 @@
 # Chart pattern recognition — implementation plan & progress tracker
 
-**Status:** Phase 0 + Phase 1 complete, tested, and verified end-to-end
-(backend + frontend) — not yet committed to git. ·
-**Date:** 2026-09-09 · **Scope:** new `src/firm/patterns/` package feeding a
-new Strategy #13 (`pattern_recognition`) into the existing 12-strategy /
-8-agent pipeline, plus the frontend surfaces it touches.
+**Status:** All 5 phases complete, tested, and verified end-to-end (a
+consolidated full-suite run against the final combined tree, plus a fresh
+live browser pass covering every touched page). Phase 0+1 **committed**
+(`53d5345`); Phases 2-5 verified and ready to commit. · **Date:** 2026-09-09
+· **Scope:** new `src/firm/patterns/` package feeding a new Strategy #13
+(`pattern_recognition`) into the existing 12-strategy/8-agent pipeline, an
+XGBoost confirmation-classifier training pipeline, on-demand REST scan
+endpoints + a `/patterns` frontend page, pattern-aware LLM validation, and
+every frontend surface across all of the above.
+
+**Final consolidated verification** (run against the complete tree, all 5
+phases combined — supersedes each phase's own in-flight numbers from when
+other phases were still concurrently editing the same tree, see §1.2):
+`pytest -q --ignore=tests/test_api.py` → **1648 passed**; `tests/test_api.py`
+(run separately per this repo's convention) → **52 passed**; frontend
+`npx tsc --noEmit` → clean; `npx vitest run` → **94 passed** (19 files);
+`frontend/dist/` rebuilt. A fresh live Playwright pass on a newly-started
+isolated instance (port 8011, `live_engine_running: false` confirmed before
+use) re-verified `/new`, `/live/config`, and `/inspector` for regressions
+and exercised the new `/patterns` page end-to-end (real "Scan Now" trigger
+→ 5 confirmed patterns of 5 different types across 5 synthetic symbols,
+correctly scored/rendered) — zero console/page errors across all of it. Both
+production instances (`:8000` IBKR, `:8001` Alpaca) confirmed unaffected
+throughout, under their original unchanged PIDs.
 
 This is the durable, repo-committed record of this initiative — the original
 ask was a deep-dive research report + implementation plan for multi-bar chart
@@ -20,31 +39,35 @@ the real codebase.
 ## 1. How to resume
 
 1. Read section 4 ("Status") for what's done vs. outstanding — short version:
-   Phase 0 + 1 (detection engine, Strategy #13, tests, frontend support) are
-   done and verified; Phases 2-5 are not started (deliberately deferred, see
-   section 2's table).
-2. **Nothing has been committed to git yet** — `git status` will show
-   `src/firm/patterns/`, `src/firm/strategies/pattern_recognition.py`,
-   `tests/test_patterns.py` as untracked, plus modified files in
-   `src/firm/strategies/__init__.py`, `src/firm/api/routers/meta.py`,
-   `frontend/src/pages/{AgentInspector,NewBacktest}.tsx`, and a rebuilt
-   `frontend/dist/`. All tests pass (26/26 new pattern tests, 1614/1614
-   existing backend tests, 91/91 frontend tests) and it's been verified
-   working live via a real Playwright browser run (see section 6) — treat it
-   as ready to commit, not as unverified work-in-progress.
+   Phase 0+1 is committed (`53d5345`); Phases 2, 3, 4, 5 are all complete,
+   tested, and (as of this writing) sitting uncommitted in the working tree,
+   ready to commit. If you're reading this after that commit happened,
+   `git log` will show it — this doc may lag one edit behind reality right
+   after a commit, so cross-check `git status`/`git log` rather than trusting
+   this line blindly forever.
+2. Phases 2-4 were each built by an independent background subagent working
+   concurrently in the *same* working tree (deliberately, to parallelize
+   independent surface areas — LLM prompt, REST API, ML pipeline — that
+   don't share files) — each was briefed with the real contracts/conventions
+   from Phases 0-1 and told not to touch `src/firm/patterns/rules/`,
+   `scanner.py`, `extrema.py`, `match.py`, `scorer.py`, or
+   `strategies/pattern_recognition.py` (verified untouched by each). Their
+   own individually-reported test-suite counts differ slightly from each
+   other and from this doc because the tree kept changing under them
+   mid-run — each confirmed *zero failures* in their own run regardless, and
+   a final consolidated full-suite run (see §4) is the number that actually
+   matters, not any single subagent's in-flight count.
 3. Section 3 ("Deviations") explains *why* the implementation departs from
    the original chat plan in several places — re-read it before assuming the
    original plan's pseudocode is authoritative; it wasn't checked against the
    real `BaseStrategy`/`Signal`/`PitView` contracts when written.
 4. Section 5 lists every file with a one-line purpose — use it as a map
    instead of re-reading all the source top to bottom.
-5. Section 6 documents four real bugs found while writing tests (a genuinely
-   backwards comparison in the zigzag bootstrap phase, a systemic
-   "pivots[-N:] isn't always the right window" issue across three rule
-   modules, a handle-window measurement bug, and a structural characteristic
-   of Double Top/Bottom's risk:reward) — worth reading before touching
-   `extrema.py` or the rule modules, since the fixes are non-obvious and
-   easy to accidentally revert.
+5. Section 6 documents real bugs/design issues found across every phase
+   (starting with a genuinely backwards comparison in the zigzag bootstrap
+   phase) — worth reading before touching `extrema.py`, the rule modules, or
+   the ML labeling code, since several fixes are non-obvious and easy to
+   accidentally revert.
 
 ## 2. Original research plan (condensed)
 
@@ -62,10 +85,10 @@ Proposed 5-phase rollout (13 weeks, illustrative — not a hard commitment):
 |---|---|---|
 | 0 | Foundation: extrema engine, rule detectors, scorer, signals | **Done — tested, see §4/§6** |
 | 1 | Register as Strategy #13, plug into existing pipeline | **Done — tested end-to-end, see §4/§6** |
-| 2 | Enhance `TechnicalAnalyst`/LLM variant with pattern-specific RAG validation | Not started — see 3.4, likely lower-value than originally scoped |
-| 3 | Standalone scheduled scanner job + `/api/patterns/*` REST endpoints | Not started |
-| 4 | ML training pipeline (XGBoost confirmation, CNN/GAF validator, PPO sizer) | Not started |
-| 5 | React frontend `/patterns` page | Not started |
+| 2 | Enhance `TechnicalAnalyst`/LLM variant with pattern-specific RAG validation | **Done — tested, see §4/§6.6** (narrower than originally scoped, see 3.7 — surgical, not a rewrite) |
+| 3 | On-demand `/api/patterns/*` REST endpoints (no scheduled job — see §4/§6.7) | **Done — tested, see §4/§6.7** |
+| 4 | ML training pipeline — **XGBoost confirmation only**, CNN/GAF + PPO sizer deliberately descoped (see §4/§6.8) | **Done — tested, see §4/§6.8** |
+| 5 | React frontend `/patterns` page | **Done — tested end-to-end, see §4/§6.10** |
 
 Empirical pattern algorithm reference (Lo/Mamaysky/Wang 2000 five-extrema
 framework) — geometric conditions and measured-move targets for each pattern
@@ -218,16 +241,135 @@ of its illustrative pseudocode didn't match reality:
       genuine `symmetrical_triangle` signal on MSFT (quality 73, R:R 4.1)
       that rendered through the new `PatternDetails` line with no console
       errors. See §6.4 for a live-instance safety note from this exercise.
-- [ ] Not yet committed to git — see §1.2. Commit as one "Phase 0+1
-      pattern-detection engine + Strategy #13 + frontend support" change
-      once the user confirms (per-user preference: commit self-contained
-      tested chunks rather than leaving everything uncommitted, but only
-      ever with explicit go-ahead).
-- **Not planned this pass:** Phases 2 (LLM/RAG agent enhancement), 3 (live
-  scheduler job + REST endpoints), 4 (ML training), 5 (dedicated `/patterns`
-  frontend page) — each needs its own review/testing cycle and touches more
-  sensitive surface (live scheduler, new API routes) than Phase 0/1's
-  pure-addition, nothing-auto-enabled-live footprint (see §5.1).
+- [x] **Committed** as `53d5345` ("Add chart-pattern recognition (Strategy
+      #13) with full test coverage") — Phase 0+1 only (patterns package,
+      Strategy #13, tests, the 3 frontend fixes). Phases 2-4 below came
+      after this commit and are uncommitted as of this writing.
+
+### Phase 2 — pattern-aware LLM validation (done)
+
+- [x] `src/firm/agents/llm/technical_analyst_llm.py` — `LLMTechnicalAnalyst
+      .run()` now branches on `sig.strategy == "pattern_recognition"` to use
+      a richer RAG query (`f"{pattern} chart pattern reliability breakout
+      confirmation"` instead of the generic per-strategy one) and a richer
+      prompt surfacing `pattern/direction/entry/stop/target/risk_reward
+      /quality_score/volume_ratio` from `sig.meta`. Reuses the *exact* same
+      `AnalystEnhancementResponse` JSON contract, `_call_llm`/
+      `_bounded_override` mechanics, and z-score renormalization as every
+      other strategy's enhancement path — only the query/prompt text
+      differs by branch; the non-pattern path is byte-identical to before.
+- [x] `tests/test_llm.py::TestLLMTechnicalAnalyst
+      ::test_pattern_recognition_signal_uses_pattern_specific_prompt` — new
+      test asserting the pattern-specific RAG query and prompt content
+      (checks for the pattern name, formatted entry/stop/target/risk:reward,
+      and the *absence* of the generic prompt's wording). Existing
+      `test_returns_signal_set` (momentum path) untouched and still passes.
+- [x] Along the way, found (and confirmed, via `git stash` A/B) a
+      **pre-existing, unrelated** test-fixture gap: `tests/test_llm.py`'s
+      `mock_llm_modules` fixture never registers `"firm.llm.schemas"` in
+      `sys.modules`, so running that file *standalone* (before anything else
+      has imported the real `firm.llm.*`) spuriously fails ~22 unrelated
+      tests. Not fixed (out of scope, pre-existing, and the full suite's
+      natural import order never hits it) — flagging here so it isn't
+      mistaken for something Phase 2 broke if someone runs
+      `pytest tests/test_llm.py` in isolation.
+
+### Phase 3 — on-demand pattern-scan REST API (done)
+
+- [x] `src/firm/api/routers/patterns.py` (registered in `app.py` same as
+      every other router) — 4 endpoints, all synchronous, **none scheduled**:
+      `POST /api/patterns/scan/trigger` (body: `PatternScanRequest` —
+      symbols/asof/data_source/scan-tuning params, all defaulted from
+      `PatternRecognitionStrategy.default_params`; runs a real scan via the
+      real `scan_symbol` + the strategy's own `_adjusted_ohlc`, reused not
+      reimplemented, and replaces an in-memory cache), `GET /api/patterns
+      /scan` (cached results, filterable by pattern/min_score/direction,
+      best-quality-first), `GET /api/patterns/summary` (counts by
+      pattern/direction), `GET /api/patterns/{symbol}` (per-symbol, `[]` not
+      404 when empty — registered *last* so it doesn't shadow the three
+      fixed-path routes above it, since Starlette matches in registration
+      order). Cache is process-local, in-memory, non-persistent by design —
+      no new persistence layer for this pass.
+- [x] `frontend/src/api/{types,client}.ts` — full typed plumbing
+      (`PatternMatchRecord`/`PatternScanQuery`/`PatternScanTriggerRequest`
+      /`PatternScanTriggerResponse`/`PatternSummary` + 4 `api.*` functions)
+      ready for Phase 5 to consume; `npx tsc --noEmit` clean.
+- [x] `tests/test_patterns_api.py` — 24 tests, all passing.
+- [x] **Deliberately descoped** (see §6.7 for the full reasoning): the
+      `/api/patterns/history` trade-outcome-tracking endpoint (needs new
+      persistence — a separate feature) and, most importantly, **any
+      scheduled/periodic scanning** — nothing wired into `app.py`'s
+      lifespan or `firm.live.scheduler.TradingScheduler`; every scan is
+      human/frontend-triggered only. Zero risk to the two running
+      production engines by construction, not just by convention.
+
+### Phase 4 — ML confirmation layer (XGBoost only; done)
+
+- [x] `src/firm/patterns/ml/feature_engineering.py` — `build_features(match,
+      ohlcv=None)`: one `PatternMatch` → ~47-key numeric feature dict
+      (scalar fields, scale-invariant stop/target distances, unpacked
+      `score_breakdown`, one-hot pattern/pattern-family encoding, optional
+      OHLCV-derived context). Pure, NaN-safe function.
+- [x] `src/firm/patterns/ml/labeling.py` — `label_triple_barrier` (López de
+      Prado): walks forward from `confirm_index + 1` against the pattern's
+      *own* entry/stop/target, `+1`/`-1`/`0` (target/stop/timeout),
+      same-bar collisions resolve to stop (fail-closed, matching this
+      codebase's convention elsewhere). `DEFAULT_TIMEOUT_BARS=20`,
+      parameterized.
+- [x] `src/firm/patterns/ml/xgb_classifier.py` — `train`/`predict_proba`/
+      `predict_label`/`save`/`load`, wrapping a fixed `(-1, 0, +1)` label
+      space regardless of which classes a given training slice happens to
+      contain (xgboost 3.x requires contiguous `0..k-1` fit-time labels).
+- [x] `scripts/train_pattern_ml.py` — end-to-end CLI (scan → feature → label
+      → train → report), universe/date-range/output/scan-params
+      CLI-configurable, defaults to `--data-source synthetic` so a bare
+      invocation never touches real market data. See §6.8 for a real
+      look-ahead/degenerate-labeling bug found and fixed while building this.
+- [x] `tests/test_pattern_ml.py` — 35 tests (xgboost-dependent ones
+      skip-gated so the file degrades gracefully without the extra
+      installed).
+- [x] `xgboost` added as an **optional** `patterns_ml` extra in
+      `pyproject.toml` (same convention as the existing `report`/quantstats
+      extra) — base install untouched. See §6.9 for a transitive-dependency
+      issue found and corrected during install.
+- [x] **Deliberately descoped**: the CNN/GAF image validator and PPO RL
+      position sizer from the original research plan — both need heavy new
+      dependencies (torch, stable-baselines3, gymnasium, pyts) that would be
+      irresponsible to add unsupervised to this resource-constrained,
+      live-trading-hosting VPS. ONNX export also skipped (plain
+      pickle for now) — noted as the natural next step for low-latency
+      serving if this is ever wired into a live scan path.
+
+### Phase 5 — `/patterns` frontend page (done)
+
+- [x] `frontend/src/pages/PatternScanner.tsx` (route `/patterns`, nav label
+      "Pattern Scanner" in `Layout.tsx` right after "Agent Inspector") —
+      scan-trigger form (modeled on `AgentInspector.tsx`) + 3 summary stat
+      tiles + filter row (pattern/min-score/direction) + results table
+      (modeled on `OrderHistory.tsx`), all against the Phase 3 API. Server-
+      side filtering (each filter combination is its own query key) uses
+      `placeholderData: keepPreviousData` so changing a filter doesn't blank
+      the whole page back to a spinner — see §6.10 for why that mattered.
+- [x] `frontend/src/pages/PatternScanner.test.tsx` + updated
+      `frontend/src/test/{handlers,mockData}.ts` fixtures (verified against
+      real backend curl output, not guessed).
+- [x] `frontend/src/App.tsx` (+route), `frontend/src/components/Layout.tsx`
+      (+nav link) — both minimal, additive diffs.
+- [x] `npx tsc --noEmit` clean; `npx vitest run` 94/94 (91 baseline + 3 new);
+      `frontend/dist/` rebuilt.
+- [x] Live-verified twice — once by the building subagent (real trigger,
+      real filter round-trip against the real backend, 375px mobile layout
+      check) and again in the final consolidated pass (§ below) alongside a
+      regression check of `/new`, `/live/config`, `/inspector`.
+
+**Consolidated verification (final, against the complete 5-phase tree) —
+see the status line at the top of this doc for the numbers.** This
+supersedes every individual phase's own in-flight test counts, which were
+each taken at a different moment while the other phases were still being
+built concurrently in the same working tree (a deliberate parallelization
+choice — see §1.2 — not a mistake, but it does mean no single subagent's
+reported number should be treated as the final word).
+- **Not yet committed to git** (Phases 2-5) — see §1.1.
 
 ## 5. Architecture reference
 
@@ -249,6 +391,21 @@ of its illustrative pseudocode didn't match reality:
 | `src/firm/api/routers/meta.py` | +`pattern_recognition` entry in `STRATEGY_INFO` |
 | `frontend/src/pages/AgentInspector.tsx` | +`PatternDetails` signal-meta rendering |
 | `frontend/src/pages/NewBacktest.tsx` | stale hardcoded-count copy fix |
+| `src/firm/agents/llm/technical_analyst_llm.py` | +pattern-specific RAG query/prompt (Phase 2) |
+| `src/firm/api/routers/patterns.py` | 4 on-demand scan endpoints (Phase 3) |
+| `frontend/src/api/{types,client}.ts` | +`Pattern*` types/client functions (Phase 3) |
+| `src/firm/patterns/ml/feature_engineering.py` | `build_features()` (Phase 4) |
+| `src/firm/patterns/ml/labeling.py` | `label_triple_barrier()` (Phase 4) |
+| `src/firm/patterns/ml/xgb_classifier.py` | train/predict/save/load wrapper (Phase 4) |
+| `scripts/train_pattern_ml.py` | end-to-end training CLI (Phase 4) |
+| `tests/test_llm.py` | +1 test (Phase 2) |
+| `tests/test_patterns_api.py` | 24 tests (Phase 3) |
+| `tests/test_pattern_ml.py` | 35 tests (Phase 4) |
+| `frontend/src/pages/PatternScanner.tsx` | `/patterns` page (Phase 5) |
+| `frontend/src/pages/PatternScanner.test.tsx` | 3 tests (Phase 5) |
+| `frontend/src/App.tsx` | +`/patterns` route (Phase 5) |
+| `frontend/src/components/Layout.tsx` | +nav link (Phase 5) |
+| `frontend/src/test/{handlers,mockData}.ts` | +pattern-endpoint fixtures (Phase 5) |
 
 ### 5.1 Live-safety note
 
@@ -264,13 +421,14 @@ full universe scan. It will not affect live trading unless a human
 deliberately adds `pattern_recognition` to `config/live.yaml`'s
 `strategies.enabled` list.
 
-## 6. Bugs found while writing tests
+## 6. Bugs and design notes found across every phase
 
-Writing hand-built fixtures for every pattern (rather than trusting the
-detectors' correctness by inspection) surfaced four real issues — none of
-them fixture problems, all genuine implementation bugs or under-specified
-behavior. Recorded here because the fixes are non-obvious and it would be
-easy for a future edit to accidentally revert one of them.
+§6.1-6.5 are from Phase 0/1 (writing hand-built fixtures for every pattern,
+rather than trusting the detectors' correctness by inspection, surfaced real
+implementation bugs, not fixture problems); §6.6-6.9 are from Phases 2-4;
+§6.10 is from Phase 5. Recorded here because several of the fixes are
+non-obvious and it would be easy for a future edit to accidentally revert
+one of them.
 
 ### 6.1 ZigZag bootstrap phase had its anchors backwards
 
@@ -379,3 +537,81 @@ false`. Worth remembering before ever launching this app directly on this
 machine again: **always check `ss -ltnp` for the target port first**, and
 prefer a port far from 8000/8001 (and 5173, which had an unrelated stray
 node process on it already).
+
+### 6.6 Phase 2 note: the generic RAG query degenerates for this strategy
+
+Every other strategy's generic enhancement query
+(`f"academic research on {sig.strategy} strategy patterns for {sig.symbol}"`)
+is at least a plausible search — "academic research on momentum strategy
+patterns". For `pattern_recognition`, `sig.strategy` is always literally the
+string `"pattern_recognition"`, so the same template produces "academic
+research on pattern_recognition strategy patterns" for *every* detection
+regardless of whether it's a cup & handle or a head & shoulders — the actual
+useful query key (which specific chart pattern) was sitting unused in
+`sig.meta["pattern"]` the whole time. Worth remembering if any *other* future
+strategy also carries its real semantic content in `meta` rather than in its
+own name.
+
+### 6.7 Phase 3 note: route registration order matters for the catch-all
+
+FastAPI/Starlette match path operations in registration order. `GET
+/api/patterns/{symbol}` is a single-segment catch-all that would shadow
+`/api/patterns/scan` and `/api/patterns/summary` (matching them with
+`symbol="scan"`/`"summary"`) if registered before them. The router file
+registers the three fixed-path routes first and the catch-all last,
+specifically to avoid this — easy to break by innocently reordering the
+functions in the file, so any future edit to that file should preserve the
+order (or add an explicit test — `tests/test_patterns_api.py` does cover
+this, so a reorder that breaks it should fail loudly).
+
+### 6.8 Phase 4 note: a single-shot scan almost never has forward history to label
+
+`firm.patterns.confirmation.find_confirmation`'s search is, by design, "most
+recent breakout within `confirm_lookback_bars` of the window's *last* bar" —
+exactly what a live strategy wants ("did something just confirm as of
+today"). But it means a single whole-series `scan_symbol()` call over
+historical data almost always returns matches with `confirm_index` in the
+last 1-2 bars of the input, leaving virtually no genuine subsequent price
+history to triple-barrier-label against — confirmed empirically while
+building `scripts/train_pattern_ml.py`: the first version's dataset had
+every label come back `0` (timeout), since there was nothing after
+`confirm_index` to look at. Fixed by rolling a growing "as-of" cutoff
+backward through each symbol's history (`min_window_bars`/`step_bars` in
+`build_dataset()`) instead of scanning the whole series once — each rolled
+cutoff is a lightweight point-in-time re-scan that can turn up patterns
+confirmed well before "today", each with real forward bars already present
+in the same series to label from. Correctly kept the point-in-time
+distinction the rest of this codebase cares about throughout: labels use the
+*full* series (the label is the answer key — knowing what actually happened
+next is the entire point of supervised learning), but **features are built
+only from the as-of `window`** (what a live scan on that date would actually
+have seen) — mixing those two up would leak future information into the
+features themselves, not just the label.
+
+### 6.9 Phase 4 note: installing xgboost pulled in an unwanted GPU dependency
+
+`pip install xgboost` transitively pulled in `nvidia-nccl-cu13` (~290MB), a
+multi-GPU communication library irrelevant to this box's CPU-only `hist`
+tree-method training. Uninstalled after confirming train/predict still work
+without it; left a warning comment in both `pyproject.toml`'s `patterns_ml`
+extra and `scripts/train_pattern_ml.py`'s docstring so a future
+`pip install '.[patterns_ml]'` on this or another box doesn't silently
+reintroduce ~290MB of unused GPU tooling onto a resource-constrained VPS.
+
+### 6.10 Phase 5 note: server-side filtering needs `keepPreviousData`
+
+`PatternScanner.tsx` filters server-side (`GET /patterns/scan?pattern=...
+&min_score=...&direction=...`), unlike `OrderHistory.tsx`'s client-side
+array filtering over one static query. That means every distinct filter
+combination is its own React Query cache key, and the first time any
+particular combination is selected there's no cached data for it yet. A
+naive top-level `isLoading` gate (copied from `OrderHistory.tsx`, which
+never has this problem since it only ever has one query) blanked the
+*entire page* — form, stat tiles, other filters included — back to a bare
+spinner on every new filter value, not just the results table. Fixed with
+`placeholderData: keepPreviousData` (TanStack Query v5), which keeps
+rendering the previous result set (with a small inline spinner next to the
+match count) while the new combination loads in the background. Worth
+remembering for any future page that filters server-side rather than
+client-side — the `OrderHistory.tsx` loading-state pattern silently assumes
+client-side filtering and doesn't generalize.
