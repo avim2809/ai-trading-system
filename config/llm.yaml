@@ -32,7 +32,15 @@ provider:
     # dropped rather than kept as a fallback — too old to be worth the
     # extra hop (see src/firm/llm/providers.py).
     - "gemini/gemini-3.7-flash"
-    - "openrouter/openai/gpt-oss-20b:free"
+    # openrouter/openai/gpt-oss-20b:free removed 2026-09-08: confirmed dead
+    # live — OpenRouter now 404s it ("This model is unavailable for free...
+    # use this slug instead: openai/gpt-oss-20b", i.e. graduated to
+    # paid-only), same permanent-decommission shape as gemini-2.5-pro and
+    # groq/llama-3.1-8b-instant above. With load_balance's deterministic-
+    # hash routing a dead entry here isn't just an inert fallback — some
+    # fraction of calls hash directly onto it as the *primary* pick every
+    # time, forcing the full remaining chain to be walked on every such
+    # call (confirmed live: every cycle on both instances 2026-09-08).
     - "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
     - "openrouter/google/gemma-4-31b-it:free"
     - "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
