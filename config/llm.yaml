@@ -41,6 +41,23 @@ provider:
     # fraction of calls hash directly onto it as the *primary* pick every
     # time, forcing the full remaining chain to be walked on every such
     # call (confirmed live: every cycle on both instances 2026-09-08).
+    #
+    # qwen/qwen3.8-27b added 2026-09-08: Groq's newest Qwen3 generation,
+    # genuinely newer/stronger than gpt-oss-120b on reasoning-style tasks —
+    # verified live with a realistic reflection-style JSON prompt (clean,
+    # correctly-formatted output, ~0.5s). Currently listed under Groq's
+    # "Preview" tier (docs.groq.com/models), not "Production" like
+    # gpt-oss-120b/20b — preview models can be pulled with less notice than
+    # a full deprecation, so this is a fallback addition, not a default_model
+    # promotion; re-verify if it starts erroring. qwen/qwen3.6-27b (the
+    # other Groq preview Qwen build) was tested and rejected: it returns raw
+    # unstripped `<think>...</think>` reasoning tags inline in the response
+    # content instead of a separate reasoning field, which would break this
+    # codebase's `chat_json`/`parse_llm_response` JSON parsing outright.
+    # minimaxai/minimax-m2.7 (Groq docs) tested and rejected: 404
+    # model_not_found live — docs listing doesn't match Groq's actual
+    # registered slug, unverified, not added.
+    - "groq/qwen/qwen3.8-27b"
     - "openrouter/nvidia/nemotron-3-super-120b-a12b:free"
     - "openrouter/google/gemma-4-31b-it:free"
     - "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
