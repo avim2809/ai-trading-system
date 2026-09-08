@@ -184,6 +184,19 @@ class RiskAgent(Agent):
         self.macro_overlay_risk_off_level: float = float(macro_cfg.get("risk_off_level", -0.5))
         self.macro_overlay_risk_off_scale: float = float(macro_cfg.get("risk_off_scale", 0.5))
 
+        # Floor on the *composed* gross-exposure scale across all three
+        # overlays above (PART 3 Phase 4 found this missing: regime_overlay's
+        # Bear de-risk composed with macro_overlay's risk-off de-risk pushed
+        # every post-overlay weight below rebalance_band_pct, permanently
+        # locking the live engine out of ever opening a position -- see
+        # docs/remediation_progress.md #67). Each overlay is individually
+        # bounded, but nothing previously stopped the *product* of several
+        # from collapsing toward zero. 0.25 keeps at least a quarter of the
+        # book's intended gross exposure live even in a maximally-de-risked
+        # composition -- comfortably above the shipped rebalance_band_pct
+        # (0.05) so a de-risked book still clears the no-trade band.
+        self.overlay_scale_floor: float = float(cfg.get("overlay_scale_floor", 0.25))
+
     def run(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
         proposal: TradeProposal = inputs["proposal"]
         portfolio = inputs.get("portfolio")
@@ -293,30 +306,55 @@ class RiskAgent(Agent):
         # constraint breach, so it is applied to the already-approved book
         # (after the veto decision) and re-capped by the hard caps — it must
         # never by itself trigger a veto/abort.
+        #
+        # Each overlay below also runs through `_apply_overlay_scale_floor`,
+        # which tracks the *composed* gross-exposure scale across all three
+        # and clamps a further de-risk if the running product would drop
+        # below `overlay_scale_floor` -- see that method's docstring and
+        # `overlay_scale_floor`'s comment in __init__ for the PART 3 Phase 4
+        # lockout bug this prevents from recurring.
+        overlay_scale = 1.0
         if self.regime_overlay_enabled:
             regime_state = inputs.get("regime_state") or self._detect_regime(ctx)
+            pre_overlay = dict(targets)
             targets, _v, a = self._regime_exposure_overlay(targets, regime_state)
             log.info("Risk regime overlay asof=%s: %s", ctx.now, a)
             actions.extend(a)
             targets, _v2, _a2 = self._enforce_hard_caps(targets)
+            targets, overlay_scale, floor_a = self._apply_overlay_scale_floor(
+                pre_overlay, targets, overlay_scale, "Regime"
+            )
+            if floor_a:
+                log.warning("Risk %s", floor_a[0])
+            actions.extend(floor_a)
 
         # Same "intentional sizing policy, not a constraint breach" posture
         # as the regime overlay above -- applied post-veto, re-capped after.
-        # Composing multiple multiplicative overlays has no lower floor
-        # today (see PART 3 of the remediation plan); if a future overlay
-        # is added alongside this one, add a composed-scaler floor before
-        # enabling both together.
         if self.seasonality_overlay_enabled:
+            pre_overlay = dict(targets)
             targets, _v3, a = self._seasonality_exposure_overlay(targets, ctx)
             log.info("Risk seasonality overlay asof=%s: %s", ctx.now, a)
             actions.extend(a)
             targets, _v4, _a4 = self._enforce_hard_caps(targets)
+            targets, overlay_scale, floor_a = self._apply_overlay_scale_floor(
+                pre_overlay, targets, overlay_scale, "Seasonality"
+            )
+            if floor_a:
+                log.warning("Risk %s", floor_a[0])
+            actions.extend(floor_a)
 
         if self.macro_overlay_enabled:
+            pre_overlay = dict(targets)
             targets, _v5, a = self._macro_exposure_overlay(targets, ctx)
             log.info("Risk macro overlay asof=%s: %s", ctx.now, a)
             actions.extend(a)
             targets, _v6, _a6 = self._enforce_hard_caps(targets)
+            targets, overlay_scale, floor_a = self._apply_overlay_scale_floor(
+                pre_overlay, targets, overlay_scale, "Macro"
+            )
+            if floor_a:
+                log.warning("Risk %s", floor_a[0])
+            actions.extend(floor_a)
 
         if violations:
             log.info(
@@ -814,6 +852,54 @@ class RiskAgent(Agent):
                 detector_kwargs["ensemble_seeds"] = tuple(cfg["ensemble_seeds"])
             self._regime_detector = MarketRegimeDetector(**detector_kwargs)
         return self._regime_detector.detect(pit_view)
+
+    def _apply_overlay_scale_floor(
+        self,
+        pre_targets: dict[str, float],
+        post_targets: dict[str, float],
+        cumulative_scale: float,
+        overlay_name: str,
+    ) -> tuple[dict[str, float], float, list[str]]:
+        """Prevent composed exposure overlays from compounding below a floor.
+
+        Each overlay (regime/seasonality/macro) applies a single scalar
+        uniformly across every symbol, so its own effect on *this* call can
+        be recovered as the ratio of post- to pre-overlay gross exposure,
+        without needing each overlay method to separately expose its
+        internal `effective` value. Multiplying that ratio into the running
+        `cumulative_scale` tracks the composed effect of every overlay
+        applied so far this cycle; if the next overlay would push the
+        product below `overlay_scale_floor`, this overlay's own contribution
+        is rescaled (not the ones already applied) so the cumulative product
+        lands exactly on the floor instead of below it -- a de-risking
+        overlay still de-risks, just not all the way to a structural
+        no-trade-band lockout (PART 3 Phase 4, docs/remediation_progress.md
+        #67).
+
+        A scale-*up* (`local_scale >= 1.0`, e.g. a Bull regime read) is never
+        clamped -- the floor only guards against collapsing exposure, not
+        against levering up.
+        """
+        pre_gross = sum(abs(w) for w in pre_targets.values())
+        if pre_gross < 1e-10:
+            return post_targets, cumulative_scale, []
+        post_gross = sum(abs(w) for w in post_targets.values())
+        local_scale = post_gross / pre_gross
+        new_cumulative = cumulative_scale * local_scale
+        if local_scale >= 1.0 - 1e-12 or new_cumulative >= self.overlay_scale_floor:
+            return post_targets, new_cumulative, []
+
+        clamped_local_scale = self.overlay_scale_floor / cumulative_scale
+        rescale = clamped_local_scale / local_scale
+        floored = {s: w * rescale for s, w in post_targets.items()}
+        note = (
+            f"{overlay_name} overlay: composed exposure scale would have "
+            f"reached {new_cumulative:.3f} (below overlay_scale_floor="
+            f"{self.overlay_scale_floor:.2f}); clamped this overlay's own "
+            f"contribution to {clamped_local_scale:.3f} so the cumulative "
+            f"composed scale stays at the floor ({self.overlay_scale_floor:.3f})"
+        )
+        return floored, self.overlay_scale_floor, [note]
 
     def _regime_exposure_overlay(
         self, targets: dict[str, float], regime_state

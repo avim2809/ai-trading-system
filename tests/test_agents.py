@@ -1588,6 +1588,97 @@ class TestRiskManager:
         decision = risk.run(ctx, proposal=proposal)
         assert decision.adjusted_targets["AAPL"] == pytest.approx(0.03)
 
+    # ── Composed-overlay exposure floor (PART 3 Phase 4 lockout fix) ──
+
+    def test_overlay_scale_floor_default(self):
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent()
+        assert risk.overlay_scale_floor == pytest.approx(0.25)
+
+    def test_overlay_scale_floor_configurable(self):
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={"overlay_scale_floor": 0.4})
+        assert risk.overlay_scale_floor == pytest.approx(0.4)
+
+    def test_single_overlay_within_floor_not_clamped(self):
+        """A mild de-risk that never approaches the floor alone must be
+        untouched by the floor mechanism -- it should only ever intervene
+        when the composed scale would actually breach it."""
+        from firm.agents.risk import RiskAgent
+        from firm.regime.model import RegimeState
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0, "max_gross_exposure": 10.0,
+            "regime_overlay": {"enabled": True, "exposure_map": {"Bear": 0.5}},
+        })
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.04})
+        ctx = AgentContext(now=NOW, pit_view=None)
+        regime_state = RegimeState(
+            label="Bear", confidence=1.0, state_idx=0, separation=10.0,
+        )
+        decision = risk.run(
+            ctx, proposal=proposal, regime_state=regime_state
+        )
+        # effective = 1 + (0.5-1)*1.0*1.0 = 0.5 -- cumulative 0.5 stays above
+        # the default 0.25 floor, so this must match the un-floored overlay
+        # result exactly (no clamping action logged).
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.02)
+        assert not any("overlay_scale_floor" in a for a in decision.actions)
+
+    def test_composed_overlays_clamped_to_floor_prevents_lockout(self):
+        """Reproduces the PART 3 Phase 4 scenario directly: two aggressive
+        de-risking overlays composed together must not collapse exposure
+        below overlay_scale_floor, even though each is fine in isolation."""
+        from firm.agents.risk import RiskAgent
+        from firm.regime.model import RegimeState
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0, "max_gross_exposure": 10.0,
+            "overlay_scale_floor": 0.25,
+            "regime_overlay": {"enabled": True, "exposure_map": {"Bear": 0.1}},
+            "macro_overlay": {
+                "enabled": True, "risk_off_level": -0.5, "risk_off_scale": 0.1,
+            },
+        })
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.04, "MSFT": -0.04})
+        ctx = AgentContext(now=NOW, pit_view=self._macro_pit_view(-1.0))
+        regime_state = RegimeState(
+            label="Bear", confidence=1.0, state_idx=0, separation=10.0,
+        )
+        decision = risk.run(
+            ctx, proposal=proposal, regime_state=regime_state
+        )
+        # Naive composition would be 0.1 * 0.1 = 0.01 (1% of original gross)
+        # -- the exact permanent-lockout shape found in PART 3 Phase 4. The
+        # floor must hold the composed result at exactly overlay_scale_floor
+        # (0.25) instead.
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.01, abs=1e-6)
+        assert decision.adjusted_targets["MSFT"] == pytest.approx(-0.01, abs=1e-6)
+        assert any("overlay_scale_floor" in a for a in decision.actions)
+
+    def test_overlay_floor_never_clamps_a_scale_up(self):
+        """A Bull regime (scale-up) must never be clamped by the floor --
+        it only guards against collapsing exposure, not against levering."""
+        from firm.agents.risk import RiskAgent
+        from firm.regime.model import RegimeState
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0, "max_gross_exposure": 10.0,
+            "regime_overlay": {"enabled": True, "exposure_map": {"Bull": 1.5}},
+        })
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.04})
+        ctx = AgentContext(now=NOW, pit_view=None)
+        regime_state = RegimeState(
+            label="Bull", confidence=1.0, state_idx=0, separation=10.0,
+        )
+        decision = risk.run(
+            ctx, proposal=proposal, regime_state=regime_state
+        )
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.06)
+        assert not any("overlay_scale_floor" in a for a in decision.actions)
+
 
 # ══════════════════════════════════════════════════════════════════════
 # Execution Agent

@@ -246,6 +246,12 @@ risk:
     min_state_separation: 0.5
     separation_damping_floor: 0.15
 
+  # Floor on the *composed* gross-exposure scale across regime/seasonality/
+  # macro overlays together — see config/live.yaml's matching comment and
+  # docs/remediation_progress.md #67. 0.25 is also the RiskAgent code
+  # default; listed here for visibility.
+  overlay_scale_floor: 0.25
+
 # ──────────────────────────────────────────────────────────────
 # Dynamic universe growth — general-purpose mechanism (not Danelfin-specific
 # in its own persistence/engine API — see firm.live.dynamic_universe_state

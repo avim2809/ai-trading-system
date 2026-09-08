@@ -219,6 +219,13 @@ risk:
       Bear: 0.4
       Chop: 0.7
 
+  # Floor on the *composed* gross-exposure scale across regime/seasonality/
+  # macro overlays together — prevents several de-risking overlays from
+  # compounding below the no-trade band and permanently locking the book
+  # out of trading (see docs/remediation_progress.md #67). 0.25 is also the
+  # RiskAgent code default; listed explicitly here for visibility.
+  overlay_scale_floor: 0.25
+
 data:
   cache_dir: "data/cache"
   price_provider: "fallback"
