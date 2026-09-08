@@ -319,6 +319,86 @@ class TestLLMTechnicalAnalyst:
         assert result.domain == "technical"
         assert result.signals[0].meta.get("llm_enhanced") is True
 
+    def test_pattern_recognition_signal_uses_pattern_specific_prompt(self, mock_llm_modules):
+        from firm.agents.llm.technical_analyst_llm import LLMTechnicalAnalyst
+
+        class _RecordingDoc:
+            def __init__(self, text: str, metadata: dict) -> None:
+                self.text = text
+                self.metadata = metadata
+
+        class _RecordingRetriever:
+            """Fake retriever that records the query it's called with, so
+            the pattern-specific RAG query text (built from sig.meta) is
+            inspectable — mock_llm_modules' own FakeRetriever discards it.
+            """
+
+            def __init__(self) -> None:
+                self.calls: list[dict] = []
+
+            def retrieve_for_symbol(self, symbol, query, n_results=3, collections=None, asof=None):
+                self.calls.append({"symbol": symbol, "query": query, "collections": collections})
+                return [_RecordingDoc(
+                    "Cup and handle formations show strong continuation after "
+                    "a confirmed breakout above the rim.",
+                    {"source": "research"},
+                )]
+
+        pattern_sig = Signal(
+            symbol="AAPL",
+            strategy="pattern_recognition",
+            score=0.75,
+            confidence=0.75,
+            horizon="10d",
+            asof=NOW,
+            meta={
+                "pattern": "cup_handle",
+                "direction": "long",
+                "entry": 100.0,
+                "stop": 90.0,
+                "target": 130.0,
+                "risk_reward": 3.0,
+                "quality_score": 75.0,
+            },
+        )
+        strat = _mock_strategy("pattern_recognition", [pattern_sig])
+        agent = LLMTechnicalAnalyst(strategies=[strat])
+        agent._retriever = _RecordingRetriever()
+        ctx = AgentContext(now=NOW, pit_view=MagicMock())
+
+        result = agent.run(ctx)
+
+        assert isinstance(result, SignalSet)
+        assert result.domain == "technical"
+        assert len(result.signals) == 1
+        out = result.signals[0]
+        assert out.meta.get("llm_enhanced") is True
+        # Single-signal group: zscore_signals passes it through unchanged
+        # (see firm.agents.analysts.zscore_signals docstring), so the LLM's
+        # mocked score (0.75) survives both z-score passes untouched.
+        assert out.score == pytest.approx(0.75)
+
+        # The RAG query must be pattern-specific (built from sig.meta), not
+        # the generic "academic research on {strategy} strategy" wording
+        # that would otherwise just say "pattern_recognition strategy".
+        assert agent._retriever.calls, "expected a RAG retrieval call"
+        rag_query = agent._retriever.calls[0]["query"]
+        assert "cup_handle" in rag_query
+        assert "pattern_recognition" not in rag_query
+
+        # The LLM prompt must surface the rich meta fields instead of the
+        # generic "Quant signal score" wording.
+        assert agent._llm._calls, "expected an LLM call"
+        prompt_sent = agent._llm._calls[0]["messages"][1]["content"]
+        assert "cup_handle" in prompt_sent
+        assert "long" in prompt_sent
+        assert "100.00" in prompt_sent  # entry
+        assert "90.00" in prompt_sent  # stop
+        assert "130.00" in prompt_sent  # target
+        assert "3.00" in prompt_sent  # risk_reward
+        assert "75.0" in prompt_sent  # quality_score
+        assert "Quant signal score" not in prompt_sent
+
 
 # ══════════════════════════════════════════════════════════════════════
 # LLM-Enhanced Fundamental Analyst
