@@ -16,10 +16,10 @@ Environment=FIRM_LIVE_CONFIG=config/live_alpaca.yaml
 # FIRM_DATA_DIR default in firm.api.app / firm.api.routers.live.
 Environment=FIRM_API_PORT=8001
 Environment=FIRM_DATA_DIR=data_alpaca
-# Same LLM arm as the production IBKR instance (config/llm_ab_quant.yaml) so
-# this is a broker-only comparison, not a confounded one. See
-# docs/llm_ab_test_runbook.md.
-Environment=FIRM_LLM_CONFIG=config/llm_ab_quant.yaml
+# Same LLM arm as the production IBKR instance (config/llm_ab_llm.yaml, arm B
+# since 2026-09-08) so this stays a broker-only comparison, not a confounded
+# one. See docs/llm_ab_test_runbook.md.
+Environment=FIRM_LLM_CONFIG=config/llm_ab_llm.yaml
 # No IB Gateway dependency — Alpaca's REST API needs no local gateway process.
 ExecStart=/local/store/git/ai-trading-system/.venv/bin/firm-api
 Restart=always
