@@ -178,7 +178,7 @@ class PatternRecognitionStrategy(BaseStrategy):
                 )
             )
 
-        log.debug(
+        log.info(
             "pattern_recognition: %d symbols scanned, %d signals", len(universe), len(signals)
         )
         return signals
