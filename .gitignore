@@ -8,6 +8,12 @@ build/
 .eggs/
 *.egg
 .venv/
+# Isolated Python 3.12 env for CNN/GAF + PPO RL research scripts and ONNX
+# export/verification (torch/stable-baselines3/gymnasium/pyts/onnxruntime
+# have no Python 3.14 wheels yet, so they can't live in .venv) — see
+# docs/pattern_recognition_plan.md §4. Never imported by the running
+# firm-api process.
+.venv-ml/
 venv/
 env/
 .env
@@ -23,12 +29,16 @@ data/approvals.json
 data/memory/decisions.jsonl
 data/kill_switch_state.json
 data/live_state.db*
+data/pattern_scan_history.db*
 data/cycle_history.json
 data/order_history.json
 data/best_stocks_ledger.json
 data/best_stocks_backtest_full.json
 data/dynamic_universe_state.json
 data/sp500_sector_map.json
+# Trained model artifacts (regenerable via scripts/train_pattern_ml.py) —
+# binary blobs don't belong in git history.
+data/models/
 # data_alpaca/ — isolated runtime state for the parallel Alpaca instance
 # (deploy/ai-trading-alpaca.service, FIRM_DATA_DIR=data_alpaca).
 data_alpaca/

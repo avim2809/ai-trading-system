@@ -31,18 +31,23 @@ carrying that mapping alongside the fitted booster, so :func:`predict_proba`
 can always decode back to the fixed 3-column ``(-1, 0, +1)`` layout
 regardless of which subset of classes this particular fit happened to see.
 
-Persistence uses plain ``pickle`` (as scoped for this pass) rather than
-XGBoost's own native ``.json``/``.ubj`` format or ONNX export -- pickling
-:class:`_FittedPatternModel` works fine since both its fields (the
-XGBClassifier and a plain tuple) are themselves picklable. ONNX would be the
-natural next step for low-latency serving (a fixed, versioned graph instead
-of a pickled Python object tied to this exact xgboost version) but pulls in
-another dependency (``onnxruntime``) not justified for this unsupervised
-pass -- see the task report for this initiative.
+Persistence uses plain ``pickle`` for :func:`save`/:func:`load` (fine since
+both of :class:`_FittedPatternModel`'s fields -- the ``XGBClassifier`` and a
+plain tuple -- are themselves picklable) plus :func:`export_onnx`/
+:func:`load_onnx`/:func:`predict_proba_onnx` for a fixed, versioned-graph
+alternative better suited to low-latency serving. The ONNX path needs
+``onnxmltools``/``onnxruntime``, which -- like ``torch`` -- have no Python
+3.14 wheels yet (see docs/pattern_recognition_plan.md §4a); it only runs
+under the isolated ``.venv-ml`` environment, never the main venv this module
+otherwise lives in. Both onnxmltools/onnxruntime imports are deferred inside
+the functions that need them, exactly like :func:`_require_xgboost` below,
+so the rest of this module (and every other caller in the main venv) stays
+importable regardless.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import pickle
 from dataclasses import dataclass
@@ -119,7 +124,12 @@ def train(X: pd.DataFrame | np.ndarray, y, *, params: dict[str, Any] | None = No
     Args:
         X: Feature matrix -- a DataFrame (e.g. from
             :func:`firm.patterns.ml.feature_engineering.build_feature_frame`)
-            or a 2D array, one row per confirmed pattern match.
+            or a 2D array, one row per confirmed pattern match. If a
+            DataFrame, its column *names* are dropped before fitting (see
+            below) -- callers needing to map a feature importance back to a
+            name should keep ``X.columns`` themselves; this module never
+            needs it, since :func:`predict_proba`/:func:`predict_label` only
+            ever take positional feature arrays.
         y: Matching sequence of int labels drawn from :data:`LABELS`
             (``-1``/``0``/``1``; see :mod:`firm.patterns.ml.labeling`). Need
             not contain all three values (see module docstring).
@@ -148,9 +158,18 @@ def train(X: pd.DataFrame | np.ndarray, y, *, params: dict[str, Any] | None = No
     label_to_compact = {label: i for i, label in enumerate(present_labels)}
     y_compact = np.array([label_to_compact[int(v)] for v in y_arr])
 
+    # Fit on a plain array, not a named-column DataFrame: xgboost bakes
+    # DataFrame column names into the booster's internal tree dump, which
+    # breaks onnxmltools' converter (it only understands the default
+    # positional "f0"/"f1"/... naming -- verified empirically, a named
+    # feature raises "Unable to interpret '<name>', feature names should
+    # follow pattern 'f%d'" deep in its tree-parsing code). Harmless here:
+    # predict_proba/predict_label always pass X straight through
+    # positionally regardless of whether it's a DataFrame or ndarray.
+    X_fit = X.to_numpy() if hasattr(X, "to_numpy") else X
     model_params = {**_DEFAULT_PARAMS, **(params or {})}
     booster = xgb.XGBClassifier(**model_params)
-    booster.fit(X, y_compact)
+    booster.fit(X_fit, y_compact)
     n_features = X.shape[1] if hasattr(X, "shape") else len(X[0])
     log.info(
         "xgb_classifier.train: fit on %d rows x %d features, labels present=%s",
@@ -201,3 +220,66 @@ def load(path: str | Path) -> _FittedPatternModel:
         model = pickle.load(f)
     log.info("xgb_classifier.load: loaded model from %s", path)
     return model
+
+
+def export_onnx(model: _FittedPatternModel, path: str | Path, *, n_features: int) -> None:
+    """Export the fitted booster to ONNX -- **isolated ML environment
+    only** (``.venv-ml``; requires ``onnxmltools``, no Python 3.14 wheel
+    exists for it or its ``onnx``/``onnxconverter-common`` dependencies).
+
+    ONNX itself has no notion of this module's ``present_labels`` remapping
+    (see module docstring), so it's written alongside the ``.onnx`` file as
+    a small JSON sidecar (``<path>.labels.json``) that :func:`load_onnx`
+    reads back -- without it, an ONNX session's raw output columns would be
+    ambiguous whenever a fit saw fewer than all 3 label values.
+    """
+    from onnxmltools import convert_xgboost
+    from onnxmltools.convert.common.data_types import FloatTensorType
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    onnx_model = convert_xgboost(
+        model.booster,
+        initial_types=[("input", FloatTensorType([None, n_features]))],
+    )
+    with open(path, "wb") as f:
+        f.write(onnx_model.SerializeToString())
+    sidecar = path.with_suffix(path.suffix + ".labels.json")
+    with open(sidecar, "w") as f:
+        json.dump(list(model.present_labels), f)
+    log.info("xgb_classifier.export_onnx: wrote %s (+ %s)", path, sidecar)
+
+
+def load_onnx(path: str | Path) -> tuple[Any, tuple[int, ...]]:
+    """Load an ONNX-exported model for inference -- **isolated ML
+    environment only** (requires ``onnxruntime``). Returns ``(session,
+    present_labels)``; pass both to :func:`predict_proba_onnx`.
+    """
+    import onnxruntime as ort
+
+    path = Path(path)
+    sidecar = path.with_suffix(path.suffix + ".labels.json")
+    with open(sidecar) as f:
+        present_labels = tuple(json.load(f))
+    session = ort.InferenceSession(str(path))
+    return session, present_labels
+
+
+def predict_proba_onnx(
+    session: Any, present_labels: tuple[int, ...], X: pd.DataFrame | np.ndarray,
+) -> np.ndarray:
+    """Same ``(n_samples, 3)``, ``(-1, 0, +1)``-ordered output as
+    :func:`predict_proba`, but running inference through an ONNX session
+    instead of the pickled ``XGBClassifier`` -- for verifying an export
+    matches the original model's predictions, or as the actual inference
+    path once ``onnxruntime`` gains a Python 3.14 wheel and this can move
+    into the main serving path. **Isolated ML environment only.**
+    """
+    input_name = session.get_inputs()[0].name
+    X_arr = np.asarray(X, dtype=np.float32)
+    _labels, proba = session.run(None, {input_name: X_arr})
+    proba = np.asarray(proba)
+    out = np.zeros((proba.shape[0], len(LABELS)))
+    for col, label in enumerate(present_labels):
+        out[:, _LABEL_TO_INDEX[label]] = proba[:, col]
+    return out
