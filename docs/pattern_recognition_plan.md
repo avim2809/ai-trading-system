@@ -830,7 +830,26 @@ into the live signal-generation path. Both stay standalone, human-run
 research tools producing artifacts on disk (`data/models/pattern_cnn.*`,
 `data/models/pattern_ppo.zip`, all `.gitignore`d).
 
-### 7.5 Push + enable live
+### 7.5 Push + enable live (done)
 
-Tracked here once done — see `git log`/`config/live.yaml` for current
-status.
+Pushed all accumulated commits to `origin/main` (`da08323..c4aa561`).
+
+**Live config isn't one file:** the two production instances read different
+YAML files — `:8000` (IBKR paper) reads the default `config/live.yaml`;
+`:8001` (Alpaca paper) reads `config/live_alpaca.yaml` via its
+`FIRM_LIVE_CONFIG` env override (confirmed via `/proc/<pid>/environ`, per
+the plan's explicit caveat to check this before assuming one edit covers
+both). Added `pattern_recognition` to `strategies.enabled` *and*
+`auto_approve` in both files (both instances run `approval_mode: full_auto`,
+where `auto_approve` has no functional effect today, but kept consistent
+with every other strategy's entry in case that ever changes).
+
+Hot-swapped into both running engines immediately via `PUT /api/live/config`
+(`LiveEngine.update_strategies()` → rebuilds the orchestrator, effective
+next cycle, no restart) rather than waiting for the next service restart to
+pick up the file change — confirmed via `GET /api/live/status` on each
+(`active_strategies` includes `pattern_recognition`) and each instance's own
+log line (`Live engine strategies updated: [...,
+'pattern_recognition']`, `engine.py:427`). Both PIDs (`3682961` Alpaca,
+`3683272` IBKR) unchanged throughout — no restart, no broker
+reconnect, no interruption to either engine.
