@@ -65,6 +65,7 @@ def _make_orchestrator(
     analysts,
     sleeve_traders: dict[str, Agent] | None = None,
     trader: Agent | None = None,
+    execution: Agent | None = None,
     config: dict | None = None,
 ) -> Orchestrator:
     cfg = {
@@ -79,7 +80,7 @@ def _make_orchestrator(
         debate=DebateAgent(config={}),
         trader=trader or TraderAgent(config={"allocation_method": "conviction_weighted"}),
         risk=RiskAgent(config=_PERMISSIVE_RISK_CFG),
-        execution=ExecutionAgent(config=_ZERO_COST_EXEC_CFG),
+        execution=execution or ExecutionAgent(config=_ZERO_COST_EXEC_CFG),
         config=cfg,
         sleeve_traders=sleeve_traders,
     )
@@ -252,6 +253,76 @@ class TestSleevedModeIndependentCompounding:
         assert trend.holdings == {}
         assert trend.cash == pytest.approx(500_000.0)  # untouched initial split
         assert len(trend.history) == 1  # still snapshotted for return continuity
+
+
+class TestRealExecutionRebalanceBand:
+    """Regression coverage for a real bug found via a blended-vs-sleeved A/B
+    backtest (2024-Q1 cached data): splitting capital across ~18 sleeves,
+    each further diversifying across several names, meant no single symbol's
+    combined weight exceeded ~1% of total NAV -- so the blended book's
+    validated 5% rebalance_band_pct silently filtered out every symbol on
+    every day, zero real turnover for an entire quarter, even though every
+    individual sleeve traded and compounded correctly. Fix: the final netted
+    real-execution pass gets its own (smaller) band, independent of each
+    sleeve's own internal execution band."""
+
+    def test_real_execution_band_defaults_to_shared_band_over_sleeve_count(self):
+        orch = _make_orchestrator(
+            analysts=[],
+            sleeve_traders={"momentum": TraderAgent(), "trend": TraderAgent()},
+            execution=ExecutionAgent(config={**_ZERO_COST_EXEC_CFG, "rebalance_band_pct": 0.05}),
+        )
+        assert orch._real_execution.rebalance_band_pct == pytest.approx(0.025)
+
+    def test_real_execution_band_explicit_override_respected(self):
+        orch = _make_orchestrator(
+            analysts=[],
+            sleeve_traders={"momentum": TraderAgent(), "trend": TraderAgent()},
+            execution=ExecutionAgent(config={**_ZERO_COST_EXEC_CFG, "rebalance_band_pct": 0.05}),
+            config={"real_rebalance_band_pct": 0.001},
+        )
+        assert orch._real_execution.rebalance_band_pct == pytest.approx(0.001)
+
+    def test_sleeve_internal_execution_band_is_unmodified(self):
+        """Each sleeve's own virtual trading must keep using the original,
+        already-validated band -- only the real netted pass changes."""
+        orch = _make_orchestrator(
+            analysts=[],
+            sleeve_traders={"momentum": TraderAgent(), "trend": TraderAgent()},
+            execution=ExecutionAgent(config={**_ZERO_COST_EXEC_CFG, "rebalance_band_pct": 0.05}),
+        )
+        assert orch.execution.rebalance_band_pct == pytest.approx(0.05)
+
+    def test_real_trades_clear_a_band_the_shared_band_would_have_blocked(self):
+        """The exact bug scenario: a small sleeve's combined weight (3% of
+        total NAV, from an explicit small capital split) sits below the
+        shared 5% band but above a real-execution override band -- so the
+        real pass must trade even though reusing the shared band verbatim
+        would have silently filtered it out for the entire run."""
+        analyst = _analyst_with_signals(
+            _sig("AAPL", "momentum", 1.0), _sig("MSFT", "trend", 1.0),
+        )
+        orch = _make_orchestrator(
+            analysts=[analyst],
+            sleeve_traders={
+                "momentum": TraderAgent(config={"allocation_method": "conviction_weighted"}),
+                "trend": TraderAgent(config={"allocation_method": "conviction_weighted"}),
+            },
+            execution=ExecutionAgent(config={**_ZERO_COST_EXEC_CFG, "rebalance_band_pct": 0.05}),
+            config={
+                "real_rebalance_band_pct": 0.01,  # would not block a 3% weight
+                "strategy_capital_weights": {"momentum": 0.03, "trend": 0.03},
+            },
+        )
+        real_portfolio = PortfolioState(initial_capital=1_000_000.0)
+        orders, _ = orch.step({
+            "pit_view": _pit_view(), "portfolio": real_portfolio,
+            "prices": {"AAPL": 100.0, "MSFT": 100.0},
+        })
+        # Each sleeve: 3% of $1M = $30k fully in its one name -> 3% of real
+        # NAV -- below the 5% shared band, above the 1% real-execution band.
+        assert len(orders) == 2
+        assert {o["symbol"] for o in orders} == {"AAPL", "MSFT"}
 
 
 class TestSleevedModeNetting:

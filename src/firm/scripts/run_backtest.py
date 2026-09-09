@@ -142,6 +142,13 @@ def main() -> None:
     # Backtest parity with live for analyst cross-sectional normalization —
     # see the field docstring in firm.config.Settings.
     merged_config["zscore_demean"] = settings.zscore_demean
+    # Per-strategy capital sleeves (see docs/capital_sleeves_plan.md) —
+    # "blended" (default) is a no-op, unchanged from before this existed.
+    merged_config["capital_allocation_mode"] = settings.capital_allocation_mode
+    if settings.strategy_capital_weights:
+        merged_config["strategy_capital_weights"] = settings.strategy_capital_weights
+    if settings.real_rebalance_band_pct is not None:
+        merged_config["real_rebalance_band_pct"] = settings.real_rebalance_band_pct
     orchestrator = build_orchestrator(merged_config)
 
     from firm.backtest.engine import BacktestEngine

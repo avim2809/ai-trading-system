@@ -97,9 +97,31 @@ class Orchestrator(Agent):
         # Restored from LiveStateStore on restart (see restore_sleeve_portfolios);
         # never derived from the broker (these are virtual, no real sub-account).
         self._sleeve_portfolios: dict[str, PortfolioState] = {}
-
+        # The final netted real-execution pass needs its own, much smaller
+        # rebalance_band_pct -- confirmed empirically (blended-vs-sleeved A/B
+        # over 2024-Q1 cached data): splitting capital across ~18 sleeves,
+        # each of which further diversifies across several names, means no
+        # single symbol's combined weight realistically exceeds ~1% of total
+        # NAV, so the blended book's validated 5% band silently filters out
+        # every symbol on every single day -- zero real turnover for an
+        # entire quarter, even though every individual sleeve traded and
+        # compounded correctly on its own. Reusing self.execution's band
+        # unmodified for the real pass would repeat that every time sleeving
+        # is enabled. Default (no explicit override): scale the shared band
+        # down by the sleeve count -- a principled starting point, not a
+        # substitute for a real calibration A/B before ever using this live.
+        self._real_execution: Agent | None = None
         if self.capital_allocation_mode == "sleeved":
             self._check_sleeved_llm_cost_safety(cfg)
+            n_sleeves = max(1, len(self.sleeve_traders))
+            override = cfg.get("real_rebalance_band_pct")
+            real_band = (
+                float(override) if override is not None
+                else getattr(execution, "rebalance_band_pct", 0.0) / n_sleeves
+            )
+            self._real_execution = type(execution)(
+                config={**execution.config, "rebalance_band_pct": real_band},
+            )
 
     @staticmethod
     def _check_sleeved_llm_cost_safety(cfg: dict[str, Any]) -> None:
@@ -686,7 +708,7 @@ class Orchestrator(Agent):
             now=pit_view.asof, pit_view=pit_view, portfolio=real_portfolio, **ctx_kwargs,
         )
         try:
-            report = self.execution.run(
+            report = self._real_execution.run(
                 real_ctx,
                 decision=RiskDecision(approved=True, adjusted_targets=combined_targets),
                 portfolio=real_portfolio,

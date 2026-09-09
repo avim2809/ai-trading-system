@@ -196,6 +196,24 @@ class Settings(BaseSettings):
     # Per-strategy score multipliers conditioned on market regime (off unless
     # ``enabled: true``). See firm.agents.research._regime_weights.
     strategy_regime_weights: dict[str, Any] = Field(default_factory=dict)
+    # "blended" (default): every strategy blends into one shared portfolio,
+    # today's exact behavior. "sleeved": each strategy gets its own
+    # independent capital/positions instead (see docs/capital_sleeves_plan.md,
+    # firm.agents.orchestrator.Orchestrator._step_sleeved). Backtest-only
+    # wiring lives in firm.scripts.run_backtest; live wiring is the same
+    # top-level config key, read directly off the merged config dict.
+    capital_allocation_mode: str = "blended"
+    # Each sleeved strategy's initial fraction of total capital (missing
+    # entries split the remainder equally). Ignored when capital_allocation_mode
+    # is "blended". See Orchestrator._sleeve_capital_weights.
+    strategy_capital_weights: dict[str, float] = Field(default_factory=dict)
+    # Rebalance-band override for the final netted real-execution pass in
+    # sleeved mode only (each sleeve's own internal execution keeps
+    # backtest.rebalance_band_pct unmodified). None (default) scales
+    # backtest.rebalance_band_pct down by the active sleeve count -- see
+    # Orchestrator.__init__'s docstring for why the blended-mode band alone
+    # silently produces zero real turnover once capital is split many ways.
+    real_rebalance_band_pct: float | None = None
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

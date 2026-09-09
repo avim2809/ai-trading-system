@@ -107,6 +107,54 @@ class TestRunBacktestWiresUniverseResolver:
         assert sorted(_FakeEngine.captured["universe"]) == ["AAPL", "DELISTED"]
 
 
+class TestRunBacktestWiresCapitalAllocationMode:
+    """capital_allocation_mode/strategy_capital_weights (Settings fields,
+    see docs/capital_sleeves_plan.md) must reach build_orchestrator's merged
+    config exactly like allocation_method/signal_combination already do."""
+
+    def test_defaults_to_blended(self, tmp_path):
+        from firm.scripts.run_backtest import main
+
+        settings = Settings()
+        settings.data.cache_dir = str(tmp_path)
+        settings.backtest.start_date = "2020-03-01"
+        settings.backtest.end_date = "2020-06-01"
+
+        with patch("firm.scripts.run_backtest.get_settings", return_value=settings), \
+             patch("firm.scripts.run_backtest.load_prices", return_value=_prices_df()), \
+             patch("firm.scripts.run_backtest.load_fundamentals", return_value=None), \
+             patch("firm.scripts.run_backtest.build_orchestrator", return_value=MagicMock()) as mock_build, \
+             patch("firm.backtest.engine.BacktestEngine", _FakeEngine), \
+             patch("builtins.print"):
+            main()
+
+        merged_config = mock_build.call_args[0][0]
+        assert merged_config["capital_allocation_mode"] == "blended"
+        assert "strategy_capital_weights" not in merged_config
+
+    def test_sleeved_mode_and_weights_pass_through(self, tmp_path):
+        from firm.scripts.run_backtest import main
+
+        settings = Settings()
+        settings.data.cache_dir = str(tmp_path)
+        settings.backtest.start_date = "2020-03-01"
+        settings.backtest.end_date = "2020-06-01"
+        settings.capital_allocation_mode = "sleeved"
+        settings.strategy_capital_weights = {"momentum": 0.6}
+
+        with patch("firm.scripts.run_backtest.get_settings", return_value=settings), \
+             patch("firm.scripts.run_backtest.load_prices", return_value=_prices_df()), \
+             patch("firm.scripts.run_backtest.load_fundamentals", return_value=None), \
+             patch("firm.scripts.run_backtest.build_orchestrator", return_value=MagicMock()) as mock_build, \
+             patch("firm.backtest.engine.BacktestEngine", _FakeEngine), \
+             patch("builtins.print"):
+            main()
+
+        merged_config = mock_build.call_args[0][0]
+        assert merged_config["capital_allocation_mode"] == "sleeved"
+        assert merged_config["strategy_capital_weights"] == {"momentum": 0.6}
+
+
 class TestRunBacktestLoadsFundamentalsAndSentimentWithoutCrashing:
     """Regression: a second pit_store.load(fundamentals=...) call (without
     `prices`, which has no default) used to raise TypeError whenever cached
