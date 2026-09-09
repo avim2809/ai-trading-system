@@ -272,6 +272,50 @@ class TestPortfolioSync:
         discreps = sync_portfolio_from_broker(broker, portfolio)
         assert any(d["type"] == "open_orders_unavailable" for d in discreps)
 
+    def test_initial_sync_on_empty_portfolio_logs_quietly(self, caplog):
+        """A fresh (just-restarted) PortfolioState always starts with empty
+        holdings, so its first reconciliation against a broker that already
+        holds positions is expected, not a real drift -- it should log a
+        single INFO summary, not a WARNING per symbol/cash (see
+        portfolio_sync.sync_portfolio_from_broker's docstring)."""
+        broker = MockBroker(initial_cash=50_000)
+        broker.connect()
+        broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=10))
+        portfolio = PortfolioState(initial_capital=100_000)
+
+        with caplog.at_level("DEBUG", logger="firm.live.portfolio_sync"):
+            discreps = sync_portfolio_from_broker(broker, portfolio)
+
+        # Still self-corrects exactly as before.
+        assert portfolio.holdings.get("AAPL") == 10
+        assert portfolio.cash == broker.get_account()["cash"]
+        assert any(d["type"] == "position_mismatch" for d in discreps)
+        assert any(d["type"] == "cash_mismatch" for d in discreps)
+
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        infos = [r for r in caplog.records if r.levelname == "INFO"]
+        assert warnings == []
+        assert len(infos) == 1
+        assert "Initial portfolio reconciliation" in infos[0].message
+
+    def test_later_drift_on_nonempty_portfolio_still_warns(self, caplog):
+        """Once the internal book is non-empty (i.e. past the initial
+        post-restart sync), a genuine mismatch is real drift and must keep
+        logging at WARNING so it stays visible/alertable."""
+        broker = MockBroker()
+        broker.connect()
+        broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=10))
+
+        portfolio = PortfolioState(initial_capital=100_000)
+        portfolio.holdings = {"MSFT": 5}  # already-synced, non-empty book
+
+        with caplog.at_level("DEBUG", logger="firm.live.portfolio_sync"):
+            discreps = sync_portfolio_from_broker(broker, portfolio)
+
+        assert any(d["type"] == "position_mismatch" for d in discreps)
+        warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert any("Position mismatch AAPL" in r.message for r in warnings)
+
 
 # ---------------------------------------------------------------------------
 # LiveDataFeed tests

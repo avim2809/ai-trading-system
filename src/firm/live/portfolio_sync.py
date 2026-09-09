@@ -25,8 +25,21 @@ def sync_portfolio_from_broker(
     """Reconcile *portfolio* with real broker positions and account cash.
 
     Returns a list of discrepancy dicts (empty when perfectly in sync).
+
+    ``PortfolioState`` never persists holdings across a process restart --
+    ``engine.py`` always constructs it fresh with empty ``holdings`` -- so
+    the very first call after every restart necessarily finds every real
+    broker position "mismatched" against that empty internal book. That's
+    expected and not actionable (this function self-corrects it below
+    either way), so when *portfolio* currently holds nothing at all, this
+    call is treated as the initial post-restart sync: the per-symbol/cash
+    lines below log at DEBUG instead of WARNING, and a single INFO summary
+    line covers the whole batch. A later cycle finding a *genuine* drift
+    (partial fill, manual trade, corporate action) still logs at WARNING as
+    before, since ``portfolio.holdings`` is non-empty by then.
     """
     discrepancies: list[dict[str, Any]] = []
+    initial_sync = not portfolio.holdings
 
     account = broker.get_account()
     broker_cash = account.get("cash", 0.0)
@@ -37,7 +50,8 @@ def sync_portfolio_from_broker(
             "actual": broker_cash,
             "diff": broker_cash - portfolio.cash,
         })
-        log.warning(
+        log.log(
+            logging.DEBUG if initial_sync else logging.WARNING,
             "Cash mismatch: internal=%.2f broker=%.2f (diff=%.2f)",
             portfolio.cash,
             broker_cash,
@@ -86,7 +100,8 @@ def sync_portfolio_from_broker(
                 "actual": broker_qty,
                 "diff": broker_qty - internal_qty,
             })
-            log.warning(
+            log.log(
+                logging.DEBUG if initial_sync else logging.WARNING,
                 "Position mismatch %s: internal=%.4f broker=%.4f",
                 sym,
                 internal_qty,
@@ -98,6 +113,17 @@ def sync_portfolio_from_broker(
                 portfolio.holdings[sym] = broker_qty
 
     portfolio.holdings = {s: q for s, q in portfolio.holdings.items() if q != 0}
+
+    if initial_sync and discrepancies:
+        n_positions = sum(1 for d in discrepancies if d["type"] == "position_mismatch")
+        cash_synced = any(d["type"] == "cash_mismatch" for d in discrepancies)
+        log.info(
+            "Initial portfolio reconciliation after restart: loaded %d position(s)%s "
+            "from broker (internal state starts empty on every boot; see "
+            "portfolio_sync.sync_portfolio_from_broker)",
+            n_positions,
+            " + cash" if cash_synced else "",
+        )
 
     if prices:
         portfolio.record_snapshot(utcnow(), prices)
