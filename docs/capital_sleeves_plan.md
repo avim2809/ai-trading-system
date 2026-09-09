@@ -1,10 +1,11 @@
 # Per-strategy capital sleeves — implementation tracker
 
-**Status:** Core mechanism built and tested (backend only) — **not enabled
-on either live production instance**. `capital_allocation_mode` defaults to
-`"blended"` everywhere (byte-for-byte today's existing behavior); flipping
-either `:8000`/`:8001` to `"sleeved"` is an explicit, separate, later step
-(see §5). · **Date:** 2026-09-09.
+**Status:** Core mechanism built, tested, and A/B-verified on cached
+historical data (found and fixed one real bug in the process — see §4b) —
+**not enabled on either live production instance**. `capital_allocation_mode`
+defaults to `"blended"` everywhere (byte-for-byte today's existing
+behavior); flipping either `:8000`/`:8001` to `"sleeved"` is an explicit,
+separate, later step (see §5). · **Date:** 2026-09-09.
 
 ## 1. Why
 
@@ -94,6 +95,55 @@ per-sleeve) is a legitimate follow-up if these three roles are ever wanted
 in `llm_enhanced` mode alongside sleeving — not required for today's actual
 production configuration.
 
+## 4b. A/B verification found and fixed a real bug before any live cutover
+
+Per §5's migration plan, ran a blended-vs-sleeved A/B comparison on cached
+2024-Q1 data (25-29 symbol universe, all ~18 registered strategies) before
+ever considering a live cutover. Found: individual sleeves traded and
+compounded correctly, but the final netted **real** execution pass produced
+**zero orders for the entire quarter** (`total_turnover=0`,
+`rebalance_count=0`).
+
+Root cause (confirmed via a targeted diagnostic instrumenting
+`ExecutionAgent.run`): splitting capital across ~18 sleeves, each further
+diversifying across several names, means no single symbol's combined
+weight in the real book realistically exceeds ~1% of total NAV (observed
+max weights: 0.4%-1.06% across every cycle). The existing
+`rebalance_band_pct` (0.05, validated for the *blended* book where one
+symbol can receive several percent from combined multi-strategy conviction)
+silently filtered out every symbol on every single day.
+
+**Fix:** the final netted real-execution pass now uses its own
+`ExecutionAgent` instance with its own band (`Orchestrator._real_execution`)
+— an explicit `real_rebalance_band_pct` config override if set, else the
+shared band divided by the active sleeve count as a principled default.
+Each sleeve's own internal execution keeps the original, already-validated
+band completely unmodified. New `Settings` fields
+(`capital_allocation_mode`, `strategy_capital_weights`,
+`real_rebalance_band_pct`) wired through `firm.scripts.run_backtest` so
+backtest configs can exercise sleeved mode at all — still `"blended"` by
+default everywhere, no `config/live.yaml` changes.
+
+Re-ran the same A/B comparison after the fix: real turnover is back in line
+with blended mode (88 rebalances / 1.06 total turnover vs blended's 82 /
+0.56). Aggregate return magnitude is noticeably smaller in sleeved mode
+(0.02% vs 1.31% over the quarter), but this is fully explained by
+mechanical capital dilution — 10 of the 18 registered strategies produced
+no signal at all against this cached dataset, so their equal capital share
+sat idle in cash — not a further bug.
+
+**Genuinely validating result:** sleeved mode's exact per-sleeve metrics
+surfaced real, distinct P&L for `momentum` (+5.3%), `mean_reversion`
+(-1.25%), and `event_driven` (+1.33%) over the quarter — but blended mode's
+own heuristic `PerformanceAttribution` table doesn't list any of these
+three strategies at all for the same period. The dominant-strategy-wins-
+the-whole-order heuristic was silently hiding their real contribution even
+in blended mode today. This is exactly the blind spot sleeving exists to
+fix, and it's already visible in this first real comparison.
+
+4 new regression tests reproduce the exact scenario (`tests/test_sleeves.py
+::TestRealExecutionRebalanceBand`).
+
 ## 5. What's deliberately not done yet
 
 - **Frontend.** `LiveConfig.tsx`/`AgentInspector.tsx` still show one shared
@@ -102,26 +152,32 @@ production configuration.
   correctly.
 - **Live cutover.** Neither `:8000` (IBKR) nor `:8001` (Alpaca) has
   `capital_allocation_mode: "sleeved"` set. Per the original plan's migration
-  section, that's a separate, later, explicitly-approved step — needs an
-  isolated-port smoke test first (synthetic/cache data, confirm sleeve
-  ledgers reconcile and risk caps bind correctly per sleeve), then an
-  A/B-style comparison on cached historical data (`blended` vs `sleeved`,
-  same date range, sanity-check total return/turnover aren't wildly
-  diverged), then a real cutover with each sleeve seeded from a best-effort
-  split of the existing (heuristic) attribution's per-strategy holdings at
-  the moment of cutover.
+  section, that's a separate, later, explicitly-approved step — the
+  A/B-style comparison on cached historical data is done (§4b, and it found
+  a real bug before touching either live engine, exactly what that step was
+  for); still needed before any cutover: an isolated-port smoke test against
+  a real (not backtest) `firm-api` instance, then a real cutover with each
+  sleeve seeded from a best-effort split of the existing (heuristic)
+  attribution's per-strategy holdings at the moment of cutover.
 - **Cross-sleeve LLM-enhancement budget coordination** (see §4) — only
   matters if `agent_modes` is ever changed from its current all-`"quant"`
   default for bull/bear/debate.
 
 ## 6. Verification so far
 
-- `tests/test_sleeves.py` — 21 passed.
-- `tests/test_live_engine.py` — 136 passed (full file, including the new
+- `tests/test_sleeves.py` — 25 passed (21 core + 4 covering the
+  rebalance-band fix, §4b).
+- `tests/test_live_engine.py` — 136 passed (full file, including the
   sleeve-persistence test).
-- Full main-venv suite (`pytest -q --ignore=tests/test_api.py`) — green
-  alongside these changes (see the session's own verification run for the
-  exact count at the time of committing).
+- `tests/test_scripts_run_backtest.py` — includes coverage for
+  `capital_allocation_mode`/`strategy_capital_weights` reaching
+  `build_orchestrator`'s merged config correctly.
+- Full main-venv suite (`pytest -q --ignore=tests/test_api.py`) — 1705
+  passed, 25 skipped; `tests/test_api.py` — 52 passed.
+- A/B backtest comparison on cached 2024-Q1 data (§4b) — blended vs sleeved
+  turnover/rebalance-count now comparable (82/0.56 vs 88/1.06); sleeved
+  mode's exact per-sleeve metrics surfaced real P&L blended mode's own
+  heuristic attribution couldn't see at all.
 - Both production instances (`:8000`, `:8001`) confirmed unaffected
   throughout — this work is purely additive/opt-in code, never touched
   either running process or its config.
