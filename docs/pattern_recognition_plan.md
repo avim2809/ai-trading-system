@@ -1,29 +1,45 @@
 # Chart pattern recognition — implementation plan & progress tracker
 
-**Status:** All 5 phases complete, tested, and verified end-to-end (a
-consolidated full-suite run against the final combined tree, plus a fresh
-live browser pass covering every touched page). Phase 0+1 **committed**
-(`53d5345`); Phases 2-5 verified and ready to commit. · **Date:** 2026-09-09
-· **Scope:** new `src/firm/patterns/` package feeding a new Strategy #13
-(`pattern_recognition`) into the existing 12-strategy/8-agent pipeline, an
-XGBoost confirmation-classifier training pipeline, on-demand REST scan
-endpoints + a `/patterns` frontend page, pattern-aware LLM validation, and
-every frontend surface across all of the above.
+**Status:** All 5 original phases complete, tested, and committed
+(`53d5345`..`da08323`). A follow-up pass then closed out every item that had
+been deliberately left open: two small bug fixes, a scheduled scan job +
+persistent history endpoint, real XGBoost training + ONNX export, and the
+CNN/GAF validator + PPO RL position sizer that were previously descoped for
+dependency reasons (`bbb72c8`, `d0e9727`, `4340b0b`, `680fa75`). ·
+**Date:** 2026-09-09 · **Scope:** new `src/firm/patterns/` package feeding a
+new Strategy #13 (`pattern_recognition`) into the existing 12-strategy/8-agent
+pipeline, an XGBoost confirmation-classifier training pipeline with ONNX
+export, an optional scheduled scan job + persistent scan history, on-demand
+REST scan endpoints + a `/patterns` frontend page, pattern-aware LLM
+validation, a CNN/GAF image validator, a PPO RL position sizer, and every
+frontend surface across all of the above.
 
-**Final consolidated verification** (run against the complete tree, all 5
-phases combined — supersedes each phase's own in-flight numbers from when
-other phases were still concurrently editing the same tree, see §1.2):
-`pytest -q --ignore=tests/test_api.py` → **1648 passed**; `tests/test_api.py`
-(run separately per this repo's convention) → **52 passed**; frontend
-`npx tsc --noEmit` → clean; `npx vitest run` → **94 passed** (19 files);
-`frontend/dist/` rebuilt. A fresh live Playwright pass on a newly-started
-isolated instance (port 8011, `live_engine_running: false` confirmed before
-use) re-verified `/new`, `/live/config`, and `/inspector` for regressions
-and exercised the new `/patterns` page end-to-end (real "Scan Now" trigger
-→ 5 confirmed patterns of 5 different types across 5 synthetic symbols,
-correctly scored/rendered) — zero console/page errors across all of it. Both
-production instances (`:8000` IBKR, `:8001` Alpaca) confirmed unaffected
-throughout, under their original unchanged PIDs.
+**Final consolidated verification for the original 5 phases** (run against
+the complete tree, all 5 phases combined — supersedes each phase's own
+in-flight numbers from when other phases were still concurrently editing the
+same tree, see §1.2): `pytest -q --ignore=tests/test_api.py` → **1648
+passed**; `tests/test_api.py` (run separately per this repo's convention) →
+**52 passed**; frontend `npx tsc --noEmit` → clean; `npx vitest run` → **94
+passed** (19 files); `frontend/dist/` rebuilt. A fresh live Playwright pass on
+a newly-started isolated instance (port 8011, `live_engine_running: false`
+confirmed before use) re-verified `/new`, `/live/config`, and `/inspector` for
+regressions and exercised the new `/patterns` page end-to-end (real "Scan
+Now" trigger → 5 confirmed patterns of 5 different types across 5 synthetic
+symbols, correctly scored/rendered) — zero console/page errors across all of
+it. Both production instances (`:8000` IBKR, `:8001` Alpaca) confirmed
+unaffected throughout, under their original unchanged PIDs.
+
+**Final consolidated verification for the follow-up pass** (§7 below,
+covering small fixes + scheduled job/history + ONNX export + CNN/PPO):
+`pytest -q --ignore=tests/test_api.py` → **1675 passed, 25 skipped** (the
+skips are the CNN/PPO/ONNX tests correctly gating themselves out of the main
+Python-3.14 venv); `tests/test_api.py` → **52 passed**; `.venv-ml/bin/pytest
+tests/test_cnn_validator.py tests/test_ppo_sizer.py tests/test_pattern_ml_onnx.py`
+(isolated Python 3.12 env, see §7.4) → **all passed**; frontend `npx tsc
+--noEmit` → clean; `npx vitest run` → **94 passed**. Both production
+instances confirmed unaffected throughout, under their original unchanged
+PIDs (`3682961`/`3683272`) — nothing in this pass touches either running
+engine until the final "enable live" step.
 
 This is the durable, repo-committed record of this initiative — the original
 ask was a deep-dive research report + implementation plan for multi-bar chart
@@ -38,13 +54,14 @@ the real codebase.
 
 ## 1. How to resume
 
-1. Read section 4 ("Status") for what's done vs. outstanding — short version:
-   Phase 0+1 is committed (`53d5345`); Phases 2, 3, 4, 5 are all complete,
-   tested, and (as of this writing) sitting uncommitted in the working tree,
-   ready to commit. If you're reading this after that commit happened,
-   `git log` will show it — this doc may lag one edit behind reality right
-   after a commit, so cross-check `git status`/`git log` rather than trusting
-   this line blindly forever.
+1. Read section 4 ("Status") for the original 5 phases and section 7 for the
+   follow-up pass that closed out everything those phases had left open —
+   short version: everything in both sections is done, tested, and
+   committed (`53d5345`..`680fa75`; `git log` shows the exact sequence). The
+   only remaining step, gated on explicit human approval each time, is
+   pushing and adding `pattern_recognition` to `config/live.yaml`'s enabled
+   strategies (§7.5) — cross-check `git status`/`git log`/`config/live.yaml`
+   rather than trusting this line blindly forever.
 2. Phases 2-4 were each built by an independent background subagent working
    concurrently in the *same* working tree (deliberately, to parallelize
    independent surface areas — LLM prompt, REST API, ML pipeline — that
@@ -68,6 +85,13 @@ the real codebase.
    phase) — worth reading before touching `extrema.py`, the rule modules, or
    the ML labeling code, since several fixes are non-obvious and easy to
    accidentally revert.
+6. Section 7 documents the follow-up pass (small fixes, scheduled job +
+   history, real ML training + ONNX export, isolated-env CNN/PPO) — read
+   §7.4 in particular before touching `ppo_sizer.py`'s `risk_aversion`
+   default: it looks like an arbitrary tuning constant but was calibrated
+   against a real training run, and a smaller value silently collapses the
+   RL policy back to the exact degenerate "always bet max size" behavior it
+   exists to prevent.
 
 ## 2. Original research plan (condensed)
 
@@ -86,8 +110,8 @@ Proposed 5-phase rollout (13 weeks, illustrative — not a hard commitment):
 | 0 | Foundation: extrema engine, rule detectors, scorer, signals | **Done — tested, see §4/§6** |
 | 1 | Register as Strategy #13, plug into existing pipeline | **Done — tested end-to-end, see §4/§6** |
 | 2 | Enhance `TechnicalAnalyst`/LLM variant with pattern-specific RAG validation | **Done — tested, see §4/§6.6** (narrower than originally scoped, see 3.7 — surgical, not a rewrite) |
-| 3 | On-demand `/api/patterns/*` REST endpoints (no scheduled job — see §4/§6.7) | **Done — tested, see §4/§6.7** |
-| 4 | ML training pipeline — **XGBoost confirmation only**, CNN/GAF + PPO sizer deliberately descoped (see §4/§6.8) | **Done — tested, see §4/§6.8** |
+| 3 | On-demand `/api/patterns/*` REST endpoints + (follow-up, §7.2) scheduled scan job + persistent history | **Done — tested, see §4/§6.7/§7.2** |
+| 4 | ML training pipeline — XGBoost confirmation + ONNX export + (follow-up, §7.3-7.4) CNN/GAF validator + PPO RL sizer | **Done — tested, see §4/§6.8/§7.3/§7.4** |
 | 5 | React frontend `/patterns` page | **Done — tested end-to-end, see §4/§6.10** |
 
 Empirical pattern algorithm reference (Lo/Mamaysky/Wang 2000 five-extrema
@@ -295,13 +319,13 @@ of its illustrative pseudocode didn't match reality:
       /`PatternScanTriggerResponse`/`PatternSummary` + 4 `api.*` functions)
       ready for Phase 5 to consume; `npx tsc --noEmit` clean.
 - [x] `tests/test_patterns_api.py` — 24 tests, all passing.
-- [x] **Deliberately descoped** (see §6.7 for the full reasoning): the
-      `/api/patterns/history` trade-outcome-tracking endpoint (needs new
-      persistence — a separate feature) and, most importantly, **any
-      scheduled/periodic scanning** — nothing wired into `app.py`'s
-      lifespan or `firm.live.scheduler.TradingScheduler`; every scan is
-      human/frontend-triggered only. Zero risk to the two running
-      production engines by construction, not just by convention.
+- [x] **Follow-up pass (§7) closed out both items originally descoped
+      here:** a persistent `GET /api/patterns/history` endpoint backed by a
+      new SQLite store, and an independent, default-OFF scheduled scan job.
+      See §7.2 for the full writeup — it stays a completely separate
+      scheduler from `firm.live.scheduler.TradingScheduler`, gated by its own
+      env var, so the zero-risk-by-construction property for the two running
+      production engines is preserved.
 
 ### Phase 4 — ML confirmation layer (XGBoost only; done)
 
@@ -332,13 +356,12 @@ of its illustrative pseudocode didn't match reality:
       `pyproject.toml` (same convention as the existing `report`/quantstats
       extra) — base install untouched. See §6.9 for a transitive-dependency
       issue found and corrected during install.
-- [x] **Deliberately descoped**: the CNN/GAF image validator and PPO RL
-      position sizer from the original research plan — both need heavy new
-      dependencies (torch, stable-baselines3, gymnasium, pyts) that would be
-      irresponsible to add unsupervised to this resource-constrained,
-      live-trading-hosting VPS. ONNX export also skipped (plain
-      pickle for now) — noted as the natural next step for low-latency
-      serving if this is ever wired into a live scan path.
+- [x] **Follow-up pass (§7) closed out every item originally descoped here:**
+      a real training run against cached historical data, ONNX export for
+      the XGBoost model, and — despite the heavy new dependencies — the
+      CNN/GAF image validator and PPO RL position sizer, built inside a new
+      isolated Python 3.12 environment (`.venv-ml`) that carries zero risk to
+      the live `firm-api` process. See §7 for the full writeup.
 
 ### Phase 5 — `/patterns` frontend page (done)
 
@@ -369,7 +392,10 @@ each taken at a different moment while the other phases were still being
 built concurrently in the same working tree (a deliberate parallelization
 choice — see §1.2 — not a mistake, but it does mean no single subagent's
 reported number should be treated as the final word).
-- **Not yet committed to git** (Phases 2-5) — see §1.1.
+- **Committed** as `ba7ccfe` (Phase 2), `3945c68` (Phase 3 REST API +
+  Phase 5 `/patterns` frontend page, bundled in one commit), `738b5e8`
+  (Phase 4). Everything originally descoped from Phases 3 and 4 was
+  subsequently built in the follow-up pass documented in §7.
 
 ## 5. Architecture reference
 
@@ -406,6 +432,16 @@ reported number should be treated as the final word).
 | `frontend/src/App.tsx` | +`/patterns` route (Phase 5) |
 | `frontend/src/components/Layout.tsx` | +nav link (Phase 5) |
 | `frontend/src/test/{handlers,mockData}.ts` | +pattern-endpoint fixtures (Phase 5) |
+| `src/firm/live/pattern_scan_job.py` | independent scheduled scan job, default OFF (§7.2) |
+| `src/firm/live/pattern_scan_history.py` | `PatternScanHistoryStore` — persistent SQLite scan history (§7.2) |
+| `tests/test_pattern_scan_job.py` | 5 tests (§7.2) |
+| `tests/test_pattern_ml_onnx.py` | XGBoost ONNX round-trip tests, isolated env (§7.3) |
+| `src/firm/patterns/ml/cnn_validator.py` | GAF encoding + CNN validator, isolated env (§7.4) |
+| `scripts/train_cnn_validator.py` | CNN training CLI, isolated env (§7.4) |
+| `tests/test_cnn_validator.py` | 11 tests, isolated env (§7.4) |
+| `src/firm/patterns/ml/ppo_sizer.py` | PPO position-sizing agent, isolated env (§7.4) |
+| `scripts/train_pattern_ppo.py` | PPO training CLI, isolated env (§7.4) |
+| `tests/test_ppo_sizer.py` | 11 tests, isolated env (§7.4) |
 
 ### 5.1 Live-safety note
 
@@ -615,3 +651,186 @@ match count) while the new combination loads in the background. Worth
 remembering for any future page that filters server-side rather than
 client-side — the `OrderHistory.tsx` loading-state pattern silently assumes
 client-side filtering and doesn't generalize.
+
+## 7. Follow-up pass — closing out everything left open (done)
+
+The original 5 phases deliberately left several things open: two small bugs,
+a scheduled scan job + persistent history (descoped from Phase 3), running
+the ML pipeline for real + ONNX export (descoped from Phase 4), and the
+CNN/GAF validator + PPO RL sizer (descoped from Phase 4 for dependency
+reasons). This section covers all of it, plus the two final operational
+steps (push, enable live).
+
+### 7.0 Disk cleanup (prerequisite)
+
+The root filesystem was at 94% full (1.4G free of 20G) — not enough headroom
+to install a second Python interpreter plus a torch-class virtualenv.
+Cleared only unambiguously-safe, regenerable items: `journalctl
+--vacuum-size=100M`, `~/.cache/pip`, `~/.cache/ms-playwright` (reinstallable
+via `npx playwright install chromium`), `~/.vscode-server/data
+/CachedExtensionVSIXs`, already-rotated system logs, and old (non-active)
+`~/.vscode-server/cli` version directories (identified by mtime, keeping the
+currently-connected build untouched). Left untouched: `.venv`, IB Gateway
+(`/opt/ibgateway`+`i4j_jres`), all live-trading state under `data/`
+(`vectordb`, `live_state.db`, `approvals.json`, `execution_audit.jsonl`).
+Freed enough to comfortably fit `.venv-ml` (currently 3.1G free).
+
+### 7.1 Small fixes
+
+- **Pivot-window detectors now collect every valid match, not just the
+  first.** `rules/{reversal,triangle,continuation,cup_handle}.py`'s 9
+  detector functions changed from returning `PatternMatch | None` on the
+  first window that produced *any* valid match (see §6.2's "known
+  limitation") to collecting every valid match across all tried windows into
+  a `list[PatternMatch]`. `scanner.py`'s `_ALL_DETECTORS` loop changed from
+  appending one candidate to extending with the whole list — it already
+  sorts everything by `quality_score` afterward, so no other change was
+  needed. `tests/test_patterns.py` gained
+  `test_double_top_collects_all_valid_windows_best_quality_first`, which
+  constructs a fixture with two valid double-top windows of different
+  quality and asserts both are returned, better-quality first — closing the
+  gap §6.2 flagged as a documented risk rather than a fix.
+- **`tests/test_llm.py`'s `mock_llm_modules` fixture never registered
+  `"firm.llm.schemas"`** (see §6.6's Phase 2 note for how this was first
+  found) — one-line fix: register the real imported module in the fake
+  `sys.modules` dict alongside the existing fake `.provider`/`.compression`
+  /`.config`/`.exceptions` entries. `pytest tests/test_llm.py -q` now passes
+  standalone, not just as part of the full suite.
+
+### 7.2 Scheduled scan job + persistent history endpoint
+
+- **`src/firm/live/pattern_scan_job.py`** — its own `BackgroundScheduler`
+  (APScheduler), completely independent of `firm.live.scheduler
+  .TradingScheduler` (never imports or touches it). One `CronTrigger(hour=16,
+  minute=30, day_of_week="mon-fri", timezone="US/Eastern")` job,
+  `max_instances=1, coalesce=True`, wrapped in a try/except-log-continue
+  matching `scheduler.py`'s `_run_cycle_safe` convention. Reuses
+  `scan_symbol` + `_adjusted_ohlc` exactly as the REST endpoint does — no new
+  scanning logic. Gated by `FIRM_ENABLE_PATTERN_SCAN` (default off, same
+  parsing convention as `FIRM_AUTO_START_LIVE`); wired into `app.py`'s
+  `lifespan()` right after the existing auto-start-live task, stashed on
+  `application.state.pattern_scan_job`, stopped on shutdown.
+- **`src/firm/live/pattern_scan_history.py`** — `PatternScanHistoryStore`,
+  following the exact SQLite convention from `firm.llm.cache.ResponseCache`
+  (WAL mode, `threading.Lock`, idempotent `CREATE TABLE IF NOT EXISTS`, every
+  read/write wrapped in try/except that logs and degrades gracefully). One
+  row per persisted match (reusing `patterns.py`'s existing
+  `_serialize_match` shape), plus a nullable `outcome` column updated
+  in-place after each scan by re-checking any still-pending rows against
+  fresh price data via the existing `label_triple_barrier` (no second
+  triple-barrier implementation). DB path scoped via `FIRM_DATA_DIR` so the
+  two `firm-api` instances never collide on one file.
+- New `GET /api/patterns/history` endpoint (paginated, filterable),
+  registered before the `/{symbol}` catch-all per §6.7's ordering rule.
+  `POST /patterns/scan/trigger` now also persists into this store, not just
+  the in-memory cache.
+- **Bug found and fixed while building this:** `patterns.py`'s original
+  history-store accessor read `FIRM_DATA_DIR` into a module-level constant
+  (`_DATA_DIR = os.environ.get(...)`), evaluated once at import time — so a
+  test's `monkeypatch.setenv("FIRM_DATA_DIR", ...)` had no effect and every
+  test run leaked writes into the real `data/pattern_scan_history.db`.
+  Fixed by reading the env var fresh inside `_history_store()` at call time;
+  the leaked file was found and deleted.
+- `tests/test_pattern_scan_job.py` (5 tests: env-gate parsing, app-wiring via
+  `with TestClient(app) as client:`, safe run-once, pending-outcome
+  resolution) + 6 new tests in `tests/test_patterns_api.py` for the history
+  endpoint. Live-safety re-verified exactly as in §6.5: on an isolated port,
+  with `FIRM_ENABLE_PATTERN_SCAN` unset nothing new starts; only with it set
+  does the independent scheduler appear.
+
+### 7.3 Real ML training run + ONNX export
+
+Ran `scripts/train_pattern_ml.py --data-source cache` for real (25-symbol
+universe, 2010-2026) — accuracy/AUC came back in the same ballpark as the
+synthetic smoke test, not overfit-perfect or degenerate. Model saved to
+`data/models/pattern_xgb.pkl` (new `.gitignore`d `data/models/` convention).
+
+Added `xgb_classifier.export_onnx`/`load_onnx`/`predict_proba_onnx`, run and
+verified inside the isolated `.venv-ml` environment (§7.4) since
+`onnxruntime` has no Python 3.14 wheel either. **Bug found and fixed:**
+`train()` originally fit the booster on a named-column `pandas.DataFrame` —
+xgboost bakes those column names into its tree dump, and `onnxmltools`'
+converter can't parse them back out (`Unable to interpret 'score_
+follow_through', feature names should follow pattern 'f%d'`). Fixed by
+fitting on `X.to_numpy()` instead; verified behavior-preserving by re-running
+`tests/test_pattern_ml.py` (35 passed, unchanged) and re-running the real
+training script (identical accuracy: 0.852/0.737/0.871). `tests/test_
+pattern_ml_onnx.py` (new, skip-gated) round-trips a trained model through
+ONNX and asserts matching predictions.
+
+### 7.4 Isolated Python 3.12 environment + CNN/GAF validator + PPO RL sizer
+
+**Environment.** This box runs Python 3.14.4, and torch/stable-baselines3/
+gymnasium/onnxruntime have no Python 3.14 wheels yet (confirmed via PyPI's
+JSON API). `apt-get install python3.12` isn't available in this Ubuntu
+release's repos either. Built via `uv` (Astral's Python toolchain manager)
+instead: `uv python install 3.12` fetches a prebuilt interpreter with no
+APT/compilation involved, then `uv venv --python 3.12 .venv-ml` + `uv pip
+install --python .venv-ml/bin/python ...`. **Gotcha:** uv-created venvs ship
+no `pip` binary at all — `.venv-ml/bin/pip` doesn't exist, so `.venv-ml/bin/
+pip list` silently no-ops instead of erroring; must use `uv pip list
+--python .venv-ml/bin/python`. This environment is never imported by the
+running `firm-api` process (Python 3.14) — it's used only for standalone
+scripts run manually. Installing `xgboost` here pulled in the same unwanted
+`nvidia-nccl-cu13` (~240MB) as §6.9; removed the same way.
+`PYTHONPATH=src .venv-ml/bin/python ...` is required to invoke it directly
+(the package isn't installed into `.venv-ml`, only imported via path).
+
+**`src/firm/patterns/ml/cnn_validator.py`** — GAF (Gramian Angular Field,
+Wang & Oates 2015) encodes the OHLCV window before a confirmed pattern's
+breakout as an image; a small 2D CNN (`torch`) predicts the same
+triple-barrier outcome the XGBoost classifier does, for direct comparison.
+Independent of `xgb_classifier` in both directions — neither requires the
+other installed. `export_onnx` works cleanly via `torch.onnx.export` (a
+plain `nn.Module` has none of xgboost's feature-naming issue from §7.3).
+`scripts/train_cnn_validator.py` mirrors `train_pattern_ml.py`'s structure.
+`tests/test_cnn_validator.py` — 11 tests, all passing under `.venv-ml`.
+
+**`src/firm/patterns/ml/ppo_sizer.py`** — a single-step "contextual bandit"
+environment (not a multi-step portfolio simulation — deliberately out of
+scope, see the module docstring) that learns *how much* to bet on a
+confirmed pattern's context, reusing the same per-match dataset the other
+two models train on. **Real design flaw found and fixed:** a purely linear
+(risk-neutral) reward makes "always bet max size" reward-optimal whenever
+the dataset's average outcome is positive — verified empirically, the first
+trained policy's mean reward matched the always-max-size baseline exactly.
+Fixed with a quadratic risk-aversion penalty on position size (standard
+mean-variance / quadratic-utility sizing): `reward = pnl - cost*|size| -
+risk_aversion*size**2`. **This needed a second round of calibration, not
+just the mechanism:** the *default* `risk_aversion` value matters as much as
+having the term at all. `0.5` looked reasonable in isolation but, checked
+against a real training run over this repo's cached data (mean
+`outcome*scale` ≈ 1.14 — the dataset really is that favorable on average),
+still left the per-context optimum clipped to the max-size boundary for
+99.4% of predictions — collapsing right back to the same degenerate policy
+the penalty exists to prevent. `risk_aversion=1.0` is the smallest value
+verified to actually break that saturation (real run: held-out mean reward
+0.374 vs. an always-max-size baseline of 0.148, sizes ranging -0.76 to 1.0,
+correlated with risk_reward). Confirmed the mechanism itself was sound
+*before* re-calibrating, on a controlled synthetic dataset with a genuine
+quality→outcome correlation: sizing came out strongly correlated with
+quality (r=0.89), negative on low-quality contexts, near-max on high-quality
+ones — exactly the intended "size by conviction" behavior. No ONNX export
+here — SB3's action-sampling wrapper around the underlying network isn't a
+plain forward pass, so consuming a saved policy still requires
+stable-baselines3 itself, documented as a known follow-on constraint, not
+solved in this pass. `scripts/train_pattern_ppo.py` mirrors the other two
+scripts' CLI structure. `tests/test_ppo_sizer.py` — 11 tests, all passing
+under `.venv-ml`.
+
+**Dependency cascade found while running both training scripts against
+`--data-source cache`:** `firm.runtime.load_prices` transitively imports the
+full backtest engine, which pulled `pyyaml`, `pydantic`, `pyarrow`,
+`pydantic-settings`, and `backtrader` into `.venv-ml` one missing-import at a
+time. Installed each rather than building a lighter-weight cache loader, for
+consistency with `train_pattern_ml.py`'s existing approach.
+
+**Explicitly out of scope, same as the original plan:** wiring either model
+into the live signal-generation path. Both stay standalone, human-run
+research tools producing artifacts on disk (`data/models/pattern_cnn.*`,
+`data/models/pattern_ppo.zip`, all `.gitignore`d).
+
+### 7.5 Push + enable live
+
+Tracked here once done — see `git log`/`config/live.yaml` for current
+status.
