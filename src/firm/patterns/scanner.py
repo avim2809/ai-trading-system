@@ -2,11 +2,16 @@
 scoring -> ATR-floored stops.
 
 Runs every rule detector against one symbol's OHLCV window and returns all
-confirmed matches clearing ``min_score``, best first. Callers that want a
-single signal per symbol (see docs/pattern_recognition_plan.md deviation #4
-— zscore_signals groups by strategy across the universe, so emitting more
-than one Signal per symbol per bar would double-count that symbol) should
-take the first element.
+confirmed matches clearing ``min_score``, best first. Each detector itself
+returns *every* window it found a valid match in (see
+``firm.patterns.extrema.recent_pivot_windows`` and
+docs/pattern_recognition_plan.md §6.2) rather than just the first — this is
+where those candidates get merged, scored uniformly, and ranked, so a
+detector never has to guess which of its own candidate windows is "best."
+Callers that want a single signal per symbol (see
+docs/pattern_recognition_plan.md deviation #4 — zscore_signals groups by
+strategy across the universe, so emitting more than one Signal per symbol
+per bar would double-count that symbol) should take the first element.
 """
 
 from __future__ import annotations
@@ -74,20 +79,19 @@ def scan_symbol(
     matches: list[PatternMatch] = []
     for detector in _ALL_DETECTORS:
         try:
-            candidate = detector(
+            candidates = detector(
                 high, low, close, volume, pivots,
                 confirm_lookback_bars=confirm_lookback_bars,
             )
         except Exception:
             log.debug("pattern detector %s failed", detector.__name__, exc_info=True)
             continue
-        if candidate is None:
-            continue
-        if enabled_patterns is not None and candidate.pattern not in enabled_patterns:
-            continue
-        scored = _score_and_finalize(candidate, close, volume, current_atr, stop_atr_floor)
-        if scored.quality_score >= min_score:
-            matches.append(scored)
+        for candidate in candidates:
+            if enabled_patterns is not None and candidate.pattern not in enabled_patterns:
+                continue
+            scored = _score_and_finalize(candidate, close, volume, current_atr, stop_atr_floor)
+            if scored.quality_score >= min_score:
+                matches.append(scored)
 
     matches.sort(key=lambda m: m.quality_score, reverse=True)
     return matches

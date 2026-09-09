@@ -124,8 +124,9 @@ def detect_cup_handle(
     max_handle_bars: int = 15,
     max_handle_retrace: float = 0.5,
     confirm_lookback_bars: int = 3,
-) -> PatternMatch | None:
+) -> list[PatternMatch]:
     n = len(close)
+    matches: list[PatternMatch] = []
     for window in recent_pivot_windows(pivots, 3, _MAX_PIVOT_LOOKBACK):
         if window[-1].kind != "peak":
             continue
@@ -137,5 +138,5 @@ def detect_cup_handle(
             confirm_lookback_bars=confirm_lookback_bars,
         )
         if match is not None:
-            return match
-    return None
+            matches.append(match)
+    return matches

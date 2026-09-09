@@ -91,8 +91,9 @@ def test_head_and_shoulders_top():
     high, low, close, volume = _ohlcv(anchors, 71)
     volume = _spike(volume, 70)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_head_shoulders(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_head_shoulders(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert (match.pattern, match.direction) == ("head_shoulders_top", "short")
     assert match.confirm_index == 70
     assert match.stop > match.entry > match.target
@@ -103,8 +104,9 @@ def test_inverse_head_and_shoulders():
     high, low, close, volume = _ohlcv(anchors, 71)
     volume = _spike(volume, 70)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_inverse_head_shoulders(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_inverse_head_shoulders(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert (match.pattern, match.direction) == ("inverse_head_shoulders", "long")
     assert match.target > match.entry > match.stop
 
@@ -114,8 +116,9 @@ def test_double_top():
     high, low, close, volume = _ohlcv(anchors, 46)
     volume = _spike(volume, 45)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_double_top(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_double_top(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert (match.pattern, match.direction) == ("double_top", "short")
 
 
@@ -124,8 +127,9 @@ def test_double_bottom():
     high, low, close, volume = _ohlcv(anchors, 46)
     volume = _spike(volume, 45)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_double_bottom(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_double_bottom(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert (match.pattern, match.direction) == ("double_bottom", "long")
 
 
@@ -134,8 +138,9 @@ def test_triple_top():
     high, low, close, volume = _ohlcv(anchors, 56)
     volume = _spike(volume, 55)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_triple_top(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_triple_top(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert (match.pattern, match.direction) == ("triple_top", "short")
 
 
@@ -144,8 +149,9 @@ def test_triple_bottom():
     high, low, close, volume = _ohlcv(anchors, 56)
     volume = _spike(volume, 55)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_triple_bottom(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_triple_bottom(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert (match.pattern, match.direction) == ("triple_bottom", "long")
 
 
@@ -157,8 +163,9 @@ def test_ascending_triangle():
     anchors = [(0, 100.0), (6, 120.0), (12, 108.0), (18, 120.5), (24, 113.0), (30, 125.0)]
     high, low, close, volume = _ohlcv(anchors, 31)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert (match.pattern, match.direction) == ("ascending_triangle", "long")
 
 
@@ -169,8 +176,9 @@ def test_descending_triangle():
     anchors = [(0, 100.0), (6, 120.0), (12, 105.0), (18, 113.0), (24, 106.0), (27, 110.0), (33, 95.0)]
     high, low, close, volume = _ohlcv(anchors, 34)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert (match.pattern, match.direction) == ("descending_triangle", "short")
 
 
@@ -178,8 +186,9 @@ def test_symmetrical_triangle():
     anchors = [(0, 100.0), (6, 130.0), (12, 100.0), (18, 120.0), (24, 108.0), (30, 115.0)]
     high, low, close, volume = _ohlcv(anchors, 31)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert (match.pattern, match.direction) == ("symmetrical_triangle", "long")
 
 
@@ -188,8 +197,9 @@ def test_rising_wedge():
     anchors = [(0, 100.0), (6, 110.0), (12, 100.0), (18, 118.0), (24, 112.0), (27, 116.0), (33, 100.0)]
     high, low, close, volume = _ohlcv(anchors, 34)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert (match.pattern, match.direction) == ("rising_wedge", "short")
 
 
@@ -197,8 +207,9 @@ def test_falling_wedge():
     anchors = [(0, 100.0), (6, 130.0), (12, 110.0), (18, 118.0), (24, 104.0), (30, 115.0)]
     high, low, close, volume = _ohlcv(anchors, 31)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert (match.pattern, match.direction) == ("falling_wedge", "long")
 
 
@@ -206,8 +217,9 @@ def test_rectangle():
     anchors = [(0, 100.0), (6, 120.0), (12, 100.0), (18, 120.3), (24, 99.7), (30, 125.0)]
     high, low, close, volume = _ohlcv(anchors, 31)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert match.pattern == "rectangle"
     assert match.direction == "long"
 
@@ -228,8 +240,9 @@ def test_bull_flag():
     ]
     high, low, close, volume = _ohlcv(anchors, 31)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_flag_pennant(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_flag_pennant(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert match.pattern in ("bull_flag", "pennant")
     assert match.direction == "long"
 
@@ -241,8 +254,9 @@ def test_bear_flag():
     ]
     high, low, close, volume = _ohlcv(anchors, 31)
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_flag_pennant(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_flag_pennant(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert match.pattern in ("bear_flag", "pennant")
     assert match.direction == "short"
 
@@ -266,8 +280,9 @@ def test_cup_and_handle():
     volume = _spike(volume, len(close) - 1)
 
     pivots = zigzag_pivots(high, low, pct=0.03)
-    match = detect_cup_handle(high, low, close, volume, pivots)
-    assert match is not None
+    matches = detect_cup_handle(high, low, close, volume, pivots)
+    assert matches
+    match = matches[0]
     assert match.direction == "long"
     assert match.pattern in ("cup_handle", "rounding_bottom")
     assert match.stop < match.entry < match.target
@@ -281,11 +296,11 @@ def test_no_patterns_on_monotonic_trend():
     high, low, close, volume = _ohlcv([(0, 100.0), (100, 200.0)], 101)
     pivots = zigzag_pivots(high, low, pct=0.03)
     assert pivots == []  # nothing to reverse against — no pattern should fire
-    assert detect_head_shoulders(high, low, close, volume, pivots) is None
-    assert detect_double_top(high, low, close, volume, pivots) is None
-    assert detect_triangle_wedge_rectangle(high, low, close, volume, pivots) is None
-    assert detect_flag_pennant(high, low, close, volume, pivots) is None
-    assert detect_cup_handle(high, low, close, volume, pivots) is None
+    assert detect_head_shoulders(high, low, close, volume, pivots) == []
+    assert detect_double_top(high, low, close, volume, pivots) == []
+    assert detect_triangle_wedge_rectangle(high, low, close, volume, pivots) == []
+    assert detect_flag_pennant(high, low, close, volume, pivots) == []
+    assert detect_cup_handle(high, low, close, volume, pivots) == []
 
 
 def test_scan_symbol_never_raises_on_degenerate_input():
@@ -319,6 +334,31 @@ def test_score_pattern_penalizes_weak_setups():
         follow_through_atr=0.0,  # barely crossed the level
     )
     assert score.total < 15.0
+
+
+# ---------------------------------------------------------------------------
+# recent_pivot_windows retry: collects every valid window, not just the first
+# ---------------------------------------------------------------------------
+
+def test_double_top_collects_all_valid_windows_best_quality_first():
+    # Two overlapping double-top candidates share pivot P1: a loose,
+    # lower-quality one from the most-recent window (P1,T1,P2) and a much
+    # tighter, higher-quality one from an older window (P0,T0,P1) that
+    # recent_pivot_windows's retry logic also tries. Both confirm on the
+    # same final breakdown bar. Before the §6.2 fix, the raw detector
+    # returned only the first (lower-quality, most-recent) window it found;
+    # now it returns both, and scan_symbol's quality-score sort must put
+    # the tighter one first regardless of which window was tried first.
+    anchors = [
+        (0, 100.0), (6, 120.0), (12, 100.0), (18, 120.5),
+        (24, 95.0), (30, 118.0), (36, 85.0),
+    ]
+    df = _frame(anchors, 37, spike_at=36)
+    matches = scan_symbol(df, min_score=0.0, zigzag_pct=0.03, enabled_patterns={"double_top"})
+    double_tops = [m for m in matches if m.pattern == "double_top"]
+    assert len(double_tops) == 2
+    assert double_tops[0].quality_score > double_tops[1].quality_score
+    assert double_tops[0].geometry_tolerance_used > double_tops[1].geometry_tolerance_used
 
 
 # ---------------------------------------------------------------------------

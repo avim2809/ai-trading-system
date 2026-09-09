@@ -113,7 +113,7 @@ class TestTriggerValidation:
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["scanned"] == 5  # StepRequest-style default symbols
-        assert data["matches"] == 5  # verified directly against scan_symbol
+        assert data["matches"] == 7  # verified directly against scan_symbol
 
 
 # ------------------------------------------------------------------
@@ -128,21 +128,24 @@ class TestTriggerScanRoundTrip:
         data = r.json()
         assert data["scanned"] == len(_SYMBOLS)
         # Verified directly against firm.patterns.scanner.scan_symbol for
-        # this exact seed/asof/min_score/symbol-list combination.
-        assert data["matches"] == 16
+        # this exact seed/asof/min_score/symbol-list combination. (Some
+        # symbols legitimately contribute more than one match of the same
+        # pattern family, from different confirmed pivot windows — see
+        # docs/pattern_recognition_plan.md §6.2 — so this isn't 1-per-symbol.)
+        assert data["matches"] == 20
         assert data["last_scan"]["data_source"] == "synthetic"
         assert data["last_scan"]["asof"] == "2023-12-31T00:00:00"
         assert data["last_scan"]["symbols_scanned"] == len(_SYMBOLS)
         assert data["last_scan"]["symbols_missing_data"] == []
         assert data["last_scan"]["symbols_failed"] == []
-        assert data["last_scan"]["match_count"] == 16
+        assert data["last_scan"]["match_count"] == 20
 
     def test_scan_populated_after_trigger(self, client):
         _trigger(client)
         r = client.get("/api/patterns/scan")
         assert r.status_code == 200
         matches = r.json()
-        assert len(matches) == 16
+        assert len(matches) == 20
 
         # Every match has the full documented shape.
         for m in matches:
@@ -167,27 +170,33 @@ class TestTriggerScanRoundTrip:
         scores = [m["quality_score"] for m in matches]
         assert scores == sorted(scores, reverse=True)
 
-        # NVDA's head_shoulders_top is the single highest-scoring match in
-        # this fixture (~91.1) — confirms real per-symbol scan_symbol output
-        # actually reached the cache, not just a placeholder.
-        assert matches[0]["symbol"] == "NVDA"
-        assert matches[0]["pattern"] == "head_shoulders_top"
-        assert matches[0]["quality_score"] == pytest.approx(91.1, abs=0.5)
+        # MSFT's falling_wedge (two confirmed windows, ~98.8 and ~98.4) is
+        # the single highest-scoring match in this fixture — confirms real
+        # per-symbol scan_symbol output actually reached the cache, not just
+        # a placeholder.
+        assert matches[0]["symbol"] == "MSFT"
+        assert matches[0]["pattern"] == "falling_wedge"
+        assert matches[0]["quality_score"] == pytest.approx(98.8, abs=0.5)
 
     def test_second_trigger_replaces_rather_than_appends(self, client):
         _trigger(client)
         first_count = len(client.get("/api/patterns/scan").json())
         _trigger(client)
         second_count = len(client.get("/api/patterns/scan").json())
-        assert first_count == second_count == 16
+        assert first_count == second_count == 20
 
     def test_trigger_with_stricter_min_score_yields_fewer_cached_matches(self, client):
+        _trigger(client, min_score=30.0)
+        matches_loose = client.get("/api/patterns/scan").json()
         _trigger(client, min_score=80.0)
         matches = client.get("/api/patterns/scan").json()
-        # Verified directly: only NVDA (head_shoulders_top, ~91.1) and AMZN
+        # Verified directly: MSFT (falling_wedge, ~98.8/~98.4), NVDA
+        # (head_shoulders_top, ~91.1; triple_top, ~85.2) and AMZN
         # (rising_wedge, ~80.3) clear an 80 floor in this fixture.
-        assert len(matches) == 2
+        assert len(matches) == 5
+        assert len(matches) < len(matches_loose)
         assert all(m["quality_score"] >= 80.0 for m in matches)
+        assert {m["symbol"] for m in matches} == {"NVDA", "AMZN", "MSFT"}
 
     def test_trigger_cache_missing_symbol_reports_no_data_not_a_crash(self, client, monkeypatch):
         """data_source="cache" loads whatever firm.runtime.load_prices
@@ -253,12 +262,12 @@ class TestScanFilters:
         r = client.get("/api/patterns/scan?direction=long")
         assert r.status_code == 200
         matches = r.json()
-        assert len(matches) == 9  # verified directly against scan_symbol
+        assert len(matches) == 11  # verified directly against scan_symbol
         assert all(m["direction"] == "long" for m in matches)
 
         r = client.get("/api/patterns/scan?direction=short")
         matches = r.json()
-        assert len(matches) == 7
+        assert len(matches) == 9
         assert all(m["direction"] == "short" for m in matches)
 
     def test_filter_by_pattern(self, client):
@@ -266,7 +275,9 @@ class TestScanFilters:
         r = client.get("/api/patterns/scan?pattern=falling_wedge")
         assert r.status_code == 200
         matches = r.json()
-        assert len(matches) == 3  # JPM, META, AAPL — verified directly
+        # AAPL, JPM, META (one each) + MSFT (two confirmed windows) —
+        # verified directly.
+        assert len(matches) == 5
         assert all(m["pattern"] == "falling_wedge" for m in matches)
 
     def test_filter_by_min_score(self, client):
@@ -274,8 +285,8 @@ class TestScanFilters:
         r = client.get("/api/patterns/scan?min_score=80")
         assert r.status_code == 200
         matches = r.json()
-        assert len(matches) == 2
-        assert {m["symbol"] for m in matches} == {"NVDA", "AMZN"}
+        assert len(matches) == 5
+        assert {m["symbol"] for m in matches} == {"NVDA", "AMZN", "MSFT"}
 
     def test_filters_combine(self, client):
         _trigger(client)
@@ -301,15 +312,15 @@ class TestSummary:
         r = client.get("/api/patterns/summary")
         assert r.status_code == 200
         data = r.json()
-        assert data["total"] == 16
-        assert sum(data["by_pattern"].values()) == 16
-        assert data["by_direction"] == {"long": 9, "short": 7}
-        assert data["last_scan"]["match_count"] == 16
+        assert data["total"] == 20
+        assert sum(data["by_pattern"].values()) == 20
+        assert data["by_direction"] == {"long": 11, "short": 9}
+        assert data["last_scan"]["match_count"] == 20
 
     def test_summary_reflects_last_trigger_only(self, client):
         _trigger(client, min_score=80.0)
         data = client.get("/api/patterns/summary").json()
-        assert data["total"] == 2
+        assert data["total"] == 5
 
 
 # ------------------------------------------------------------------
@@ -323,16 +334,19 @@ class TestSymbolEndpoint:
         r = client.get("/api/patterns/NVDA")
         assert r.status_code == 200
         matches = r.json()
-        assert len(matches) == 2
+        assert len(matches) == 3
         assert all(m["symbol"] == "NVDA" for m in matches)
-        # Best first: head_shoulders_top (~91.1) before triple_top (~61.6).
+        # Best first: head_shoulders_top (~91.1), then triple_top from two
+        # confirmed windows (~85.2, ~61.6).
         assert matches[0]["pattern"] == "head_shoulders_top"
         assert matches[1]["pattern"] == "triple_top"
+        assert matches[2]["pattern"] == "triple_top"
+        assert matches[1]["quality_score"] > matches[2]["quality_score"]
 
     def test_symbol_is_case_insensitive(self, client):
         _trigger(client)
         r = client.get("/api/patterns/nvda")
-        assert len(r.json()) == 2
+        assert len(r.json()) == 3
 
     def test_symbol_with_no_matches_returns_empty_list(self, client):
         _trigger(client)

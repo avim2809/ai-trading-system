@@ -44,10 +44,11 @@ def detect_flag_pennant(
     min_flag_bars: int = 5,
     max_flag_bars: int = 20,
     confirm_lookback_bars: int = 3,
-) -> PatternMatch | None:
+) -> list[PatternMatch]:
     if len(pivots) < 2:
-        return None
+        return []
     n = len(close)
+    matches: list[PatternMatch] = []
     earliest_k = max(0, len(pivots) - 1 - _MAX_POLE_LOOKBACK)
     for k in range(len(pivots) - 2, earliest_k - 1, -1):
         match = _try_flag(
@@ -59,8 +60,8 @@ def detect_flag_pennant(
             confirm_lookback_bars=confirm_lookback_bars,
         )
         if match is not None:
-            return match
-    return None
+            matches.append(match)
+    return matches
 
 
 def _try_flag(

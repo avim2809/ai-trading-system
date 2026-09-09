@@ -10,7 +10,10 @@ Each detector tries a handful of recent windows via
 than assuming the pattern's last structural pivot is always ``pivots[-1]`` —
 a big enough post-formation move (the breakout itself, or a bounce after it)
 can register its own confirmed reversal and push the real pattern back a
-pivot or two.
+pivot or two. Every window that produces a valid match is collected (not
+just the first) — the scanner's own quality scoring picks the best one
+across everything found, rather than this module guessing which window is
+"right" by trying them in most-recent-first order and stopping early.
 """
 
 from __future__ import annotations
@@ -96,8 +99,9 @@ def detect_head_shoulders(
     shoulder_tolerance: float = 0.05,
     neckline_tolerance: float = 0.05,
     confirm_lookback_bars: int = 3,
-) -> PatternMatch | None:
-    """Head & Shoulders top — bearish reversal. ``None`` if not present/confirmed."""
+) -> list[PatternMatch]:
+    """Head & Shoulders top — bearish reversal. ``[]`` if not present/confirmed."""
+    matches: list[PatternMatch] = []
     for window in recent_pivot_windows(pivots, 5, _MAX_PIVOT_LOOKBACK):
         if window[-1].kind != "peak":
             continue
@@ -106,8 +110,8 @@ def detect_head_shoulders(
             neckline_tolerance=neckline_tolerance, confirm_lookback_bars=confirm_lookback_bars,
         )
         if match is not None:
-            return match
-    return None
+            matches.append(match)
+    return matches
 
 
 def detect_inverse_head_shoulders(
@@ -120,8 +124,9 @@ def detect_inverse_head_shoulders(
     shoulder_tolerance: float = 0.05,
     neckline_tolerance: float = 0.05,
     confirm_lookback_bars: int = 3,
-) -> PatternMatch | None:
+) -> list[PatternMatch]:
     """Inverse Head & Shoulders — bullish reversal (mirror of the top)."""
+    matches: list[PatternMatch] = []
     for window in recent_pivot_windows(pivots, 5, _MAX_PIVOT_LOOKBACK):
         if window[-1].kind != "trough":
             continue
@@ -130,8 +135,8 @@ def detect_inverse_head_shoulders(
             neckline_tolerance=neckline_tolerance, confirm_lookback_bars=confirm_lookback_bars,
         )
         if match is not None:
-            return match
-    return None
+            matches.append(match)
+    return matches
 
 
 def _double_pattern(
@@ -189,8 +194,9 @@ def _detect_double(
     tolerance: float,
     min_retrace: float,
     confirm_lookback_bars: int,
-) -> PatternMatch | None:
+) -> list[PatternMatch]:
     kind = "peak" if top else "trough"
+    matches: list[PatternMatch] = []
     for window in recent_pivot_windows(pivots, 3, _MAX_PIVOT_LOOKBACK):
         if window[-1].kind != kind:
             continue
@@ -199,8 +205,8 @@ def _detect_double(
             confirm_lookback_bars=confirm_lookback_bars,
         )
         if match is not None:
-            return match
-    return None
+            matches.append(match)
+    return matches
 
 
 def detect_double_top(
@@ -213,7 +219,7 @@ def detect_double_top(
     tolerance: float = 0.03,
     min_retrace: float = 0.10,
     confirm_lookback_bars: int = 3,
-) -> PatternMatch | None:
+) -> list[PatternMatch]:
     return _detect_double(
         close, pivots, top=True, tolerance=tolerance, min_retrace=min_retrace,
         confirm_lookback_bars=confirm_lookback_bars,
@@ -230,7 +236,7 @@ def detect_double_bottom(
     tolerance: float = 0.03,
     min_retrace: float = 0.10,
     confirm_lookback_bars: int = 3,
-) -> PatternMatch | None:
+) -> list[PatternMatch]:
     return _detect_double(
         close, pivots, top=False, tolerance=tolerance, min_retrace=min_retrace,
         confirm_lookback_bars=confirm_lookback_bars,
@@ -294,8 +300,9 @@ def _detect_triple(
     outer_tolerance: float,
     inner_tolerance: float,
     confirm_lookback_bars: int,
-) -> PatternMatch | None:
+) -> list[PatternMatch]:
     kind = "peak" if top else "trough"
+    matches: list[PatternMatch] = []
     for window in recent_pivot_windows(pivots, 5, _MAX_PIVOT_LOOKBACK):
         if window[-1].kind != kind:
             continue
@@ -304,8 +311,8 @@ def _detect_triple(
             inner_tolerance=inner_tolerance, confirm_lookback_bars=confirm_lookback_bars,
         )
         if match is not None:
-            return match
-    return None
+            matches.append(match)
+    return matches
 
 
 def detect_triple_top(
@@ -318,7 +325,7 @@ def detect_triple_top(
     outer_tolerance: float = 0.02,
     inner_tolerance: float = 0.02,
     confirm_lookback_bars: int = 3,
-) -> PatternMatch | None:
+) -> list[PatternMatch]:
     return _detect_triple(
         close, pivots, top=True, outer_tolerance=outer_tolerance,
         inner_tolerance=inner_tolerance, confirm_lookback_bars=confirm_lookback_bars,
@@ -335,7 +342,7 @@ def detect_triple_bottom(
     outer_tolerance: float = 0.02,
     inner_tolerance: float = 0.02,
     confirm_lookback_bars: int = 3,
-) -> PatternMatch | None:
+) -> list[PatternMatch]:
     return _detect_triple(
         close, pivots, top=False, outer_tolerance=outer_tolerance,
         inner_tolerance=inner_tolerance, confirm_lookback_bars=confirm_lookback_bars,

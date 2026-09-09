@@ -12,7 +12,9 @@ Tries a few recent pivot windows (see
 ``pivots[-window:]`` is always the right slice — same reasoning as
 ``rules/reversal.py``/``rules/cup_handle.py``: a noise pivot from the
 eventual breakout can land inside a naive trailing window and skew the
-fitted slope enough to misclassify (or miss) the pattern.
+fitted slope enough to misclassify (or miss) the pattern. Every window that
+produces a valid match is returned (not just the first) so the scanner's own
+quality scoring can pick the best one across all of them.
 """
 
 from __future__ import annotations
@@ -143,9 +145,10 @@ def detect_triangle_wedge_rectangle(
     flat_eps: float = _FLAT_EPS,
     converge_margin: float = _CONVERGE_MARGIN,
     confirm_lookback_bars: int = 3,
-) -> PatternMatch | None:
+) -> list[PatternMatch]:
     if len(pivots) < 4:
-        return None
+        return []
+    matches: list[PatternMatch] = []
     for window_pivots in recent_pivot_windows(pivots, min(window, len(pivots)), _MAX_PIVOT_LOOKBACK):
         match = _triangle(
             high, low, close, window_pivots,
@@ -153,5 +156,5 @@ def detect_triangle_wedge_rectangle(
             confirm_lookback_bars=confirm_lookback_bars,
         )
         if match is not None:
-            return match
-    return None
+            matches.append(match)
+    return matches

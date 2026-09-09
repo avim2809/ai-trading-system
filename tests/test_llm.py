@@ -81,7 +81,21 @@ class MockLLMServiceBroken:
 
 # Fake firm.llm and firm.rag modules for import patching
 def _build_fake_llm_module():
-    """Create a minimal fake firm.llm.provider module."""
+    """Create a minimal fake firm.llm.provider module.
+
+    ``firm.llm.schemas`` (pydantic response models, e.g.
+    ``AnalystEnhancementResponse`` — no LLM/network calls, nothing to fake)
+    is imported for real and registered below rather than left out: leaving
+    it out means Python can't resolve ``firm.llm.schemas`` once the parent
+    ``firm.llm`` package is replaced by the fake module here (it has no
+    ``__path__``), which only bites when this test file is the *first* thing
+    in the process to import anything under ``firm.llm`` — the full suite's
+    natural import order never hits this, but running this file standalone
+    (``pytest tests/test_llm.py``) did, spuriously failing ~22 unrelated
+    tests.
+    """
+    import firm.llm.schemas as schemas_mod
+
     mod = types.ModuleType("firm.llm")
     provider_mod = types.ModuleType("firm.llm.provider")
     provider_mod.LLMService = MockLLMService  # type: ignore[attr-defined]
@@ -128,6 +142,7 @@ def _build_fake_llm_module():
         "firm.llm.compression": compression_mod,
         "firm.llm.config": config_mod,
         "firm.llm.exceptions": exceptions_mod,
+        "firm.llm.schemas": schemas_mod,
     }
 
 
