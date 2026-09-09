@@ -41,6 +41,9 @@ strategies:
     # removed 2026-08-16: user closed their Danelfin account. See
     # docs/investing_pro_integration.md and docs/danelfin_best_stocks_arm.md
     # for the prior A/B history if this vendor is ever reinstated.
+    # pattern_recognition (Strategy #13) — enabled 2026-09-09, see
+    # docs/pattern_recognition_plan.md.
+    - pattern_recognition
   auto_approve:
     - momentum
     - trend
@@ -52,6 +55,7 @@ strategies:
     - volatility_breakout
     - seasonality
     - regime_hmm
+    - pattern_recognition
 
 # Per-strategy parameters passed to build_orchestrator via strategy_params.
 strategy_params:
