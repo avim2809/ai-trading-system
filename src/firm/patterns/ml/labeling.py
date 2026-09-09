@@ -89,10 +89,27 @@ def label_triple_barrier(
     end = min(n, start + timeout_bars)
     high = ohlcv["high"].to_numpy(dtype=float)[start:end]
     low = ohlcv["low"].to_numpy(dtype=float)[start:end]
+    return first_barrier_hit(high, low, direction=match.direction, stop=float(match.stop), target=float(match.target))
 
-    is_long = match.direction == "long"
-    target, stop = float(match.target), float(match.stop)
 
+def first_barrier_hit(
+    high: np.ndarray,
+    low: np.ndarray,
+    *,
+    direction: str,
+    stop: float,
+    target: float,
+) -> int:
+    """Shared inner loop of :func:`label_triple_barrier`: walk ``high``/
+    ``low`` bar-by-bar and return the first barrier touched (``1`` target,
+    ``-1`` stop — stop wins on a same-bar tie, ``0`` if neither). Factored
+    out so a live outcome-tracking job can apply the *same* barrier logic
+    against freshly-fetched, date-aligned price data for an already-persisted
+    historical match, without a second hand-written copy of it (a
+    ``PatternMatch`` + its original scan-time array aren't available for a
+    row read back out of storage days/weeks later).
+    """
+    is_long = direction == "long"
     for bar_high, bar_low in zip(high, low):
         if is_long:
             hit_stop = bar_low <= stop

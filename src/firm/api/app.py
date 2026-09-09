@@ -60,6 +60,27 @@ def create_app() -> FastAPI:
             await auto_start_live_with_retries(application)
 
         task = asyncio.create_task(_auto_start_live())
+
+        # Optional, off-by-default daily pattern scan (docs/
+        # pattern_recognition_plan.md §2a) — a completely independent
+        # BackgroundScheduler, never touches TradingScheduler/the live
+        # engine, only starts if a human explicitly sets
+        # FIRM_ENABLE_PATTERN_SCAN. Any failure here (e.g. apscheduler
+        # unavailable) must not prevent the app itself from starting.
+        application.state.pattern_scan_job = None
+        try:
+            from firm.live.pattern_scan_job import PatternScanJob, pattern_scan_enabled
+
+            if pattern_scan_enabled():
+                from firm.live.provider_utils import resolve_live_startup
+
+                symbols = resolve_live_startup().get("symbols") or ["AAPL", "MSFT", "GOOG", "AMZN", "META"]
+                job = PatternScanJob(symbols=symbols)
+                job.start()
+                application.state.pattern_scan_job = job
+        except Exception:
+            log.warning("Pattern scan job failed to start — continuing without it", exc_info=True)
+
         yield
         task.cancel()
         try:
@@ -69,6 +90,9 @@ def create_app() -> FastAPI:
         from firm.api.routers.live import shutdown_live_engine
 
         await asyncio.to_thread(shutdown_live_engine, application)
+
+        if application.state.pattern_scan_job is not None:
+            await asyncio.to_thread(application.state.pattern_scan_job.stop)
 
     application = FastAPI(title="AI Trading System", version="0.1.0", lifespan=lifespan)
 

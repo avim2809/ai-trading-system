@@ -25,21 +25,28 @@ _SEED = 42
 
 
 @pytest.fixture(autouse=True)
-def _reset_pattern_cache():
-    """Isolate the router's module-level scan cache between tests.
+def _reset_pattern_cache(tmp_path, monkeypatch):
+    """Isolate the router's module-level scan cache *and* history store
+    between tests.
 
     Mirrors test_api.py's `_isolate_registry` fixture for the runs router's
     singletons — same rationale: these are process-local globals, not
     per-request state, so without an explicit reset a match cached by one
-    test would leak into the next.
+    test (or a real data/pattern_scan_history.db write) would leak into the
+    next. The history store gets a fresh tmp_path-scoped DB file per test
+    via FIRM_DATA_DIR, exactly like a real second firm-api instance would
+    get its own separate file.
     """
     import firm.api.routers.patterns as patterns_mod
 
+    monkeypatch.setenv("FIRM_DATA_DIR", str(tmp_path))
     patterns_mod._SCAN_CACHE = []
     patterns_mod._LAST_SCAN = None
+    patterns_mod._history_store_instance = None
     yield
     patterns_mod._SCAN_CACHE = []
     patterns_mod._LAST_SCAN = None
+    patterns_mod._history_store_instance = None
 
 
 @pytest.fixture()
@@ -321,6 +328,79 @@ class TestSummary:
         _trigger(client, min_score=80.0)
         data = client.get("/api/patterns/summary").json()
         assert data["total"] == 5
+
+
+# ------------------------------------------------------------------
+# GET /patterns/history (durable, unlike the in-memory /scan cache)
+# ------------------------------------------------------------------
+
+
+class TestHistoryEndpoint:
+    def test_history_empty_before_any_trigger(self, client):
+        r = client.get("/api/patterns/history")
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_history_populated_after_trigger_with_full_shape(self, client):
+        _trigger(client)
+        r = client.get("/api/patterns/history")
+        assert r.status_code == 200
+        rows = r.json()
+        assert len(rows) == 20
+        row = rows[0]
+        # History rows carry everything a cached /scan row does, plus
+        # persistence-only fields that prove this hit the real history
+        # endpoint (see the route-ordering note on get_symbol_patterns) —
+        # not the /{symbol} catch-all falling through to an empty result.
+        for key in ("id", "confirm_date", "outcome", "outcome_checked_at", "source", "created_at"):
+            assert key in row
+        assert row["outcome"] is None
+        assert row["source"] == "manual"
+        assert isinstance(row["score_breakdown"], dict)
+        assert isinstance(row["pivots"], list)
+
+    def test_history_survives_in_memory_cache_reset(self, client):
+        """Simulates a process restart's effect on the in-memory cache
+        (which starts empty again) without touching the SQLite file, to
+        prove history really is a separate, durable surface from
+        GET /patterns/scan -- not just reading the same cache twice."""
+        import firm.api.routers.patterns as patterns_mod
+
+        _trigger(client)
+        assert len(client.get("/api/patterns/scan").json()) == 20
+        patterns_mod._SCAN_CACHE = []
+        patterns_mod._LAST_SCAN = None
+
+        assert client.get("/api/patterns/scan").json() == []
+        assert len(client.get("/api/patterns/history").json()) == 20
+
+    def test_history_accumulates_across_multiple_triggers(self, client):
+        _trigger(client, min_score=80.0)  # 5 matches
+        _trigger(client, min_score=30.0)  # 20 matches
+        history = client.get("/api/patterns/history").json()
+        assert len(history) == 25
+        # /scan (the in-memory cache) reflects only the *second* trigger.
+        assert len(client.get("/api/patterns/scan").json()) == 20
+
+    def test_history_filters_by_symbol_and_pattern(self, client):
+        _trigger(client)
+        r = client.get("/api/patterns/history?symbol=nvda")
+        rows = r.json()
+        assert rows and all(row["symbol"] == "NVDA" for row in rows)
+
+        r = client.get("/api/patterns/history?pattern=falling_wedge")
+        rows = r.json()
+        assert len(rows) == 5
+        assert all(row["pattern"] == "falling_wedge" for row in rows)
+
+    def test_history_route_not_shadowed_by_symbol_catchall(self, client):
+        _trigger(client)
+        rows = client.get("/api/patterns/history").json()
+        # If route registration order regressed, this would silently hit
+        # get_symbol_patterns(symbol="history") instead and return [] (no
+        # symbol is literally named "HISTORY" in this fixture).
+        assert len(rows) == 20
+        assert all("id" in row for row in rows)
 
 
 # ------------------------------------------------------------------

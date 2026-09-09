@@ -1,32 +1,37 @@
-"""On-demand chart-pattern scan API (Phase 3 of docs/pattern_recognition_plan.md).
+"""On-demand + scheduled chart-pattern scan API (Phases 3 of
+docs/pattern_recognition_plan.md).
 
 Exposes :func:`firm.patterns.scanner.scan_symbol` over REST so a frontend can
-browse pattern-scan results without a scheduled job. Deliberately narrow
-scope (see the tracker doc's Phase 3 row): no persistence layer, no
-trade-outcome-history tracking (that is a distinct, descoped follow-up), and
-— most importantly — **no background/periodic/scheduled scanning of any
-kind**. Every scan runs synchronously, only when a human or the frontend
-calls ``POST /patterns/scan/trigger`` explicitly; nothing here is wired into
+browse pattern-scan results, and shares its core scan logic (:func:`run_scan`
+below) with the optional, independently-scheduled ``firm.live
+.pattern_scan_job.PatternScanJob`` — **no background/periodic/scheduled
+scanning happens from this router itself**. Every ``POST
+/patterns/scan/trigger`` call is synchronous, only run when a human or the
+frontend calls it explicitly; nothing in this module is wired into
 ``firm.api.app``'s lifespan or ``firm.live.scheduler.TradingScheduler``. This
 keeps the feature fully inert with respect to the two live paper-trading
-engines already running on this box (see CLAUDE.md and this doc's §5.1) — a
-future scheduled EOD scan job is a reasonable follow-up, but requires its own
-deliberate, human-reviewed wiring and is intentionally not implemented here.
+engines already running on this box unless a human deliberately sets
+``FIRM_ENABLE_PATTERN_SCAN`` (see ``pattern_scan_job.py``) — see CLAUDE.md and
+docs/pattern_recognition_plan.md §5.1/§2a.
 
-Results live in a process-local in-memory cache (module globals below),
-populated only by the trigger endpoint and read by the three GET endpoints
-below. Restarting the API process (or asking a different ``firm-api``
-instance, e.g. the :8001 Alpaca one behind this same nginx host) starts from
-an empty cache — there is no disk persistence, by design (see the tracker
-doc's Phase 3 scope note on why trade-outcome history is a separate feature).
+Two result surfaces:
+- ``_SCAN_CACHE``/``_LAST_SCAN`` (module globals): the *latest* trigger's
+  results only, process-local and non-persistent — reassigned wholesale
+  (never mutated in place) so a concurrent GET always sees either the
+  complete previous scan or the complete new one, never a partial write.
+- ``PatternScanHistoryStore`` (SQLite, ``firm.live.pattern_scan_history``):
+  every match ever persisted, across every trigger and every scheduled run,
+  survives a process restart — read via ``GET /patterns/history``.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 from typing import Any
 
+import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 
 from firm.api.schemas import PatternScanRequest
@@ -38,13 +43,37 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/patterns", tags=["patterns"])
 
-# Populated only by trigger_scan(); every read endpoint below is a pure,
-# side-effect-free filter over these two globals. Process-local, in-memory,
-# non-persistent by design — see module docstring. Reassigned wholesale
-# (never mutated in place) so a concurrent GET always sees either the
-# complete previous scan or the complete new one, never a partial write.
+# Populated only by trigger_scan()/run_scan() callers; every read endpoint
+# below is a pure, side-effect-free filter over these two globals. See
+# module docstring for why this is process-local/non-persistent by design,
+# unlike the SQLite history store.
 _SCAN_CACHE: list[dict[str, Any]] = []
 _LAST_SCAN: dict[str, Any] | None = None
+_history_store_instance: Any = None
+
+
+def _history_store():
+    """Lazily-constructed singleton — deferred import so this module (and
+    the FastAPI app) still loads even if something about the store's own
+    dependencies were ever unavailable, matching this codebase's other
+    lazy-singleton accessors.
+
+    Reads ``FIRM_DATA_DIR`` fresh here rather than freezing it into a
+    module-level constant at import time (the more common convention
+    elsewhere in this codebase, e.g. ``firm.api.app``/``firm.api.routers
+    .live`` — fine there since it's only ever set once, before process
+    start) specifically so tests can isolate this store per-test via
+    ``monkeypatch.setenv`` without needing to reload the module.
+    """
+    global _history_store_instance
+    if _history_store_instance is None:
+        from firm.live.pattern_scan_history import PatternScanHistoryStore
+
+        data_dir = os.environ.get("FIRM_DATA_DIR", "data")
+        _history_store_instance = PatternScanHistoryStore(
+            db_path=f"{data_dir}/pattern_scan_history.db"
+        )
+    return _history_store_instance
 
 
 def _serialize_match(symbol: str, asof: datetime, match: PatternMatch) -> dict[str, Any]:
@@ -81,75 +110,93 @@ def _serialize_match(symbol: str, asof: datetime, match: PatternMatch) -> dict[s
     }
 
 
+def _confirm_date(sym_df: pd.DataFrame, confirm_index: int) -> str | None:
+    """Calendar date of the confirmation bar, for later outcome-tracking
+    alignment (see ``PatternScanHistoryStore.insert_matches``'s
+    ``confirm_dates`` param) — distinct from ``asof``, the scan's shared
+    reference date.
+    """
+    try:
+        return sym_df["date"].iloc[confirm_index].isoformat()
+    except Exception:
+        return None
+
+
 def _sorted_best_first(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(matches, key=lambda r: r["quality_score"] or 0.0, reverse=True)
 
 
-@router.post("/scan/trigger")
-def trigger_scan(req: PatternScanRequest) -> dict[str, Any]:
-    """Synchronously scan ``req.symbols`` right now and replace the cache.
-
-    Real data path (``data_source="cache"``): loads prices via
-    ``firm.runtime.load_prices`` -> ``PointInTimeDataStore`` ->
-    ``PitViewAdapter`` -- the exact same chain every backtest and
-    ``POST /api/agents/step`` already use (see
-    ``firm.api.routers.agents.agent_step``), not a new data-loading path.
-    ``data_source="synthetic"`` (the default) uses
-    ``firm.data.synthetic.make_synthetic_prices`` instead, primarily so this
-    endpoint — and its tests — don't require real cached market data.
+def run_scan(
+    *,
+    symbols: list[str],
+    asof: str,
+    data_source: str,
+    lookback_days: int,
+    zigzag_pct: float,
+    min_score: float,
+    confirm_lookback_bars: int,
+    stop_atr_floor: float,
+    enabled_patterns: list[str] | None,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Core scan logic, shared by the ``trigger_scan`` route below and the
+    optional scheduled ``firm.live.pattern_scan_job.PatternScanJob`` — same
+    real data-loading chain (``firm.runtime.load_prices`` ->
+    ``PointInTimeDataStore`` -> ``PitViewAdapter``, the exact one every
+    backtest and ``POST /api/agents/step`` already use — see
+    ``firm.api.routers.agents.agent_step``) and the same
+    ``firm.patterns.scanner.scan_symbol`` call, not a second copy of either.
 
     Per-symbol OHLC is adjusted for splits/dividends via the strategy's own
-    ``_adjusted_ohlc`` (reused, not reimplemented) before being handed to the
-    real ``firm.patterns.scanner.scan_symbol``. Unlike the strategy (which
-    keeps only the single best match per symbol to avoid double-counting a
-    symbol in the downstream cross-sectional z-score — see
-    docs/pattern_recognition_plan.md deviation #4), this endpoint is a
-    browsing surface, not a signal source, so *every* confirmed match
-    clearing ``min_score`` is cached, not just the top one per symbol.
+    ``_adjusted_ohlc`` (reused, not reimplemented). Unlike the strategy
+    (which keeps only the single best match per symbol to avoid
+    double-counting a symbol in the downstream cross-sectional z-score — see
+    docs/pattern_recognition_plan.md deviation #4), this is a browsing/
+    persistence surface, not a signal source, so *every* confirmed match
+    clearing ``min_score`` is returned, not just the top one per symbol.
+
+    Raises ``ValueError`` for empty ``symbols`` or a malformed ``asof``, and
+    propagates ``FileNotFoundError`` from a ``data_source="cache"`` miss —
+    callers translate those into whatever's appropriate for their context
+    (an HTTP error for the route, a logged skip for the scheduled job).
     """
     from firm.backtest.firm_strategy import PitViewAdapter
     from firm.data.pit_store import PointInTimeDataStore
     from firm.patterns.scanner import scan_symbol
     from firm.strategies.pattern_recognition import _adjusted_ohlc
 
-    symbols = req.symbols
     if not symbols:
-        raise HTTPException(status_code=422, detail="symbols must not be empty")
+        raise ValueError("symbols must not be empty")
 
-    if req.data_source == "synthetic":
+    if data_source == "synthetic":
         from firm.data.synthetic import make_synthetic_prices
 
-        prices_df = make_synthetic_prices(symbols=symbols, end_date=req.asof, seed=req.seed)
+        prices_df = make_synthetic_prices(symbols=symbols, end_date=asof, seed=seed)
     else:
         from firm.config import get_settings
         from firm.runtime import load_prices
 
-        try:
-            prices_df = load_prices(get_settings())
-        except FileNotFoundError as exc:
-            log.warning("Pattern scan trigger: no cached price data available: %s", exc)
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        prices_df = load_prices(get_settings())
 
     try:
-        asof_dt = datetime.fromisoformat(req.asof)
+        asof_dt = datetime.fromisoformat(asof)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=f"invalid asof {req.asof!r}") from exc
+        raise ValueError(f"invalid asof {asof!r}") from exc
 
     pit_store = PointInTimeDataStore()
     pit_store.load(prices=prices_df)
     pit_view = PitViewAdapter(pit_store, asof_dt, symbols)
-    prices = pit_view.prices(symbols=symbols, lookback_days=req.lookback_days)
+    prices = pit_view.prices(symbols=symbols, lookback_days=lookback_days)
 
-    enabled_set = set(req.enabled_patterns) if req.enabled_patterns else None
+    enabled_set = set(enabled_patterns) if enabled_patterns else None
 
     got_data = set(prices["symbol"].astype(str)) if not prices.empty else set()
     missing = [s for s in symbols if s not in got_data]
     if missing:
-        log.info(
-            "Pattern scan trigger: no price data as of %s for %s", req.asof, missing,
-        )
+        log.info("Pattern scan: no price data as of %s for %s", asof, missing)
 
     results: list[dict[str, Any]] = []
+    confirm_dates: list[str | None] = []
     failed: list[str] = []
     scanned = 0
     if not prices.empty:
@@ -161,10 +208,10 @@ def trigger_scan(req: PatternScanRequest) -> dict[str, Any]:
                 matches = scan_symbol(
                     ohlcv,
                     enabled_patterns=enabled_set,
-                    zigzag_pct=req.zigzag_pct,
-                    min_score=req.min_score,
-                    confirm_lookback_bars=req.confirm_lookback_bars,
-                    stop_atr_floor=req.stop_atr_floor,
+                    zigzag_pct=zigzag_pct,
+                    min_score=min_score,
+                    confirm_lookback_bars=confirm_lookback_bars,
+                    stop_atr_floor=stop_atr_floor,
                 )
             except Exception:
                 log.warning("Pattern scan failed for %s", symbol, exc_info=True)
@@ -172,25 +219,62 @@ def trigger_scan(req: PatternScanRequest) -> dict[str, Any]:
                 continue
             for m in matches:
                 results.append(_serialize_match(str(symbol), asof_dt, m))
+                confirm_dates.append(_confirm_date(sym_df, m.confirm_index))
 
+    return {
+        "results": results,
+        "confirm_dates": confirm_dates,
+        "scanned": scanned,
+        "missing": missing,
+        "failed": failed,
+        "asof_dt": asof_dt,
+    }
+
+
+@router.post("/scan/trigger")
+def trigger_scan(req: PatternScanRequest) -> dict[str, Any]:
+    """Synchronously scan ``req.symbols`` right now, replace the in-memory
+    cache, and persist every match into the durable history store.
+    """
+    try:
+        scan = run_scan(
+            symbols=req.symbols,
+            asof=req.asof,
+            data_source=req.data_source,
+            lookback_days=req.lookback_days,
+            zigzag_pct=req.zigzag_pct,
+            min_score=req.min_score,
+            confirm_lookback_bars=req.confirm_lookback_bars,
+            stop_atr_floor=req.stop_atr_floor,
+            enabled_patterns=req.enabled_patterns,
+            seed=req.seed,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        log.warning("Pattern scan trigger: no cached price data available: %s", exc)
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    results = scan["results"]
     global _SCAN_CACHE, _LAST_SCAN
     _SCAN_CACHE = results
     _LAST_SCAN = {
-        "asof": asof_dt.isoformat(),
+        "asof": scan["asof_dt"].isoformat(),
         "data_source": req.data_source,
-        "symbols_requested": symbols,
-        "symbols_scanned": scanned,
-        "symbols_missing_data": missing,
-        "symbols_failed": failed,
+        "symbols_requested": req.symbols,
+        "symbols_scanned": scan["scanned"],
+        "symbols_missing_data": scan["missing"],
+        "symbols_failed": scan["failed"],
         "triggered_at": utcnow().isoformat(),
         "match_count": len(results),
     }
+    _history_store().insert_matches(results, confirm_dates=scan["confirm_dates"], source="manual")
     log.info(
         "Pattern scan triggered: %d/%d symbols scanned, %d matches "
         "(data_source=%s, asof=%s)",
-        scanned, len(symbols), len(results), req.data_source, req.asof,
+        scan["scanned"], len(req.symbols), len(results), req.data_source, req.asof,
     )
-    return {"scanned": scanned, "matches": len(results), "last_scan": _LAST_SCAN}
+    return {"scanned": scan["scanned"], "matches": len(results), "last_scan": _LAST_SCAN}
 
 
 @router.get("/scan")
@@ -231,6 +315,29 @@ def get_summary() -> dict[str, Any]:
     }
 
 
+@router.get("/history")
+def get_history(
+    symbol: str | None = Query(None),
+    pattern: str | None = Query(None),
+    direction: str | None = Query(None),
+    outcome: str | None = Query(
+        None, description="'pending' for not-yet-resolved rows, or an exact outcome value"
+    ),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+) -> list[dict[str, Any]]:
+    """Durable history of every match ever persisted by a trigger or a
+    scheduled scan (``firm.live.pattern_scan_job``, if enabled) — unlike
+    ``GET /patterns/scan``, survives a process restart. Paginated/filterable,
+    newest first. Registered *before* ``/{symbol}`` below so that fixed path
+    isn't shadowed by the catch-all (see that route's own docstring).
+    """
+    return _history_store().list_history(
+        symbol=symbol, pattern=pattern, direction=direction, outcome=outcome,
+        limit=limit, offset=offset,
+    )
+
+
 @router.get("/{symbol}")
 def get_symbol_patterns(symbol: str) -> list[dict[str, Any]]:
     """All cached pattern matches for one symbol (case-insensitive), best
@@ -238,11 +345,11 @@ def get_symbol_patterns(symbol: str) -> list[dict[str, Any]]:
     cache -- "no patterns found for this symbol" is a normal, valid result,
     not a missing-resource error.
 
-    Registered after ``/scan``, ``/summary`` and ``/scan/trigger`` above so
-    those fixed paths are matched first -- FastAPI/Starlette tries routes in
-    registration order, and this catch-all single-segment path would
-    otherwise shadow them (e.g. a request for ``/patterns/scan`` resolving
-    here with ``symbol="scan"``).
+    Registered after ``/scan``, ``/summary``, ``/scan/trigger`` and
+    ``/history`` above so those fixed paths are matched first -- FastAPI/
+    Starlette tries routes in registration order, and this catch-all
+    single-segment path would otherwise shadow them (e.g. a request for
+    ``/patterns/history`` resolving here with ``symbol="history"``).
     """
     sym = symbol.upper()
     results = [r for r in _SCAN_CACHE if r["symbol"].upper() == sym]
