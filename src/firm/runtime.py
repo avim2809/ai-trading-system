@@ -154,6 +154,17 @@ def build_orchestrator(config: dict):
 
     analysts = [tech, fund, sent]
 
+    sleeve_traders: dict[str, object] | None = None
+    if config.get("capital_allocation_mode") == "sleeved":
+        # One independent TraderAgent instance per sleeved strategy -- see
+        # Orchestrator's docstring on why one shared instance can't be
+        # reused across sleeves (cross-cycle conviction-EMA/NAV-history
+        # state, keyed only by symbol, would corrupt across sleeves).
+        # Every strategy this run instantiated gets a sleeve, using the same
+        # trader config every other strategy would get in blended mode.
+        all_strategies = strats["technical"] + strats["fundamental"] + strats["sentiment"]
+        sleeve_traders = {s.name: TraderAgent(config=config) for s in all_strategies}
+
     return Orchestrator(
         analysts=analysts,
         bull=bull,
@@ -163,6 +174,7 @@ def build_orchestrator(config: dict):
         risk=risk,
         execution=ExecutionAgent(config=config),
         config=config,
+        sleeve_traders=sleeve_traders,
     )
 
 

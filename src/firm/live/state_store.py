@@ -41,6 +41,7 @@ KILL_SWITCH_KEY = "kill_switch"
 DAILY_LIMITS_KEY = "daily_limits"
 TRADER_STATE_KEY = "trader_state"
 CYCLE_COUNTER_KEY = "cycle_counter"
+SLEEVE_PORTFOLIOS_KEY = "sleeve_portfolios"
 
 
 class LiveStateStore:
@@ -217,6 +218,42 @@ class LiveStateStore:
 
     def load_trader_state(self) -> dict[str, Any] | None:
         return self._load_blob(TRADER_STATE_KEY)
+
+    # ------------------------------------------------------------------
+    # Per-sleeve TraderAgent state (capital_allocation_mode: sleeved -- see
+    # docs on the sleeve architecture). One independent TraderAgent instance
+    # per strategy sleeve means one independent conviction-EMA/NAV-history
+    # state per strategy, so each needs its own key -- reuses the same
+    # generic blob store as save_trader_state above, just keyed by strategy
+    # name instead of the single fixed key, with zero schema change.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _sleeve_trader_key(strategy: str) -> str:
+        return f"{TRADER_STATE_KEY}:{strategy}"
+
+    def save_sleeve_trader_state(self, strategy: str, state: dict[str, Any]) -> None:
+        self._save_blob(self._sleeve_trader_key(strategy), state)
+
+    def load_sleeve_trader_state(self, strategy: str) -> dict[str, Any] | None:
+        return self._load_blob(self._sleeve_trader_key(strategy))
+
+    # ------------------------------------------------------------------
+    # Per-sleeve virtual PortfolioState (cash/holdings). Sleeves have no
+    # real broker sub-account to reconcile from on restart (unlike the real
+    # book, whose cash/holdings are always re-derived from the broker via
+    # sync_portfolio_from_broker) -- without this, a restart would silently
+    # reset every sleeve back to its initial capital split, discarding its
+    # entire independent compounding history. One blob covering every
+    # sleeve (small: cash + a holdings dict per strategy), same rationale
+    # as portfolio_history/attribution_state above.
+    # ------------------------------------------------------------------
+
+    def save_sleeve_portfolios(self, state: dict[str, dict[str, Any]]) -> None:
+        self._save_blob(SLEEVE_PORTFOLIOS_KEY, state)
+
+    def load_sleeve_portfolios(self) -> dict[str, dict[str, Any]] | None:
+        return self._load_blob(SLEEVE_PORTFOLIOS_KEY)
 
     # ------------------------------------------------------------------
     # Cycle counter (see LiveTradingEngine._cycle_count). Unlike daily_limits

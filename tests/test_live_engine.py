@@ -946,6 +946,73 @@ class TestDurableLiveState:
         )
         assert engine2._cycle_count == 3
 
+    @patch("firm.live.engine.build_orchestrator")
+    def test_sleeve_trader_state_and_portfolios_persist_across_restart(
+        self, mock_build, tmp_path,
+    ):
+        """capital_allocation_mode: 'sleeved' companion to the conviction-EMA
+        test above: each sleeve has its own TraderAgent state AND its own
+        virtual PortfolioState (cash/holdings), neither reconciled from a
+        real broker sub-account -- both must survive a process restart or
+        every sleeve silently resets to its initial capital split."""
+        from firm.agents.base import AgentContext
+        from firm.agents.trader import TraderAgent
+        from firm.contracts.models import DebateResult
+
+        db_path = tmp_path / "live_state.db"
+        broker = MockBroker(initial_cash=100_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {
+            "initial_capital": 100_000,
+            "memory_log_path": str(tmp_path / "decisions.jsonl"),
+            "conviction_smoothing_enabled": True,
+        }
+
+        sleeve_trader = TraderAgent(config=config)
+        mock_orch = MagicMock()
+        mock_orch.sleeve_traders = {"momentum": sleeve_trader}
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            state_db_path=db_path,
+        )
+        engine.start()
+        sleeve_trader.run(
+            AgentContext(now=utcnow()),
+            debate_results=[DebateResult(symbol="AAPL", net_conviction=0.6)],
+        )
+        mock_orch._sleeve_portfolios = {"momentum": None}  # sanity: attr exists
+        mock_orch.export_sleeve_portfolios.return_value = {
+            "momentum": {"cash": 40_000.0, "holdings": {"AAPL": 123.0}},
+        }
+        engine.run_cycle()  # triggers _persist_live_state
+        engine.stop()
+
+        assert sleeve_trader._conviction_ema  # sanity: there's something to lose
+
+        sleeve_trader2 = TraderAgent(config=config)
+        mock_orch2 = MagicMock()
+        mock_orch2.sleeve_traders = {"momentum": sleeve_trader2}
+        mock_orch2.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch2
+
+        # A fresh engine instance (simulating a process restart) must restore
+        # both the sleeve's EMA memory and its virtual portfolio before the
+        # first cycle runs.
+        LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            state_db_path=db_path,
+        )
+        assert sleeve_trader2._conviction_ema == sleeve_trader._conviction_ema
+        mock_orch2.restore_sleeve_portfolios.assert_called_once_with(
+            {"momentum": {"cash": 40_000.0, "holdings": {"AAPL": 123.0}}}
+        )
+
     def test_no_state_db_path_never_creates_file(self, tmp_path, engine_components):
         broker, feed, queue, config = engine_components
         would_be_path = tmp_path / "should_not_exist.db"

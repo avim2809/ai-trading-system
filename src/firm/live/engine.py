@@ -1019,6 +1019,37 @@ class LiveTradingEngine:
             except Exception:
                 log.warning("Failed to restore persisted trader state", exc_info=True)
 
+        # capital_allocation_mode: "sleeved" -- one independent TraderAgent
+        # state per sleeve, plus each sleeve's own virtual PortfolioState
+        # (cash/holdings). Sleeves are virtual: unlike the real portfolio,
+        # nothing reconciles them from a broker, so without this a restart
+        # would silently reset every sleeve back to its initial capital
+        # split, discarding its entire independent compounding history.
+        sleeve_traders = getattr(self._orchestrator, "sleeve_traders", None) or {}
+        for strategy, sleeve_trader in sleeve_traders.items():
+            if not hasattr(sleeve_trader, "load_state"):
+                continue
+            try:
+                state = self._state_store.load_sleeve_trader_state(strategy)
+                if state:
+                    sleeve_trader.load_state(state)
+            except Exception:
+                log.warning(
+                    "Failed to restore persisted sleeve trader state for %s",
+                    strategy, exc_info=True,
+                )
+        if sleeve_traders:
+            try:
+                sleeve_portfolios = self._state_store.load_sleeve_portfolios()
+                if sleeve_portfolios:
+                    self._orchestrator.restore_sleeve_portfolios(sleeve_portfolios)
+                    log.info(
+                        "Restored %d persisted sleeve portfolio(s)",
+                        len(sleeve_portfolios),
+                    )
+            except Exception:
+                log.warning("Failed to restore persisted sleeve portfolios", exc_info=True)
+
     def _persist_live_state(self) -> None:
         """Save portfolio history + attribution state after a cycle.
 
@@ -1066,6 +1097,23 @@ class LiveTradingEngine:
                 self._state_store.save_trader_state(trader.get_state())
             except Exception:
                 log.warning("Failed to persist trader state", exc_info=True)
+        sleeve_traders = getattr(self._orchestrator, "sleeve_traders", None) or {}
+        for strategy, sleeve_trader in sleeve_traders.items():
+            if not hasattr(sleeve_trader, "get_state"):
+                continue
+            try:
+                self._state_store.save_sleeve_trader_state(strategy, sleeve_trader.get_state())
+            except Exception:
+                log.warning(
+                    "Failed to persist sleeve trader state for %s", strategy, exc_info=True,
+                )
+        if sleeve_traders:
+            try:
+                self._state_store.save_sleeve_portfolios(
+                    self._orchestrator.export_sleeve_portfolios()
+                )
+            except Exception:
+                log.warning("Failed to persist sleeve portfolios", exc_info=True)
 
     def reset_kill_switch(self) -> dict[str, Any]:
         """Clear the drawdown kill switch and re-arm trading.

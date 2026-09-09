@@ -844,11 +844,25 @@ def live_attribution(request: Request) -> dict[str, dict[str, float]]:
     """Per-strategy performance metrics from the live engine's own
     PerformanceAttribution — the live-trading equivalent of
     GET /runs/{id}/report's ``strategies`` field
-    (firm.eval.reports.BacktestReport.strategy_summary)."""
+    (firm.eval.reports.BacktestReport.strategy_summary).
+
+    Under ``capital_allocation_mode: "sleeved"``, each sleeved strategy's
+    entry instead comes from its own ``PortfolioState``'s real NAV history
+    (Orchestrator.get_sleeve_metrics()) — exact, since that strategy really
+    does hold its own capital/positions, rather than PerformanceAttribution's
+    dominant-strategy-wins-the-whole-order heuristic over one shared book.
+    Any strategy without a sleeve (shouldn't happen once sleeving covers
+    every registered strategy, but kept defensive) still falls back to the
+    heuristic so it isn't silently dropped from the response.
+    """
     engine = getattr(request.app.state, "live_engine", None)
     if engine is None:
         return {}
-    return engine._attribution.get_strategy_metrics()
+    metrics = engine._attribution.get_strategy_metrics()
+    orchestrator = getattr(engine, "_orchestrator", None)
+    if getattr(orchestrator, "capital_allocation_mode", "blended") == "sleeved":
+        metrics.update(orchestrator.get_sleeve_metrics())
+    return metrics
 
 
 @router.delete("/cycles")

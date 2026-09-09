@@ -11,9 +11,12 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from typing import Any, Callable, TypeVar
 
+import pandas as pd
+
 from firm.agents.base import Agent, AgentContext
 from firm.agents.blackboard import Blackboard
-from firm.contracts.models import TradeProposal
+from firm.contracts.models import RiskDecision, SignalSet, TradeProposal
+from firm.portfolio.state import PortfolioState
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +47,7 @@ class Orchestrator(Agent):
         risk: Agent,
         execution: Agent,
         config: dict[str, Any] | None = None,
+        sleeve_traders: dict[str, Agent] | None = None,
     ) -> None:
         super().__init__(name="orchestrator", config=config)
         self.analysts = analysts
@@ -66,6 +70,67 @@ class Orchestrator(Agent):
             stage_timeout = cfg.get("analyst_timeout_seconds")
         self._stage_timeout_seconds = self._optional_timeout(stage_timeout)
         self._regime_weights_detector = None
+
+        # ------------------------------------------------------------------
+        # Per-strategy capital sleeves (capital_allocation_mode: "sleeved").
+        # See docs/pattern_recognition_plan.md-style tracker or the plan this
+        # was built from -- default "blended" reproduces today's single
+        # shared-book behavior byte-for-byte (see step()).
+        # ------------------------------------------------------------------
+        self.capital_allocation_mode: str = cfg.get("capital_allocation_mode", "blended")
+        # One independent TraderAgent per sleeved strategy -- required
+        # because TraderAgent holds real cross-cycle instance state
+        # (conviction EMA, joint_optimizer NAV history) keyed only by
+        # symbol; one shared instance called once per sleeve would let
+        # sleeves corrupt each other's smoothing/history state.
+        self.sleeve_traders: dict[str, Agent] = sleeve_traders or {}
+        self._strategy_capital_weights: dict[str, float] = cfg.get(
+            "strategy_capital_weights", {},
+        ) or {}
+        self._total_initial_capital: float = float(cfg.get("initial_capital", 10_000_000))
+        # Each sleeve's own independently-compounding virtual book -- fixed
+        # initial capital at first allocation, then evolves purely from that
+        # sleeve's own trades from then on (like a real per-strategy
+        # sub-account), NOT re-normalized to a fraction of total NAV every
+        # cycle -- that would hide a strategy's own true standalone
+        # compounding track record, defeating the point of sleeving at all.
+        # Restored from LiveStateStore on restart (see restore_sleeve_portfolios);
+        # never derived from the broker (these are virtual, no real sub-account).
+        self._sleeve_portfolios: dict[str, PortfolioState] = {}
+
+        if self.capital_allocation_mode == "sleeved":
+            self._check_sleeved_llm_cost_safety(cfg)
+
+    @staticmethod
+    def _check_sleeved_llm_cost_safety(cfg: dict[str, Any]) -> None:
+        """Refuse construction rather than silently multiply LLM cost.
+
+        bull/bear/debate normally run once per cycle over the whole blended
+        blackboard; in sleeved mode they run once *per sleeve*. That's cheap
+        CPU when these three stay in "quant" mode (the production default --
+        see config/llm.yaml's "no per-symbol LLM fan-out" comment), but if
+        any were ever switched to "llm_enhanced"/"llm_only", running them
+        independently per sleeve would multiply per-cycle LLM call volume
+        roughly N-fold (once per sleeve instead of once), since each sleeve's
+        own top-K enhancement-budget selection has no visibility into what
+        other sleeves already spent this cycle. That cross-sleeve shared
+        budget coordination isn't implemented yet -- fail loud here instead
+        of silently shipping an N-fold cost surprise.
+        """
+        agent_modes = cfg.get("agent_modes", {}) or {}
+        unsafe = [
+            role for role in ("bull_researcher", "bear_researcher", "debate")
+            if agent_modes.get(role) in ("llm_enhanced", "llm_only")
+        ]
+        if unsafe:
+            raise ValueError(
+                f"capital_allocation_mode='sleeved' is incompatible with "
+                f"agent_modes {unsafe} set to llm_enhanced/llm_only -- running "
+                "these per sleeve would multiply per-cycle LLM call volume "
+                "roughly N-fold (no cross-sleeve shared enhancement budget "
+                "exists yet). Keep bull_researcher/bear_researcher/debate at "
+                "'quant' while capital_allocation_mode is 'sleeved'."
+            )
 
     def _resolve_market_regime(self, pit_view) -> Any | None:
         """Detect market regime when ``strategy_regime_weights`` is enabled."""
@@ -191,6 +256,9 @@ class Orchestrator(Agent):
             ``(orders_list, blackboard)`` where *orders_list* feeds the
             execution engine.
         """
+        if self.capital_allocation_mode == "sleeved":
+            return self._step_sleeved(context)
+
         pit_view = context["pit_view"]
         portfolio = context.get("portfolio")
         prices: dict[str, float] = context.get("prices", {})
@@ -354,6 +422,285 @@ class Orchestrator(Agent):
 
         self._collect_llm_usage(bb)
 
+        return report.fills, bb
+
+    # ------------------------------------------------------------------
+    # Per-strategy capital sleeves (capital_allocation_mode: "sleeved")
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _partition_blackboard(bb: Blackboard, strategy: str) -> Blackboard:
+        """A blackboard containing only *strategy*'s own signals.
+
+        Reuses the exact same ``SignalSet``/``Signal`` shape bull/bear/debate
+        already consume -- with only one strategy's signals present,
+        ``net_scores_for_blackboard`` degenerates to that strategy's own
+        z-scored signal (nothing else to combine with), so those three
+        agents need no code changes at all to work correctly per sleeve.
+        """
+        sleeve_bb = Blackboard(asof=bb.asof)
+        for ss in bb.signal_sets:
+            filtered = [sig for sig in ss.signals if sig.strategy == strategy]
+            if filtered:
+                sleeve_bb.signal_sets.append(
+                    SignalSet(domain=ss.domain, asof=ss.asof, signals=filtered)
+                )
+        return sleeve_bb
+
+    def _sleeve_capital_weights(self) -> dict[str, float]:
+        """Each sleeved strategy's fraction of total initial capital.
+
+        Explicit ``strategy_capital_weights`` entries are honored as-is; any
+        strategy not listed there splits the *remaining* budget equally.
+        This is the initial allocation only -- each sleeve's own
+        ``PortfolioState`` then compounds independently from that starting
+        point, it is not re-derived every cycle.
+        """
+        names = list(self.sleeve_traders.keys())
+        if not names:
+            return {}
+        weights = {
+            name: float(self._strategy_capital_weights[name])
+            for name in names
+            if name in self._strategy_capital_weights
+        }
+        remaining_names = [n for n in names if n not in weights]
+        if remaining_names:
+            remaining_budget = max(0.0, 1.0 - sum(weights.values()))
+            equal_share = remaining_budget / len(remaining_names)
+            for name in remaining_names:
+                weights[name] = equal_share
+        return weights
+
+    def _get_or_create_sleeve_portfolio(self, strategy: str, weight: float) -> PortfolioState:
+        portfolio = self._sleeve_portfolios.get(strategy)
+        if portfolio is None:
+            portfolio = PortfolioState(initial_capital=weight * self._total_initial_capital)
+            self._sleeve_portfolios[strategy] = portfolio
+        return portfolio
+
+    def export_sleeve_portfolios(self) -> dict[str, dict[str, Any]]:
+        """Serialize every sleeve's cash/holdings for durable persistence.
+
+        Sleeve books are virtual (no real broker sub-account to reconcile
+        against on restart), so -- unlike the real ``PortfolioState``, which
+        re-derives cash/holdings from the broker every cycle -- this state
+        must be explicitly saved/restored or a restart would silently reset
+        every sleeve back to its initial capital split, discarding its
+        entire independent compounding history.
+        """
+        return {
+            strategy: {"cash": p.cash, "holdings": dict(p.holdings)}
+            for strategy, p in self._sleeve_portfolios.items()
+        }
+
+    def restore_sleeve_portfolios(self, state: dict[str, dict[str, Any]]) -> None:
+        """Restore sleeve books persisted via :meth:`export_sleeve_portfolios`.
+
+        Called once at engine startup, before the first cycle -- any sleeve
+        not yet present in *state* (e.g. a newly-added strategy) is left to
+        be lazily created at its full initial-capital split on first use.
+        """
+        for strategy, blob in (state or {}).items():
+            try:
+                portfolio = PortfolioState(initial_capital=float(blob.get("cash", 0.0)))
+                portfolio.cash = float(blob.get("cash", 0.0))
+                portfolio.holdings = {
+                    sym: float(qty) for sym, qty in (blob.get("holdings") or {}).items()
+                }
+                self._sleeve_portfolios[strategy] = portfolio
+            except Exception:
+                log.warning(
+                    "Failed to restore sleeve portfolio state for %s", strategy, exc_info=True,
+                )
+
+    def get_sleeve_metrics(self) -> dict[str, dict[str, float]]:
+        """Exact per-strategy performance metrics from each sleeve's own NAV
+        history -- unlike ``PerformanceAttribution``'s heuristic (dominant-
+        strategy-wins-the-whole-order + running-net-share-count over one
+        shared book), this is a genuine standalone return series per
+        strategy, since each sleeve really does hold its own capital/positions.
+        """
+        from firm.eval.metrics import compute_all_metrics
+
+        result: dict[str, dict[str, float]] = {}
+        for strategy, portfolio in self._sleeve_portfolios.items():
+            history = portfolio.history
+            if len(history) < 2:
+                continue
+            navs = [snap.nav for snap in history]
+            returns = pd.Series(navs).pct_change().dropna()
+            if returns.empty:
+                continue
+            result[strategy] = compute_all_metrics(returns)
+        return result
+
+    def _step_sleeved(self, context: dict[str, Any]) -> tuple[list[dict], Blackboard]:
+        """Sleeved-mode pipeline: one independent bull/bear/debate/trader/risk/
+        execution pass per strategy against its own ``PortfolioState``, then
+        one final netted ``ExecutionAgent`` pass against the real shared
+        book for actual broker submission. See the module-level design note
+        this was built from for the full rationale.
+        """
+        pit_view = context["pit_view"]
+        real_portfolio = context.get("portfolio")
+        prices: dict[str, float] = context.get("prices", {})
+        memory = context.get("memory")
+        attribution = context.get("attribution")
+
+        bb = Blackboard(asof=pit_view.asof)
+        market_regime = self._resolve_market_regime(pit_view)
+        ctx_kwargs: dict[str, Any] = dict(
+            config=self.config,
+            strategy_returns=context.get("strategy_returns"),
+            market_regime=market_regime,
+        )
+
+        self._run_analysts(
+            AgentContext(now=pit_view.asof, pit_view=pit_view, portfolio=real_portfolio, **ctx_kwargs),
+            bb,
+        )
+        bb.signal_sets.sort(key=lambda ss: ss.domain)
+
+        if bb.errors:
+            bb.degraded = True
+            log.warning("Pipeline degraded: %d signal-source failure(s)", len(bb.errors))
+            if self._abort_on_degraded:
+                log.warning("Aborting bar (abort_on_degraded=True) – returning empty orders")
+                return [], bb
+
+        if not any(ss.signals for ss in bb.signal_sets):
+            log.warning("No signals produced – returning empty orders")
+            return [], bb
+
+        weights = self._sleeve_capital_weights()
+        sym_dollar_targets: dict[str, float] = {}
+        per_strategy_weights: dict[str, dict[str, float]] = {}
+
+        for strategy, trader in self.sleeve_traders.items():
+            sleeve_bb = self._partition_blackboard(bb, strategy)
+            sleeve_portfolio = self._get_or_create_sleeve_portfolio(
+                strategy, weights.get(strategy, 0.0),
+            )
+            sleeve_ctx = AgentContext(
+                now=pit_view.asof, pit_view=pit_view, portfolio=sleeve_portfolio, **ctx_kwargs,
+            )
+
+            if not any(ss.signals for ss in sleeve_bb.signal_sets):
+                # No signal from this strategy this cycle -- its book simply
+                # doesn't trade, but still needs a mark-to-market snapshot so
+                # its return series has no gaps on no-trade days.
+                sleeve_portfolio.record_snapshot(pit_view.asof, prices)
+                continue
+
+            try:
+                bull_theses = self.bull.run(sleeve_ctx, blackboard=sleeve_bb)
+                bear_theses = self.bear.run(sleeve_ctx, blackboard=sleeve_bb)
+            except Exception:
+                log.warning("Sleeve %s bull/bear failed", strategy, exc_info=True)
+                bb.errors.append({"agent": f"sleeve:{strategy}", "error": "bull/bear failed"})
+                sleeve_portfolio.record_snapshot(pit_view.asof, prices)
+                continue
+            sleeve_bb.theses.extend(bull_theses)
+            sleeve_bb.theses.extend(bear_theses)
+
+            try:
+                debate_results = self.debate.run(
+                    sleeve_ctx, bull_theses=bull_theses, bear_theses=bear_theses,
+                )
+            except Exception:
+                log.warning("Sleeve %s debate failed", strategy, exc_info=True)
+                bb.errors.append({"agent": f"sleeve:{strategy}", "error": "debate failed"})
+                sleeve_portfolio.record_snapshot(pit_view.asof, prices)
+                continue
+            sleeve_bb.debate_results = debate_results
+            if not debate_results:
+                sleeve_portfolio.record_snapshot(pit_view.asof, prices)
+                continue
+
+            try:
+                proposal = trader.run(
+                    sleeve_ctx, debate_results=debate_results, blackboard=sleeve_bb,
+                    memory=memory, prices=prices,
+                )
+            except Exception:
+                log.warning("Sleeve %s trader failed", strategy, exc_info=True)
+                bb.errors.append({"agent": f"sleeve:{strategy}", "error": "trader failed"})
+                sleeve_portfolio.record_snapshot(pit_view.asof, prices)
+                continue
+            sleeve_bb.proposal = proposal
+
+            try:
+                decision = self.risk.run(
+                    sleeve_ctx, proposal=proposal, portfolio=sleeve_portfolio, memory=memory,
+                )
+            except Exception:
+                log.warning("Sleeve %s risk failed", strategy, exc_info=True)
+                bb.errors.append({"agent": f"sleeve:{strategy}", "error": "risk failed"})
+                sleeve_portfolio.record_snapshot(pit_view.asof, prices)
+                continue
+            sleeve_bb.risk_decision = decision
+            if not decision.approved:
+                log.info("Sleeve %s proposal rejected: %s", strategy, decision.violations)
+                sleeve_portfolio.record_snapshot(pit_view.asof, prices)
+                continue
+
+            try:
+                sleeve_report = self.execution.run(
+                    sleeve_ctx, decision=decision, portfolio=sleeve_portfolio, prices=prices,
+                    per_strategy={strategy: decision.adjusted_targets}, attribution=None,
+                )
+            except Exception:
+                log.warning("Sleeve %s execution failed", strategy, exc_info=True)
+                bb.errors.append({"agent": f"sleeve:{strategy}", "error": "execution failed"})
+                sleeve_portfolio.record_snapshot(pit_view.asof, prices)
+                continue
+            sleeve_bb.execution_report = sleeve_report
+
+            # Apply this sleeve's own fills to its own book -- exactly the
+            # backtest path's mechanism (PortfolioState.update), giving a
+            # realistic, cost-aware, independently-compounding ledger.
+            if sleeve_report.fills:
+                sleeve_portfolio.update(sleeve_report.fills, prices, cost=sleeve_report.costs)
+            else:
+                sleeve_portfolio.record_snapshot(pit_view.asof, prices)
+
+            sleeve_nav = sleeve_portfolio.nav
+            for sym, w in decision.adjusted_targets.items():
+                sym_dollar_targets[sym] = sym_dollar_targets.get(sym, 0.0) + w * sleeve_nav
+            per_strategy_weights[strategy] = dict(decision.adjusted_targets)
+
+        if not sym_dollar_targets:
+            log.warning("No sleeve produced an approved allocation – returning empty orders")
+            self._collect_llm_usage(bb)
+            return [], bb
+
+        real_nav = getattr(real_portfolio, "nav", None) if real_portfolio is not None else None
+        if not real_nav:
+            real_nav = self._total_initial_capital
+        combined_targets = {
+            sym: dollar / real_nav for sym, dollar in sym_dollar_targets.items()
+        }
+
+        real_ctx = AgentContext(
+            now=pit_view.asof, pit_view=pit_view, portfolio=real_portfolio, **ctx_kwargs,
+        )
+        try:
+            report = self.execution.run(
+                real_ctx,
+                decision=RiskDecision(approved=True, adjusted_targets=combined_targets),
+                portfolio=real_portfolio,
+                prices=prices,
+                per_strategy=per_strategy_weights,
+                attribution=attribution,
+            )
+        except Exception as exc:
+            log.error("Real (netted) execution pass failed in sleeved mode", exc_info=True)
+            bb.errors.append({"agent": "execution", "error": str(exc)})
+            return [], bb
+        bb.execution_report = report
+
+        self._collect_llm_usage(bb)
         return report.fills, bb
 
     def _collect_llm_usage(self, bb: Blackboard) -> None:
