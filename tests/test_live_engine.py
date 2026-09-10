@@ -660,6 +660,48 @@ class TestLiveTradingEngine:
         assert result2.halted is False
 
     @patch("firm.live.engine.build_orchestrator")
+    def test_reset_kill_switch_survives_restart_when_nav_below_initial_capital(
+        self, mock_build, tmp_path,
+    ):
+        # A reset intentionally sets the peak to *current* NAV even when
+        # that's below initial_capital (a real, still-underwater drawdown) —
+        # otherwise the drawdown calc would immediately re-trip against the
+        # pre-halt peak. A restart right after must not silently re-inflate
+        # that peak back to initial_capital, or the reset's whole point
+        # (restart the calc from here) is lost on the very next restart.
+        state_path = tmp_path / "kill_switch_state.json"
+        broker = MockBroker(initial_cash=50_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1, "memory_log_path": str(tmp_path / "decisions.jsonl")}
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            kill_switch_state_path=state_path,
+        )
+        engine.start()
+        engine.run_cycle()
+        assert engine.halted is True
+
+        engine.reset_kill_switch()
+        assert engine._peak_equity == pytest.approx(50_000.0)
+
+        # Simulate a process restart with the same real (underwater) broker
+        # equity — a fresh engine loading the same state file.
+        engine2 = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+            kill_switch_state_path=state_path,
+        )
+        assert engine2.halted is False
+        assert engine2._peak_equity == pytest.approx(50_000.0)
+
+    @patch("firm.live.engine.build_orchestrator")
     def test_alert_callback_invoked(self, mock_build, tmp_path):
         received: list[dict] = []
         broker = MockBroker(initial_cash=50_000)

@@ -989,14 +989,19 @@ class LiveTradingEngine:
             return
         self._halted = bool(data.get("halted", False))
         if "peak_equity" in data:
-            restored_peak = float(data["peak_equity"])
-            if restored_peak >= self._peak_equity:
-                self._peak_equity = restored_peak
-                self._peak_equity_cycle_id = data.get("peak_equity_cycle_id")
-                prior_nav = data.get("peak_equity_prior_nav")
-                self._peak_equity_prior_nav = (
-                    float(prior_nav) if prior_nav is not None else None
-                )
+            # Trust the persisted peak outright rather than flooring it at
+            # the in-memory ``initial_capital`` default: a deliberate
+            # ``reset_kill_switch()`` intentionally sets the peak *below*
+            # initial_capital when NAV is currently underwater (that's the
+            # whole point — restart the drawdown calc from here, not from
+            # the pre-halt high). Flooring at initial_capital would silently
+            # discard that reset on the very next restart.
+            self._peak_equity = float(data["peak_equity"])
+            self._peak_equity_cycle_id = data.get("peak_equity_cycle_id")
+            prior_nav = data.get("peak_equity_prior_nav")
+            self._peak_equity_prior_nav = (
+                float(prior_nav) if prior_nav is not None else None
+            )
         if self._halted:
             log.warning(
                 "Restored HALTED kill-switch state from %s (reason=%s, "
