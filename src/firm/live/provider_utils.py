@@ -259,6 +259,14 @@ def resolve_live_startup(
         "fundamentals_refresh_hour",
         "danelfin_dynamic_universe",
         "sp500_dynamic_universe",
+        # Per-strategy capital sleeves (see docs/capital_sleeves_plan.md) --
+        # same silent-drop bug class as conviction_smoothing_enabled/
+        # zscore_demean above: without this, config/live.yaml could set
+        # capital_allocation_mode: "sleeved" and it would never actually
+        # reach the orchestrator via the systemd auto-start path.
+        "capital_allocation_mode",
+        "strategy_capital_weights",
+        "real_rebalance_band_pct",
     ):
         if key in yaml_cfg:
             engine_config[key] = yaml_cfg[key]

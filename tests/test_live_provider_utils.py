@@ -180,6 +180,29 @@ def test_resolve_live_startup_carries_zscore_demean_when_set():
     assert resolved["engine_config"]["zscore_demean"] is False
 
 
+def test_resolve_live_startup_carries_capital_allocation_mode_when_set():
+    """Same silent-drop risk class: without this, config/live.yaml could
+    set capital_allocation_mode: "sleeved" and it would never actually
+    reach the orchestrator via the systemd auto-start path (bootstrap_
+    live_from_yaml -> resolve_live_startup), even though the manual
+    POST /api/live/start path (StartRequest) already supported it."""
+    from unittest.mock import patch as _patch
+
+    from firm.live.provider_utils import resolve_live_startup
+
+    fake_yaml = {
+        "risk": {"max_position_pct": 0.05},
+        "capital_allocation_mode": "sleeved",
+        "strategy_capital_weights": {"momentum": 0.6},
+        "real_rebalance_band_pct": 0.01,
+    }
+    with _patch("firm.live.provider_utils.load_live_yaml_defaults", return_value=fake_yaml):
+        resolved = resolve_live_startup()
+    assert resolved["engine_config"]["capital_allocation_mode"] == "sleeved"
+    assert resolved["engine_config"]["strategy_capital_weights"] == {"momentum": 0.6}
+    assert resolved["engine_config"]["real_rebalance_band_pct"] == 0.01
+
+
 def test_resolve_live_startup_costs_absent_from_yaml_leaves_execution_agent_defaults():
     from unittest.mock import patch as _patch
 
