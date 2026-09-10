@@ -257,6 +257,8 @@ export interface LiveStatus {
   broker: string
   broker_connected: boolean
   next_run: string | null
+  /** Next fire of the lost-cycle-retry safety net (session-anchored schedules only) — can be much sooner than next_run after a restart mid-halt. */
+  next_lost_cycle_retry: string | null
   active_strategies: string[]
   approval_mode: string
   uptime_seconds: number | null

@@ -631,6 +631,33 @@ class TestTradingSchedulerLifecycle:
         finally:
             sched.stop()
 
+    def test_next_lost_cycle_retry_returns_datetime_for_session_schedule(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule="market_open")
+        try:
+            sched.start()
+            nxt = sched.next_lost_cycle_retry()
+            assert nxt is not None
+            assert isinstance(nxt, datetime)
+        finally:
+            sched.stop()
+
+    def test_next_lost_cycle_retry_none_for_non_session_schedule(self):
+        # An interval/hourly schedule never registers the retry job at all
+        # (see test_lost_cycle_retry_job_not_added_for_non_session_schedule)
+        # since it already retries naturally on its own next regular tick.
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule="hourly")
+        try:
+            sched.start()
+            assert sched.next_lost_cycle_retry() is None
+        finally:
+            sched.stop()
+
+    def test_next_lost_cycle_retry_none_before_start(self):
+        sched = TradingScheduler(engine=MagicMock(), schedule="market_open")
+        assert sched.next_lost_cycle_retry() is None
+
 
 class TestBuildTrigger:
     @pytest.mark.parametrize("spec", ["market_open", "market_close", "hourly"])

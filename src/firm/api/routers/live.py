@@ -63,7 +63,11 @@ def _start_live_scheduler(
     try:
         from firm.live.fundamentals_refresh import maybe_refresh_fundamentals_cache_on_start
         from firm.live.pipeline_warmup import PipelineWarmupGate, warmup_wait_seconds
-        from firm.live.scheduler import TradingScheduler, maybe_catch_up_session_cycle
+        from firm.live.scheduler import (
+            TradingScheduler,
+            maybe_catch_up_session_cycle,
+            maybe_retry_lost_cycle,
+        )
 
         gate = getattr(app.state, "pipeline_warmup_gate", None)
         if gate is None:
@@ -129,6 +133,15 @@ def _start_live_scheduler(
                     timezone=schedule_tz,
                     warmup_gate=gate,
                 )
+                # Self-heal immediately on boot rather than waiting up to 30
+                # minutes for the lost-cycle-retry job's first interval tick
+                # (see maybe_retry_lost_cycle) — e.g. a restart right after
+                # an operator resets a kill-switch halt should resume
+                # trading right away, not idle until the next tick. A no-op
+                # when today has no cycle yet at all (the catch-up call
+                # above owns that case) or today's most recent cycle already
+                # had a real trading outcome.
+                maybe_retry_lost_cycle(engine, timezone=schedule_tz)
             except Exception:
                 log.error("Scheduler boot failed", exc_info=True)
 
@@ -496,6 +509,7 @@ def live_status(request: Request) -> dict[str, Any]:
             "broker": "",
             "broker_connected": False,
             "next_run": None,
+            "next_lost_cycle_retry": None,
             "active_strategies": [],
             "approval_mode": "",
             "uptime_seconds": None,
@@ -508,9 +522,17 @@ def live_status(request: Request) -> dict[str, Any]:
         }
 
     next_run = None
+    next_lost_cycle_retry = None
     if scheduler is not None:
         nr = scheduler.next_run()
         next_run = nr.isoformat() if nr else None
+        # For a session-anchored schedule (market_open/market_close), this
+        # is the earliest an idle-looking engine could actually resume
+        # trading on its own — e.g. right after a restart that followed a
+        # kill-switch halt, `next_run` alone looks like "nothing until
+        # tomorrow" when a retry is really due within 30 minutes.
+        nlcr = scheduler.next_lost_cycle_retry()
+        next_lost_cycle_retry = nlcr.isoformat() if nlcr else None
 
     uptime = None
     if hasattr(engine, "_started_at") and engine._started_at:
@@ -542,6 +564,7 @@ def live_status(request: Request) -> dict[str, Any]:
         "broker": getattr(engine, "_broker_type", ""),
         "broker_connected": engine._broker.is_connected() if engine._broker else False,
         "next_run": next_run,
+        "next_lost_cycle_retry": next_lost_cycle_retry,
         "active_strategies": engine.enabled_strategies if hasattr(engine, "enabled_strategies") else [],
         "approval_mode": getattr(engine, "_approval_mode", ""),
         "uptime_seconds": uptime,

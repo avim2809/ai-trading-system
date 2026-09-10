@@ -569,6 +569,21 @@ class TestLiveConfigRoundTrip:
         assert status["market_open"] is None
         assert status["next_market_open"] is None
         assert status["next_market_close"] is None
+        assert status["next_lost_cycle_retry"] is None
+
+    def test_status_includes_next_lost_cycle_retry_for_session_schedule(self, client):
+        resp = client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "market_open"})
+        assert resp.status_code == 200, resp.text
+
+        # The scheduler boots in a background thread after pipeline warmup;
+        # poll briefly rather than assume it's already up.
+        import time
+        for _ in range(50):
+            if getattr(client.app.state, "live_scheduler", None) is not None:
+                break
+            time.sleep(0.05)
+        status = client.get("/api/live/status").json()
+        assert status["next_lost_cycle_retry"] is not None
 
     def test_status_reflects_broker_market_open_state(self, client):
         resp = client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})

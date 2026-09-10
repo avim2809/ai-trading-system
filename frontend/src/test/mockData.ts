@@ -29,6 +29,7 @@ export const mockRuns: RunSummary[] = [
 
 export const mockLiveStatusStopped: LiveStatus = {
   state: 'stopped', broker: '', broker_connected: false, next_run: null,
+  next_lost_cycle_retry: null,
   active_strategies: [], approval_mode: '', uptime_seconds: null, last_cycle: null,
   cycle_running_seconds: null,
   market_open: null, next_market_open: null, next_market_close: null,
@@ -37,6 +38,7 @@ export const mockLiveStatusStopped: LiveStatus = {
 export const mockLiveStatusRunning: LiveStatus = {
   state: 'running', broker: 'ibkr_paper', broker_connected: true,
   next_run: '2026-07-22T09:35:00-04:00',
+  next_lost_cycle_retry: null,
   active_strategies: ['momentum', 'trend', 'multi_factor'],
   approval_mode: 'full_auto', uptime_seconds: 3600,
   last_cycle: { cycle_id: 1, timestamp: '2026-07-21T19:49:04.066971', orders_generated: 20 },

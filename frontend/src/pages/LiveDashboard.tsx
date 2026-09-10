@@ -512,6 +512,11 @@ export default function LiveDashboard() {
               <p className="mt-1 text-slate-200 text-xs">
                 {status.next_run ? formatTime(status.next_run) : '—'}
               </p>
+              {status.next_lost_cycle_retry && (
+                <p className="mt-0.5 text-slate-400 text-xs">
+                  retry check {formatTime(status.next_lost_cycle_retry)}
+                </p>
+              )}
             </div>
             <div>
               <span className="text-xs text-slate-400">Approval Mode</span>

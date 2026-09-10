@@ -460,14 +460,33 @@ class TradingScheduler:
         """Manually trigger an immediate cycle."""
         self._run_cycle_safe()
 
-    def next_run(self) -> datetime | None:
-        """Return the next scheduled execution time, or None."""
+    def next_run(self, job_id: str | None = None) -> datetime | None:
+        """Return the next scheduled execution time for *job_id*, or None.
+
+        Defaults to the main trading-cycle job. For a session-anchored
+        schedule (``market_open``/``market_close``) this is the *only* thing
+        that fires automatically once a day — but ``maybe_retry_lost_cycle``
+        (see :meth:`next_lost_cycle_retry`) can run a cycle well before then,
+        so callers that want "when will this engine next act" should check
+        both rather than just this one.
+        """
         if self._scheduler is None:
             return None
-        job = self._scheduler.get_job(self._job_id)
+        job = self._scheduler.get_job(job_id or self._job_id)
         if job is None:
             return None
         return getattr(job, "next_run_time", None)
+
+    def next_lost_cycle_retry(self) -> datetime | None:
+        """Next fire time of the lost-cycle-retry safety net, or None.
+
+        Only registered for session-anchored schedules (see
+        ``maybe_retry_lost_cycle``'s 30-minute interval job) — None here
+        means either the scheduler isn't running or the schedule isn't
+        session-anchored (an interval/hourly schedule already retries on its
+        own next regular tick, so this job doesn't exist for those).
+        """
+        return self.next_run(self._lost_cycle_retry_job_id)
 
     def is_running(self) -> bool:
         return self._scheduler is not None and self._scheduler.running
