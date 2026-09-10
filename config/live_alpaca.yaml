@@ -24,6 +24,17 @@ schedule_timezone: "US/Eastern"
 # (e.g. plain "auto") silently falls through to "everything needs approval".
 approval_mode: "full_auto"
 
+# Per-strategy capital sleeves (see docs/capital_sleeves_plan.md) — enabled
+# on this Alpaca instance ONLY (2026-09-10), with IBKR (config/live.yaml)
+# deliberately left on "blended" as the static control, mirroring this
+# session's other Alpaca-only A/B work (the sector scanner, 8/30). This is
+# the one deliberate divergence from this file's "exact mirror of
+# config/live.yaml" header comment above — every other knob still matches.
+# Seeded from existing per-strategy attribution at cutover via
+# POST /api/live/sleeves/seed (must be called once, before the first
+# post-restart cycle, or every sleeve starts from zero positions instead).
+capital_allocation_mode: sleeved
+
 # Live cycles read ``data/cache/combined/fundamentals`` only (no per-cycle API).
 # firm-api refreshes that cache daily at fundamentals_refresh_hour and at boot
 # when older than FIRM_FUNDAMENTALS_REFRESH_MAX_AGE_HOURS (default 24).
