@@ -931,6 +931,47 @@ class TestLiveSleevedModeStart:
 
         client.post("/api/live/stop")
 
+    def test_seed_sleeves_endpoint_refuses_when_not_sleeved(self, client):
+        client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+        resp = client.post("/api/live/sleeves/seed")
+        assert resp.status_code == 400
+        assert "not in sleeved mode" in resp.json()["detail"]
+        client.post("/api/live/stop")
+
+    def test_seed_sleeves_endpoint_no_engine_returns_400(self, client):
+        resp = client.post("/api/live/sleeves/seed")
+        assert resp.status_code == 400
+
+    def test_seed_sleeves_endpoint_seeds_from_attribution_and_positions(self, client):
+        from firm.brokers.base import OrderRequest
+
+        client.post("/api/live/start", json={
+            "broker": "alpaca_paper", "schedule": "hourly",
+            "strategies": ["momentum", "trend"],
+            "capital_allocation_mode": "sleeved",
+            "initial_capital": 100_000,
+        })
+        engine = client.app.state.live_engine
+        engine._broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=5))
+        engine._attribution.record_trades(
+            [{"symbol": "AAPL", "shares": 5, "price": 1.0, "strategy": "momentum"}],
+            {"AAPL": 1.0},
+        )
+
+        resp = client.post("/api/live/sleeves/seed")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["seeded"] is True
+        assert "momentum" in body["sleeves"]
+        assert engine._orchestrator._sleeve_portfolios["momentum"].holdings == {"AAPL": 5.0}
+
+        # A second call must refuse -- sleeves already have state.
+        resp2 = client.post("/api/live/sleeves/seed")
+        assert resp2.status_code == 400
+        assert "already have state" in resp2.json()["detail"]
+
+        client.post("/api/live/stop")
+
 
 class TestKillSwitchResetEndpoint:
     @pytest.fixture(autouse=True)

@@ -152,16 +152,90 @@ fix, and it's already visible in this first real comparison.
   correctly.
 - **Live cutover.** Neither `:8000` (IBKR) nor `:8001` (Alpaca) has
   `capital_allocation_mode: "sleeved"` set. Per the original plan's migration
-  section, that's a separate, later, explicitly-approved step — the
-  A/B-style comparison on cached historical data is done (§4b, and it found
-  a real bug before touching either live engine, exactly what that step was
-  for); still needed before any cutover: an isolated-port smoke test against
-  a real (not backtest) `firm-api` instance, then a real cutover with each
-  sleeve seeded from a best-effort split of the existing (heuristic)
-  attribution's per-strategy holdings at the moment of cutover.
+  section, that's a separate, later, explicitly-approved step. Done so far:
+  the A/B-style comparison on cached historical data (§4b, found a real bug
+  before touching either live engine); the isolated-mode smoke test through
+  the real app/engine (§4c, no mock broker exists in the real factory, so
+  this used the suite's own monkeypatched-`MockBroker` + `TestClient`
+  pattern instead of a literal separate port); and best-effort sleeve
+  seeding from existing attribution (§4d), so cutover doesn't force an
+  unnecessary unwind/rebuild of every position. Approved plan for the actual
+  cutover: Alpaca (`:8001`) only, first — IBKR stays the static blended
+  control for comparison, same pattern as other A/B work this session.
+  Remaining before that cutover actually happens: stop the running Alpaca
+  engine, start a new one with `capital_allocation_mode: "sleeved"`, call
+  `POST /api/live/sleeves/seed` once before its first cycle, verify.
 - **Cross-sleeve LLM-enhancement budget coordination** (see §4) — only
   matters if `agent_modes` is ever changed from its current all-`"quant"`
   default for bull/bear/debate.
+
+### 4c. Isolated-mode smoke test through the real app/engine
+
+Confirmed (by investigation) that no mock/paper broker type is wired into
+the real `_create_broker` factory behind `POST /api/live/start` — every
+valid `broker` string needs a genuine IBKR Gateway connection or real
+Alpaca API keys. The prior isolated-port precedent in this repo
+(`docs/pattern_recognition_plan.md` §6.5) deliberately avoided calling
+`/live/start` at all for exactly this reason. Used this test suite's own
+established pattern instead (`monkeypatch.setattr(live_mod, "_create_broker",
+lambda broker_type: MockBroker())` + a real `TestClient`) — same zero-real-
+broker-risk guarantee, more real app-level integration coverage than an
+actual separate port would give. New `TestLiveSleevedModeStart` in
+`tests/test_api.py`: confirms `POST /api/live/start` with
+`capital_allocation_mode: "sleeved"` builds a real sleeved orchestrator with
+the right sleeve traders and capital weights, and that
+`GET /api/live/attribution` correctly reads sleeve metrics through the full
+HTTP path after a real (if signal-less, since no real market data) cycle.
+
+Also found and fixed a real, separate gap during this work: every `update_*`
+method on `LiveTradingEngine` that rebuilds the orchestrator mid-session
+(`update_strategies` — the exact call used earlier to enable
+`pattern_recognition` live with no restart — plus `update_strategy_params`,
+`update_signal_combination`, `update_strategy_circuit_breaker`,
+`update_strategy_regime_weights`, `update_allocation`) constructed a
+brand-new `Orchestrator` via `build_orchestrator(...)` directly, with empty
+sleeve state. In sleeved mode, any of these calls — no restart at all —
+would have silently discarded every sleeve's entire compounding history.
+Fixed with a new `LiveTradingEngine._rebuild_orchestrator()` helper that all
+six call sites now go through, carrying the old orchestrator's sleeve
+portfolios and per-sleeve `TraderAgent` state over to the new instance.
+
+`capital_allocation_mode`/`strategy_capital_weights`/`real_rebalance_band_pct`
+added to `StartRequest` (start-time only, same treatment as `broker` —
+switching capital-allocation mode restructures the orchestrator, not a
+single mutable attribute a running engine can swap in place, so deliberately
+**not** part of `ConfigUpdateRequest`/`PUT /api/live/config`).
+
+### 4d. Best-effort sleeve seeding from existing attribution
+
+Without seeding, switching a running blended engine to sleeved mode would
+start every sleeve at zero positions while the real book still holds actual
+current positions — the first cycle's netted real-execution pass would then
+effectively try to reconcile "real current holdings" against "sum of
+sleeve targets computed from scratch," likely forcing an unnecessary
+unwind/rebuild burst of trades rather than a clean transition.
+
+New `PerformanceAttribution.get_strategy_holdings(strategy)` (public
+accessor for the existing running-net-share-count heuristic) feeds
+`Orchestrator.seed_sleeve_portfolios_from_attribution(attribution, prices,
+total_nav)`: for each sleeved strategy, seeds its `holdings` from that
+heuristic and sets `cash` so the sleeve's *total* NAV at the seed moment
+equals exactly its target weight fraction of `total_nav` — honestly
+reflecting the approximation (a strategy attributed more notional than its
+own capital share, entirely possible since blended mode never capped any
+strategy's contribution, seeds a real negative cash balance rather than
+being silently clipped).
+
+Wired to a new deliberate operator action,
+`LiveTradingEngine.seed_sleeves_from_attribution()` /
+`POST /api/live/sleeves/seed` — reads real current positions/cash directly
+from the broker (`BrokerPosition.market_value` gives per-symbol prices for
+free, no separate data-feed fetch needed) and this engine's own
+`PerformanceAttribution` history. Refuses (`ValueError`/400) if the engine
+isn't in sleeved mode, or if any sleeve already has state — calling it twice
+would silently overwrite real accumulated sleeve history with a stale
+re-approximation. Call once, immediately after starting the new sleeved
+engine and before its first cycle runs.
 
 ## 6. Verification so far
 

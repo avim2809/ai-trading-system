@@ -536,6 +536,65 @@ class Orchestrator(Agent):
                     "Failed to restore sleeve portfolio state for %s", strategy, exc_info=True,
                 )
 
+    def seed_sleeve_portfolios_from_attribution(
+        self,
+        attribution: Any,
+        prices: dict[str, float],
+        total_nav: float,
+    ) -> dict[str, dict[str, Any]]:
+        """One-time best-effort seed for switching a running engine from
+        ``"blended"`` to ``"sleeved"`` mid-history, so cutover doesn't force
+        an unnecessary unwind/rebuild of every position.
+
+        For each sleeved strategy: ``holdings`` comes from
+        ``attribution.get_strategy_holdings(strategy)`` (blended mode's
+        existing running-net-share-count heuristic -- never an exact split,
+        since blended mode never tracked exact per-strategy positions in the
+        first place). ``cash`` is set so the sleeve's *total* NAV at the seed
+        moment equals exactly its target weight fraction of *total_nav*
+        (:meth:`_sleeve_capital_weights`) -- whether that leaves it cash-heavy
+        (attributed little/nothing) or cash-negative (attributed more than
+        its fair share; a real possibility, since blended mode never enforced
+        any per-strategy capital cap -- left as an honest reflection of the
+        approximation rather than silently clipped).
+
+        Deliberately not called automatically anywhere -- this is a one-time,
+        deliberate operator action at the moment of cutover (see
+        ``LiveTradingEngine.seed_sleeves_from_attribution``), never on every
+        boot: calling it again after sleeves have started trading on their
+        own would overwrite their real, exact history with a stale
+        re-approximation.
+
+        Returns a per-sleeve summary (for logging/operator verification
+        before relying on it), e.g. ``{"momentum": {"target_capital": ...,
+        "seeded_cash": ..., "seeded_holdings": {...}}}``.
+        """
+        weights = self._sleeve_capital_weights()
+        summary: dict[str, dict[str, Any]] = {}
+        for strategy in self.sleeve_traders:
+            target_capital = weights.get(strategy, 0.0) * total_nav
+            holdings = attribution.get_strategy_holdings(strategy)
+            holdings_value = sum(
+                shares * prices.get(sym, 0.0) for sym, shares in holdings.items()
+            )
+            cash = target_capital - holdings_value
+            portfolio = PortfolioState(initial_capital=target_capital)
+            portfolio.cash = cash
+            portfolio.holdings = dict(holdings)
+            # Mark today's prices so .nav reflects the seeded holdings'
+            # value immediately, not just cash (nav is cash + mark-to-market
+            # holdings, valued at the most recent prices *seen* -- see
+            # PortfolioState.nav's docstring; without this call it would
+            # read 0 for every seeded holding until the next real cycle).
+            portfolio.get_weights(prices)
+            self._sleeve_portfolios[strategy] = portfolio
+            summary[strategy] = {
+                "target_capital": target_capital,
+                "seeded_cash": cash,
+                "seeded_holdings": dict(holdings),
+            }
+        return summary
+
     def get_sleeve_metrics(self) -> dict[str, dict[str, float]]:
         """Exact per-strategy performance metrics from each sleeve's own NAV
         history -- unlike ``PerformanceAttribution``'s heuristic (dominant-

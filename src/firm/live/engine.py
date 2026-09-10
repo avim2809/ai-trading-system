@@ -1159,6 +1159,53 @@ class LiveTradingEngine:
             except Exception:
                 log.warning("Failed to persist sleeve portfolios", exc_info=True)
 
+    def seed_sleeves_from_attribution(self) -> dict[str, dict[str, Any]]:
+        """One-time, deliberate operator action for the moment of switching
+        a running engine from ``capital_allocation_mode: "blended"`` to
+        ``"sleeved"``: seeds every sleeve's virtual ``PortfolioState`` from
+        this engine's ``PerformanceAttribution`` (blended mode's best-effort
+        per-strategy holdings heuristic) and the broker's real current
+        positions/cash, so cutover doesn't force an unnecessary unwind/
+        rebuild of every position. See
+        ``Orchestrator.seed_sleeve_portfolios_from_attribution``'s docstring
+        for the exact math and caveats (an approximation, not an exact
+        split -- blended mode never tracked exact per-strategy positions).
+
+        Refuses (raises ``ValueError``) if this engine isn't in sleeved mode,
+        or if any sleeve already has virtual state -- calling this twice
+        would silently overwrite a sleeve's real, exact accumulated trading
+        history with a stale re-approximation. Call once, immediately after
+        starting the new sleeved engine and before its first cycle runs.
+        """
+        if self._orchestrator.capital_allocation_mode != "sleeved":
+            raise ValueError("seed_sleeves_from_attribution: engine is not in sleeved mode")
+        if self._orchestrator._sleeve_portfolios:
+            raise ValueError(
+                "seed_sleeves_from_attribution: sleeves already have state -- "
+                "refusing to overwrite real accumulated history with a stale seed"
+            )
+
+        positions = self._broker.get_positions()
+        account = self._broker.get_account()
+        prices = {
+            p.symbol: (p.market_value / p.quantity if p.quantity else 0.0)
+            for p in positions
+        }
+        total_nav = account.get("cash", 0.0) + sum(p.market_value for p in positions)
+
+        summary = self._orchestrator.seed_sleeve_portfolios_from_attribution(
+            self._attribution, prices, total_nav,
+        )
+        log.info("Seeded %d sleeve(s) from attribution: %s", len(summary), list(summary))
+        if self._state_store is not None:
+            try:
+                self._state_store.save_sleeve_portfolios(
+                    self._orchestrator.export_sleeve_portfolios()
+                )
+            except Exception:
+                log.warning("Failed to persist freshly-seeded sleeve portfolios", exc_info=True)
+        return summary
+
     def reset_kill_switch(self) -> dict[str, Any]:
         """Clear the drawdown kill switch and re-arm trading.
 

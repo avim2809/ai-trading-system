@@ -24,7 +24,20 @@ from firm.agents.research.debate import DebateAgent
 from firm.agents.risk import RiskAgent
 from firm.agents.trader import TraderAgent
 from firm.contracts.models import Signal, SignalSet
+from firm.live.approval import ApprovalQueue
+from firm.live.data_feed import LiveDataFeed
+from firm.live.engine import LiveTradingEngine
 from firm.portfolio.state import PortfolioState
+from tests.test_brokers import MockBroker
+
+
+@pytest.fixture()
+def engine_components(tmp_path):
+    broker = MockBroker()
+    feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+    queue = ApprovalQueue(broker=broker)
+    config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
+    return broker, feed, queue, config
 
 NOW = datetime(2023, 6, 15, 16, 0)
 
@@ -454,6 +467,115 @@ class TestLiveAttributionEndpointSleeveMerge:
         request = MagicMock()
         request.app.state.live_engine = None
         assert live_attribution(request) == {}
+
+
+class TestSeedSleevesFromAttribution:
+    """Best-effort seeding when switching a running engine from "blended"
+    to "sleeved" mid-history (docs/capital_sleeves_plan.md §5's cutover
+    step) -- without this, every sleeve would start from zero positions
+    while the real book still holds actual current positions."""
+
+    @staticmethod
+    def _attribution_with_holdings(holdings: dict[str, dict[str, float]]):
+        from firm.portfolio.attribution import PerformanceAttribution
+
+        attribution = PerformanceAttribution()
+        for strategy, sym_shares in holdings.items():
+            fills = [
+                {"symbol": sym, "shares": shares, "price": 1.0, "strategy": strategy}
+                for sym, shares in sym_shares.items()
+            ]
+            attribution.record_trades(fills, {sym: 1.0 for sym in sym_shares})
+        return attribution
+
+    def test_get_strategy_holdings_returns_attributed_shares(self):
+        attribution = self._attribution_with_holdings({"momentum": {"AAPL": 100.0}})
+        assert attribution.get_strategy_holdings("momentum") == {"AAPL": 100.0}
+        assert attribution.get_strategy_holdings("trend") == {}
+
+    def test_seeds_cash_and_holdings_to_match_target_capital(self):
+        orch = _make_orchestrator(
+            analysts=[],
+            sleeve_traders={"momentum": TraderAgent(), "trend": TraderAgent()},
+        )
+        attribution = self._attribution_with_holdings({"momentum": {"AAPL": 100.0}})
+        # Equal split: each sleeve's target = 50% of total_nav ($1M) = $500k.
+        # momentum's seeded holdings (100 AAPL @ $100) are worth $10k, so its
+        # seeded cash should be $500k - $10k = $490k; trend has no
+        # attributed holdings, so its seeded cash is its full $500k share.
+        summary = orch.seed_sleeve_portfolios_from_attribution(
+            attribution, {"AAPL": 100.0}, total_nav=1_000_000.0,
+        )
+
+        momentum = orch._sleeve_portfolios["momentum"]
+        assert momentum.holdings == {"AAPL": 100.0}
+        assert momentum.cash == pytest.approx(490_000.0)
+        assert momentum.nav == pytest.approx(500_000.0)
+
+        trend = orch._sleeve_portfolios["trend"]
+        assert trend.holdings == {}
+        assert trend.cash == pytest.approx(500_000.0)
+
+        assert summary["momentum"]["target_capital"] == pytest.approx(500_000.0)
+        assert summary["momentum"]["seeded_cash"] == pytest.approx(490_000.0)
+        assert summary["momentum"]["seeded_holdings"] == {"AAPL": 100.0}
+
+    def test_over_attributed_sleeve_seeds_negative_cash_not_clipped(self):
+        """A strategy attributed more notional than its own capital share
+        (possible: blended mode never capped any strategy's contribution)
+        seeds a real negative cash balance -- an honest reflection of the
+        approximation, not silently clipped to zero."""
+        orch = _make_orchestrator(
+            analysts=[], sleeve_traders={"momentum": TraderAgent(), "trend": TraderAgent()},
+        )
+        attribution = self._attribution_with_holdings({"momentum": {"AAPL": 8_000.0}})
+        orch.seed_sleeve_portfolios_from_attribution(
+            attribution, {"AAPL": 100.0}, total_nav=1_000_000.0,
+        )
+        momentum = orch._sleeve_portfolios["momentum"]
+        # 8,000 shares @ $100 = $800k >> momentum's $500k target share.
+        assert momentum.cash == pytest.approx(500_000.0 - 800_000.0)
+        assert momentum.nav == pytest.approx(500_000.0)  # still exactly its target
+
+
+class TestEngineSeedSleevesFromAttribution:
+    """LiveTradingEngine.seed_sleeves_from_attribution -- the deliberate,
+    one-time operator action wired to POST /api/live/sleeves/seed."""
+
+    def _sleeved_engine(self, broker, feed, queue, config):
+        cfg = {**config, "capital_allocation_mode": "sleeved", "strategies": ["momentum", "trend"]}
+        return LiveTradingEngine(config=cfg, broker=broker, data_feed=feed, approval_queue=queue)
+
+    def test_refuses_when_not_sleeved(self, engine_components):
+        broker, feed, queue, config = engine_components
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        with pytest.raises(ValueError, match="not in sleeved mode"):
+            engine.seed_sleeves_from_attribution()
+
+    def test_refuses_when_sleeves_already_have_state(self, engine_components):
+        broker, feed, queue, config = engine_components
+        engine = self._sleeved_engine(broker, feed, queue, config)
+        engine._orchestrator._get_or_create_sleeve_portfolio("momentum", 0.5)
+        with pytest.raises(ValueError, match="already have state"):
+            engine.seed_sleeves_from_attribution()
+
+    def test_seeds_from_real_broker_positions_and_persists(self, engine_components, tmp_path):
+        from firm.brokers.base import OrderRequest
+
+        broker, feed, queue, config = engine_components
+        broker.connect()
+        broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=10))
+        engine = self._sleeved_engine(broker, feed, queue, config)
+        engine._attribution.record_trades(
+            [{"symbol": "AAPL", "shares": 10, "price": 1.0, "strategy": "momentum"}],
+            {"AAPL": 1.0},
+        )
+
+        summary = engine.seed_sleeves_from_attribution()
+
+        assert "momentum" in summary
+        momentum = engine._orchestrator._sleeve_portfolios["momentum"]
+        assert momentum.holdings == {"AAPL": 10.0}
 
 
 class TestSleeveMetrics:

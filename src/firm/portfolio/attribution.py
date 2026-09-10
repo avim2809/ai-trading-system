@@ -86,6 +86,18 @@ class PerformanceAttribution:
     # Queries
     # ------------------------------------------------------------------
 
+    def get_strategy_holdings(self, strategy: str) -> dict[str, float]:
+        """Current cumulative ``{symbol: net_shares}`` attributed to
+        *strategy* by the running-net-share-count heuristic (see
+        :meth:`record_trades`). Used as a best-effort seed for that
+        strategy's own :class:`~firm.portfolio.state.PortfolioState` when
+        switching a running engine from ``capital_allocation_mode: "blended"``
+        to ``"sleeved"`` -- exact per-strategy positions were never tracked
+        in blended mode, so this is the closest approximation available at
+        the moment of cutover, not a precise split.
+        """
+        return dict(self._strategy_holdings.get(strategy, {}))
+
     def get_strategy_returns(self, strategy: str) -> pd.Series:
         """Get daily P&L series for a specific strategy."""
         dates = self._strategy_dates.get(strategy, [])
