@@ -2,7 +2,7 @@
   <h1 align="center">AI Multi-Agent Stock Investment Firm</h1>
   <p align="center">
     A production-grade, multi-agent AI system that operates like a professional investment firm.<br/>
-    12 quant strategies &bull; 8 AI-augmented agents &bull; Live & paper trading &bull; RAG-powered research
+    13 quant strategies &bull; 8 AI-augmented agents &bull; Live & paper trading &bull; RAG-powered research
   </p>
 </p>
 
@@ -20,7 +20,7 @@
 
 This system simulates (and can execute) the full workflow of a quantitative investment firm:
 
-1. **Signal Generation** &mdash; 12 pluggable alpha strategies analyze market data
+1. **Signal Generation** &mdash; 13 pluggable alpha strategies analyze market data (11 enabled by default; see [Strategies](#strategies))
 2. **Research Debate** &mdash; Bull and bear AI researchers build competing investment theses
 3. **Portfolio Construction** &mdash; A portfolio manager synthesizes research into target weights
 4. **Risk Management** &mdash; A risk manager enforces constraints with veto power
@@ -32,15 +32,16 @@ Every step can run in pure quant mode, AI-enhanced mode (quant + LLM reasoning),
 
 | Category | Details |
 |----------|---------|
-| **Strategies** | Cross-sectional momentum, trend following, mean reversion, statistical arbitrage, multi-factor, sentiment, PEAD event-driven, ML prediction, volatility breakout, seasonality, W.D. Gann composite, HMM regime detection |
+| **Strategies** | Cross-sectional momentum, trend following, mean reversion, statistical arbitrage, multi-factor, sentiment, PEAD event-driven, ML prediction (disabled by default), volatility breakout, seasonality, W.D. Gann composite (disabled by default), HMM regime detection, chart-pattern recognition |
 | **Agent Pipeline** | 3 domain analysts, bull/bear researchers, debate synthesis, portfolio manager, risk manager (6-constraint pipeline + veto), execution agent |
+| **Capital Allocation** | **Blended** (one shared portfolio, default) or **sleeved** (independent per-strategy capital + P&L, netted only at the final order pass) via `capital_allocation_mode` |
 | **Backtesting** | Backtrader engine, strict no-look-ahead PIT data store, configurable rebalancing, broker-level transaction costs + slippage, per-strategy attribution, benchmark-relative metrics (alpha/beta/info ratio), walk-forward validation |
 | **Live Trading** | Alpaca (paper + live), Interactive Brokers (paper + live), configurable approval workflow (full-auto / semi-auto per strategy), APScheduler, drawdown kill-switch + operational alerts |
 | **AI / LLM** | LiteLLM (Groq, Ollama, OpenAI, Anthropic, any OpenAI-compatible), free model by default, per-agent mode switching, SQLite response cache, token compression |
 | **RAG Pipeline** | ChromaDB vector store, 8 embedding models (MiniLM, Nomic, Qwen2, BGE, E5), SEC EDGAR / earnings / news / research paper ingestors |
-| **Frontend** | React + TypeScript + Tailwind dark theme, 9 pages: Dashboard, New Backtest, Run Detail, Compare, Agent Inspector, Live Dashboard, Config, Approvals, Order History |
+| **Frontend** | React + TypeScript + Tailwind dark theme, 13 pages: Dashboard, New Backtest, Run Detail, Compare, Agent Inspector, Pattern Scanner, Live Dashboard, Config, Approvals, Order History, Decisions, Logs, System Resources |
 | **Data Providers** | Polygon, Tiingo, Alpha Vantage, FMP + synthetic data for zero-config backtesting |
-| **Testing & CI** | 425 tests (unit, integration, E2E, no-look-ahead, reproducibility golden-run); GitHub Actions CI runs ruff + pytest + frontend build |
+| **Testing & CI** | ~1,800 tests (unit, integration, E2E, no-look-ahead, reproducibility golden-run); GitHub Actions CI runs ruff + pytest + frontend build |
 
 ## Architecture
 
@@ -70,7 +71,7 @@ flowchart LR
   subgraph DataFlow [Data Flow]
     direction LR
     Providers["Data Providers (Polygon, Tiingo, AV, FMP)"] --> PIT["PIT DataStore (date <= asof)"]
-    PIT --> Strategies["12 Strategies"]
+    PIT --> Strategies["13 Strategies"]
     Strategies --> Signals["Standardized Signals"]
     Signals --> Pipeline["Agent Pipeline"]
     Pipeline --> Orders["Orders"]
@@ -164,11 +165,16 @@ The web UI provides:
 | **Dashboard** | `/` | View all backtest runs, compare metrics side-by-side |
 | **New Backtest** | `/new` | Configure strategies, universe, dates, capital; launch a single run or a walk-forward analysis (synthetic or real data) |
 | **Run Detail** | `/runs/:id` | Equity curve, drawdown chart, monthly returns heatmap, per-strategy attribution, benchmark-relative metrics |
+| **Compare** | `/compare` | Side-by-side metrics across multiple runs |
 | **Agent Inspector** | `/inspector` | Step through the full agent pipeline; see signals, theses, debate, risk decisions |
+| **Pattern Scanner** | `/patterns` | On-demand chart-pattern scan across the universe, scan history |
 | **Live Dashboard** | `/live` | Start/stop live engine, view positions, account, recent cycles |
 | **Configuration** | `/live/config` | Broker, schedule, per-strategy approval mode, AI model config, RAG management |
 | **Approvals** | `/live/approvals` | Review and approve/reject pending trade proposals (semi-auto mode) |
 | **Order History** | `/live/orders` | View all executed orders with fill details and strategy attribution |
+| **Decisions** | `/decisions` | Live agent decision log + reflection/lessons (`TradingMemoryLog`) |
+| **Logs** | `/logs` | Tail the running process's logs from the browser |
+| **System Resources** | `/system` | CPU/memory/disk of the host process; restart/kill controls |
 
 ### Live Trading
 
@@ -212,11 +218,17 @@ pip install -e ".[llm]"
 | 5 | `multi_factor` | Fundamental | Value + quality + momentum + low-vol composite |
 | 6 | `sentiment` | Sentiment | News sentiment level + delta scoring |
 | 7 | `event_driven` | Sentiment | Post-earnings announcement drift (PEAD) |
-| 8 | `ml_prediction` | ML | Walk-forward GBR/Ridge with strict PIT training cutoff |
+| 8 | `ml_prediction` | ML | Walk-forward GBR/Ridge with strict PIT training cutoff — **disabled by default** (overfit risk on a small universe) |
 | 9 | `volatility_breakout` | Technical | ATR breakout from low-vol compression |
 | 10 | `seasonality` | Technical | Turn-of-month + day-of-week calendar effects |
-| 11 | `gann` | Technical | W.D. Gann composite: angles, Square of Nine, time cycles, swing, retracement |
+| 11 | `gann` | Technical | W.D. Gann composite: angles, Square of Nine, time cycles, swing, retracement — **disabled by default** (no timing edge found) |
 | 12 | `regime_hmm` | Technical | Per-symbol Gaussian HMM regime detection (Bull/Chop/Bear) with directional, confidence-weighted signals |
+| 13 | `pattern_recognition` | Technical | Chart-pattern recognition (head & shoulders, triangles, flags, cup & handle) via the Lo/Mamaysky/Wang (2000) geometric framework, quality-scored |
+
+11 of these 13 are enabled by default (`ml_prediction`/`gann` are the exceptions above).
+The strategy registry also holds a handful of optional/decommissioned entries
+(`investing_analyst_ratings`, four `danelfin_*` variants) not included in the table —
+see [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) for the full registry.
 
 ### HMM Market-Regime Detection
 
@@ -331,6 +343,26 @@ All endpoints are under `/api`:
 | POST | `/api/live/approvals/{id}/reject` | Reject trade |
 | GET | `/api/live/config` | Live config |
 | PUT | `/api/live/config` | Update live config |
+| GET | `/api/live/attribution` | Per-strategy performance (exact per-sleeve metrics once `capital_allocation_mode: sleeved`) |
+| POST | `/api/live/sleeves/seed` | One-time seed of per-strategy sleeve capital from broker positions + attribution history |
+
+### Chart Patterns
+| Method | Endpoint | Description |
+|--------|----------|--------------|
+| GET | `/api/patterns/{symbol}` | Detected patterns for a symbol |
+| POST | `/api/patterns/scan/trigger` | Trigger an on-demand universe scan |
+| GET | `/api/patterns/scan` | Latest scan status |
+| GET | `/api/patterns/summary` | Scan summary stats |
+| GET | `/api/patterns/history` | Persisted scan history |
+
+### Decisions, Logs & System
+| Method | Endpoint | Description |
+|--------|----------|--------------|
+| GET | `/api/decisions` | Live per-cycle agent decision log |
+| GET | `/api/lessons` | Reflected lessons (`TradingMemoryLog`) |
+| GET | `/api/logs/tail` | Tail recent process logs |
+| GET | `/api/system/resources` | Host CPU/memory/disk stats |
+| POST | `/api/system/restart` / `/api/system/kill` | Restart or kill the running process |
 
 ### LLM / RAG
 | Method | Endpoint | Description |
@@ -351,8 +383,8 @@ All endpoints are under `/api`:
 ```
 ai-trading-system/
 ├── src/firm/
-│   ├── strategies/          # 12 alpha strategies + registry
-│   ├── agents/              # 8 quant agents + orchestrator
+│   ├── strategies/          # 13 alpha strategies (+ optional/decommissioned) + registry
+│   ├── agents/              # quant agents + orchestrator (blended + per-strategy sleeved modes)
 │   │   └── llm/             # 8 LLM-enhanced agent variants
 │   ├── backtest/            # Backtrader engine bridge
 │   ├── brokers/             # Broker ABC + Alpaca + IBKR
@@ -360,15 +392,15 @@ ai-trading-system/
 │   ├── llm/                 # LLM provider (LiteLLM) + cache + compression
 │   ├── rag/                 # ChromaDB store + chunker + retriever + ingestors
 │   ├── data/                # PIT store + 4 provider adapters + synthetic data
-│   ├── api/                 # FastAPI app + routers (meta, runs, agents, live, llm)
+│   ├── api/                 # FastAPI app + routers (meta, runs, agents, live, llm, patterns, decisions, logs, system)
 │   ├── contracts/           # Frozen dataclass contracts (Signal, Thesis, etc.)
 │   ├── portfolio/           # Portfolio state + attribution
 │   ├── eval/                # Metrics, reports, plots
 │   └── experiments/         # Experiment runner + versioned registry
-├── frontend/                # React + TypeScript + Tailwind (9 pages)
-├── config/                  # YAML configs (settings, live, llm, experiments)
+├── frontend/                # React + TypeScript + Tailwind (13 pages)
+├── config/                  # YAML configs (settings, live, live_alpaca, llm, experiments)
 ├── scripts/                 # CLI tools (fetch_data, run_backtest, ingest_docs)
-├── tests/                   # 425 tests (unit + integration + E2E)
+├── tests/                   # ~1,800 tests (unit + integration + E2E)
 ├── .github/workflows/       # CI: ruff + pytest + frontend build
 ├── setup.ps1 / setup.sh     # One-command setup scripts
 └── pyproject.toml            # Package config with 4 optional extras
@@ -380,14 +412,15 @@ ai-trading-system/
 |------|---------|
 | `.env` | API keys and secrets (from `.env.example`) |
 | `config/settings.yaml` | Universe, backtest params, risk limits, data providers |
-| `config/live.yaml` | Live trading: broker, schedule, approval mode, strategies |
+| `config/live.yaml` | Live trading: broker, schedule, approval mode, strategies, capital allocation mode |
+| `config/live_alpaca.yaml` | Second live instance config (Alpaca) — each instance is pointed at its own YAML via `FIRM_LIVE_CONFIG` |
 | `config/llm.yaml` | LLM provider, agent modes, RAG settings, cache config |
 | `config/experiments/*.yaml` | Parameterized experiment definitions |
 
 ## Testing
 
 ```bash
-pytest                    # run all 425 tests
+pytest                    # run the full test suite (~1,800 tests)
 pytest tests/test_strategies.py  # strategy tests only
 pytest tests/test_e2e.py  # end-to-end integration
 pytest -k "no_look_ahead" # verify PIT safety
@@ -403,7 +436,7 @@ CI (`.github/workflows/ci.yml`) runs ruff, the full pytest suite, and the fronte
 - **Deterministic runs** &mdash; Seeded randomness, versioned experiment configs
 - **Structured logging** &mdash; JSON logs for every signal, decision, trade, and risk action
 - **Graceful degradation** &mdash; All optional dependencies (LLM, brokers, RAG) use try/except imports
-- **425 tests + CI** &mdash; Unit, integration, E2E, reproducibility, and no-look-ahead verification, gated by GitHub Actions (ruff + pytest + frontend build)
+- **~1,800 tests + CI** &mdash; Unit, integration, E2E, reproducibility, and no-look-ahead verification, gated by GitHub Actions (ruff + pytest + frontend build)
 
 ## License
 
