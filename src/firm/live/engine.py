@@ -413,6 +413,50 @@ class LiveTradingEngine:
         from firm.strategies import list_strategies
         return list_strategies()
 
+    def _rebuild_orchestrator(self, new_config: dict[str, Any]) -> None:
+        """Rebuild ``self._orchestrator`` from *new_config*, carrying over any
+        in-flight per-strategy sleeve state first.
+
+        ``capital_allocation_mode: "sleeved"`` sleeves keep their own
+        virtual ``PortfolioState`` and per-strategy ``TraderAgent``
+        conviction-EMA/NAV-history *in memory* on the orchestrator instance
+        -- unlike the real book, nothing reconciles them from a broker.
+        Every ``update_*`` below used to just call ``build_orchestrator(...)``
+        directly, which constructs a brand-new ``Orchestrator`` with empty
+        sleeve state: a config hot-swap mid-session (no restart at all)
+        would silently discard every sleeve's entire compounding history.
+        Transferring the *current* in-memory state here (not reloading from
+        ``LiveStateStore``, which can lag behind by up to one cycle) keeps a
+        hot-swap exactly as safe for sleeves as it already is for the real
+        book, whose cash/holdings/broker connection are untouched by a
+        rebuild.
+        """
+        old_orchestrator = self._orchestrator
+        self._orchestrator = build_orchestrator(new_config)
+        old_sleeve_traders = getattr(old_orchestrator, "sleeve_traders", None) or {}
+        new_sleeve_traders = getattr(self._orchestrator, "sleeve_traders", None) or {}
+        if not old_sleeve_traders or not new_sleeve_traders:
+            return
+        try:
+            self._orchestrator.restore_sleeve_portfolios(
+                old_orchestrator.export_sleeve_portfolios()
+            )
+        except Exception:
+            log.warning("Failed to carry over sleeve portfolios across orchestrator rebuild", exc_info=True)
+        for strategy, new_trader in new_sleeve_traders.items():
+            old_trader = old_sleeve_traders.get(strategy)
+            if old_trader is None or not hasattr(old_trader, "get_state"):
+                continue
+            if not hasattr(new_trader, "load_state"):
+                continue
+            try:
+                new_trader.load_state(old_trader.get_state())
+            except Exception:
+                log.warning(
+                    "Failed to carry over sleeve trader state for %s across "
+                    "orchestrator rebuild", strategy, exc_info=True,
+                )
+
     def update_strategies(self, names: list[str]) -> None:
         """Swap which strategies the orchestrator runs, effective next cycle.
 
@@ -422,14 +466,14 @@ class LiveTradingEngine:
         """
         self._enabled_strategies = list(names) if names else self._all_strategy_names()
         new_config = {**self._config, "strategies": self._enabled_strategies}
-        self._orchestrator = build_orchestrator(new_config)
+        self._rebuild_orchestrator(new_config)
         self._config = new_config
         log.info("Live engine strategies updated: %s", self._enabled_strategies)
 
     def update_strategy_params(self, strategy_params: dict[str, Any]) -> None:
         """Replace per-strategy params and rebuild the orchestrator."""
         self._config = {**self._config, "strategy_params": strategy_params}
-        self._orchestrator = build_orchestrator(self._config)
+        self._rebuild_orchestrator(self._config)
         log.info("Live engine strategy_params updated: %s", list(strategy_params))
 
     def update_universe(self, symbols: list[str]) -> None:
@@ -508,7 +552,7 @@ class LiveTradingEngine:
         this from config at construction, so the orchestrator is rebuilt.
         """
         self._config = {**self._config, "signal_combination": dict(signal_combination)}
-        self._orchestrator = build_orchestrator(self._config)
+        self._rebuild_orchestrator(self._config)
         log.info("Live engine signal_combination updated: %s", signal_combination)
 
     def _signal_combination_method(self) -> str:
@@ -529,7 +573,7 @@ class LiveTradingEngine:
             **self._config,
             "strategy_circuit_breaker": dict(strategy_circuit_breaker),
         }
-        self._orchestrator = build_orchestrator(self._config)
+        self._rebuild_orchestrator(self._config)
         log.info(
             "Live engine strategy_circuit_breaker updated: %s", strategy_circuit_breaker
         )
@@ -545,7 +589,7 @@ class LiveTradingEngine:
             **self._config,
             "strategy_regime_weights": dict(strategy_regime_weights),
         }
-        self._orchestrator = build_orchestrator(self._config)
+        self._rebuild_orchestrator(self._config)
         log.info(
             "Live engine strategy_regime_weights updated: enabled=%s",
             bool(strategy_regime_weights.get("enabled")),
@@ -565,7 +609,7 @@ class LiveTradingEngine:
         if not updates:
             return
         self._config = {**self._config, **updates}
-        self._orchestrator = build_orchestrator(self._config)
+        self._rebuild_orchestrator(self._config)
         log.info("Live engine allocation updated: %s", updates)
 
     def update_risk(

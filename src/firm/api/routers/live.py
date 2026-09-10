@@ -183,6 +183,16 @@ class StartRequest(BaseModel):
     strategy_regime_weights: dict[str, Any] | None = None
     allocation_method: str | None = None
     kelly_fraction: float | None = None
+    # Per-strategy capital sleeves (see docs/capital_sleeves_plan.md) --
+    # start-time only, like `broker`: switching capital_allocation_mode
+    # changes how the orchestrator itself is constructed (independent
+    # TraderAgent instances per sleeve), not a single mutable attribute a
+    # running engine can swap in place, so it is deliberately NOT part of
+    # ConfigUpdateRequest below -- changing it requires stopping and
+    # restarting the engine.
+    capital_allocation_mode: str | None = None
+    strategy_capital_weights: dict[str, float] | None = None
+    real_rebalance_band_pct: float | None = None
 
 
 class ConfigUpdateStrategies(BaseModel):
@@ -585,6 +595,12 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
             engine_config["allocation_method"] = body.allocation_method
         if body.kelly_fraction is not None:
             engine_config["kelly_fraction"] = body.kelly_fraction
+        if body.capital_allocation_mode is not None:
+            engine_config["capital_allocation_mode"] = body.capital_allocation_mode
+        if body.strategy_capital_weights is not None:
+            engine_config["strategy_capital_weights"] = body.strategy_capital_weights
+        if body.real_rebalance_band_pct is not None:
+            engine_config["real_rebalance_band_pct"] = body.real_rebalance_band_pct
 
         try:
             result = _start_live_engine(

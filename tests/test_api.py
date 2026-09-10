@@ -827,6 +827,111 @@ class TestLiveClearEndpoints:
         assert orders[0]["source"] == "approval"
 
 
+# ------------------------------------------------------------------
+# Per-strategy capital sleeves (capital_allocation_mode: "sleeved") --
+# isolated-port-equivalent smoke test through the real app/engine, never
+# touching a real broker: /api/live/start's _create_broker is mocked (see
+# docs/capital_sleeves_plan.md's finding that no mock broker type is wired
+# into the real broker factory, so this monkeypatch -- this suite's own
+# established pattern -- is the safe way to exercise this end to end).
+# ------------------------------------------------------------------
+
+class TestLiveSleevedModeStart:
+    @pytest.fixture(autouse=True)
+    def _mock_broker(self, monkeypatch, tmp_path):
+        import firm.api.routers.live as live_mod
+        from tests.test_brokers import MockBroker
+
+        monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: MockBroker())
+        monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_ORDERS_PATH", str(tmp_path / "order_history.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
+        monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
+        monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
+        monkeypatch.setattr(live_mod, "_MEMORY_LOG_PATH", str(tmp_path / "decisions.jsonl"))
+
+    def test_start_with_sleeved_mode_builds_a_real_sleeved_orchestrator(self, client):
+        resp = client.post("/api/live/start", json={
+            "broker": "alpaca_paper", "schedule": "hourly",
+            "strategies": ["momentum", "trend"],
+            "capital_allocation_mode": "sleeved",
+        })
+        assert resp.status_code == 200, resp.text
+
+        engine = client.app.state.live_engine
+        assert engine._orchestrator.capital_allocation_mode == "sleeved"
+        assert set(engine._orchestrator.sleeve_traders.keys()) == {"momentum", "trend"}
+
+        client.post("/api/live/stop")
+
+    def test_defaults_to_blended_when_omitted(self, client):
+        resp = client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+        assert resp.status_code == 200, resp.text
+
+        engine = client.app.state.live_engine
+        assert engine._orchestrator.capital_allocation_mode == "blended"
+        assert engine._orchestrator.sleeve_traders == {}
+
+        client.post("/api/live/stop")
+
+    def test_strategy_capital_weights_reach_the_orchestrator(self, client):
+        resp = client.post("/api/live/start", json={
+            "broker": "alpaca_paper", "schedule": "hourly",
+            "strategies": ["momentum", "trend"],
+            "capital_allocation_mode": "sleeved",
+            "strategy_capital_weights": {"momentum": 0.7},
+        })
+        assert resp.status_code == 200, resp.text
+
+        engine = client.app.state.live_engine
+        weights = engine._orchestrator._sleeve_capital_weights()
+        assert weights["momentum"] == pytest.approx(0.7)
+        assert weights["trend"] == pytest.approx(0.3)
+
+        client.post("/api/live/stop")
+
+    def test_attribution_endpoint_uses_sleeve_metrics_once_running(self, client, monkeypatch):
+        """End-to-end through the real HTTP route: run one real cycle (real
+        agents, no real market data -- FallbackProvider mocked to empty, so
+        no signals fire, but the whole pipeline including the sleeved-mode
+        branch must survive it cleanly), then confirm GET /api/live/
+        attribution reads from the real orchestrator's sleeve metrics."""
+        import pandas as pd
+        from unittest.mock import MagicMock
+        import firm.data.providers.fallback as fallback_mod
+
+        mock_provider = MagicMock()
+        mock_provider.get_prices.return_value = pd.DataFrame()
+        mock_provider.get_fundamentals.return_value = pd.DataFrame()
+        mock_provider.get_news_sentiment.return_value = pd.DataFrame()
+        monkeypatch.setattr(fallback_mod, "FallbackProvider", lambda *a, **k: mock_provider)
+
+        resp = client.post("/api/live/start", json={
+            "broker": "alpaca_paper", "schedule": "hourly",
+            "strategies": ["momentum", "trend"],
+            "capital_allocation_mode": "sleeved",
+            # Must match MockBroker's default cash, or the kill switch trips
+            # on a spurious "drawdown" from comparing against the wrong
+            # peak-equity baseline -- unrelated to sleeving itself.
+            "initial_capital": 100_000,
+        })
+        assert resp.status_code == 200, resp.text
+
+        engine = client.app.state.live_engine
+        result = engine.run_cycle(force=True)
+        assert result.error is None, result.error
+
+        attribution = client.get("/api/live/attribution")
+        assert attribution.status_code == 200
+        # No real market data -> no sleeve traded -> no metrics yet, but the
+        # endpoint must not error and must have actually asked the sleeved
+        # orchestrator for its (empty, in this case) exact metrics rather
+        # than silently falling back to the heuristic path.
+        assert attribution.json() == {}
+
+        client.post("/api/live/stop")
+
+
 class TestKillSwitchResetEndpoint:
     @pytest.fixture(autouse=True)
     def _mock_broker(self, monkeypatch, tmp_path):

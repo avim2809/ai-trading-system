@@ -1289,6 +1289,46 @@ class TestEngineConfigUpdates:
         assert len(engine.enabled_strategies) > 1  # falls back to all registered strategies
 
     @patch("firm.live.engine.build_orchestrator")
+    def test_update_strategies_carries_over_sleeve_state(self, mock_build, engine_components):
+        """capital_allocation_mode: 'sleeved' companion: rebuilding the
+        orchestrator (e.g. via update_strategies) constructs a brand-new
+        Orchestrator with empty sleeve state -- without carrying the old
+        instance's in-memory state over, a config hot-swap mid-session
+        (no restart at all) would silently discard every sleeve's entire
+        compounding history and TraderAgent smoothing state."""
+        from firm.agents.trader import TraderAgent
+        from firm.portfolio.state import PortfolioState
+
+        broker, feed, queue, config = engine_components
+
+        old_orch = MagicMock()
+        old_momentum_trader = TraderAgent(config={"conviction_smoothing_enabled": True})
+        old_momentum_trader._conviction_ema = {"AAPL": 0.42}
+        old_orch.sleeve_traders = {"momentum": old_momentum_trader}
+        old_portfolio = PortfolioState(initial_capital=500_000.0)
+        old_portfolio.cash = 400_000.0
+        old_portfolio.holdings = {"AAPL": 123.0}
+        old_orch.export_sleeve_portfolios.return_value = {
+            "momentum": {"cash": old_portfolio.cash, "holdings": old_portfolio.holdings},
+        }
+
+        new_orch = MagicMock()
+        new_momentum_trader = TraderAgent(config={"conviction_smoothing_enabled": True})
+        new_orch.sleeve_traders = {"momentum": new_momentum_trader}
+
+        mock_build.side_effect = [old_orch, new_orch]
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        assert engine._orchestrator is old_orch
+
+        engine.update_strategies(["momentum"])
+
+        assert engine._orchestrator is new_orch
+        new_orch.restore_sleeve_portfolios.assert_called_once_with(
+            {"momentum": {"cash": 400_000.0, "holdings": {"AAPL": 123.0}}}
+        )
+        assert new_momentum_trader._conviction_ema == {"AAPL": 0.42}
+
+    @patch("firm.live.engine.build_orchestrator")
     def test_update_risk(self, mock_build, engine_components):
         broker, feed, queue, config = engine_components
         mock_build.return_value = MagicMock()
