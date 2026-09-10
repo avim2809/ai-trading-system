@@ -5,10 +5,10 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 2ceda047-fc14-4536-ae62-6e8b77b7ca59
-  modified: 2026-07-18T21:32:04.350Z
+  modified: 2026-09-08T20:11:43.017Z
 ---
 
-**Context:** VPS is resource-constrained — **2 CPU cores, 3.3GB RAM** (confirmed via `nproc`/`free -h`), already at load average ~6 under light load. Any CPU/RAM-heavy addition (ML inference, etc.) is a real operational risk to the live trading loop (which also runs IB Gateway, a Java process) — weigh this before adding anything similar in the future.
+**Context:** VPS is resource-constrained — **2 CPU cores** (confirmed via `nproc`, still true as of 9/8), already at load average ~6 under light load. Any CPU/RAM-heavy addition (ML inference, etc.) is a real operational risk to the live trading loop (which also runs IB Gateway, a Java process) — weigh this before adding anything similar in the future. RAM was 3.3GB when this was written (7/18); as of 2026-09-08 `free -h` shows **5.3GB total** — box appears to have been upgraded at some point since, so treat RAM specifically (not CPU) as less tight than this memory originally implied. Disk is a newer concern: 83% used, only 3.3G free on a 20G root as of 9/8 — worth monitoring.
 
 **LLMLingua (real prompt compression) — installed, works, deliberately NOT used in the live path:**
 - Installed `llmlingua` + CPU-only torch (`pip install torch --index-url https://download.pytorch.org/whl/cpu` first, ~192MB, else it pulls the ~2GB CUDA stack this machine can't even use — no GPU present). Total added ~1GB, disk had headroom.

@@ -1,4 +1,5 @@
-- [IBKR paper trading setup status](project_ibkr_paper_trading_setup.md) — blockers/state for IBKR paper; 8/3-4: retry+reconciliation added, hung qualifyContracts() froze broker until timeouts fixed
+- [IBKR paper trading setup status](project_ibkr_paper_trading_setup.md) — blockers/state for IBKR paper; 8/5: root cause was 2 IB connections sharing 1 thread, fixed + verified 22/22 orders submit
+- [Alpaca parallel instance](project_alpaca_parallel_instance.md) — 8/5: second live paper instance (Alpaca) alongside IBKR, one checkout param'd via FIRM_API_PORT/FIRM_DATA_DIR/FIRM_LIVE_CONFIG (disk-constrained host)
 - [Data pipeline & backtest reliability](project_data_pipeline_and_backtest_reliability.md) — 6 real bugs in fallback provider/fetch-data/walk-forward found running real data end to end
 - [RAG subsystem status](project_rag_subsystem_status.md) — fixed retrieval bugs; 4344 real chunks ingested (SEC/research/system), news pending AV quota reset
 - [Exception-logging audit](project_exception_logging_audit.md) — fixed silent excepts across ~20 files; found/fixed critical /live/start empty-providers bug
@@ -9,6 +10,20 @@
 - [User profile](user_profile.md) — comfortable with infra-level work, defer to them only for credentials
 - [Memory-keeping habits](feedback_memory_habits.md) — user wants proactive, thorough memory updates, not just on request
 - [Full-stack sync](feedback_full_stack_sync.md) — always verify frontend against real backend shapes and rebuild frontend/dist, not just backend fixes
-- [Danelfin integration](project_danelfin_integration.md) — ai_scores (A/B'd, enabled), live_signals (enabled, unvalidated), Best-Stocks synthetic arm; LLM A/B is sequential not concurrent
+- [Danelfin integration](project_danelfin_integration.md) — DECOMMISSIONED 8/16 (account closed): config/timer/API-key disabled on both live instances, restarted+verified
 - [Autonomous scope calls](feedback_autonomous_scope_calls.md) — user wants paid-data capabilities maximally wired in even without A/B; still no anti-bot bypass or silent heavy infra
 - [Production incident priority](feedback_production_incident_priority.md) — fix currently-broken live-trading bugs now, in-session, not as a deferred follow-up
+- [Alpaca paper instance incident](project_alpaca_paper_instance_incident.md) — 8/6: initial_capital config bug halted new Alpaca instance all day; found+fixed a kill-switch persistence safety bug in shared engine.py
+- [8/16 deep audit outage fixes](project_deep_audit_aug16_outage_fixes.md) — IBKR 5-day zero-trade outage (stale connection post nightly gateway restart) + Alpaca order rejections (long/short flip splitting) fixed; Discord alerts now severity-colored embeds
+- [Concurrent sessions 8/21](project_concurrent_sessions_aug21.md) — 3 parallel Claude sessions on live-trading reliability; both live engines paused via API, do not restart (SUPERSEDED, see 8/23 entry)
+- [Joint-optimizer redesign 8/23](project_joint_optimizer_redesign_aug23.md) — built+validated combo-layer QP redesign, failed gate; pause SUPERSEDED 8/30 — both engines running again (resumed by explicit user request, not accident), user confirmed keep running
+- [Signal-quality investigation status 8/30](project_signal_quality_investigation_status.md) — sector scanner LIVE on Alpaca only since 8/30 (IBKR=static control), first real run Mon 8/31 07:00ET; fixed a real AlpacaProvider SIP-feed 403 bug found via dry-run
+- [Autonomous session workflow](feedback_autonomous_session_workflow.md) — "run on your own" grants no-questions+git push, NOT lower validation rigor
+- [Live pause isn't persistent](project_live_pause_not_persistent.md) — /api/live/stop doesn't survive a service restart; FIRM_AUTO_START_LIVE=1 auto-resumes on every boot
+- [Groq model deprecation fix 8/30](project_groq_model_deprecation_fix.md) — llama-3.3-70b-versatile dead since 6/17, silently degraded every LLM-enhanced call for 2+ months; fixed to openai/gpt-oss-120b, verified live, both services restarted
+- [LLM A/B experiment status](project_llm_ab_experiment.md) — 9/8 AM session ended arm A (quant-only) early per user request, NAV -4.9%/Sharpe -5.625; now on arm B (llm_enhanced), both services restarted+verified
+- [Session recency check](feedback_session_recency_check.md) — check git log timestamp clusters for "last session," not just memory's newest entry date
+- [9/8 reflection & LLM fallback fixes](project_reflection_and_llm_fallback_fixes_sep8.md) — fixed benchmark_return false-zero bug (unresolved cadence caveat), dead fallback model, added verified qwen3.8-27b; user has paid Google API tier1 w/ ~100 NIS credit
+- [Pattern recognition feature](project_pattern_recognition_feature.md) — Strategy #13, 5 phases + full follow-up pass (scheduled job, ONNX, isolated CNN/PPO env); live on both instances 9/9
+- [Capital sleeves feature](project_capital_sleeves_feature.md) — per-strategy capital/P&L, A/B found+fixed a real rebalance-band bug pre-cutover; live on Alpaca only 9/10, IBKR stays blended control
+- [Repo doc & memory upkeep](feedback_repo_doc_and_memory_upkeep.md) — keep docs/claude-memory + PROJECT_CONTEXT.md/.cursor/rules in sync as things change, don't let staleness accumulate again

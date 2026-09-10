@@ -18,16 +18,23 @@ Canonical reference for architecture, production deployment, and conventions in 
 ### Agent pipeline
 
 ```
-12 Strategies → 3 Analysts (technical, fundamental, sentiment)
+13 Strategies → 3 Analysts (technical, fundamental, sentiment)
               → Bull / Bear researchers → Debate
               → Portfolio Manager → Risk Manager (veto) → Execution
 ```
 
 - **Strategies** emit raw cross-sectional scores (no internal z-scoring).
 - **Analysts** are the sole `zscore_signals` pass before the research layer.
-- Each agent can run in quant, AI-enhanced, or AI-only mode (`config/llm.yaml` → `agent_modes`).
+- Each agent can run in quant, AI-enhanced, or AI-only mode (`config/llm.yaml` →
+  `agent_modes`) — **currently live**: `fundamental_analyst`/`sentiment_analyst` are
+  `llm_enhanced` (Arm B of the quant-vs-LLM A/B, started 2026-09-08 per
+  `docs/llm_ab_experiment_log.md`), everything else stays `quant` (no per-symbol LLM
+  fan-out for bull/bear/debate/trader/risk).
+- **Per-strategy capital sleeves** (`capital_allocation_mode: "blended" | "sleeved"`,
+  see "Per-strategy capital sleeves" below) — currently `sleeved` on the Alpaca instance
+  only, `blended` (default, unchanged) on IBKR as the static control.
 
-### Twelve strategies
+### Thirteen strategies
 
 | Name | Module | Notes |
 |------|--------|-------|
@@ -38,11 +45,24 @@ Canonical reference for architecture, production deployment, and conventions in 
 | multi_factor | `multi_factor.py` | Value/quality/momentum/low-vol; omits `low_vol` when fundamentals missing |
 | sentiment | `sentiment.py` | News/sentiment scores |
 | event_driven | `event_driven.py` | Simplified PEAD proxy; needs fundamentals |
-| ml_prediction | `ml_prediction.py` | PIT-safe ML features |
+| ml_prediction | `ml_prediction.py` | PIT-safe ML features — registered but **permanently disabled** in live configs (overfit risk on the 25-name universe) |
 | volatility_breakout | `volatility_breakout.py` | Vol breakout |
 | seasonality | `seasonality.py` | Calendar effects; TOM uses trading days (`pd.bdate_range`) |
-| gann | `gann.py` | Heuristic composite (not academic Gann) |
+| gann | `gann.py` | Heuristic composite (not academic Gann) — registered but **permanently disabled** (no timing value found on any asset class tested) |
 | regime_hmm | `regime_hmm.py` | Per-symbol HMM regime overlay |
+| pattern_recognition | `pattern_recognition.py` | Strategy #13 (added 2026-09-09): multi-bar chart patterns (H&S, triangles, flags, cup & handle — Lo/Mamaysky/Wang 2000 geometric framework), quality-scored. Full history: `docs/pattern_recognition_plan.md` |
+
+Of these 13, **11 are enabled** in both `config/live.yaml`/`config/live_alpaca.yaml`
+(`ml_prediction`/`gann` are the two permanently-disabled exceptions above).
+
+The registry (`src/firm/strategies/registry.py`, `list_strategies()`) actually holds
+**18** `@register`-decorated classes today — the 13 above plus `investing_analyst_ratings`
+and four `danelfin_*` variants. **Danelfin was fully decommissioned 2026-08-16** (user
+closed the account) — its strategy/provider modules still exist under `src/firm/` but are
+commented out of both live configs' `strategies.enabled`; see
+`docs/danelfin_best_stocks_arm.md` for its A/B history if the vendor is ever reinstated.
+`investing_analyst_ratings` is also registered but not currently enabled — see
+`docs/investing_pro_integration.md`.
 
 Register new strategies with `@register` in `src/firm/strategies/registry.py`.
 
@@ -138,6 +158,9 @@ having to notice and intervene:
 | Kill switch (`_halted`, `_peak_equity`) | JSON file | `data/kill_switch_state.json` | **Yes** — `_load_kill_switch_state()`; a halted engine restarts halted. |
 | Portfolio NAV/equity-curve history | SQLite blob | `data/live_state.db` (`firm.live.state_store.LiveStateStore`) | Yes — `_load_persisted_state()`; cash/holdings still come from the broker, only history is restored. |
 | Per-strategy attribution (`PerformanceAttribution`) | SQLite blob | `data/live_state.db` | Yes — same load call; restores `_strategy_returns`/`_trade_log`/`_strategy_holdings` so the `optimal` signal-combination method doesn't reset to empty history on every restart. |
+| `TraderAgent` conviction-EMA + joint-optimizer NAV history | SQLite blob | `data/live_state.db` | Yes — otherwise every restart re-enters unsmoothed at full strength, exactly what the smoothing exists to damp. |
+| Cycle counter, daily trade/turnover counters | SQLite blob | `data/live_state.db` | Yes — the cycle counter keeps `client_order_id`s unique across a same-day restart (Alpaca previously rejected a regenerated duplicate id). |
+| Per-sleeve `PortfolioState` + per-sleeve `TraderAgent` state (`capital_allocation_mode: "sleeved"` only) | SQLite blob | `data/live_state.db` | Yes — sleeves are virtual (no real broker sub-account to reconcile from), so without this a restart *or* a config hot-swap (`update_strategies` etc., which rebuilds the orchestrator) would silently reset every sleeve to its initial capital split. See "Per-strategy capital sleeves" above. |
 
 Both `kill_switch_state_path` and `state_db_path` are constructor kwargs that
 default to `None` (fully disk-free) — every test and any direct
@@ -166,6 +189,20 @@ inside `record_trades`, silently swallowed by a broad
 `LiveTradingEngine._orders_to_fills()` as a defensive normalizer at the
 call site so attribution recording no longer depends on every upstream
 order producer happening to include `shares`.
+
+### Live reflection (`agents/memory.py`, `TradingMemoryLog`)
+
+Append-only JSONL decision log (`data/memory/decisions.jsonl`, path configurable via
+`memory_log_path`): `store_decision()` writes a pending entry per cycle (target-weight
+breakdown, not the `PerformanceAttribution` metrics above); a later `reflect()` call adds
+an LLM-generated verdict/lesson once the realized and benchmark return for that decision
+are known. Purely read-only/commentary today — `get_context()`/`summarize_lessons()` only
+feed future prompts, nothing here adjusts weights, disables a strategy, or touches config.
+`benchmark_return` (the SPY-based comparison reflection needs) was fixed 2026-09-08: it
+previously collapsed to a false-precision `0.0` in a real-but-narrow case rather than the
+real SPY return for that period (commits `7abdbe9`, `983c5a2`) — a cadence caveat from
+that fix is still open, see `project_reflection_and_llm_fallback_fixes_sep8.md` in
+`docs/claude-memory/`.
 
 ### Operations
 
@@ -313,8 +350,12 @@ There is no warm standby today, so this is a manual rebuild, not a failover:
 - **broker**: `ibkr_paper`
 - **schedule**: `market_open`
 - **approval_mode**: `full_auto` (only `full_auto` and `semi_auto` are valid)
-- **universe**: 30 symbols (mega-cap, ETFs including SPY/QQQ/IWM)
-- **strategies**: all 12 enabled with full auto-approve
+- **universe**: 25 symbols (mega-cap, ETFs including SPY/QQQ/IWM)
+- **strategies**: 11 of 13 enabled with full auto-approve (`ml_prediction`/`gann`
+  permanently disabled; `pattern_recognition` added 2026-09-09)
+- **capital_allocation_mode**: `blended` (default/unset) — IBKR is the static control for
+  the capital-sleeves A/B; `config/live_alpaca.yaml` sets `sleeved` instead, see
+  "Per-strategy capital sleeves" below
 - **initial_capital**: 1_000_000
 - **strategy_params.stat_arb**: predefined pairs, `require_cointegration: true`
 - **risk**: flattened into engine config (kill switch 8%, position limits, regime overlay)
@@ -580,6 +621,51 @@ now populated unconditionally in both the backtest (`FirmStrategy.next()`) and l
    and `strategy_regime_weights.ensemble`; see `docs/regime_ensemble_scoping.md`
    for the full A/B and `scripts/calibrate_regime_ensemble.py` to reproduce.
 
+### Per-strategy capital sleeves (`agents/orchestrator.py`, `capital_allocation_mode`)
+
+Built 2026-09-09/10 to answer a real gap: `PerformanceAttribution`'s per-strategy P&L is
+a heuristic (dominant-strategy-wins-the-whole-order + running-net-share-count over one
+shared book), not exact, since every strategy blends into one portfolio. Full
+design/history: `docs/capital_sleeves_plan.md`.
+
+- **Config**: `capital_allocation_mode: "blended" | "sleeved"` (default `blended` =
+  today's exact existing behavior, byte-for-byte). Start-time only — same treatment as
+  `broker`, since switching it restructures the orchestrator rather than swapping one
+  mutable attribute; not part of `PUT /api/live/config`.
+- **Design**: each sleeved strategy runs its own independent
+  bull→bear→debate→trader→risk→execution pass against its own `PortfolioState` (a fixed
+  initial capital split that compounds independently from there — not re-normalized to a
+  fraction of current NAV every cycle, or the sleeve's real standalone track record would
+  be hidden). A separate `TraderAgent` instance per sleeve (it holds real cross-cycle
+  state — conviction EMA, joint-optimizer NAV history — that one shared instance would
+  let sleeves corrupt). A final pass nets every sleeve's approved target into one real
+  order set against the *real* shared book — the only place actual broker orders are
+  generated, so opposing sleeve views on the same symbol still net to one smaller order.
+- **A real bug found via A/B backtest** (blended vs sleeved, same cached data, before any
+  live exposure): splitting capital ~18 ways meant no single symbol's combined weight
+  could clear the 5% rebalance band tuned for the *blended* book — the real (netted) book
+  had **zero turnover for an entire quarter** even though every individual sleeve traded
+  correctly. Fixed with a separate, smaller band for the final netted pass only
+  (`real_rebalance_band_pct`, defaults to the shared band divided by the sleeve count);
+  each sleeve's own internal execution keeps the original band unchanged.
+- **Cutover procedure**: `POST /api/live/sleeves/seed` (once, right after starting a newly
+  sleeved engine, before its first cycle) seeds every sleeve from real broker
+  positions + existing `PerformanceAttribution` history — a best-effort approximation,
+  not an exact split, since blended mode never tracked exact per-strategy positions.
+  Refuses a second call once any sleeve has real state, to avoid overwriting genuine
+  history with a stale re-seed.
+- **Current live status**: `config/live_alpaca.yaml` sets `capital_allocation_mode:
+  sleeved` (2026-09-10) — `config/live.yaml` (IBKR) has no such key, so it stays on
+  `blended` as the static control, same A/B pattern as the sector-scanner work below.
+  `GET /api/live/attribution` prefers exact per-sleeve metrics
+  (`Orchestrator.get_sleeve_metrics()`) over the heuristic once a sleeve has ≥2 daily
+  snapshots, falling back to the heuristic for any non-sleeved strategy.
+- **Deliberately not done yet**: a per-sleeve NAV/position/PnL frontend view (still one
+  shared-portfolio UI); cross-sleeve LLM-enhancement budget coordination (only matters if
+  `bull_researcher`/`bear_researcher`/`debate` are ever switched to `llm_enhanced` — the
+  orchestrator refuses to construct in sleeved mode if they are, rather than silently
+  multiplying LLM call volume ~N-fold).
+
 ### Web UI surfaces (`frontend/src`)
 
 | Page | Adds |
@@ -661,7 +747,7 @@ Before promoting a strategy mix or behavioural knob from backtest research to **
 | Max drawdown | ≤ **15%** | Peak-to-trough on paper equity curve |
 | Kill-switch trips | **0** unexplained trips | Manual operator resets are logged; investigate any auto trip |
 | Execution gate blocks | Documented | `FIRM_ALLOW_TRADING`, news-guard, and risk-limit blocks must be understood, not ignored |
-| LLM A/B (if applicable) | Arm completes runbook | See `docs/llm_ab_test_runbook.md` — do not enable LLM-heavy modes without the quant-only baseline arm |
+| LLM A/B (if applicable) | Arm completes runbook | See `docs/llm_ab_test_runbook.md`. Currently on **Arm B** (`fundamental_analyst`/`sentiment_analyst`: `llm_enhanced`, started 2026-09-08 early per user request) — don't assume quant-only is still the live baseline |
 
 **Process:** (1) backtest + walk-forward validation on cache data, (2) enable on paper with knob **off** or at research default, (3) observe through one full macro regime if possible, (4) only then set `enabled: true` in `live.yaml` or via `PUT /api/live/config`. Document the decision in `docs/remediation_progress.md` or an experiment log.
 
@@ -683,7 +769,7 @@ all-or-nothing capital switch adds unnecessary risk versus starting small:
 | Realized Sharpe (daily) | **Bootstrap 90% CI lower bound > 0** | Point estimate alone (as in the paper-promotion gate) isn't enough for real capital; use `eval/robustness.py`'s Monte Carlo bootstrap against the live NAV series, not a plain in-sample Sharpe |
 | Max drawdown | ≤ **15%** | Peak-to-trough on paper equity curve |
 | Kill-switch trips | **0** unexplained trips | Manual operator resets are logged; investigate any auto trip |
-| LLM A/B (if applicable) | Arm completes runbook | See `docs/llm_ab_test_runbook.md` |
+| LLM A/B (if applicable) | Arm completes runbook | See `docs/llm_ab_test_runbook.md`. Currently on Arm B (`llm_enhanced`) — see the paper-promotion gate row above for detail |
 
 **Initial allocation is tranched, not all-or-nothing:** fund at **10-20%** of the
 intended target size first; only scale toward full size after a second
@@ -703,7 +789,7 @@ confirmed with real money on the line, not just simulated.
 | IBKR connect fails on boot | Gateway up? `nc -zv 127.0.0.1 4002`; auto-start logs in journalctl |
 | `this event loop is already running` | IBKR connect called from asyncio lifespan — must use worker thread |
 | Orders queued forever | `approval_mode` must be `full_auto` or `semi_auto` |
-| Only 11 strategies active | `regime_hmm` or fundamental strategies filtered — check provider keys |
+| Fewer than 11 strategies active | `regime_hmm` or fundamental strategies filtered — check provider keys (11 is the current full baseline; see "Thirteen strategies" above) |
 
 ---
 
@@ -751,3 +837,5 @@ confirmed with real money on the line, not just simulated.
 - [llm_ab_test_runbook.md](llm_ab_test_runbook.md) — Quant vs LLM paper experiment procedure
 - [llm_lookahead_audit.md](llm_lookahead_audit.md) — RAG point-in-time audit + a dense-channel crash-on-None-date fix
 - [regime_ensemble_scoping.md](regime_ensemble_scoping.md) — ensemble-HMM regime detector, A/B'd (shipped disabled: calms `regime_hmm`'s own noise but doesn't rescue `strategy_regime_weights`)
+- [pattern_recognition_plan.md](pattern_recognition_plan.md) — chart-pattern recognition (Strategy #13): 5 build phases + a follow-up pass (scheduled scan job, ONNX export, isolated CNN/PPO env)
+- [capital_sleeves_plan.md](capital_sleeves_plan.md) — per-strategy capital sleeves: design, an A/B-found-and-fixed rebalance-band bug, live cutover on Alpaca

@@ -27,10 +27,20 @@ Full reference: `docs/PROJECT_CONTEXT.md`
 ## Registration
 
 - New strategies: `@register` decorator, add to `config/live.yaml` `strategies.enabled` for live
+- Both live instances read a **different** YAML (`config/live.yaml` vs `config/live_alpaca.yaml` via `FIRM_LIVE_CONFIG`) — enabling a strategy on one does not enable it on the other
 - Fundamental strategies (`multi_factor`, `event_driven`) need `FMP_API_KEY` on IBKR live stack
 
 ## Known simplifications
 
 - `event_driven`: earnings proxy, not true SUE/PEAD
 - `regime_hmm`: per-symbol HMM
-- `gann`: heuristic composite
+- `gann`: heuristic composite — permanently disabled (kept registered, not enabled in either live config)
+- `ml_prediction`: permanently disabled (kept registered, not enabled in either live config)
+
+## pattern_recognition (Strategy #13)
+
+- Chart-pattern recognition (Lo/Mamaysky/Wang geometric framework): extrema detection → rule-based pattern detectors → scorer
+- Full history/design: `docs/pattern_recognition_plan.md`
+- Optional scheduled scan job + `/api/patterns/*` REST + `/patterns` frontend page
+- CNN/GAF and PPO position-sizer pieces live in an isolated `.venv-ml` env (Python 3.12, `uv`-managed) — never imported by the live `firm-api` process
+- Debugging: check `pattern_recognition: N symbols scanned, M signals` in the instance log (INFO level)

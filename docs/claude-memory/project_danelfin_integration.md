@@ -1,12 +1,27 @@
 ---
 name: project-danelfin-integration
-description: "Danelfin API integration status — ai_scores strategy (enabled, A/B'd), live_signals strategy (enabled, unvalidated), and a separate Best-Stocks synthetic paper arm"
+description: "Danelfin API integration — DECOMMISSIONED 2026-08-16 (user closed account); prior history: ai_scores strategy (A/B'd positive), live_signals (unvalidated), Best-Stocks synthetic paper arm"
 metadata: 
   node_type: memory
   type: project
   originSessionId: d187bdf3-58a0-49c4-ae8b-81294f53899d
-  modified: 2026-07-31T07:53:53.215Z
+  modified: 2026-08-15T21:36:39.181Z
 ---
+
+**2026-08-16: DECOMMISSIONED.** User closed their Danelfin account and asked
+to disable the integration in the repo. Done: removed `danelfin_ai_score`,
+`danelfin_live_signals`, `danelfin_best_stocks_signal` from
+`strategies.enabled`/`strategies.auto_approve` in `config/live.yaml` and
+`config/live_alpaca.yaml`; blanked `DANELFIN_API_KEY` in `.env`; ran
+`systemctl disable --now best-stocks-arm.timer`; restarted
+`ai-trading.service` and `ai-trading-alpaca.service` and confirmed via
+journalctl that `_attach_auxiliary_providers` no longer logs a Danelfin
+attach line on either instance; annotated `docs/investing_pro_integration.md`
+and `docs/danelfin_best_stocks_arm.md` as decommissioned. Provider/strategy
+source code was left in place (inert without the key, same pattern as other
+unconfigured providers in this codebase) — only config+env+timer were
+touched. Historical detail below is preserved in case Danelfin is ever
+reinstated.
 
 User subscribed to Danelfin (Expert plan, $149/mo, 10,000 calls/mo, 120/min)
 as a real-API replacement for Investing.com Pro's per-stock data (which

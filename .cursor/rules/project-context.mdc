@@ -16,12 +16,16 @@ Full reference: `docs/PROJECT_CONTEXT.md`
 ## Production stack (this host)
 
 - `ibgateway.service` → IB Gateway paper port 4002
-- `ai-trading.service` → `.venv/bin/firm-api` on port 8000
-- `FIRM_AUTO_START_LIVE=1` boots live from `config/live.yaml` via worker thread
+- `ai-trading.service` → `.venv/bin/firm-api` on port 8000 (IBKR, `config/live.yaml`, blended capital)
+- second instance on port 8001 (Alpaca, `config/live_alpaca.yaml`, sleeved capital) — own `FIRM_API_PORT`/`FIRM_DATA_DIR`/`FIRM_LIVE_CONFIG`
+- `FIRM_AUTO_START_LIVE=1` boots each instance's live engine from its own YAML via worker thread
 
 ## Pipeline
 
-12 strategies (raw scores) → 3 analysts (sole z-score) → bull/bear → PM → risk → execution
+13 strategies (raw scores; 11 enabled — `ml_prediction`/`gann` permanently disabled) → 3 analysts (sole z-score) → bull/bear → PM → risk → execution.
+Capital is **blended** (one shared portfolio, default) or **sleeved**
+(`capital_allocation_mode: sleeved` — independent per-strategy capital/P&L,
+netted only at the final real-order pass). See `docs/capital_sleeves_plan.md`.
 
 ## When changing live behavior
 

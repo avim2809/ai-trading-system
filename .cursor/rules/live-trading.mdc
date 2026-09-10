@@ -34,10 +34,19 @@ Only `full_auto` and `semi_auto` are valid. Anything else queues all orders.
 
 - `GET`/`PUT /api/live/config` and `POST /api/live/start` round-trip `news_guard`, `signal_combination`, `allocation_method`, `kelly_fraction` (alongside strategies/risk/universe)
 - Apply on a running engine via setters: `update_news_guard()` (sets `_news_guard_*` attrs), `update_signal_combination()` / `update_allocation()` (merge `_config` + **rebuild orchestrator**)
+- Any `update_*` that rebuilds the orchestrator must go through `LiveTradingEngine._rebuild_orchestrator()` — it preserves per-sleeve state (see below) across the rebuild; don't call `build_orchestrator()` directly from an update method
 - YAML in `config/live.yaml`; `resolve_live_startup()` seeds `engine_config`; explicit request fields override
 - UI: `frontend/src/pages/LiveConfig.tsx`
+
+## Capital sleeves (`capital_allocation_mode`)
+
+- `blended` (default) = today's single shared `PortfolioState`; `sleeved` = one independent `PortfolioState` + `TraderAgent` per strategy, netted into one real order set only at the final `ExecutionAgent` pass (its own, smaller `real_rebalance_band_pct` — the blended-mode band is far too wide once capital splits N ways)
+- Start-time only, like `broker` — not hot-swappable via `PUT /api/live/config`, requires a restart
+- `capital_allocation_mode`/`strategy_capital_weights`/`real_rebalance_band_pct` must be in **both** `StartRequest` (manual API) and `resolve_live_startup()`'s YAML allowlist (`provider_utils.py`) — these are two separate wiring paths, easy to update only one
+- Cutover on a live engine with real positions: seed sleeves once via `POST /api/live/sleeves/seed` (best-effort split from broker positions + existing attribution; refuses a second call)
+- Full design/history: `docs/capital_sleeves_plan.md`
 
 ## Ops
 
 - Status: `GET /api/live/status` — watch `cycle_running_seconds` for stuck cycles
-- Unit: `deploy/ai-trading.service`
+- Two instances, two units: `:8000` IBKR (`deploy/ai-trading.service`, `config/live.yaml`, blended) and `:8001` Alpaca (`config/live_alpaca.yaml`, sleeved)
