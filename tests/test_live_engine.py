@@ -536,6 +536,50 @@ class TestLiveTradingEngine:
         assert any(a["kind"] == "drawdown_breach" for a in engine.alerts)
 
     @patch("firm.live.engine.build_orchestrator")
+    def test_drawdown_breach_alert_records_when_peak_was_set(self, mock_build, tmp_path):
+        # Reproduces a false-trip scenario: broker equity spikes on one
+        # cycle (e.g. a transient broker-side reading), setting a new peak,
+        # then a later cycle's accurate NAV looks like a big drawdown
+        # against that peak. The alert/persisted state must record which
+        # cycle set the peak and what NAV preceded it, so this is
+        # diagnosable without correlating logs after the fact.
+        broker = MockBroker(initial_cash=100_000)
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "kill_switch_drawdown": 0.1, "memory_log_path": str(tmp_path / "decisions.jsonl")}
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed,
+            approval_queue=queue, approval_mode="full_auto",
+        )
+        engine.start()
+
+        # Cycle 1: a normal cycle at the starting NAV — establishes the
+        # "prior cycle NAV" baseline, no peak jump yet.
+        result1 = engine.run_cycle()
+        assert result1.halted is False
+
+        # Cycle 2: broker (spuriously) reports a spiked equity — a new peak.
+        broker._cash = 130_000
+        result2 = engine.run_cycle()
+        assert result2.halted is False
+
+        # Cycle 3: broker reports its real, much lower equity — an 11%+
+        # drawdown against the spiked peak, breaching the 10% kill switch.
+        broker._cash = 115_000
+        result3 = engine.run_cycle()
+        assert result3.halted is True
+        alert = next(a for a in result3.alerts if a["kind"] == "drawdown_breach")
+        assert alert["peak_equity"] == 130_000.0
+        assert alert["peak_equity_cycle_id"] == result2.cycle_id
+        assert alert["peak_equity_prior_nav"] == 100_000.0
+        assert f"Peak was set in cycle {result2.cycle_id}" in alert["message"]
+
+    @patch("firm.live.engine.build_orchestrator")
     def test_drawdown_kill_switch_persists_and_survives_restart(self, mock_build, tmp_path):
         state_path = tmp_path / "kill_switch_state.json"
         broker = MockBroker(initial_cash=50_000)

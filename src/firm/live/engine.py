@@ -227,6 +227,16 @@ class LiveTradingEngine:
         self._alerts: list[dict[str, Any]] = []
         self._alert_callback = alert_callback
         self._peak_equity = float(initial_capital)
+        # Diagnostic breadcrumbs for *how* the current peak was set — without
+        # these, a drawdown trip only tells you the peak and trip NAV, not
+        # which cycle produced the peak or what NAV looked like the cycle
+        # before, so a false trip caused by one anomalous broker reading
+        # (e.g. a transient equity spike while many orders settle) is
+        # otherwise only diagnosable by manually correlating portfolio
+        # history against logs after the fact.
+        self._peak_equity_cycle_id: int | None = None
+        self._peak_equity_prior_nav: float | None = None
+        self._last_cycle_nav: float | None = None
         self._kill_switch_drawdown = float(
             config.get("kill_switch_drawdown", config.get("max_drawdown_pct", 1.0))
         )
@@ -900,20 +910,46 @@ class LiveTradingEngine:
         nav = self._portfolio.nav
         if nav <= 0:
             return
-        self._peak_equity = max(self._peak_equity, nav)
+        prior_nav = self._last_cycle_nav
+        self._last_cycle_nav = nav
+        if nav > self._peak_equity:
+            self._peak_equity = nav
+            self._peak_equity_cycle_id = self._cycle_count
+            self._peak_equity_prior_nav = prior_nav
         if self._peak_equity <= 0:
             return
         drawdown = (self._peak_equity - nav) / self._peak_equity
         if drawdown >= self._kill_switch_drawdown and not self._halted:
             self._halted = True
+            peak_jump_note = ""
+            if (
+                self._peak_equity_prior_nav is not None
+                and self._peak_equity_prior_nav > 0
+            ):
+                peak_jump_pct = (
+                    self._peak_equity - self._peak_equity_prior_nav
+                ) / self._peak_equity_prior_nav
+                peak_jump_note = (
+                    f" Peak was set in cycle {self._peak_equity_cycle_id} "
+                    f"(NAV jumped {peak_jump_pct:+.1%} from ${self._peak_equity_prior_nav:,.2f} "
+                    f"the prior cycle to ${self._peak_equity:,.2f}) — if that jump looks "
+                    f"anomalous rather than a real gain, this may be a false trip."
+                )
             alert = self._emit_alert(
                 "drawdown_breach",
                 "critical",
                 f"Drawdown {drawdown:.1%} breached kill switch "
-                f"{self._kill_switch_drawdown:.1%}; halting new orders.",
+                f"{self._kill_switch_drawdown:.1%}; halting new orders."
+                f"{peak_jump_note}",
                 drawdown=round(drawdown, 6),
                 nav=round(nav, 2),
                 peak_equity=round(self._peak_equity, 2),
+                peak_equity_cycle_id=self._peak_equity_cycle_id,
+                peak_equity_prior_nav=(
+                    round(self._peak_equity_prior_nav, 2)
+                    if self._peak_equity_prior_nav is not None
+                    else None
+                ),
             )
             result.alerts.append(alert)
             self._persist_kill_switch_state(
@@ -953,7 +989,14 @@ class LiveTradingEngine:
             return
         self._halted = bool(data.get("halted", False))
         if "peak_equity" in data:
-            self._peak_equity = max(self._peak_equity, float(data["peak_equity"]))
+            restored_peak = float(data["peak_equity"])
+            if restored_peak >= self._peak_equity:
+                self._peak_equity = restored_peak
+                self._peak_equity_cycle_id = data.get("peak_equity_cycle_id")
+                prior_nav = data.get("peak_equity_prior_nav")
+                self._peak_equity_prior_nav = (
+                    float(prior_nav) if prior_nav is not None else None
+                )
         if self._halted:
             log.warning(
                 "Restored HALTED kill-switch state from %s (reason=%s, "
@@ -977,6 +1020,12 @@ class LiveTradingEngine:
         data: dict[str, Any] = {
             "halted": self._halted if halted is None else halted,
             "peak_equity": round(self._peak_equity, 2),
+            "peak_equity_cycle_id": self._peak_equity_cycle_id,
+            "peak_equity_prior_nav": (
+                round(self._peak_equity_prior_nav, 2)
+                if self._peak_equity_prior_nav is not None
+                else None
+            ),
         }
         if reason is not None:
             data["reason"] = reason
@@ -1218,14 +1267,18 @@ class LiveTradingEngine:
         peak.
         """
         was_halted = self._halted
+        prior_peak_equity = self._peak_equity
         self._halted = False
         self._peak_equity = self._portfolio.nav
+        self._peak_equity_cycle_id = self._cycle_count
+        self._peak_equity_prior_nav = None
         self._persist_kill_switch_state(halted=False)
         alert = self._emit_alert(
             "kill_switch_reset",
             "warning",
             "Kill switch manually reset by operator; trading re-armed.",
             was_halted=was_halted,
+            prior_peak_equity=round(prior_peak_equity, 2),
             new_peak_equity=round(self._peak_equity, 2),
         )
         log.warning(
