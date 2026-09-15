@@ -601,6 +601,14 @@ class Orchestrator(Agent):
         strategy-wins-the-whole-order + running-net-share-count over one
         shared book), this is a genuine standalone return series per
         strategy, since each sleeve really does hold its own capital/positions.
+
+        ``record_snapshot`` is taken every live cycle (multiple times per
+        trading day), but ``compute_all_metrics``'s annualization assumes
+        one *daily* return per period (252/year) -- same mismatch as
+        ``PerformanceAttribution.get_strategy_metrics``. Resample to one NAV
+        per calendar day (last snapshot of the day) before diffing, so
+        annualized Sharpe/CAGR/vol/Calmar aren't inflated by
+        sqrt(cycles_per_day).
         """
         from firm.eval.metrics import compute_all_metrics
 
@@ -609,8 +617,12 @@ class Orchestrator(Agent):
             history = portfolio.history
             if len(history) < 2:
                 continue
-            navs = [snap.nav for snap in history]
-            returns = pd.Series(navs).pct_change().dropna()
+            navs = pd.Series(
+                [snap.nav for snap in history],
+                index=pd.DatetimeIndex([snap.asof for snap in history]),
+            )
+            daily_navs = navs.groupby(navs.index.date).last()
+            returns = daily_navs.pct_change().dropna()
             if returns.empty:
                 continue
             result[strategy] = compute_all_metrics(returns)

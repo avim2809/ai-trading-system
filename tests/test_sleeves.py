@@ -10,7 +10,7 @@ order set, and the restart-persistence round trip.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -589,8 +589,11 @@ class TestSleeveMetrics:
         orch = _make_orchestrator(analysts=[], sleeve_traders={"momentum": TraderAgent()})
         portfolio = orch._get_or_create_sleeve_portfolio("momentum", 1.0)
         portfolio.holdings = {"AAPL": 100.0}
-        for price in (100.0, 105.0, 110.0):
-            portfolio.record_snapshot(NOW, {"AAPL": price})
+        # Distinct calendar days: metrics are resampled to one NAV per day
+        # before annualizing, so same-day snapshots wouldn't produce
+        # multiple return observations.
+        for i, price in enumerate((100.0, 105.0, 110.0)):
+            portfolio.record_snapshot(NOW + timedelta(days=i), {"AAPL": price})
 
         metrics = orch.get_sleeve_metrics()
         assert "momentum" in metrics

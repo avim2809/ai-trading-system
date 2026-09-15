@@ -124,13 +124,25 @@ class PerformanceAttribution:
         """Compute metrics for each strategy using compute_all_metrics.
 
         Strategies with no return history are skipped.
+
+        ``update_daily()`` is actually called every live cycle (multiple
+        times per trading day), not once per day despite its name — but
+        ``compute_all_metrics``'s annualization (Sharpe/CAGR/vol/Calmar) is
+        documented to assume one *daily* return per period (252/year). Fed
+        raw, that mismatch inflates every annualized stat by roughly
+        sqrt(cycles_per_day). Compound same-day returns into a single daily
+        return here (order-independent, so total_return is unaffected) so
+        the annualized figures mean what they say.
         """
         result: dict[str, dict[str, float]] = {}
         for strategy in self._strategy_returns:
             series = self.get_strategy_returns(strategy)
             if series.empty:
                 continue
-            result[strategy] = compute_all_metrics(series)
+            daily = (1.0 + series).groupby(series.index.date).prod() - 1.0
+            if daily.empty:
+                continue
+            result[strategy] = compute_all_metrics(daily)
         return result
 
     def dominant_strategy_by_symbol(self) -> dict[str, str]:
