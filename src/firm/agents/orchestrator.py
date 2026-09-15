@@ -605,10 +605,18 @@ class Orchestrator(Agent):
         ``record_snapshot`` is taken every live cycle (multiple times per
         trading day), but ``compute_all_metrics``'s annualization assumes
         one *daily* return per period (252/year) -- same mismatch as
-        ``PerformanceAttribution.get_strategy_metrics``. Resample to one NAV
-        per calendar day (last snapshot of the day) before diffing, so
+        ``PerformanceAttribution.get_strategy_metrics``. Compound same-day
+        per-cycle returns into one daily return before computing metrics, so
         annualized Sharpe/CAGR/vol/Calmar aren't inflated by
         sqrt(cycles_per_day).
+
+        Deliberately resamples *returns* (via compounding), not NAV levels
+        via ``groupby(date).last()`` -- the latter was tried and reverted:
+        keeping only each day's last NAV silently drops the return earned
+        between a sleeve's first snapshot of a day and that day's close,
+        understating total_return by exactly that amount on every strategy.
+        Compounding per-cycle returns has no such gap since every step is
+        still included in the product, just regrouped.
         """
         from firm.eval.metrics import compute_all_metrics
 
@@ -621,8 +629,10 @@ class Orchestrator(Agent):
                 [snap.nav for snap in history],
                 index=pd.DatetimeIndex([snap.asof for snap in history]),
             )
-            daily_navs = navs.groupby(navs.index.date).last()
-            returns = daily_navs.pct_change().dropna()
+            per_cycle_returns = navs.pct_change().dropna()
+            if per_cycle_returns.empty:
+                continue
+            returns = (1.0 + per_cycle_returns).groupby(per_cycle_returns.index.date).prod() - 1.0
             if returns.empty:
                 continue
             result[strategy] = compute_all_metrics(returns)

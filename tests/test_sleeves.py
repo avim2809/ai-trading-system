@@ -599,3 +599,22 @@ class TestSleeveMetrics:
         assert "momentum" in metrics
         assert metrics["momentum"]["total_return"] > 0
         assert "sharpe_ratio" in metrics["momentum"]
+
+    def test_get_sleeve_metrics_total_return_unaffected_by_intraday_snapshot_count(self):
+        """Regression: daily-resampling for annualization must not drop the
+        return earned on a sleeve's first day just because that day had
+        multiple snapshots (was briefly broken by grouping NAV *levels*
+        instead of compounding per-cycle *returns*)."""
+        orch = _make_orchestrator(analysts=[], sleeve_traders={"momentum": TraderAgent()})
+        portfolio = orch._get_or_create_sleeve_portfolio("momentum", 1.0)
+        portfolio.holdings = {"AAPL": 100.0}
+        portfolio.cash = 0.0  # isolate NAV to shares*price so the expected ratio below is exact
+        # Day 0 gets two intraday snapshots (seed price, then a mid-day move)
+        # before day 1's single close -- the mid-day move must still count.
+        portfolio.record_snapshot(NOW, {"AAPL": 100.0})
+        portfolio.record_snapshot(NOW + timedelta(hours=3), {"AAPL": 90.0})
+        portfolio.record_snapshot(NOW + timedelta(days=1), {"AAPL": 110.0})
+
+        metrics = orch.get_sleeve_metrics()
+        expected_total_return = 110.0 / 100.0 - 1.0
+        assert metrics["momentum"]["total_return"] == pytest.approx(expected_total_return)
