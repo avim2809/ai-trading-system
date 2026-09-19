@@ -40,6 +40,26 @@ approval_mode: "full_auto"
 # schedule itself.
 llm_open_close_only: true
 
+# Pre-market/after-hours trading (firm.live.scheduler's opt-in
+# EXTENDED_HOURS_CYCLE_TYPES). Enabled 2026-09-19 on IBKR ONLY: IBKR's
+# outsideRth flag works on any order type, but ExecutionAgent always emits
+# plain market orders today, and Alpaca's API only honors extended_hours on
+# LIMIT orders -- enabling this on Alpaca right now would be a silent
+# no-op (every order would degrade back to regular-hours, logged as a
+# warning). Revisit Alpaca once an extended-hours limit-pricing policy
+# exists for ExecutionAgent. Standard US equity windows (pre-market
+# 04:00-09:30 ET, after-hours 16:00-20:00 ET) via the defaults in
+# firm.live.scheduler._DEFAULT_EXTENDED_HOURS_WINDOWS. IBKR paper's
+# simulated outside-RTH fills for market orders are not necessarily
+# realistic (thin/no liquidity simulation) -- treat early results as
+# exploratory, not a live P&L signal, until validated.
+extended_hours_trading:
+  enabled: true
+  premarket:
+    enabled: true
+  afterhours:
+    enabled: true
+
 # Live cycles read ``data/cache/combined/fundamentals`` only (no per-cycle API).
 # firm-api refreshes that cache daily at fundamentals_refresh_hour and at boot
 # when older than FIRM_FUNDAMENTALS_REFRESH_MAX_AGE_HOURS (default 24).

@@ -46,6 +46,21 @@ approval_mode: "full_auto"
 # sleeved below) since _llm_enhanced_agents() also covers sleeve_traders.
 llm_open_close_only: true
 
+# Broker-side stop-loss (firm.agents.execution.ExecutionAgent) — the
+# faster, broker-resident complement to risk.stop_loss_overlay below: this
+# one can fire *between* cycles, not just at the next scheduled decision.
+# Same strategies/threshold, same insurance-not-alpha rationale (see
+# risk.stop_loss_overlay's comment). Only fires on a flat->open transition
+# (see ExecutionAgent._is_fresh_open) and, in sleeved mode, only on the
+# final netted execution pass — see its own docstring for why. Top-level,
+# not nested under risk: — ExecutionAgent reads this from the same merged
+# engine config Orchestrator/RiskAgent get, not the risk: sub-block.
+protective_orders:
+  mean_reversion:
+    stop_loss_pct: 0.07
+  stat_arb:
+    stop_loss_pct: 0.07
+
 # Per-strategy capital sleeves (see docs/capital_sleeves_plan.md) — enabled
 # on this Alpaca instance ONLY (2026-09-10), with IBKR (config/live.yaml)
 # deliberately left on "blended" as the static control, mirroring this
@@ -236,14 +251,22 @@ risk:
   # momentum-driven crashes") but neither the strategy layer nor this agent
   # ever implemented it, and a walk-forward audit (9/17) found both are the
   # worst live performers, consistent with an extended trending regime that
-  # a pure divergence bet has no way to exit early from. Off pending
-  # backtest validation — see RiskAgent._stop_loss_overlay. Sleeved mode
-  # (this instance) gives it exact per-strategy positions to check, unlike
-  # blended (IBKR), which has to fall back to the dominant-strategy heuristic.
-  # stop_loss_overlay:
-  #   enabled: true
-  #   strategies: [mean_reversion, stat_arb]
-  #   max_loss_pct: 0.07
+  # a pure divergence bet has no way to exit early from. Sleeved mode (this
+  # instance) gives it exact per-strategy positions to check, unlike blended
+  # (IBKR), which has to fall back to the dominant-strategy heuristic.
+  #
+  # Enabled 2026-09-19 as risk insurance, not a validated alpha claim: a
+  # full 11-strategy live-parity backtest (see docs/PROJECT_CONTEXT.md)
+  # could not reproduce live's actual mean_reversion/stat_arb losses either
+  # way, so this isn't shipped because backtesting proved it helps — it's
+  # shipped because these two strategies still have no mechanism to cap a
+  # bad move, which their own docstrings call a known, named risk. Revisit
+  # if it turns out to be costing more than it saves on an otherwise-healthy
+  # run.
+  stop_loss_overlay:
+    enabled: true
+    strategies: [mean_reversion, stat_arb]
+    max_loss_pct: 0.07
 
   # Per-strategy override of the exposure/veto envelope above, for a sleeve
   # whose OWN book is inherently concentrated by design (capital_allocation_
