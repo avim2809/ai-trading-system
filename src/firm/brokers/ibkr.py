@@ -52,7 +52,7 @@ _IB_REQUEST_TIMEOUT_SECONDS = 20.0
 _IB_LOCK_ACQUIRE_TIMEOUT_SECONDS = 45.0
 
 try:
-    from ib_async import IB, Stock, LimitOrder, MarketOrder
+    from ib_async import IB, Order, Stock, LimitOrder, MarketOrder, StopLimitOrder, StopOrder
 
     _HAS_IB = True
 except ImportError:
@@ -388,8 +388,35 @@ class IBKRBroker(Broker):
             if order.limit_price is None:
                 raise BrokerError("limit_price required for limit orders")
             ib_order = LimitOrder(action, qty, order.limit_price)
+        elif order.order_type == "stop":
+            if order.stop_price is None:
+                raise BrokerError("stop_price required for stop orders")
+            ib_order = StopOrder(action, qty, order.stop_price)
+        elif order.order_type == "stop_limit":
+            if order.stop_price is None or order.limit_price is None:
+                raise BrokerError("stop_price and limit_price required for stop_limit orders")
+            ib_order = StopLimitOrder(action, qty, order.limit_price, order.stop_price)
+        elif order.order_type == "trailing_stop":
+            if order.trail_percent is None and order.trail_amount is None:
+                raise BrokerError(
+                    "trail_percent or trail_amount required for trailing_stop orders"
+                )
+            # ib_async has no dedicated TrailingStopOrder helper (unlike
+            # StopOrder/StopLimitOrder) — a plain Order with orderType="TRAIL"
+            # is IBKR's documented construction. Exactly one of
+            # trailingPercent/auxPrice must be set; trailingPercent (a plain
+            # percentage number, e.g. 1.0 == "1%") takes precedence to match
+            # OrderRequest.trail_percent's own documented precedence.
+            ib_order = Order(action=action, totalQuantity=qty, orderType="TRAIL")
+            if order.trail_percent is not None:
+                ib_order.trailingPercent = order.trail_percent
+            else:
+                ib_order.auxPrice = order.trail_amount
         else:
             ib_order = MarketOrder(action, qty)
+
+        if order.extended_hours:
+            ib_order.outsideRth = True
 
         if order.client_order_id:
             ib_order.orderRef = order.client_order_id

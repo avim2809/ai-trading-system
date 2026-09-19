@@ -11,13 +11,34 @@ experiment:
   end_date: "2026-07-24"
 
 broker: "ibkr_paper"
-schedule: "market_open"
-# Cron timezone for market_open / market_close (US equity RTH).
-# Also buckets daily trade/turnover limits and decision-memory dates.
+# Hourly-during-market-hours cadence (2026-09-18): ~7 cycles/trading day
+# (9:30 open, then hourly on the half-hour 10:30-14:30, then a 15:50
+# close-anchor) in place of the old once/day market_open-only run — see
+# firm.live.scheduler's "hourly_market_hours" composite schedule, which
+# registers the open/intraday/close legs as three separate APScheduler
+# jobs restricted to RTH (no wasted off-hours fetch), each passing an
+# explicit cycle_type down through LiveTradingEngine.run_cycle to
+# Orchestrator.step. Rolled out to both live instances together (this
+# file and config/live_alpaca.yaml) per the same decision.
+schedule: "hourly_market_hours"
+# Cron timezone for market_open / market_close / hourly_market_hours (US
+# equity RTH). Also buckets daily trade/turnover limits and
+# decision-memory dates.
 schedule_timezone: "US/Eastern"
 # LiveTradingEngine only recognises "full_auto" / "semi_auto" — anything else
 # (e.g. plain "auto") silently falls through to "everything needs approval".
 approval_mode: "full_auto"
+
+# LLM-enhanced reasoning (config/llm.yaml's agent_modes) is restricted to
+# the day's open/close cycles only; every intraday/hourly cycle forces
+# cache_only (no live LLM calls) regardless of agent_modes — see
+# Orchestrator._apply_cycle_llm_mode. Without this, running the full
+# pipeline hourly during market hours would multiply LLM API cost ~7x/day.
+# true is the deliberate default matching the 2026-09-18 decision to keep
+# LLM cost flat despite the new cadence above; set false to fall back to
+# plain agent_modes behavior on every cycle without reverting the
+# schedule itself.
+llm_open_close_only: true
 
 # Live cycles read ``data/cache/combined/fundamentals`` only (no per-cycle API).
 # firm-api refreshes that cache daily at fundamentals_refresh_hour and at boot
@@ -189,6 +210,21 @@ risk:
   # cvar_limit: 0.03
   # cvar_confidence: 0.95
   # cvar_lookback_days: 60
+
+  # Per-position stop-loss for mean_reversion/stat_arb — both strategies'
+  # own docstrings call for one ("reversals can fail spectacularly during
+  # momentum-driven crashes") but neither the strategy layer nor this agent
+  # ever implemented it, and a walk-forward audit (9/17) found both are the
+  # worst live performers, consistent with an extended trending regime that
+  # a pure divergence bet has no way to exit early from. Off pending
+  # backtest validation — see RiskAgent._stop_loss_overlay. In blended mode
+  # (this instance) symbol ownership is the same dominant-strategy heuristic
+  # PerformanceAttribution uses elsewhere, so treat any triggered exit here
+  # as approximate, not exact.
+  # stop_loss_overlay:
+  #   enabled: true
+  #   strategies: [mean_reversion, stat_arb]
+  #   max_loss_pct: 0.07
 
   # GICS-style sector tags for the 25-name universe (enables max_sector_pct).
   sector_map:

@@ -70,6 +70,14 @@ class Orchestrator(Agent):
             stage_timeout = cfg.get("analyst_timeout_seconds")
         self._stage_timeout_seconds = self._optional_timeout(stage_timeout)
         self._regime_weights_detector = None
+        # Explicit opt-out valve for the cycle_type -> LLM-mode gating in
+        # _apply_cycle_llm_mode (see config/live.yaml's "hourly_market_hours"
+        # schedule comment, added 2026-09-18): true (the deliberate default)
+        # restricts each role's agent_modes-configured LLM enhancement to
+        # the day's open/close cycles; setting this false restores every
+        # cycle to plain agent_modes behavior regardless of cycle_type,
+        # without having to revert the schedule itself.
+        self._llm_open_close_only: bool = bool(cfg.get("llm_open_close_only", True))
 
         # ------------------------------------------------------------------
         # Per-strategy capital sleeves (capital_allocation_mode: "sleeved").
@@ -264,7 +272,18 @@ class Orchestrator(Agent):
             return [], bb
         return None
 
-    def step(self, context: dict[str, Any]) -> tuple[list[dict], Blackboard]:
+    # Cycle types whose agent_modes-configured LLM enhancement is allowed to
+    # make live LLM calls this cycle. Any other ``cycle_type`` (in practice
+    # just "intraday") forces every LLM-enhanced agent to "cache_only" for
+    # the duration of the call -- see ``_apply_cycle_llm_mode``.
+    _LLM_LIVE_CYCLE_TYPES = frozenset({"open", "close"})
+    # Sentinel distinguishing "no policy key was set" from "policy was
+    # explicitly set to None" when restoring after a cycle.
+    _NO_POLICY = object()
+
+    def step(
+        self, context: dict[str, Any], cycle_type: str | None = None,
+    ) -> tuple[list[dict], Blackboard]:
         """Run the full agent pipeline for one timestep.
 
         Args:
@@ -273,11 +292,90 @@ class Orchestrator(Agent):
                 (``dict[str, float]``).  Optional ``memory``
                 (:class:`firm.agents.memory.TradingMemoryLog`) is forwarded
                 to LLM-enhanced trader and risk agents for past-context injection.
+            cycle_type: ``"open" | "close" | "intraday" | None``, threaded
+                down from ``LiveTradingEngine.run_cycle`` (see
+                ``firm.live.scheduler``'s ``hourly_market_hours`` composite
+                schedule, added 2026-09-18). Only "open"/"close" cycles may
+                use each role's agent_modes-configured LLM enhancement;
+                every other value (in practice "intraday") forces
+                cache_only (no live LLM calls) for this call only, so that
+                running the full pipeline hourly during market hours
+                doesn't multiply LLM API cost ~7x/day. ``None`` (a manual
+                trigger, or a single-cycle-per-day schedule like
+                ``market_open``) makes no change at all -- pre-2026-09-18
+                behavior, unchanged.
 
         Returns:
             ``(orders_list, blackboard)`` where *orders_list* feeds the
             execution engine.
         """
+        restore = self._apply_cycle_llm_mode(cycle_type)
+        try:
+            return self._step_impl(context)
+        finally:
+            self._restore_cycle_llm_mode(restore)
+
+    def _llm_enhanced_agents(self) -> list[Any]:
+        """Every constructed agent that has its own per-call enhancement
+        policy to gate (technical/fundamental/sentiment analysts, bull/
+        bear/debate, trader, risk, and any per-sleeve trader).
+
+        Duck-typed on the ``_llm_config`` attribute :class:`LLMAgentMixin`
+        sets in ``__init__`` rather than an ``isinstance`` check, so a role
+        left in plain "quant" mode (a plain, non-mixin agent instance --
+        the production default for most roles, see config/llm.yaml's
+        agent_modes) is correctly skipped: it has no ``_llm_config`` at all
+        and nothing to gate.
+        """
+        candidates: list[Any] = list(self.analysts) + [
+            self.bull, self.bear, self.debate, self.trader, self.risk,
+        ]
+        candidates.extend(self.sleeve_traders.values())
+        return [a for a in candidates if hasattr(a, "_llm_config")]
+
+    def _apply_cycle_llm_mode(self, cycle_type: str | None) -> list[tuple[Any, Any]]:
+        """Force cache_only enhancement on every LLM-enhanced agent when
+        *cycle_type* isn't one of the day's open/close cycles.
+
+        Reuses ``LLMAgentMixin._call_llm``'s existing cache_only cost-gate
+        (see ``config/llm.yaml``'s ``enhancement.policy``) rather than
+        adding a new skip path: with each cycle's inputs generally novel,
+        a cache_only lookup on an intraday cycle is effectively always a
+        miss, which ``_call_llm`` turns into ``LLMEnhancementSkipped`` --
+        already caught by every LLM-enhanced agent's ``run()`` to fall back
+        to the plain quant score/thesis/decision, exactly like a real
+        quant-only agent would. Zero live LLM calls, no new fallback path
+        to trust. Returns the list of ``(agent, previous_policy)`` pairs
+        ``_restore_cycle_llm_mode`` needs to undo this after the cycle.
+        """
+        if not self._llm_open_close_only:
+            return []
+        if cycle_type is None or cycle_type in self._LLM_LIVE_CYCLE_TYPES:
+            return []
+        restore: list[tuple[Any, Any]] = []
+        for agent in self._llm_enhanced_agents():
+            enhancement_cfg = agent._llm_config.setdefault("enhancement", {})
+            restore.append((agent, enhancement_cfg.get("policy", self._NO_POLICY)))
+            enhancement_cfg["policy"] = "cache_only"
+        if restore:
+            log.debug(
+                "cycle_type=%s: forcing %d LLM-enhanced agent(s) to "
+                "cache_only for this cycle (no live LLM calls)",
+                cycle_type, len(restore),
+            )
+        return restore
+
+    def _restore_cycle_llm_mode(self, restore: list[tuple[Any, Any]]) -> None:
+        """Undo :meth:`_apply_cycle_llm_mode` after the cycle completes."""
+        for agent, previous_policy in restore:
+            enhancement_cfg = agent._llm_config.setdefault("enhancement", {})
+            if previous_policy is self._NO_POLICY:
+                enhancement_cfg.pop("policy", None)
+            else:
+                enhancement_cfg["policy"] = previous_policy
+
+    def _step_impl(self, context: dict[str, Any]) -> tuple[list[dict], Blackboard]:
+        """Body of :meth:`step`, run with the cycle's LLM mode already applied."""
         if self.capital_allocation_mode == "sleeved":
             return self._step_sleeved(context)
 
@@ -286,6 +384,7 @@ class Orchestrator(Agent):
         prices: dict[str, float] = context.get("prices", {})
         memory = context.get("memory")
         attribution = context.get("attribution")
+        broker = context.get("broker")
 
         bb = Blackboard(asof=pit_view.asof)
         market_regime = self._resolve_market_regime(pit_view)
@@ -393,6 +492,8 @@ class Orchestrator(Agent):
                     proposal=proposal,
                     portfolio=portfolio,
                     memory=memory,
+                    prices=prices,
+                    attribution=attribution,
                 )
             except StageTimeoutError as exc:
                 early = self._record_stage_failure(bb, self.risk, exc)
@@ -434,6 +535,7 @@ class Orchestrator(Agent):
                 prices=prices,
                 per_strategy=proposal.per_strategy,
                 attribution=attribution,
+                broker=broker,
             )
         except StageTimeoutError as exc:
             early = self._record_stage_failure(bb, self.execution, exc)
@@ -650,6 +752,7 @@ class Orchestrator(Agent):
         prices: dict[str, float] = context.get("prices", {})
         memory = context.get("memory")
         attribution = context.get("attribution")
+        broker = context.get("broker")
 
         bb = Blackboard(asof=pit_view.asof)
         market_regime = self._resolve_market_regime(pit_view)
@@ -736,6 +839,7 @@ class Orchestrator(Agent):
             try:
                 decision = self.risk.run(
                     sleeve_ctx, proposal=proposal, portfolio=sleeve_portfolio, memory=memory,
+                    prices=prices, strategy=strategy,
                 )
             except Exception:
                 log.warning("Sleeve %s risk failed", strategy, exc_info=True)
@@ -796,6 +900,13 @@ class Orchestrator(Agent):
                 prices=prices,
                 per_strategy=per_strategy_weights,
                 attribution=attribution,
+                # Only the final netted pass talks to the real broker -- the
+                # per-sleeve pass above (self.execution.run) is virtual
+                # (sleeve_portfolio has no broker sub-account), so a
+                # protective order there would fire against an unnetted
+                # position that may not even survive netting. Deliberately
+                # not passed to the per-sleeve call.
+                broker=broker,
             )
         except Exception as exc:
             log.error("Real (netted) execution pass failed in sleeved mode", exc_info=True)

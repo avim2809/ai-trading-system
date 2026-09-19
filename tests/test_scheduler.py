@@ -25,6 +25,7 @@ import pytest
 
 from firm.live.scheduler import (
     DEFAULT_MARKET_TIMEZONE,
+    HOURLY_MARKET_HOURS,
     TradingScheduler,
     _pending_approvals_on_disk,
     cycle_had_no_trading_outcome,
@@ -413,26 +414,38 @@ class TestMaybeRetryLostCycle:
     def test_retries_when_most_recent_cycle_today_was_fully_blocked(self):
         ran = threading.Event()
         engine = _mock_engine(cycles_today=[_blocked_cycle()])
-        engine.run_cycle.side_effect = lambda: ran.set()
+        engine.run_cycle.side_effect = lambda **kwargs: ran.set()
         with _patched_weekday_now():
             maybe_retry_lost_cycle(engine)
         assert ran.wait(timeout=5.0), "retry thread never invoked run_cycle()"
-        engine.run_cycle.assert_called_once()
+        engine.run_cycle.assert_called_once_with(cycle_type=None)
 
     def test_retries_when_most_recent_cycle_today_errored_out(self):
         ran = threading.Event()
         engine = _mock_engine(cycles_today=[_errored_cycle(error="IB Gateway disconnect timed out")])
-        engine.run_cycle.side_effect = lambda: ran.set()
+        engine.run_cycle.side_effect = lambda **kwargs: ran.set()
         with _patched_weekday_now():
             maybe_retry_lost_cycle(engine)
         assert ran.wait(timeout=5.0), "retry thread never invoked run_cycle()"
-        engine.run_cycle.assert_called_once()
+        engine.run_cycle.assert_called_once_with(cycle_type=None)
+
+    def test_retry_forwards_explicit_cycle_type(self):
+        """The "hourly_market_hours" schedule hardcodes cycle_type="intraday"
+        for this job (see TradingScheduler.start()) — verify it's forwarded
+        straight through to engine.run_cycle rather than dropped."""
+        ran = threading.Event()
+        engine = _mock_engine(cycles_today=[_blocked_cycle()])
+        engine.run_cycle.side_effect = lambda **kwargs: ran.set()
+        with _patched_weekday_now():
+            maybe_retry_lost_cycle(engine, cycle_type="intraday")
+        assert ran.wait(timeout=5.0), "retry thread never invoked run_cycle()"
+        engine.run_cycle.assert_called_once_with(cycle_type="intraday")
 
     def test_retry_thread_logs_and_swallows_run_cycle_errors(self):
         done = threading.Event()
         engine = _mock_engine(cycles_today=[_blocked_cycle()])
 
-        def _boom():
+        def _boom(**kwargs):
             done.set()
             raise RuntimeError("pipeline exploded")
 
@@ -698,7 +711,13 @@ class TestRunCycleSafe:
         engine = MagicMock()
         sched = TradingScheduler(engine=engine)
         sched._run_cycle_safe()
-        engine.run_cycle.assert_called_once()
+        engine.run_cycle.assert_called_once_with(cycle_type=None)
+
+    def test_forwards_explicit_cycle_type(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine)
+        sched._run_cycle_safe(cycle_type="open")
+        engine.run_cycle.assert_called_once_with(cycle_type="open")
 
     def test_logs_and_swallows_exception(self, caplog):
         engine = MagicMock()
@@ -707,3 +726,152 @@ class TestRunCycleSafe:
         with caplog.at_level("ERROR"):
             sched._run_cycle_safe()
         assert any("Scheduled cycle failed" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# "hourly_market_hours" composite schedule (added 2026-09-18)
+# ---------------------------------------------------------------------------
+
+class TestHourlyMarketHoursSchedule:
+    """The "hourly_market_hours" schedule (config/live.yaml's ``schedule:``)
+    registers three separate jobs instead of the usual single "live_cycle"
+    job -- an open leg (9:30, cycle_type="open"), an intraday leg
+    (hour="10-14", minute=30, cycle_type="intraday"), and a close-anchor leg
+    (15:50, cycle_type="close") -- see
+    TradingScheduler._start_hourly_market_hours_jobs.
+    """
+
+    def test_registers_three_jobs_not_the_single_job(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule=HOURLY_MARKET_HOURS)
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._job_id) is not None
+            assert sched._scheduler.get_job(sched._intraday_job_id) is not None
+            assert sched._scheduler.get_job(sched._close_job_id) is not None
+        finally:
+            sched.stop()
+
+    def test_open_leg_cron_matches_market_open_preset(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule=HOURLY_MARKET_HOURS)
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._job_id)
+            trigger = job.trigger
+            assert str(trigger.fields[trigger.FIELD_NAMES.index("hour")]) == "9"
+            assert str(trigger.fields[trigger.FIELD_NAMES.index("minute")]) == "30"
+        finally:
+            sched.stop()
+
+    def test_intraday_leg_restricted_to_market_hours(self):
+        """Unlike the plain "hourly" preset (unrestricted hours), this leg's
+        cron hour field is itself restricted to 10-14 so it never fires
+        outside RTH at all (no wasted provider-fetch)."""
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule=HOURLY_MARKET_HOURS)
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._intraday_job_id)
+            trigger = job.trigger
+            assert str(trigger.fields[trigger.FIELD_NAMES.index("hour")]) == "10-14"
+            assert str(trigger.fields[trigger.FIELD_NAMES.index("minute")]) == "30"
+        finally:
+            sched.stop()
+
+    def test_close_leg_fires_a_few_minutes_before_market_close(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule=HOURLY_MARKET_HOURS)
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._close_job_id)
+            trigger = job.trigger
+            assert str(trigger.fields[trigger.FIELD_NAMES.index("hour")]) == "15"
+            assert str(trigger.fields[trigger.FIELD_NAMES.index("minute")]) == "50"
+        finally:
+            sched.stop()
+
+    def test_each_leg_passes_its_own_explicit_cycle_type(self):
+        """The whole point of three separate jobs instead of one generic
+        job inferring the cycle type from the wall clock: each leg's own
+        callback already knows which leg it is."""
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule=HOURLY_MARKET_HOURS)
+        try:
+            sched.start()
+            for job_id, expected_cycle_type in (
+                (sched._job_id, "open"),
+                (sched._intraday_job_id, "intraday"),
+                (sched._close_job_id, "close"),
+            ):
+                engine.reset_mock()
+                sched._scheduler.get_job(job_id).func()
+                engine.run_cycle.assert_called_once_with(cycle_type=expected_cycle_type)
+        finally:
+            sched.stop()
+
+    def test_lost_cycle_retry_job_registered_for_hourly_market_hours(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule=HOURLY_MARKET_HOURS)
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._lost_cycle_retry_job_id) is not None
+        finally:
+            sched.stop()
+
+    def test_lost_cycle_retry_uses_intraday_cycle_type(self):
+        """The retry job hardcodes cycle_type="intraday" (the conservative,
+        cost-safe default) regardless of which leg actually failed -- see
+        TradingScheduler.start()'s comment above this job's registration."""
+        ran = threading.Event()
+        engine = _mock_engine(cycles_today=[_blocked_cycle()])
+        engine.run_cycle.side_effect = lambda **kwargs: ran.set()
+        sched = TradingScheduler(engine=engine, schedule=HOURLY_MARKET_HOURS)
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._lost_cycle_retry_job_id)
+            with _patched_weekday_now():
+                job.func()
+            assert ran.wait(timeout=5.0), "retry thread never invoked run_cycle()"
+            engine.run_cycle.assert_called_once_with(cycle_type="intraday")
+        finally:
+            sched.stop()
+
+    def test_next_run_returns_earliest_leg_when_job_id_omitted(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule=HOURLY_MARKET_HOURS)
+        try:
+            sched.start()
+            overall = sched.next_run()
+            per_leg = [
+                sched.next_run(jid)
+                for jid in (sched._job_id, sched._intraday_job_id, sched._close_job_id)
+            ]
+            assert overall is not None
+            assert overall == min(per_leg)
+        finally:
+            sched.stop()
+
+    def test_next_run_still_honours_an_explicit_job_id(self):
+        """Passing an explicit job id bypasses the "earliest across all
+        three legs" behavior and returns that one job's own next fire."""
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule=HOURLY_MARKET_HOURS)
+        try:
+            sched.start()
+            close_job = sched._scheduler.get_job(sched._close_job_id)
+            assert sched.next_run(sched._close_job_id) == close_job.next_run_time
+        finally:
+            sched.stop()
+
+    def test_next_run_unaffected_for_non_composite_schedules(self):
+        """Every other schedule keeps resolving next_run() to its single
+        job exactly as before -- the composite branch only activates for
+        HOURLY_MARKET_HOURS."""
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule="market_open")
+        try:
+            sched.start()
+            assert sched.next_run() == sched.next_run(sched._job_id)
+        finally:
+            sched.stop()

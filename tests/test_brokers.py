@@ -344,6 +344,50 @@ class TestDataclasses:
         assert req.order_type == "limit"
         assert req.limit_price == 145.0
 
+    def test_order_request_new_field_defaults_preserve_backward_compatibility(self):
+        """Every field added for stop/stop-limit/trailing-stop/extended-hours
+        support must default such that a caller that only ever set
+        symbol/side/quantity/order_type/limit_price (i.e. every pre-existing
+        caller) sees byte-identical behavior."""
+        req = OrderRequest(symbol="AAPL", side="buy", quantity=10)
+        assert req.stop_price is None
+        assert req.trail_percent is None
+        assert req.trail_amount is None
+        assert req.extended_hours is False
+
+    def test_order_request_stop(self):
+        req = OrderRequest(
+            symbol="AAPL", side="sell", quantity=10,
+            order_type="stop", stop_price=140.0,
+        )
+        assert req.order_type == "stop"
+        assert req.stop_price == 140.0
+
+    def test_order_request_stop_limit(self):
+        req = OrderRequest(
+            symbol="AAPL", side="sell", quantity=10,
+            order_type="stop_limit", stop_price=140.0, limit_price=139.0,
+        )
+        assert req.order_type == "stop_limit"
+        assert req.stop_price == 140.0
+        assert req.limit_price == 139.0
+
+    def test_order_request_trailing_stop(self):
+        req = OrderRequest(
+            symbol="AAPL", side="sell", quantity=10,
+            order_type="trailing_stop", trail_percent=3.0,
+        )
+        assert req.order_type == "trailing_stop"
+        assert req.trail_percent == 3.0
+        assert req.trail_amount is None
+
+    def test_order_request_extended_hours(self):
+        req = OrderRequest(
+            symbol="AAPL", side="buy", quantity=10,
+            order_type="limit", limit_price=145.0, extended_hours=True,
+        )
+        assert req.extended_hours is True
+
     def test_order_status_defaults(self):
         s = OrderStatus(order_id="abc", symbol="AAPL", side="buy", quantity=10)
         assert s.filled_quantity == 0.0

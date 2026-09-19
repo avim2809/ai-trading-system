@@ -583,6 +583,115 @@ class TestSubmitOrderWaitsForRealResolution:
         assert state["clock"] >= _ORDER_STATUS_MAX_WAIT_SECONDS
 
 
+class TestNativeOrderTypes:
+    """Coverage for the native stop/stop-limit/trailing-stop branches added
+    to _submit_order_once_unlocked, plus outsideRth for extended_hours --
+    previously only market/limit were ever built here even though ib_async
+    and IBKR both support these order types (and the extended-hours flag)
+    natively."""
+
+    def test_stop_order_sets_stp_type_and_aux_price(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=50)
+        ib, state = _fake_ib(["Filled"])
+        broker._ib = ib
+        broker.submit_order(
+            OrderRequest(symbol="AAPL", side="sell", quantity=10, order_type="stop", stop_price=95.0)
+        )
+        order = state["trade"].order
+        assert order.orderType == "STP"
+        assert order.auxPrice == 95.0
+        assert order.action == "SELL"
+        assert order.totalQuantity == 10
+
+    def test_stop_order_missing_stop_price_raises(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=51)
+        ib, state = _fake_ib(["Filled"])
+        broker._ib = ib
+        with pytest.raises(BrokerError, match="stop_price"):
+            broker.submit_order(OrderRequest(symbol="AAPL", side="sell", quantity=10, order_type="stop"))
+        assert state["trade"] is None
+
+    def test_stop_limit_order_sets_stp_lmt_type(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=52)
+        ib, state = _fake_ib(["Filled"])
+        broker._ib = ib
+        broker.submit_order(
+            OrderRequest(
+                symbol="AAPL", side="sell", quantity=10, order_type="stop_limit",
+                stop_price=95.0, limit_price=94.0,
+            )
+        )
+        order = state["trade"].order
+        assert order.orderType == "STP LMT"
+        assert order.auxPrice == 95.0
+        assert order.lmtPrice == 94.0
+
+    def test_stop_limit_order_missing_prices_raises(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=53)
+        ib, state = _fake_ib(["Filled"])
+        broker._ib = ib
+        with pytest.raises(BrokerError, match="stop_price and limit_price"):
+            broker.submit_order(
+                OrderRequest(symbol="AAPL", side="sell", quantity=10, order_type="stop_limit", stop_price=95.0)
+            )
+
+    def test_trailing_stop_with_percent_sets_trail_type(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=54)
+        ib, state = _fake_ib(["Filled"])
+        broker._ib = ib
+        broker.submit_order(
+            OrderRequest(
+                symbol="AAPL", side="sell", quantity=10, order_type="trailing_stop", trail_percent=3.0,
+            )
+        )
+        order = state["trade"].order
+        assert order.orderType == "TRAIL"
+        assert order.trailingPercent == 3.0
+
+    def test_trailing_stop_with_amount_sets_aux_price(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=55)
+        ib, state = _fake_ib(["Filled"])
+        broker._ib = ib
+        broker.submit_order(
+            OrderRequest(
+                symbol="AAPL", side="sell", quantity=10, order_type="trailing_stop", trail_amount=2.5,
+            )
+        )
+        order = state["trade"].order
+        assert order.orderType == "TRAIL"
+        assert order.auxPrice == 2.5
+
+    def test_trailing_stop_missing_both_raises(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=56)
+        ib, state = _fake_ib(["Filled"])
+        broker._ib = ib
+        with pytest.raises(BrokerError, match="trail_percent or trail_amount"):
+            broker.submit_order(
+                OrderRequest(symbol="AAPL", side="sell", quantity=10, order_type="trailing_stop")
+            )
+
+    def test_extended_hours_sets_outside_rth(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=57)
+        ib, state = _fake_ib(["Filled"])
+        broker._ib = ib
+        broker.submit_order(
+            OrderRequest(
+                symbol="AAPL", side="buy", quantity=10, order_type="limit",
+                limit_price=100.0, extended_hours=True,
+            )
+        )
+        order = state["trade"].order
+        assert order.outsideRth is True
+
+    def test_extended_hours_defaults_to_false(self):
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=58)
+        ib, state = _fake_ib(["Filled"])
+        broker._ib = ib
+        broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=10, order_type="market"))
+        order = state["trade"].order
+        assert order.outsideRth is False
+
+
 class TestSubmitOrderTimeoutRecovery:
     def test_timeout_triggers_reconnect_then_retry_once(self):
         broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=40)

@@ -34,7 +34,33 @@ _PRESET_SCHEDULES: dict[str, dict[str, Any]] = {
     "market_open": {"hour": 9, "minute": 30, "day_of_week": "mon-fri"},
     "market_close": {"hour": 16, "minute": 0, "day_of_week": "mon-fri"},
     "hourly": {"minute": 5, "day_of_week": "mon-fri"},
+    # ------------------------------------------------------------------
+    # 2026-09-18: legs of the "hourly_market_hours" composite schedule
+    # (see HOURLY_MARKET_HOURS / TradingScheduler._start_hourly_market_hours_jobs).
+    # Not selectable directly via ``schedule:`` -- only reachable through
+    # that composite. Unlike "hourly" above (unrestricted hours, relies on
+    # the engine's own is_market_open() to no-op outside RTH), this leg is
+    # restricted to hour="10-14" so it doesn't waste a cycle/provider-fetch
+    # outside market hours at all. Fires on the half-hour, strictly between
+    # the "market_open" leg (9:30) and the close-anchor leg below (15:50).
+    "_hourly_market_hours_intraday": {"hour": "10-14", "minute": 30, "day_of_week": "mon-fri"},
+    # A few minutes before the 16:00 close so the day's final signal / any
+    # close-to-open transition trade is deliberately captured, rather than
+    # relying on the 14:30 intraday leg (90 minutes earlier) as the day's
+    # last word.
+    "_hourly_market_hours_close": {"hour": 15, "minute": 50, "day_of_week": "mon-fri"},
 }
+
+# Composite schedule spec (set as ``schedule:`` in config/live*.yaml):
+# registers three separate CronTrigger jobs (open/intraday/close legs,
+# built from the presets above) instead of the usual single "live_cycle"
+# job, each passing an explicit ``cycle_type`` down to
+# LiveTradingEngine.run_cycle -> Orchestrator.step so LLM-enhanced agent
+# reasoning (agent_modes) is restricted to the open/close legs -- running
+# the full pipeline hourly during market hours would otherwise multiply
+# LLM API cost ~7x/day. See TradingScheduler._start_hourly_market_hours_jobs
+# and config/live.yaml's schedule comment (2026-09-18).
+HOURLY_MARKET_HOURS = "hourly_market_hours"
 
 _SESSION_SCHEDULES = frozenset({"market_open", "market_close"})
 
@@ -171,6 +197,7 @@ def maybe_retry_lost_cycle(
     engine: LiveTradingEngine,
     *,
     timezone: str = DEFAULT_MARKET_TIMEZONE,
+    cycle_type: str | None = None,
 ) -> None:
     """Run one more cycle now if today's most recent cycle had no trading
     outcome — either every order was held by the news guard, or the cycle
@@ -186,6 +213,10 @@ def maybe_retry_lost_cycle(
     outage), this will keep retrying every interval rather than giving up —
     the same bet the news-guard case already makes, and each attempt is
     cheap and feeds the engine's own consecutive-failure alerting.
+
+    ``cycle_type`` is forwarded to ``engine.run_cycle`` unchanged (see
+    ``TradingScheduler``'s call site for why it's hardcoded to "intraday"
+    for the "hourly_market_hours" schedule, never inferred here).
     """
     if not engine.is_running or getattr(engine, "_shutting_down", False):
         return
@@ -220,7 +251,7 @@ def maybe_retry_lost_cycle(
         try:
             if getattr(engine, "_shutting_down", False):
                 return
-            engine.run_cycle()
+            engine.run_cycle(cycle_type=cycle_type)
         except Exception:
             log.error("Lost-cycle retry failed", exc_info=True)
 
@@ -314,6 +345,12 @@ class TradingScheduler:
         self._sp500_static_sector_map = dict(sp500_static_sector_map or {})
         self._scheduler: BackgroundScheduler | None = None
         self._job_id = "live_cycle"
+        # Extra legs registered only for the "hourly_market_hours" composite
+        # schedule (see _start_hourly_market_hours_jobs) -- the open leg
+        # reuses self._job_id above so next_run()'s existing default keeps
+        # working unchanged for every other schedule.
+        self._intraday_job_id = "live_cycle_intraday"
+        self._close_job_id = "live_cycle_close"
         self._fundamentals_job_id = "fundamentals_refresh"
         self._dynamic_universe_job_id = "danelfin_universe_sync"
         self._sp500_sync_job_id = "sp500_universe_sync"
@@ -324,18 +361,21 @@ class TradingScheduler:
     def start(self) -> None:
         """Start the background scheduler."""
         self._scheduler = BackgroundScheduler(timezone=self._timezone)
-        trigger = self._build_trigger(self._schedule_spec)
-        self._scheduler.add_job(
-            self._run_cycle_safe,
-            trigger=trigger,
-            id=self._job_id,
-            replace_existing=True,
-            # Never let a scheduled cycle overlap itself or pile up missed
-            # runs into a burst; the engine also guards against overlap with
-            # manual/API triggers via its own re-entrancy lock.
-            max_instances=1,
-            coalesce=True,
-        )
+        if self._schedule_spec == HOURLY_MARKET_HOURS:
+            self._start_hourly_market_hours_jobs()
+        else:
+            trigger = self._build_trigger(self._schedule_spec)
+            self._scheduler.add_job(
+                self._run_cycle_safe,
+                trigger=trigger,
+                id=self._job_id,
+                replace_existing=True,
+                # Never let a scheduled cycle overlap itself or pile up missed
+                # runs into a burst; the engine also guards against overlap
+                # with manual/API triggers via its own re-entrancy lock.
+                max_instances=1,
+                coalesce=True,
+            )
         if self._universe:
             from firm.live.fundamentals_refresh import run_scheduled_fundamentals_refresh
 
@@ -420,13 +460,26 @@ class TradingScheduler:
             max_instances=1,
             coalesce=True,
         )
-        if self._schedule_spec in _SESSION_SCHEDULES:
-            # Only meaningful for a single-cycle-per-day schedule — an
-            # `every_N_minutes`/`hourly` schedule already retries naturally
-            # on its own next tick.
+        if self._schedule_spec in _SESSION_SCHEDULES or self._schedule_spec == HOURLY_MARKET_HOURS:
+            # Meaningful for a single-cycle-per-day schedule (market_open/
+            # market_close) since nothing else would run again for the rest
+            # of the day otherwise. Also kept for "hourly_market_hours"
+            # (2026-09-18): unlike the plain `every_N_minutes`/`hourly`
+            # preset (which retries within minutes on its own next tick),
+            # this composite's legs are up to ~80 minutes apart (14:30
+            # intraday -> 15:50 close-anchor) — still worth a 30-minute
+            # safety net rather than silently losing that whole gap to a
+            # transient broker/news-guard issue.
+            # A retry of a lost cycle always gets cycle_type="intraday"
+            # (quant-only) regardless of which leg actually failed: it's
+            # the conservative, cost-safe default (never *adds* an LLM call
+            # a schedule-driven "open"/"close" cycle wouldn't already have
+            # made) and this job has no reliable way to know which leg's
+            # cycle it's standing in for.
+            retry_cycle_type = "intraday" if self._schedule_spec == HOURLY_MARKET_HOURS else None
             self._scheduler.add_job(
                 lambda: maybe_retry_lost_cycle(
-                    self._engine, timezone=self._timezone
+                    self._engine, timezone=self._timezone, cycle_type=retry_cycle_type,
                 ),
                 trigger=IntervalTrigger(minutes=30),
                 id=self._lost_cycle_retry_job_id,
@@ -469,9 +522,24 @@ class TradingScheduler:
         (see :meth:`next_lost_cycle_retry`) can run a cycle well before then,
         so callers that want "when will this engine next act" should check
         both rather than just this one.
+
+        For the "hourly_market_hours" composite schedule, *job_id=None*
+        instead returns the earliest next fire across all three legs (open/
+        intraday/close) — the single most-relevant "next cycle" instant,
+        since three separate jobs exist under the hood (see
+        ``_start_hourly_market_hours_jobs``). Pass an explicit job id
+        (``self._job_id`` / ``self._intraday_job_id`` / ``self._close_job_id``)
+        to inspect one leg specifically.
         """
         if self._scheduler is None:
             return None
+        if job_id is None and self._schedule_spec == HOURLY_MARKET_HOURS:
+            candidates = [
+                self.next_run(jid)
+                for jid in (self._job_id, self._intraday_job_id, self._close_job_id)
+            ]
+            live = [c for c in candidates if c is not None]
+            return min(live) if live else None
         job = self._scheduler.get_job(job_id or self._job_id)
         if job is None:
             return None
@@ -480,11 +548,12 @@ class TradingScheduler:
     def next_lost_cycle_retry(self) -> datetime | None:
         """Next fire time of the lost-cycle-retry safety net, or None.
 
-        Only registered for session-anchored schedules (see
-        ``maybe_retry_lost_cycle``'s 30-minute interval job) — None here
-        means either the scheduler isn't running or the schedule isn't
-        session-anchored (an interval/hourly schedule already retries on its
-        own next regular tick, so this job doesn't exist for those).
+        Registered for session-anchored schedules (``market_open``/
+        ``market_close``) and for "hourly_market_hours" (see ``start()``'s
+        session-schedule check) — None here means either the scheduler
+        isn't running or the schedule is a plain interval/``hourly`` preset,
+        which already retries on its own next regular tick without this
+        job existing at all.
         """
         return self.next_run(self._lost_cycle_retry_job_id)
 
@@ -523,10 +592,54 @@ class TradingScheduler:
         except Exception:
             log.error("sp500 sector-cache refresh job failed", exc_info=True)
 
-    def _run_cycle_safe(self) -> None:
+    def _start_hourly_market_hours_jobs(self) -> None:
+        """Register the "hourly_market_hours" composite schedule's three
+        legs as separate APScheduler jobs, each passing an explicit
+        ``cycle_type`` through :meth:`_run_cycle_safe` down to
+        ``LiveTradingEngine.run_cycle`` -> ``Orchestrator.step`` (added
+        2026-09-18 — see module docstring on ``HOURLY_MARKET_HOURS``).
+
+        A fixed ``cycle_type`` baked into each job's own callback (rather
+        than one generic job inferring "is this the open/close cycle" from
+        the wall clock at run time) keeps that decision explicit and
+        traceable at the one place that actually knows which leg just
+        fired, per this feature's design constraint — see
+        config/live.yaml's schedule comment.
+
+        The open leg is registered under ``self._job_id`` (the same id
+        every other schedule's single job uses) so ``next_run()``'s
+        existing default keeps resolving to *something* sensible even for
+        callers that don't know about the intraday/close legs.
+        """
+        self._scheduler.add_job(
+            lambda: self._run_cycle_safe(cycle_type="open"),
+            trigger=self._build_trigger("market_open"),
+            id=self._job_id,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        self._scheduler.add_job(
+            lambda: self._run_cycle_safe(cycle_type="intraday"),
+            trigger=self._build_trigger("_hourly_market_hours_intraday"),
+            id=self._intraday_job_id,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        self._scheduler.add_job(
+            lambda: self._run_cycle_safe(cycle_type="close"),
+            trigger=self._build_trigger("_hourly_market_hours_close"),
+            id=self._close_job_id,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
+    def _run_cycle_safe(self, cycle_type: str | None = None) -> None:
         """Wrapper that catches exceptions to avoid killing the scheduler."""
         try:
-            self._engine.run_cycle()
+            self._engine.run_cycle(cycle_type=cycle_type)
         except Exception:
             log.error("Scheduled cycle failed", exc_info=True)
 

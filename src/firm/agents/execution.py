@@ -3,6 +3,17 @@
 Takes an approved ``RiskDecision``, diffs its adjusted target weights
 against current portfolio holdings, and produces an order list plus
 turnover and cost estimates in an ``ExecutionReport``.
+
+Optionally (config key ``protective_orders``, off by default — see
+``ExecutionAgent.__init__``) also submits broker-side stop/trailing-stop
+orders directly, as a side channel outside the fills/turnover/cost
+accounting above, when a configured strategy opens or increases a
+position. This only fires if a ``broker`` object is passed into ``run()``
+via ``inputs`` — today's live orchestrator/engine call sites don't do that
+(wiring that through was out of scope for this change, which was
+deliberately confined to brokers/base.py, brokers/alpaca.py, brokers/ibkr.py
+and this file), so merging this is a no-op for the running system until a
+caller supplies both the config and the broker.
 """
 
 from __future__ import annotations
@@ -12,6 +23,7 @@ from typing import Any
 
 from firm.agents._liquidity import estimate_adv_dollars, market_impact_pct
 from firm.agents.base import Agent, AgentContext
+from firm.brokers.base import BrokerError, OrderRequest
 from firm.contracts.models import ExecutionReport, RiskDecision
 
 log = logging.getLogger(__name__)
@@ -78,12 +90,36 @@ class ExecutionAgent(Agent):
         # filters out.
         self.rebalance_fraction: float = float(cfg.get("rebalance_fraction", 1.0))
 
+        # Broker-resident protective stops (off by default). Keyed by
+        # strategy name, mirroring the spirit of RiskAgent's
+        # ``stop_loss_overlay`` config (also opt-in, also per-strategy) but
+        # shaped as a plain dict of per-strategy settings rather than an
+        # enabled-flag + strategies-list pair, e.g.:
+        #   {"mean_reversion": {"stop_loss_pct": 0.07},
+        #    "stat_arb": {"trailing_stop_pct": 0.05}}
+        # RiskAgent's overlay is a portfolio-level, cycle-gated backstop that
+        # zeroes a held symbol's *target weight* once per scheduled cycle;
+        # this is a complementary, faster, broker-resident layer that
+        # protects the position between cycles (a broker-side stop can
+        # trigger intracycle, long before the next scheduled decision).
+        # {} (default) submits no protective orders at all -- byte-identical
+        # behavior to before this existed. Only fires when a ``broker`` is
+        # also supplied to run() (see _maybe_submit_protective_orders).
+        self.protective_orders_cfg: dict[str, dict[str, Any]] = cfg.get("protective_orders", {}) or {}
+
     def run(self, ctx: AgentContext, **inputs: Any) -> ExecutionReport:
         decision: RiskDecision = inputs["decision"]
         portfolio = inputs.get("portfolio")
         prices: dict[str, float] = inputs.get("prices", {})
         per_strategy: dict[str, dict[str, float]] = inputs.get("per_strategy", {})
         attribution = inputs.get("attribution")
+        # Optional broker handle for the protective-stop side channel below.
+        # Not wired up by the live engine/orchestrator today (out of scope
+        # for this change — see ExecutionAgent module docstring) so passing
+        # nothing here is exactly today's behavior; a caller that does supply
+        # one only sees protective orders fire if protective_orders_cfg is
+        # also non-empty.
+        broker = inputs.get("broker")
 
         target_weights = decision.adjusted_targets
         symbol_strategy = self._dominant_strategy_by_symbol(per_strategy)
@@ -208,11 +244,129 @@ class ExecutionAgent(Agent):
             )
             turnover += abs(diff_w)
 
+            if self.protective_orders_cfg and broker is not None:
+                self._maybe_submit_protective_order(
+                    broker=broker,
+                    strategy=symbol_strategy.get(sym, "composite"),
+                    symbol=sym,
+                    current_w=current_w,
+                    target_w=target_w,
+                    price=price,
+                    nav=nav,
+                )
+
         # Aggregate cost is the sum of the per-order estimates (identical to the
         # previous total_notional * (commission + slippage) formulation).
         costs = sum(o["est_cost"] for o in orders)
 
         return ExecutionReport(fills=orders, turnover=turnover, costs=costs)
+
+    # ------------------------------------------------------------------
+    # Broker-side protective stops (opt-in)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _is_fresh_open(current_w: float, target_w: float) -> bool:
+        """True only when *symbol* is moving from genuinely flat to a new
+        position -- the sole case this submits a protective order for.
+
+        Deliberately narrower than "opens or increases": this class has no
+        broker order-ID tracking, so it cannot cancel a previously-submitted
+        protective stop before placing another one. Firing again on every
+        cycle that *increases* an already-open position (the original
+        design) would leave a separate resting stop order at the broker for
+        each cycle's incremental add, stacked on top of the still-live
+        stop(s) from earlier cycles -- e.g. three 07-cycle increases into the
+        same long leaves three resting sell-stops; if the price ever trades
+        through the stop level, all three fire together and the position
+        flips net short by roughly the sum of the earlier tranches, not just
+        flat. Restricting to flat -> open avoids that entirely: once a
+        symbol has a protective order, this returns False for it on every
+        later cycle until the position is fully closed (target_w == 0,
+        which zeroes current_w for the next cycle) and genuinely reopened.
+        The known cost: neither a same-direction increase nor a same-cycle
+        sign flip gets a *new* stop sized to the larger/flipped position --
+        only the original tranche is covered by the first stop. Sizing or
+        replacing the resting stop as a position changes would need this
+        agent to track and cancel its own previously-submitted broker order
+        IDs, which is out of scope here.
+        """
+        return current_w == 0 and target_w != 0
+
+    def _maybe_submit_protective_order(
+        self,
+        *,
+        broker: Any,
+        strategy: str,
+        symbol: str,
+        current_w: float,
+        target_w: float,
+        price: float,
+        nav: float,
+    ) -> None:
+        """Submit a broker-side stop/trailing-stop covering *symbol*'s new
+        position, if *strategy* opts in via ``protective_orders``.
+
+        No-op (no config for this strategy, not a fresh open, or a bad
+        price/nav) means nothing is submitted -- default behavior is
+        unchanged. A submission failure is logged and swallowed rather than
+        raised: a protective order is a best-effort safety net on top of the
+        primary order, not a condition the primary rebalance should fail on.
+        """
+        cfg = self.protective_orders_cfg.get(strategy)
+        if not cfg:
+            return
+        if not self._is_fresh_open(current_w, target_w):
+            return
+        if price <= 0 or nav <= 0:
+            return
+
+        # current_w == 0 here (see _is_fresh_open), so target_w is the whole
+        # new position, not just an incremental slice.
+        protective_qty = int(round(abs(target_w) * nav / price))
+        if protective_qty <= 0:
+            return
+
+        is_long = target_w > 0
+        protective_side = "sell" if is_long else "buy"
+
+        trailing_stop_pct = cfg.get("trailing_stop_pct")
+        stop_loss_pct = cfg.get("stop_loss_pct")
+
+        order_kwargs: dict[str, Any] = dict(
+            symbol=symbol,
+            side=protective_side,
+            quantity=protective_qty,
+            strategy=strategy,
+            client_order_id=f"protective-{strategy}-{symbol}-{protective_side}",
+        )
+        if trailing_stop_pct is not None:
+            order_kwargs["order_type"] = "trailing_stop"
+            order_kwargs["trail_percent"] = float(trailing_stop_pct) * 100.0
+        elif stop_loss_pct is not None:
+            order_kwargs["order_type"] = "stop"
+            order_kwargs["stop_price"] = (
+                price * (1 - float(stop_loss_pct)) if is_long else price * (1 + float(stop_loss_pct))
+            )
+        else:
+            log.debug(
+                "protective_orders configured for %s but neither stop_loss_pct "
+                "nor trailing_stop_pct is set — skipping %s", strategy, symbol,
+            )
+            return
+
+        req = OrderRequest(**order_kwargs)
+        try:
+            status = broker.submit_order(req)
+            log.info(
+                "Protective %s order submitted for %s (%s, qty=%d) -> %s",
+                req.order_type, symbol, strategy, protective_qty, status.status,
+            )
+        except BrokerError:
+            log.warning(
+                "Protective %s order submission failed for %s (%s, qty=%d)",
+                req.order_type, symbol, strategy, protective_qty, exc_info=True,
+            )
 
     def _estimate_impact_cost(self, ctx: AgentContext, symbol: str, notional: float) -> float:
         """Size/volume-aware market-impact cost estimate for one order.

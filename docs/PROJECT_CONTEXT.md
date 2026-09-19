@@ -348,7 +348,17 @@ There is no warm standby today, so this is a manual rebuild, not a failover:
 [`config/live.yaml`](../config/live.yaml) is the source of truth for paper trading on this host:
 
 - **broker**: `ibkr_paper`
-- **schedule**: `market_open`
+- **schedule**: `hourly_market_hours` (2026-09-18) — ~7 cycles/trading day (9:30
+  open, hourly on the half-hour 10:30-14:30, a 15:50 close-anchor), up from
+  the prior once/day `market_open`-only cadence; registers 3 separate
+  APScheduler jobs (`TradingScheduler._start_hourly_market_hours_jobs`), each
+  passing an explicit `cycle_type` (`"open"|"intraday"|"close"`) through
+  `LiveTradingEngine.run_cycle` to `Orchestrator.step`
+- **llm_open_close_only**: `true` — LLM-enhanced agent reasoning
+  (`agent_modes`) only runs on the day's open/close cycles; every intraday
+  cycle forces `cache_only` (no live LLM calls) via
+  `Orchestrator._apply_cycle_llm_mode`, keeping LLM cost flat despite the
+  higher cadence above
 - **approval_mode**: `full_auto` (only `full_auto` and `semi_auto` are valid)
 - **universe**: 25 symbols (mega-cap, ETFs including SPY/QQQ/IWM)
 - **strategies**: 11 of 13 enabled with full auto-approve (`ml_prediction`/`gann`
@@ -391,6 +401,9 @@ Explicit API request fields override YAML when provided (non-null / non-empty).
 | `strategy_regime_weights.enabled` | `firm.agents.research._regime_weights` | Per-strategy score multipliers conditioned on Bull/Bear/Chop regime (detected once per cycle). **Disabled by default** — calibrate via `scripts/calibrate_strategy_regime_weights.py` before enabling live. |
 | `allocation_method: kelly` | `firm.agents.trader` | Fractional-Kelly sizing from per-name return history (`kelly_fraction`, default half-Kelly) |
 | `allocation_method: joint_optimizer` | `firm.agents.trader` / `firm.portfolio.optimizer` | Joint mean-variance-with-costs QP (`cvxpy`) replacing L1-normalize-to-full-investment sizing. **Disabled by default (not shipped anywhere) — failed its walk-forward+PBO gate** (see `docs/formal_pbo_audit.md`'s `joint_optimizer` section / `docs/remediation_progress.md` #61-62); kept as validated, tested, off-by-default infrastructure only. |
+| `risk.stop_loss_overlay.enabled` | `firm.agents.risk` | Portfolio-level cycle-gated stop-loss (see "Stop-loss / trailing-stop / extended-hours orders" above). **Disabled by default** — pending backtest validation before flipping on for either instance. |
+| `protective_orders` | `firm.agents.execution` | Broker-side stop/trailing-stop orders per strategy (see same section above). **Disabled by default (`{}`)** — also requires a real `broker` handle, only present on the live path (never in a backtest). |
+| `llm_open_close_only` | `firm.agents.orchestrator` | Restricts LLM-enhanced `agent_modes` to the day's open/close cycles; every intraday cycle forces `cache_only`. **Enabled by default (`true`)** — deliberately not an opt-in, since it's what keeps the 2026-09-18 `hourly_market_hours` cadence cost-flat. |
 | `FIRM_ALLOW_TRADING` | `firm.live.execution_safety` | Hard env lock; live brokers won't submit unless `=1` |
 
 ### Live start paths
@@ -544,6 +557,42 @@ shared by three call sites so they all agree on what "ADV" means:
 Wired through `BacktestConfig.market_impact_coefficient`, `RunRequest.market_impact_coefficient`
 (API), and `frontend/src/pages/NewBacktest.tsx` (Capital & Costs section). `adv_lookback_days`
 (the trailing window, default 20) is shared with `RiskAgent`'s own liquidity cap config.
+
+### Stop-loss / trailing-stop / extended-hours orders (2026-09-18)
+
+Two independent, both **opt-in and off by default**, layers — built after an audit found
+`mean_reversion`/`stat_arb` were the worst live performers on both instances, with neither
+strategy's own documented "a stop-loss is advisable" ever implemented anywhere:
+
+- **`RiskAgent._stop_loss_overlay`** (`config: risk.stop_loss_overlay`) — portfolio-level,
+  cycle-gated: forces a held symbol's *target weight* to 0 once its unrealized loss
+  (`PortfolioState.unrealized_return_pct`, new avg-cost tracking) breaches `max_loss_pct`,
+  for strategies listed in `strategies`. Exact in sleeved mode (the portfolio passed in
+  *is* that strategy's own book); approximated in blended mode via the same
+  dominant-strategy-by-symbol heuristic `PerformanceAttribution` already uses for order
+  attribution.
+- **`ExecutionAgent._maybe_submit_protective_order`** (`config: protective_orders`, e.g.
+  `{"mean_reversion": {"stop_loss_pct": 0.07}}` or `{"trailing_stop_pct": 0.05}`) —
+  broker-resident: submits a real stop/trailing-stop order (new `OrderRequest` order
+  types wired into both `IBKRBroker`/`AlpacaBroker`) that can fire *between* scheduled
+  cycles, not just at the next one. **Only fires on a flat -> open transition**
+  (`_is_fresh_open`) — deliberately narrower than "opens or increases," since this agent
+  has no broker order-ID tracking/cancellation, so re-firing on every incremental add
+  would stack a new resting stop on top of each earlier one instead of replacing it.
+  Requires a real `broker` handle, threaded via `context["broker"]`
+  (`LiveTradingEngine` -> `Orchestrator.step`/`_step_sleeved` -> `ExecutionAgent.run`); in
+  sleeved mode only the final netted `_real_execution` pass gets it, never the per-sleeve
+  virtual pass (`sleeve_portfolio` has no broker sub-account).
+- **Extended-hours**: `OrderRequest.extended_hours` sets Alpaca's `extended_hours` flag
+  (limit orders only — other order types silently degrade to regular-hours with a logged
+  warning, since Alpaca's API doesn't honor it elsewhere) or IBKR's `outsideRth` (every
+  order type). Not currently set anywhere in the live path — the flag exists on the order
+  schema/both brokers but nothing yet decides *when* to submit an extended-hours order or
+  relaxes the engine's regular-hours cycle gate to produce one.
+- Both `risk.stop_loss_overlay` and `protective_orders` must be present in
+  `provider_utils.py`'s allowlist tuple to actually reach the engine via the systemd
+  auto-start / `POST /api/live/start` path (see "What `resolve_live_startup()` merges"
+  below) — both were added there in the same change.
 
 ### Live config (`src/firm/api/routers/live.py`)
 

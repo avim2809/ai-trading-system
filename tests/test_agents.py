@@ -20,6 +20,7 @@ import pytest
 
 from firm.agents.base import Agent, AgentContext
 from firm.agents.blackboard import Blackboard
+from firm.brokers.base import BrokerError, OrderRequest, OrderStatus
 from firm.contracts.models import (
     DebateResult,
     ExecutionReport,
@@ -48,6 +49,31 @@ def _sig(symbol: str, strategy: str, score: float, confidence: float = 0.8) -> S
 
 def _make_signal_set(domain: str, signals: list[Signal]) -> SignalSet:
     return SignalSet(domain=domain, asof=NOW, signals=signals)
+
+
+class _FakeProtectiveBroker:
+    """Minimal broker double for ExecutionAgent's protective-order side
+    channel -- records every OrderRequest it's asked to submit, and either
+    reports it as accepted or raises BrokerError, depending on *raise_error*.
+    """
+
+    def __init__(self, raise_error: bool = False) -> None:
+        self.calls: list[OrderRequest] = []
+        self._raise_error = raise_error
+
+    def submit_order(self, order: OrderRequest) -> OrderStatus:
+        self.calls.append(order)
+        if self._raise_error:
+            raise BrokerError("simulated broker rejection")
+        return OrderStatus(
+            order_id="protective-1",
+            symbol=order.symbol,
+            side=order.side,
+            quantity=order.quantity,
+            filled_quantity=0.0,
+            avg_fill_price=0.0,
+            status="pending",
+        )
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -921,6 +947,90 @@ class TestRiskManager:
 
         assert abs(decision.adjusted_targets["AAPL"]) < 0.4
         assert any("Drawdown" in v for v in decision.violations)
+
+    def test_stop_loss_sleeved_forces_exit(self):
+        from firm.agents.risk import RiskAgent
+        from firm.portfolio.state import PortfolioState
+
+        risk = RiskAgent(
+            config={
+                "max_position_pct": 1.0,
+                "stop_loss_overlay": {
+                    "enabled": True,
+                    "strategies": ["mean_reversion"],
+                    "max_loss_pct": 0.05,
+                },
+            }
+        )
+        portfolio = PortfolioState(initial_capital=1_000_000)
+        # Long 100 AAPL @ 100, now marked at 90 -> -10% unrealized, breaches 5%.
+        portfolio.update(
+            fills=[{"symbol": "AAPL", "shares": 100, "price": 100.0, "strategy": "mean_reversion"}],
+            prices={"AAPL": 100.0},
+        )
+
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.3, "MSFT": 0.1})
+        ctx = AgentContext(now=NOW)
+        decision = risk.run(
+            ctx, proposal=proposal, portfolio=portfolio,
+            prices={"AAPL": 90.0, "MSFT": 50.0}, strategy="mean_reversion",
+        )
+
+        assert decision.adjusted_targets["AAPL"] == 0.0
+        assert decision.adjusted_targets["MSFT"] == pytest.approx(0.1)
+        assert any("stop-loss" in v for v in decision.violations)
+
+    def test_stop_loss_disabled_by_default(self):
+        from firm.agents.risk import RiskAgent
+        from firm.portfolio.state import PortfolioState
+
+        risk = RiskAgent(config={"max_position_pct": 1.0})
+        portfolio = PortfolioState(initial_capital=1_000_000)
+        portfolio.update(
+            fills=[{"symbol": "AAPL", "shares": 100, "price": 100.0, "strategy": "mean_reversion"}],
+            prices={"AAPL": 100.0},
+        )
+
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.3})
+        ctx = AgentContext(now=NOW)
+        decision = risk.run(
+            ctx, proposal=proposal, portfolio=portfolio,
+            prices={"AAPL": 50.0}, strategy="mean_reversion",
+        )
+
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.3)
+
+    def test_stop_loss_blended_uses_dominant_strategy_heuristic(self):
+        from firm.agents.risk import RiskAgent
+        from firm.portfolio.attribution import PerformanceAttribution
+        from firm.portfolio.state import PortfolioState
+
+        risk = RiskAgent(
+            config={
+                "max_position_pct": 1.0,
+                "stop_loss_overlay": {
+                    "enabled": True,
+                    "strategies": ["mean_reversion"],
+                    "max_loss_pct": 0.05,
+                },
+            }
+        )
+        portfolio = PortfolioState(initial_capital=1_000_000)
+        portfolio.update(
+            fills=[{"symbol": "AAPL", "shares": 100, "price": 100.0, "strategy": "mean_reversion"}],
+            prices={"AAPL": 100.0},
+        )
+        attribution = PerformanceAttribution()
+        attribution._strategy_holdings = {"mean_reversion": {"AAPL": 100.0}}
+
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.3})
+        ctx = AgentContext(now=NOW)
+        decision = risk.run(
+            ctx, proposal=proposal, portfolio=portfolio,
+            prices={"AAPL": 90.0}, attribution=attribution,
+        )
+
+        assert decision.adjusted_targets["AAPL"] == 0.0
 
     def test_no_violations_passes_cleanly(self):
         from firm.agents.risk import RiskAgent
@@ -2044,6 +2154,268 @@ class TestExecution:
 
 
 # ══════════════════════════════════════════════════════════════════════
+# Protective (broker-side stop / trailing-stop) orders -- opt-in
+# ══════════════════════════════════════════════════════════════════════
+class TestProtectiveOrders:
+    def test_default_off_no_broker_calls_even_with_broker_supplied(self):
+        """Backward compatibility: protective_orders defaults to {} (no
+        strategies configured), so merging this feature must not change
+        behavior for any existing caller -- even one that happens to pass a
+        broker in, no protective order should ever be submitted."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent()
+        assert execution.protective_orders_cfg == {}
+        portfolio = PortfolioState(initial_capital=500_000)
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.20})
+        broker = _FakeProtectiveBroker()
+
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            per_strategy={"mean_reversion": {"AAPL": 0.5}}, broker=broker,
+        )
+
+        assert len(report.fills) == 1  # the primary order is unaffected
+        assert broker.calls == []
+
+    def test_configured_but_no_broker_supplied_is_a_no_op(self):
+        """The other half of the default-safety story: configuring
+        protective_orders without also wiring a broker into run() (exactly
+        today's live orchestrator/engine call sites) must not raise or
+        otherwise change the primary ExecutionReport."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"protective_orders": {"mean_reversion": {"stop_loss_pct": 0.07}}}
+        )
+        portfolio = PortfolioState(initial_capital=500_000)
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.20})
+
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            per_strategy={"mean_reversion": {"AAPL": 0.5}},
+        )
+        assert len(report.fills) == 1
+
+    def test_opening_long_submits_sell_stop_below_entry(self):
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"protective_orders": {"mean_reversion": {"stop_loss_pct": 0.07}}}
+        )
+        portfolio = PortfolioState(initial_capital=500_000)  # flat, all cash
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.20})
+        broker = _FakeProtectiveBroker()
+
+        execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            per_strategy={"mean_reversion": {"AAPL": 0.5}}, broker=broker,
+        )
+
+        assert len(broker.calls) == 1
+        call = broker.calls[0]
+        assert call.symbol == "AAPL"
+        assert call.side == "sell"
+        assert call.order_type == "stop"
+        assert call.stop_price == pytest.approx(150.0 * (1 - 0.07))
+        expected_qty = round(0.20 * 500_000 / 150.0)
+        assert call.quantity == expected_qty
+        assert call.strategy == "mean_reversion"
+
+    def test_opening_short_submits_buy_stop_above_entry(self):
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"protective_orders": {"mean_reversion": {"stop_loss_pct": 0.07}}}
+        )
+        portfolio = PortfolioState(initial_capital=500_000)
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": -0.20})
+        broker = _FakeProtectiveBroker()
+
+        execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            per_strategy={"mean_reversion": {"AAPL": -0.5}}, broker=broker,
+        )
+
+        assert len(broker.calls) == 1
+        call = broker.calls[0]
+        assert call.side == "buy"
+        assert call.order_type == "stop"
+        assert call.stop_price == pytest.approx(150.0 * (1 + 0.07))
+
+    def test_trailing_stop_pct_submits_trailing_stop_order(self):
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"protective_orders": {"mean_reversion": {"trailing_stop_pct": 0.05}}}
+        )
+        portfolio = PortfolioState(initial_capital=500_000)
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.20})
+        broker = _FakeProtectiveBroker()
+
+        execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            per_strategy={"mean_reversion": {"AAPL": 0.5}}, broker=broker,
+        )
+
+        assert len(broker.calls) == 1
+        call = broker.calls[0]
+        assert call.order_type == "trailing_stop"
+        assert call.trail_percent == pytest.approx(5.0)  # 0.05 -> 5.0%
+        assert call.stop_price is None
+
+    def test_increasing_existing_position_does_not_resubmit(self):
+        """Adding to an already-open position must NOT submit a second
+        protective order -- this agent has no broker order-ID tracking, so
+        it can't cancel the stop from the position's original opening
+        cycle before placing another. Submitting again here would leave
+        two resting stops at the broker, stacked on top of each other (see
+        ExecutionAgent._is_fresh_open's docstring): if price ever trades
+        through the stop level, both would fire together and the position
+        would flip net short/long by roughly the earlier tranche, not end
+        up flat. Only a flat -> open transition is protected."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"protective_orders": {"mean_reversion": {"stop_loss_pct": 0.07}}}
+        )
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 100}  # already long a little
+        prices = {"AAPL": 150.0}
+        # current_w = 15_000 / 515_000 ~= 0.0291 (nonzero) -- an increase, not a fresh open.
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.20})
+        broker = _FakeProtectiveBroker()
+
+        execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            per_strategy={"mean_reversion": {"AAPL": 0.5}}, broker=broker,
+        )
+        assert broker.calls == []
+
+    def test_sign_flip_does_not_submit_protective_order(self):
+        """A trade that flips an existing long straight to short (or vice
+        versa) in one cycle is not a flat -> open transition (current_w is
+        nonzero going in) -- no new protective order, for the same
+        no-order-tracking reason as the increase case above. The stale
+        stop from the original long is left as a known, undocumented-here
+        residual risk rather than one this narrow design attempts to
+        reason about."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"protective_orders": {"mean_reversion": {"stop_loss_pct": 0.07}}}
+        )
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 1000}  # long
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": -0.10})  # flip to short
+        broker = _FakeProtectiveBroker()
+
+        execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            per_strategy={"mean_reversion": {"AAPL": -0.5}}, broker=broker,
+        )
+        assert broker.calls == []
+
+    def test_reducing_position_does_not_submit_protective_order(self):
+        """A trade that shrinks (but doesn't flip or close) an existing
+        position isn't a flat -> open transition -- no new protective
+        order is warranted."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"protective_orders": {"mean_reversion": {"stop_loss_pct": 0.07}}}
+        )
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 1000}  # ~0.2308 weight
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.10})  # reduce
+        broker = _FakeProtectiveBroker()
+
+        execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            per_strategy={"mean_reversion": {"AAPL": 0.5}}, broker=broker,
+        )
+        assert broker.calls == []
+
+    def test_closing_position_does_not_submit_protective_order(self):
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"protective_orders": {"mean_reversion": {"stop_loss_pct": 0.07}}}
+        )
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 1000}
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={})  # full close
+        broker = _FakeProtectiveBroker()
+
+        execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            per_strategy={"mean_reversion": {"AAPL": 0.5}}, broker=broker,
+        )
+        assert broker.calls == []
+
+    def test_strategy_not_in_protective_orders_cfg_is_skipped(self):
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"protective_orders": {"mean_reversion": {"stop_loss_pct": 0.07}}}
+        )
+        portfolio = PortfolioState(initial_capital=500_000)
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.20})
+        broker = _FakeProtectiveBroker()
+
+        # AAPL is attributed to "stat_arb", which isn't in protective_orders.
+        execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            per_strategy={"stat_arb": {"AAPL": 0.5}}, broker=broker,
+        )
+        assert broker.calls == []
+
+    def test_protective_submission_failure_is_logged_not_raised(self, caplog):
+        """A protective order is a best-effort safety net on top of the
+        primary rebalance order -- its own submission failing must not
+        prevent the primary ExecutionReport from being returned."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"protective_orders": {"mean_reversion": {"stop_loss_pct": 0.07}}}
+        )
+        portfolio = PortfolioState(initial_capital=500_000)
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.20})
+        broker = _FakeProtectiveBroker(raise_error=True)
+
+        with caplog.at_level("WARNING"):
+            report = execution.run(
+                AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+                per_strategy={"mean_reversion": {"AAPL": 0.5}}, broker=broker,
+            )
+
+        assert len(report.fills) == 1  # primary order still produced
+        assert len(broker.calls) == 1  # the attempt was made
+        assert any("Protective" in r.message for r in caplog.records)
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Orchestrator (end-to-end with mocks)
 # ══════════════════════════════════════════════════════════════════════
 class TestOrchestrator:
@@ -2139,6 +2511,31 @@ class TestOrchestrator:
 
         assert orders == []
         assert not bb.risk_decision.approved
+
+    def test_execution_receives_broker_from_context(self):
+        """The real broker handle threads context['broker'] -> execution.run
+
+        (see LiveTradingEngine's context dict and Orchestrator._step_impl,
+        2026-09-18) — required for ExecutionAgent's protective-order
+        attachment to ever fire live.
+        """
+        orch, pit_view = self._build_orchestrator()
+        sentinel_broker = object()
+        orch.step({
+            "pit_view": pit_view, "portfolio": None,
+            "prices": {"AAPL": 150, "GOOG": 100}, "broker": sentinel_broker,
+        })
+
+        _, kwargs = orch.execution.run.call_args
+        assert kwargs["broker"] is sentinel_broker
+
+    def test_execution_broker_defaults_to_none(self):
+        """No 'broker' key in context (e.g. every backtest) -> None, not KeyError."""
+        orch, pit_view = self._build_orchestrator()
+        orch.step({"pit_view": pit_view, "portfolio": None, "prices": {}})
+
+        _, kwargs = orch.execution.run.call_args
+        assert kwargs["broker"] is None
 
     def test_orchestrator_via_run(self):
         orch, pit_view = self._build_orchestrator()
@@ -2283,3 +2680,150 @@ class TestOrchestrator:
             e.get("agent") == "debate" and "timed out" in e.get("error", "")
             for e in bb.errors
         )
+
+
+class TestOrchestratorCycleTypeLLMMode:
+    """cycle_type -> LLM-mode gating (added 2026-09-18, see
+    Orchestrator._apply_cycle_llm_mode / config/live.yaml's
+    "hourly_market_hours" schedule comment): "open"/"close" cycles leave
+    each role's configured LLM-enhancement policy alone; every other
+    cycle_type (in practice "intraday") forces "cache_only" (no live LLM
+    calls) for that one step() call, then restores it afterward.
+
+    These agents are duck-typed on ``_llm_config`` (what
+    :class:`LLMAgentMixin` actually sets) rather than a real LLM
+    subclass — cheaper and just as faithful to what
+    ``_llm_enhanced_agents`` actually checks.
+    """
+
+    @staticmethod
+    def _llm_agent(name: str, policy: str | None = "live_calls") -> MagicMock:
+        agent = MagicMock(spec=Agent)
+        agent.name = name
+        enhancement: dict[str, Any] = {} if policy is None else {"policy": policy}
+        agent._llm_config = {"enhancement": enhancement}
+        return agent
+
+    @staticmethod
+    def _plain_agent(name: str) -> MagicMock:
+        """A quant-only agent (no ``_llm_config`` at all) — the production
+        default for most roles; must never be touched by the gating."""
+        agent = MagicMock(spec=Agent)
+        agent.name = name
+        return agent
+
+    def _orchestrator(self, **overrides: Any):
+        from firm.agents.orchestrator import Orchestrator
+
+        kwargs = {
+            "analysts": [self._llm_agent("fundamental_analyst")],
+            "bull": self._plain_agent("bull"),
+            "bear": self._plain_agent("bear"),
+            "debate": self._plain_agent("debate"),
+            "trader": self._plain_agent("trader"),
+            "risk": self._plain_agent("risk"),
+            "execution": self._plain_agent("execution"),
+        }
+        kwargs.update(overrides)
+        return Orchestrator(**kwargs)
+
+    def test_llm_enhanced_agents_finds_only_agents_with_llm_config(self):
+        llm_analyst = self._llm_agent("fundamental_analyst")
+        orch = self._orchestrator(analysts=[llm_analyst, self._plain_agent("technical_analyst")])
+        assert orch._llm_enhanced_agents() == [llm_analyst]
+
+    def test_llm_enhanced_agents_includes_sleeve_traders(self):
+        sleeve_trader = self._llm_agent("trader_for_momentum")
+        orch = self._orchestrator(sleeve_traders={"momentum": sleeve_trader})
+        assert sleeve_trader in orch._llm_enhanced_agents()
+
+    @pytest.mark.parametrize("cycle_type", ["open", "close"])
+    def test_open_close_cycle_leaves_policy_untouched(self, cycle_type):
+        agent = self._llm_agent("fundamental_analyst", policy="live_calls")
+        orch = self._orchestrator(analysts=[agent])
+        restore = orch._apply_cycle_llm_mode(cycle_type)
+        assert restore == []
+        assert agent._llm_config["enhancement"]["policy"] == "live_calls"
+
+    def test_none_cycle_type_leaves_policy_untouched(self):
+        """Manual trigger / a single-cycle-per-day schedule (market_open) —
+        pre-2026-09-18 behavior, unchanged."""
+        agent = self._llm_agent("fundamental_analyst", policy="live_calls")
+        orch = self._orchestrator(analysts=[agent])
+        restore = orch._apply_cycle_llm_mode(None)
+        assert restore == []
+        assert agent._llm_config["enhancement"]["policy"] == "live_calls"
+
+    def test_intraday_cycle_forces_cache_only(self):
+        agent = self._llm_agent("fundamental_analyst", policy="live_calls")
+        orch = self._orchestrator(analysts=[agent])
+        orch._apply_cycle_llm_mode("intraday")
+        assert agent._llm_config["enhancement"]["policy"] == "cache_only"
+
+    def test_intraday_cycle_restores_previous_policy_afterward(self):
+        agent = self._llm_agent("fundamental_analyst", policy="live_calls")
+        orch = self._orchestrator(analysts=[agent])
+        restore = orch._apply_cycle_llm_mode("intraday")
+        assert agent._llm_config["enhancement"]["policy"] == "cache_only"
+        orch._restore_cycle_llm_mode(restore)
+        assert agent._llm_config["enhancement"]["policy"] == "live_calls"
+
+    def test_intraday_cycle_restore_removes_policy_key_that_was_never_set(self):
+        """An agent with no explicit ``policy`` key (falls back to the
+        module default inside LLMAgentMixin) must come back to that same
+        "unset" state, not gain a stray "live_calls" key from restoration."""
+        agent = self._llm_agent("fundamental_analyst", policy=None)
+        assert "policy" not in agent._llm_config["enhancement"]
+        orch = self._orchestrator(analysts=[agent])
+        restore = orch._apply_cycle_llm_mode("intraday")
+        assert agent._llm_config["enhancement"]["policy"] == "cache_only"
+        orch._restore_cycle_llm_mode(restore)
+        assert "policy" not in agent._llm_config["enhancement"]
+
+    def test_plain_quant_agents_are_never_touched(self):
+        plain = self._plain_agent("technical_analyst")
+        orch = self._orchestrator(analysts=[plain])
+        restore = orch._apply_cycle_llm_mode("intraday")
+        assert restore == []
+        assert not hasattr(plain, "_llm_config")
+
+    def test_llm_open_close_only_false_disables_gating_entirely(self):
+        agent = self._llm_agent("fundamental_analyst", policy="live_calls")
+        orch = self._orchestrator(
+            analysts=[agent], config={"llm_open_close_only": False},
+        )
+        restore = orch._apply_cycle_llm_mode("intraday")
+        assert restore == []
+        assert agent._llm_config["enhancement"]["policy"] == "live_calls"
+
+    def test_llm_open_close_only_defaults_true(self):
+        orch = self._orchestrator()
+        assert orch._llm_open_close_only is True
+
+    def test_step_applies_and_restores_around_the_pipeline_call(self):
+        """End-to-end through step() (not just the helper methods directly):
+        an intraday cycle must see cache_only *during* the pipeline run and
+        the original policy again once step() returns."""
+        from firm.contracts.models import ExecutionReport, RiskDecision, TradeProposal
+
+        agent = self._llm_agent("fundamental_analyst", policy="live_calls")
+        seen_policy_during_run: list[str] = []
+
+        def _record_and_return(*_a: Any, **_k: Any) -> SignalSet:
+            seen_policy_during_run.append(agent._llm_config["enhancement"]["policy"])
+            return SignalSet(domain="fundamental", asof=NOW, signals=[])
+
+        agent.run.side_effect = _record_and_return
+
+        orch = self._orchestrator(
+            analysts=[agent],
+            trader=MagicMock(spec=Agent, **{"name": "trader", "run.return_value": TradeProposal(asof=NOW)}),
+            risk=MagicMock(spec=Agent, **{"name": "risk", "run.return_value": RiskDecision(approved=True)}),
+            execution=MagicMock(spec=Agent, **{"name": "exec", "run.return_value": ExecutionReport()}),
+        )
+        pit_view = MagicMock()
+        pit_view.asof = NOW
+        orch.step({"pit_view": pit_view, "portfolio": None, "prices": {}}, cycle_type="intraday")
+
+        assert seen_policy_during_run == ["cache_only"]
+        assert agent._llm_config["enhancement"]["policy"] == "live_calls"

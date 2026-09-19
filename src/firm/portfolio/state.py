@@ -20,6 +20,12 @@ class PortfolioState:
         self._strategy_ledger: dict[str, dict[str, float]] = {}  # strategy -> {symbol: pnl}
         self._history: list[PortfolioSnapshot] = []
         self._last_prices: dict[str, float] = {}  # most recent marks seen
+        # Average entry price of the *currently open* position per symbol,
+        # long or short. Reset on flat/flip, weighted-averaged on adds,
+        # left unchanged on partial reduces -- standard cost-basis
+        # accounting. Used by RiskAgent's stop-loss overlay to size
+        # unrealized loss without needing a separate lot ledger.
+        self.avg_cost: dict[str, float] = {}
 
     @property
     def nav(self) -> float:
@@ -75,7 +81,25 @@ class PortfolioState:
             price = fill["price"]
             strategy = fill.get("strategy", "_default")
 
-            self.holdings[sym] = self.holdings.get(sym, 0.0) + shares
+            prev_shares = self.holdings.get(sym, 0.0)
+            new_shares = prev_shares + shares
+            if prev_shares == 0.0 or (prev_shares > 0) != (new_shares > 0):
+                # Opening from flat, or flipping sign: the new cost basis is
+                # this fill's price, not a blend with the closed-out side.
+                if new_shares != 0.0:
+                    self.avg_cost[sym] = price
+                else:
+                    self.avg_cost.pop(sym, None)
+            elif abs(new_shares) > abs(prev_shares):
+                # Adding to an existing position in the same direction.
+                prev_cost = self.avg_cost.get(sym, price)
+                self.avg_cost[sym] = (
+                    prev_cost * prev_shares + price * shares
+                ) / new_shares
+            # else: partial reduce in the same direction -- cost basis of
+            # the remaining shares is unchanged.
+
+            self.holdings[sym] = new_shares
             self.cash -= shares * price
 
             if strategy not in self._strategy_ledger:
@@ -122,6 +146,21 @@ class PortfolioState:
     def get_strategy_pnl(self, strategy: str) -> float:
         """Cumulative PnL attributed to a strategy."""
         return sum(self._strategy_ledger.get(strategy, {}).values())
+
+    def unrealized_return_pct(self, symbol: str, current_price: float) -> float | None:
+        """Unrealized return of the open position in ``symbol``, positive
+        when favorable regardless of long/short direction.
+
+        Returns ``None`` when there is no open position or no recorded cost
+        basis (e.g. a position restored from a broker sync rather than
+        built up through :meth:`update`).
+        """
+        shares = self.holdings.get(symbol, 0.0)
+        cost = self.avg_cost.get(symbol)
+        if shares == 0.0 or not cost:
+            return None
+        raw_return = (current_price - cost) / cost
+        return raw_return if shares > 0 else -raw_return
 
     @property
     def history(self) -> list[PortfolioSnapshot]:

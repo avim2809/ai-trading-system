@@ -24,6 +24,9 @@ try:
         GetOrdersRequest,
         LimitOrderRequest,
         MarketOrderRequest,
+        StopLimitOrderRequest,
+        StopOrderRequest,
+        TrailingStopOrderRequest,
     )
     from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
     from alpaca.data.historical import StockHistoricalDataClient
@@ -295,11 +298,35 @@ class AlpacaBroker(Broker):
             time.sleep(_FLATTEN_POLL_INTERVAL)
         return False
 
+    def _extended_hours_kwarg(self, order: OrderRequest) -> dict[str, bool]:
+        """Return ``{"extended_hours": True}`` when *order* both requested it
+        and its order type actually supports it, else ``{}``.
+
+        Alpaca's API only honors ``extended_hours`` on a regular limit order
+        (day TIF) — market, stop, stop-limit, and trailing-stop orders are
+        rejected (or silently ignored, depending on endpoint version) if it's
+        set. Rather than let that surface as a confusing broker-side
+        rejection, degrade to a regular-hours order and log why.
+        """
+        if not order.extended_hours:
+            return {}
+        if order.order_type == "limit":
+            return {"extended_hours": True}
+        log.warning(
+            "extended_hours requested for %s order on %s, but Alpaca only "
+            "supports it on limit orders — submitting as a regular-hours "
+            "order instead",
+            order.order_type, order.symbol,
+        )
+        return {}
+
     def _submit_single(
         self, order: OrderRequest, *, qty: float, client_order_id: str | None,
     ) -> OrderStatus:
         client = self._ensure_connected()
         tif = getattr(TimeInForce, _TIF_MAP.get(order.time_in_force, "day").upper(), TimeInForce.DAY)
+        side = OrderSide.BUY if order.side == "buy" else OrderSide.SELL
+        extended_hours_kwarg = self._extended_hours_kwarg(order)
 
         try:
             if order.order_type == "limit":
@@ -308,18 +335,61 @@ class AlpacaBroker(Broker):
                 req = LimitOrderRequest(
                     symbol=order.symbol,
                     qty=qty,
-                    side=OrderSide.BUY if order.side == "buy" else OrderSide.SELL,
+                    side=side,
                     time_in_force=tif,
                     limit_price=order.limit_price,
                     client_order_id=client_order_id,
+                    **extended_hours_kwarg,
+                )
+            elif order.order_type == "stop":
+                if order.stop_price is None:
+                    raise BrokerError("stop_price required for stop orders")
+                req = StopOrderRequest(
+                    symbol=order.symbol,
+                    qty=qty,
+                    side=side,
+                    time_in_force=tif,
+                    stop_price=order.stop_price,
+                    client_order_id=client_order_id,
+                )
+            elif order.order_type == "stop_limit":
+                if order.stop_price is None or order.limit_price is None:
+                    raise BrokerError("stop_price and limit_price required for stop_limit orders")
+                req = StopLimitOrderRequest(
+                    symbol=order.symbol,
+                    qty=qty,
+                    side=side,
+                    time_in_force=tif,
+                    stop_price=order.stop_price,
+                    limit_price=order.limit_price,
+                    client_order_id=client_order_id,
+                )
+            elif order.order_type == "trailing_stop":
+                if order.trail_percent is None and order.trail_amount is None:
+                    raise BrokerError(
+                        "trail_percent or trail_amount required for trailing_stop orders"
+                    )
+                trail_kwargs: dict[str, float] = (
+                    {"trail_percent": order.trail_percent}
+                    if order.trail_percent is not None
+                    else {"trail_price": order.trail_amount}
+                )
+                req = TrailingStopOrderRequest(
+                    symbol=order.symbol,
+                    qty=qty,
+                    side=side,
+                    time_in_force=tif,
+                    client_order_id=client_order_id,
+                    **trail_kwargs,
                 )
             else:
                 req = MarketOrderRequest(
                     symbol=order.symbol,
                     qty=qty,
-                    side=OrderSide.BUY if order.side == "buy" else OrderSide.SELL,
+                    side=side,
                     time_in_force=tif,
                     client_order_id=client_order_id,
+                    **extended_hours_kwarg,
                 )
 
             result = client.submit_order(req)

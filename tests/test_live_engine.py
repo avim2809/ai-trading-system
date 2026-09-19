@@ -457,6 +457,74 @@ class TestLiveTradingEngine:
         assert result.error is None
 
     @patch("firm.live.engine.build_orchestrator")
+    def test_run_cycle_forwards_cycle_type_to_orchestrator_step(self, mock_build, engine_components):
+        """cycle_type ("open"/"close"/"intraday"/None), set by
+        TradingScheduler for the "hourly_market_hours" composite schedule
+        (added 2026-09-18), must reach Orchestrator.step unchanged so it
+        can restrict LLM-enhanced agent_modes to the open/close legs."""
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+
+        engine.run_cycle(cycle_type="intraday")
+        _args, kwargs = mock_orch.step.call_args
+        assert kwargs["cycle_type"] == "intraday"
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_run_cycle_defaults_cycle_type_to_none(self, mock_build, engine_components):
+        """A manual trigger (no cycle_type passed) must reach
+        Orchestrator.step as None -- matching pre-2026-09-18 behavior
+        exactly (no LLM-mode override at all)."""
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+
+        engine.run_cycle()
+        _args, kwargs = mock_orch.step.call_args
+        assert kwargs["cycle_type"] is None
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_run_cycle_result_records_cycle_type(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+
+        result = engine.run_cycle(cycle_type="close")
+        assert result.cycle_type == "close"
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_run_cycle_result_records_cycle_type_even_when_skipped(self, mock_build, engine_components):
+        """A cycle skipped before the pipeline runs (e.g. a concurrent
+        cycle already in progress) must still carry the cycle_type it was
+        invoked with, for traceability in persisted cycle history."""
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+        engine._cycle_lock.acquire()  # simulate a cycle already in progress
+        try:
+            result = engine.run_cycle(cycle_type="open")
+        finally:
+            engine._cycle_lock.release()
+        assert result.skipped is True
+        assert result.cycle_type == "open"
+
+    @patch("firm.live.engine.build_orchestrator")
     def test_run_cycle_semi_auto(self, mock_build, engine_components):
         broker, feed, queue, config = engine_components
         orders = _make_orders()

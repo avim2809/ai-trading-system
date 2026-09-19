@@ -267,6 +267,21 @@ def resolve_live_startup(
         "capital_allocation_mode",
         "strategy_capital_weights",
         "real_rebalance_band_pct",
+        # Orchestrator._llm_open_close_only opt-out valve (see
+        # config/live.yaml's "hourly_market_hours" schedule comment,
+        # 2026-09-18) — same silent-drop bug class as conviction_smoothing_
+        # enabled/capital_allocation_mode above: defaults to True either way
+        # (Orchestrator.__init__ treats an absent key as True), so omitting
+        # this from the allowlist doesn't turn LLM gating off, it only means
+        # the documented "set false to opt out" escape hatch in the YAML
+        # comment silently wouldn't work via the systemd auto-start /
+        # POST /api/live/start path.
+        "llm_open_close_only",
+        # ExecutionAgent's broker-side stop-loss/trailing-stop attachment
+        # (see firm.agents.execution.ExecutionAgent._maybe_submit_protective_
+        # order, 2026-09-18) — off by default ({}), same silent-drop bug
+        # class as every other key in this tuple.
+        "protective_orders",
     ):
         if key in yaml_cfg:
             engine_config[key] = yaml_cfg[key]

@@ -197,6 +197,31 @@ class RiskAgent(Agent):
         # (0.05) so a de-risked book still clears the no-trade band.
         self.overlay_scale_floor: float = float(cfg.get("overlay_scale_floor", 0.25))
 
+        # Optional per-position stop-loss (off by default). mean_reversion
+        # and stat_arb's own docstrings both call for one ("reversals can
+        # fail spectacularly during momentum-driven crashes" / "a stop-loss
+        # on divergence beyond a maximum z-score") but neither the strategy
+        # layer nor this agent ever implemented it -- both are pure
+        # short-horizon divergence bets with no mechanism to cut a losing
+        # position early, so a persistently trending market lets losses run
+        # for the full holding period. Forces a held symbol's target to 0
+        # once its unrealized loss (PortfolioState.unrealized_return_pct)
+        # breaches max_loss_pct, for strategies named in ``strategies``.
+        # Exact in sleeved mode (portfolio is that strategy's own book, see
+        # Orchestrator._step_sleeved); in blended mode, ownership of a held
+        # symbol is approximated via the same dominant-strategy heuristic
+        # PerformanceAttribution already uses for order attribution
+        # (inputs["attribution"].dominant_strategy_by_symbol()), since a
+        # blended book has no per-strategy positions to check exactly.
+        stop_loss_cfg = cfg.get("stop_loss_overlay", {}) or {}
+        self.stop_loss_enabled: bool = bool(stop_loss_cfg.get("enabled", False))
+        self.stop_loss_strategies: set[str] = set(
+            stop_loss_cfg.get("strategies", ["mean_reversion", "stat_arb"])
+        )
+        self.stop_loss_max_loss_pct: float = float(
+            stop_loss_cfg.get("max_loss_pct", 0.07)
+        )
+
     def run(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
         proposal: TradeProposal = inputs["proposal"]
         portfolio = inputs.get("portfolio")
@@ -263,6 +288,17 @@ class RiskAgent(Agent):
         targets, v, a = self._drawdown_breaker(targets, portfolio)
         violations.extend(v)
         actions.extend(a)
+
+        if self.stop_loss_enabled:
+            targets, v, a = self._stop_loss_overlay(
+                targets,
+                portfolio,
+                inputs.get("prices") or {},
+                strategy=inputs.get("strategy"),
+                attribution=inputs.get("attribution"),
+            )
+            violations.extend(v)
+            actions.extend(a)
 
         # Final enforcement pass: non-uniform stages (sector) and de-risking
         # can perturb exposures set earlier, so re-assert the hard caps once
@@ -822,6 +858,63 @@ class RiskAgent(Agent):
             [f"Drawdown {drawdown:.1%} exceeds threshold {self.max_drawdown_pct:.1%}"],
             [f"Reduced exposure by {1 - scale:.0%} (drawdown circuit breaker)"],
         )
+
+    # ------------------------------------------------------------------
+    # Per-position stop-loss (opt-in)
+    # ------------------------------------------------------------------
+
+    def _stop_loss_overlay(
+        self,
+        targets: dict[str, float],
+        portfolio: Any,
+        prices: dict[str, float],
+        strategy: str | None,
+        attribution: Any,
+    ) -> tuple[dict[str, float], list[str], list[str]]:
+        holdings = getattr(portfolio, "holdings", None)
+        if not holdings or not prices:
+            return targets, [], []
+
+        if strategy is not None:
+            # Sleeved call site: this portfolio is entirely one strategy's
+            # book, so every held symbol belongs to it.
+            if strategy not in self.stop_loss_strategies:
+                return targets, [], []
+            owner_by_symbol = {sym: strategy for sym in holdings}
+        else:
+            # Blended call site: no single owning strategy for this shared
+            # book, so fall back to the same dominant-strategy heuristic
+            # PerformanceAttribution already uses for order attribution.
+            if attribution is None:
+                return targets, [], []
+            owner_by_symbol = attribution.dominant_strategy_by_symbol()
+
+        violations: list[str] = []
+        actions: list[str] = []
+        adjusted = dict(targets)
+        for sym, shares in holdings.items():
+            if shares == 0.0:
+                continue
+            owner = owner_by_symbol.get(sym)
+            if owner not in self.stop_loss_strategies:
+                continue
+            price = prices.get(sym)
+            if price is None:
+                continue
+            pnl_pct = portfolio.unrealized_return_pct(sym, price)
+            if pnl_pct is None or pnl_pct > -self.stop_loss_max_loss_pct:
+                continue
+            adjusted[sym] = 0.0
+            violations.append(
+                f"{sym} stop-loss: {owner} position at {pnl_pct:.1%} "
+                f"breaches -{self.stop_loss_max_loss_pct:.1%}"
+            )
+            actions.append(f"Force-exit {sym} ({owner} stop-loss)")
+            log.warning(
+                "Stop-loss triggered: %s (%s) at %.1f%% unrealized, forcing exit",
+                sym, owner, pnl_pct * 100,
+            )
+        return adjusted, violations, actions
 
     # ------------------------------------------------------------------
     # HMM market-regime overlay (opt-in)

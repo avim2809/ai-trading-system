@@ -83,6 +83,13 @@ class CycleResult:
     skipped: bool = False
     halted: bool = False
     error: str | None = None
+    # "open" | "close" | "intraday" | None -- which leg of the schedule
+    # triggered this cycle (see firm.live.scheduler's "hourly_market_hours"
+    # composite schedule, added 2026-09-18). None for a manual trigger or a
+    # single-cycle-per-day schedule (market_open/market_close) -- carried
+    # straight through to Orchestrator.step() to decide LLM-enhanced vs
+    # quant-only agent behavior for this cycle.
+    cycle_type: str | None = None
 
 
 class LiveTradingEngine:
@@ -387,6 +394,7 @@ class LiveTradingEngine:
             "orders_failed": result.orders_failed,
             "skipped": result.skipped,
             "error": result.error,
+            "cycle_type": result.cycle_type,
         }
         self._trade_history.record_cycle(summary)
         if result.order_statuses:
@@ -1365,7 +1373,7 @@ class LiveTradingEngine:
                 log.warning("Error closing live state store", exc_info=True)
         log.info("Live engine stopped after %d cycles", self._cycle_count)
 
-    def run_cycle(self, force: bool = False) -> CycleResult:
+    def run_cycle(self, force: bool = False, cycle_type: str | None = None) -> CycleResult:
         """Execute one full cycle of the agent pipeline.
 
         Cycles are serialised: if one is already running (e.g. a scheduled
@@ -1380,6 +1388,16 @@ class LiveTradingEngine:
         ``force=True`` (used by a manual ``/live/trigger?force=true``) to
         run anyway, e.g. for deliberate off-hours testing.
 
+        ``cycle_type`` ("open" | "close" | "intraday" | None) is set by
+        ``TradingScheduler`` for the "hourly_market_hours" composite
+        schedule (added 2026-09-18) and forwarded to
+        ``Orchestrator.step()`` unchanged -- it decides there whether this
+        cycle's LLM-enhanced agents (per agent_modes) may make live LLM
+        calls ("open"/"close") or must run quant-only this cycle
+        ("intraday"). ``None`` (a manual trigger, or a single-cycle-per-day
+        schedule like ``market_open``) makes no change, matching
+        pre-2026-09-18 behavior exactly.
+
         Returns a :class:`CycleResult` summarizing what happened.
         """
         if self._shutting_down:
@@ -1389,6 +1407,7 @@ class LiveTradingEngine:
                 timestamp=utcnow(),
                 skipped=True,
                 error="skipped: engine shutting down",
+                cycle_type=cycle_type,
             )
         if not self._cycle_lock.acquire(blocking=False):
             log.warning("run_cycle skipped: a cycle is already in progress")
@@ -1397,12 +1416,13 @@ class LiveTradingEngine:
                 timestamp=utcnow(),
                 skipped=True,
                 error="cycle already in progress",
+                cycle_type=cycle_type,
             )
         try:
             self._cycle_count += 1
             now = utcnow()
             self._current_cycle_started_at = now
-            result = CycleResult(cycle_id=self._cycle_count, timestamp=now)
+            result = CycleResult(cycle_id=self._cycle_count, timestamp=now, cycle_type=cycle_type)
 
             self._watchdog_timer = threading.Timer(
                 self._cycle_watchdog_seconds, self._on_cycle_watchdog_timeout, args=(self._cycle_count,)
@@ -1542,6 +1562,12 @@ class LiveTradingEngine:
                 "prices": prices,
                 "memory": self._memory,
                 "attribution": self._attribution,
+                # Real broker handle for ExecutionAgent's optional protective
+                # (stop-loss/trailing-stop) order attachment -- see
+                # ExecutionAgent._maybe_submit_protective_order, 2026-09-18.
+                # None in every backtest/offline context, where no live
+                # broker exists; that path already no-ops without one.
+                "broker": self._broker,
             }
 
             # Mark-to-market attribution daily regardless of signal-combination
@@ -1568,7 +1594,7 @@ class LiveTradingEngine:
                     "attribution daily update failed", exc_info=True,
                 )
 
-            orders, blackboard = self._orchestrator.step(context)
+            orders, blackboard = self._orchestrator.step(context, cycle_type=result.cycle_type)
             result.orders_generated = len(orders)
 
             proposal = getattr(blackboard, "proposal", None)

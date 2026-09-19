@@ -24,7 +24,7 @@ class OrderRequest:
     symbol: str
     side: Literal["buy", "sell"]
     quantity: float
-    order_type: Literal["market", "limit"] = "market"
+    order_type: Literal["market", "limit", "stop", "stop_limit", "trailing_stop"] = "market"
     limit_price: float | None = None
     strategy: str = "composite"
     time_in_force: str = "day"
@@ -33,6 +33,28 @@ class OrderRequest:
     # overlapping cycle that re-submits the same order is deduplicated by the
     # broker instead of double-filling.
     client_order_id: str | None = None
+    # Trigger price for "stop" and "stop_limit" orders (IBKR ``auxPrice`` /
+    # Alpaca ``stop_price``). Required for those two order types; ignored
+    # otherwise.
+    stop_price: float | None = None
+    # Trailing distance for "trailing_stop" orders, expressed in the same
+    # percentage units the underlying broker APIs use natively (e.g. ``1.0``
+    # means "1%", not "0.01") — Alpaca's ``trail_percent`` and IBKR's
+    # ``trailingPercent`` both take a plain percentage number, not a
+    # fraction. Exactly one of ``trail_percent``/``trail_amount`` should be
+    # set for a trailing-stop order; ``trail_percent`` takes precedence if
+    # both are given.
+    trail_percent: float | None = None
+    # Trailing distance in absolute price units (IBKR ``auxPrice`` used as a
+    # trailing amount / Alpaca ``trail_price``) — the alternative to
+    # ``trail_percent`` for a "trailing_stop" order.
+    trail_amount: float | None = None
+    # Request the order be eligible to execute during pre-market/after-hours
+    # sessions. Brokers/order-types that don't support this (see each
+    # adapter's own order-construction method) log a warning and submit
+    # without it rather than raising, so a misconfigured combination degrades
+    # to a regular-hours order instead of crashing the submission.
+    extended_hours: bool = False
 
 
 @dataclass

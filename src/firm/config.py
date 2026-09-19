@@ -102,6 +102,9 @@ class RiskConfig(BaseModel):
     # Optional HMM market-regime exposure overlay (off unless ``enabled: true``).
     # See firm.agents.risk.RiskAgent and firm.regime.detector.MarketRegimeDetector.
     regime_overlay: dict[str, Any] = {}
+    # Optional per-position stop-loss (off unless ``enabled: true``). See
+    # firm.agents.risk.RiskAgent._stop_loss_overlay.
+    stop_loss_overlay: dict[str, Any] = {}
 
 
 class DataConfig(BaseModel):

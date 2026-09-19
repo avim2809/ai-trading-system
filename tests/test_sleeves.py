@@ -208,6 +208,37 @@ class TestSleevedModeSingleStrategyMatchesBlended:
         assert _by_symbol(blended_orders) == _by_symbol(sleeved_orders)
 
 
+class TestSleevedModeBrokerThreading:
+    """context['broker'] must reach only the final netted real-execution
+    pass (the one that actually talks to the broker), never the per-sleeve
+    virtual pass (sleeve_portfolio has no broker sub-account) -- see
+    Orchestrator._step_sleeved, 2026-09-18."""
+
+    def test_broker_reaches_real_execution_not_sleeve_execution(self):
+        from unittest.mock import patch
+
+        signals = [_sig("AAPL", "momentum", 1.0)]
+        orch = _make_orchestrator(
+            analysts=[_analyst_with_signals(*signals)],
+            sleeve_traders={"momentum": TraderAgent(config={"allocation_method": "conviction_weighted"})},
+        )
+        sentinel_broker = object()
+
+        with (
+            patch.object(orch._real_execution, "run", wraps=orch._real_execution.run) as real_exec_spy,
+            patch.object(orch.execution, "run", wraps=orch.execution.run) as sleeve_exec_spy,
+        ):
+            orch.step({
+                "pit_view": _pit_view(),
+                "portfolio": PortfolioState(initial_capital=1_000_000.0),
+                "prices": {"AAPL": 150.0},
+                "broker": sentinel_broker,
+            })
+
+            assert real_exec_spy.call_args.kwargs["broker"] is sentinel_broker
+            assert sleeve_exec_spy.call_args.kwargs.get("broker") is None
+
+
 class TestSleevedModeIndependentCompounding:
     def test_sleeve_portfolio_updates_from_its_own_fills(self):
         signals = [_sig("AAPL", "momentum", 1.0)]
