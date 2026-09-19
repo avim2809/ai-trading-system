@@ -53,6 +53,7 @@ _IB_LOCK_ACQUIRE_TIMEOUT_SECONDS = 45.0
 
 try:
     from ib_async import IB, Order, Stock, LimitOrder, MarketOrder, StopLimitOrder, StopOrder
+    from ib_async.ib import StartupFetch
 
     _HAS_IB = True
 except ImportError:
@@ -138,7 +139,26 @@ class IBKRBroker(Broker):
             self._ib = IB()
             self._ib.RequestTimeout = _IB_REQUEST_TIMEOUT_SECONDS
             try:
-                self._ib.connect(self._host, self._port, clientId=self._client_id)
+                # fetchFields excludes SUB_ACCOUNT_UPDATES: ib_async's default
+                # startup sync (StartupFetch.ALL) calls
+                # reqAccountUpdatesMultiAsync(account, modelCode="") for every
+                # account, and IBKR's backend rejects that empty modelCode
+                # with error 321 "Group name cannot be null" on at least this
+                # account/Gateway-version combination -- confirmed live
+                # 2026-09-19 (every single connect attempt logged this via
+                # errorEvent, permanently blocking the sync step). This
+                # sub-account fetch is for Advisor/multi-client-account setups
+                # anyway; a single paper account has nothing for it to fetch,
+                # and plain ACCOUNT_UPDATES (still requested below) already
+                # covers this account's own values/positions.
+                self._ib.connect(
+                    self._host, self._port, clientId=self._client_id,
+                    fetchFields=(
+                        StartupFetch.POSITIONS | StartupFetch.ORDERS_OPEN
+                        | StartupFetch.ORDERS_COMPLETE | StartupFetch.ACCOUNT_UPDATES
+                        | StartupFetch.EXECUTIONS
+                    ),
+                )
                 self._ib.reqMarketDataType(self._market_data_type)
                 # Subscribe once, here, on the connecting thread. ib_async binds
                 # any call that awaits a Future (reqAccountSummary, reqTickers,

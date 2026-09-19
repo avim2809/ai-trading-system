@@ -36,6 +36,18 @@ class Blackboard:
         # longer silent) and a flag that the bar ran on a degraded signal set.
         self.errors: list[dict] = []
         self.degraded: bool = False
+        # Per-sleeve decision log (capital_allocation_mode: "sleeved" only --
+        # see Orchestrator._step_sleeved). One entry per strategy that has
+        # sleeve_traders configured, every cycle, regardless of outcome --
+        # {"status": "approved"|"rejected"|"no_signal"|"no_debate_results"|
+        # "<stage>_failed", "violations": [...], "actions": [...]}. Added
+        # 2026-09-19 after a real incident: stat_arb's sleeve was silently
+        # vetoed on every single cycle for 8+ days (frozen on stale
+        # cutover-seed positions) with the only trace being free-text
+        # journalctl log lines -- nothing queryable surfaced that a sleeve
+        # had stopped trading. This is that queryable trace, persisted via
+        # LiveTradingEngine._persist_cycle_result -> TradeHistoryStore.
+        self.sleeve_decisions: dict[str, dict] = {}
 
     def get_signals_by_symbol(self, symbol: str) -> list[Signal]:
         """Return all signals across every domain for *symbol*."""

@@ -11,6 +11,8 @@ import logging
 import os
 import threading
 from datetime import datetime
+from datetime import time as dt_time
+from datetime import timezone as dt_tz
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
@@ -65,6 +67,94 @@ HOURLY_MARKET_HOURS = "hourly_market_hours"
 _SESSION_SCHEDULES = frozenset({"market_open", "market_close"})
 
 DEFAULT_MARKET_TIMEZONE = "US/Eastern"
+
+# ---------------------------------------------------------------------------
+# Extended-hours trading (opt-in, off by default — see the
+# ``extended_hours_trading`` config block: {"enabled": false, "premarket":
+# {"enabled": false, "start": "...", "end": "...", "schedule": "cron:..."},
+# "afterhours": {...}}, added to the systemd auto-start allowlist in
+# firm.live.provider_utils). Distinct from HOURLY_MARKET_HOURS's "open"/
+# "intraday"/"close" legs, which only ever fire inside *regular* trading
+# hours. Two cycle_type values, each scheduled by its own optional
+# TradingScheduler job (see TradingScheduler._start_extended_hours_jobs) and
+# validated against the configured window by LiveTradingEngine.run_cycle
+# (see within_extended_hours_window below) before it's allowed to bypass the
+# regular is_market_open() gate.
+# ---------------------------------------------------------------------------
+EXTENDED_HOURS_CYCLE_TYPES = frozenset({"premarket", "afterhours"})
+
+# Standard US equity convention, used whenever a session's config omits its
+# own start/end. Pre-market: 04:00-09:30 ET. After-hours: 16:00-20:00 ET.
+_DEFAULT_EXTENDED_HOURS_WINDOWS: dict[str, tuple[str, str]] = {
+    "premarket": ("04:00", "09:30"),
+    "afterhours": ("16:00", "20:00"),
+}
+
+
+def _parse_hhmm(value: str) -> dt_time:
+    hour_str, _, minute_str = str(value).partition(":")
+    return dt_time(int(hour_str), int(minute_str or 0))
+
+
+def extended_hours_session_config(
+    extended_hours_cfg: dict[str, Any] | None, cycle_type: str,
+) -> dict[str, Any] | None:
+    """Return the *enabled* sub-window config block for *cycle_type*
+    ("premarket"/"afterhours") out of an ``extended_hours_trading`` config
+    dict, or ``None`` when the feature overall, or that specific session,
+    isn't enabled.
+
+    Both the scheduler (deciding when to fire an extended-hours cycle) and
+    the engine (deciding whether a fired cycle is genuinely still inside its
+    window before letting it proceed — see ``within_extended_hours_window``)
+    read this same helper, so they can never disagree about what "enabled"
+    means.
+    """
+    cfg = extended_hours_cfg or {}
+    if not cfg.get("enabled", False):
+        return None
+    session_cfg = cfg.get(cycle_type) or {}
+    if not session_cfg.get("enabled", False):
+        return None
+    return session_cfg
+
+
+def within_extended_hours_window(
+    now: datetime,
+    cycle_type: str,
+    extended_hours_cfg: dict[str, Any] | None,
+    *,
+    timezone: str = DEFAULT_MARKET_TIMEZONE,
+) -> bool:
+    """True when *now* genuinely falls inside the configured ``[start, end)``
+    window for *cycle_type* ("premarket"/"afterhours"), Mon-Fri only in
+    *timezone*.
+
+    Always False when the feature (or that specific session) isn't enabled
+    in *extended_hours_cfg* — callers that reached here because a cycle's
+    ``cycle_type`` is one of ``EXTENDED_HOURS_CYCLE_TYPES`` must treat a
+    False return as "skip this cycle", not as "fall back to the regular
+    is_market_open() gate" (see ``LiveTradingEngine.run_cycle``): a
+    "premarket"/"afterhours" cycle_type only exists because something
+    scheduled it, so silently treating a since-disabled feature as "market
+    closed, use the regular check" could let it slip through the regular
+    gate at a time (e.g. 6am) the regular gate never anticipates being
+    asked about.
+    """
+    session_cfg = extended_hours_session_config(extended_hours_cfg, cycle_type)
+    if session_cfg is None:
+        return False
+    tz = ZoneInfo(timezone)
+    ts = now if now.tzinfo is not None else now.replace(tzinfo=dt_tz.utc)
+    local = ts.astimezone(tz)
+    if local.weekday() >= 5:
+        return False
+    default_start, default_end = _DEFAULT_EXTENDED_HOURS_WINDOWS.get(
+        cycle_type, ("00:00", "00:00")
+    )
+    start_t = _parse_hhmm(session_cfg.get("start", default_start))
+    end_t = _parse_hhmm(session_cfg.get("end", default_end))
+    return start_t <= local.time() < end_t
 
 
 def trading_day_key(at: datetime, timezone: str = DEFAULT_MARKET_TIMEZONE) -> str:
@@ -307,6 +397,12 @@ class TradingScheduler:
         # of danelfin_universe_sync's sync_once signature (it has no notion
         # of sector-balancing), so it has no equivalent kwarg above.
         sp500_static_sector_map: dict[str, str] | None = None,
+        # Opt-in premarket/afterhours cycles (off by default — see the
+        # module-level EXTENDED_HOURS_CYCLE_TYPES docstring and
+        # ``extended_hours_trading`` in config/live*.yaml). Additive: these
+        # legs are registered alongside whatever ``schedule`` above already
+        # sets up, not a replacement for it.
+        extended_hours_trading: dict[str, Any] | None = None,
     ) -> None:
         if not _HAS_APSCHEDULER:
             raise ImportError(
@@ -343,6 +439,7 @@ class TradingScheduler:
         )
         self._sp500_sector_cache_refresh_day = sp500_sector_cache_refresh_day
         self._sp500_static_sector_map = dict(sp500_static_sector_map or {})
+        self._extended_hours_cfg: dict[str, Any] = dict(extended_hours_trading or {})
         self._scheduler: BackgroundScheduler | None = None
         self._job_id = "live_cycle"
         # Extra legs registered only for the "hourly_market_hours" composite
@@ -357,6 +454,10 @@ class TradingScheduler:
         self._sp500_sector_refresh_job_id = "sp500_sector_cache_refresh"
         self._lost_cycle_retry_job_id = "lost_cycle_retry"
         self._order_reconciliation_job_id = "order_reconciliation"
+        # Extended-hours legs (see _start_extended_hours_jobs) — only
+        # registered when self._extended_hours_cfg["enabled"] is true.
+        self._premarket_job_id = "live_cycle_premarket"
+        self._afterhours_job_id = "live_cycle_afterhours"
 
     def start(self) -> None:
         """Start the background scheduler."""
@@ -460,6 +561,8 @@ class TradingScheduler:
             max_instances=1,
             coalesce=True,
         )
+        if self._extended_hours_cfg.get("enabled"):
+            self._start_extended_hours_jobs()
         if self._schedule_spec in _SESSION_SCHEDULES or self._schedule_spec == HOURLY_MARKET_HOURS:
             # Meaningful for a single-cycle-per-day schedule (market_open/
             # market_close) since nothing else would run again for the rest
@@ -635,6 +738,50 @@ class TradingScheduler:
             max_instances=1,
             coalesce=True,
         )
+
+    def _start_extended_hours_jobs(self) -> None:
+        """Register the opt-in premarket/afterhours legs (see the
+        ``extended_hours_trading`` config block and module-level
+        ``EXTENDED_HOURS_CYCLE_TYPES`` docstring).
+
+        Additive to whatever ``self._schedule_spec`` already registered
+        above (a plain preset, an interval, or the "hourly_market_hours"
+        composite) — this only runs at all when
+        ``self._extended_hours_cfg["enabled"]`` is true, which defaults to
+        false, so an operator who never sets it sees no new jobs and no
+        behavior change. Each leg's own ``schedule`` key (default
+        "cron:08:00" for premarket, "cron:17:00" for afterhours — a few
+        minutes inside the session's own window, giving prices a moment to
+        populate/settle at the open of that window) is resolved through the
+        same ``_build_trigger`` used by every other schedule spec in this
+        class, so the same "cron:HH:MM" shorthand / raw-crontab conventions
+        apply here too. The *actual* window bounds a fired cycle is
+        validated against live in ``extended_hours_cfg["premarket"/
+        "afterhours"]["start"/"end"]`` and are checked independently by
+        ``LiveTradingEngine.run_cycle`` via ``within_extended_hours_window``
+        — this method only decides when APScheduler calls in, not whether
+        the engine actually lets that cycle run.
+        """
+        premarket_cfg = self._extended_hours_cfg.get("premarket") or {}
+        if premarket_cfg.get("enabled"):
+            self._scheduler.add_job(
+                lambda: self._run_cycle_safe(cycle_type="premarket"),
+                trigger=self._build_trigger(premarket_cfg.get("schedule", "cron:08:00")),
+                id=self._premarket_job_id,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        afterhours_cfg = self._extended_hours_cfg.get("afterhours") or {}
+        if afterhours_cfg.get("enabled"):
+            self._scheduler.add_job(
+                lambda: self._run_cycle_safe(cycle_type="afterhours"),
+                trigger=self._build_trigger(afterhours_cfg.get("schedule", "cron:17:00")),
+                id=self._afterhours_job_id,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
 
     def _run_cycle_safe(self, cycle_type: str | None = None) -> None:
         """Wrapper that catches exceptions to avoid killing the scheduler."""

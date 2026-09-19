@@ -28,7 +28,12 @@ from firm.brokers.base import Broker, BrokerError, OrderRequest, OrderStatus
 from firm.live.approval import ApprovalQueue
 from firm.live.data_feed import LiveDataFeed
 from firm.live.portfolio_sync import sync_portfolio_from_broker
-from firm.live.scheduler import DEFAULT_MARKET_TIMEZONE, trading_day_key
+from firm.live.scheduler import (
+    DEFAULT_MARKET_TIMEZONE,
+    EXTENDED_HOURS_CYCLE_TYPES,
+    trading_day_key,
+    within_extended_hours_window,
+)
 from firm.live.state_store import LiveStateStore
 from firm.portfolio.state import PortfolioState
 from firm.runtime import build_orchestrator
@@ -90,6 +95,22 @@ class CycleResult:
     # straight through to Orchestrator.step() to decide LLM-enhanced vs
     # quant-only agent behavior for this cycle.
     cycle_type: str | None = None
+    # True only when this cycle's cycle_type is "premarket"/"afterhours" AND
+    # run_cycle's market-hours gate confirmed *now* was genuinely inside the
+    # configured extended_hours_trading window for it (see
+    # firm.live.scheduler.within_extended_hours_window) -- a cycle that fails
+    # that check is skipped outright and never reaches order submission at
+    # all, so by the time _execute_orders reads this flag it reflects a
+    # gate-verified fact, not just the requested cycle_type string. Threaded
+    # into _execute_orders to decide whether this cycle's orders should
+    # request OrderRequest.extended_hours=True.
+    extended_hours_cycle: bool = False
+    # Per-sleeve decision log (capital_allocation_mode: "sleeved" only) --
+    # {strategy: {"status": ..., "violations": [...], "actions": [...]}},
+    # copied from Blackboard.sleeve_decisions after Orchestrator.step()
+    # returns. None in blended mode (no sleeves to report on). See
+    # Blackboard.sleeve_decisions's field docstring for why this exists.
+    sleeve_decisions: dict[str, dict[str, Any]] | None = None
 
 
 class LiveTradingEngine:
@@ -156,6 +177,20 @@ class LiveTradingEngine:
         # anyway. Scheduled cycles always respect this; a manual /live/trigger
         # can override with force=True for deliberate off-hours testing.
         self._respect_market_hours = bool(config.get("respect_market_hours", True))
+        # Extended-hours trading (opt-in, off by default) -- see
+        # firm.live.scheduler's EXTENDED_HOURS_CYCLE_TYPES/
+        # within_extended_hours_window docstrings for the config shape
+        # ({"enabled": false, "premarket": {...}, "afterhours": {...}}).
+        # Read directly off this same engine config dict (populated from
+        # config/live*.yaml's top-level extended_hours_trading key via
+        # provider_utils' allowlist) so the scheduler that decides *when*
+        # to fire a "premarket"/"afterhours" cycle and this engine's gate
+        # that decides whether *now* is genuinely still inside that
+        # cycle's window (see run_cycle below) can never disagree about
+        # what "enabled" means.
+        self._extended_hours_cfg: dict[str, Any] = dict(
+            config.get("extended_hours_trading") or {}
+        )
         # Macro-event blackout gate (news-guard). Default OFF — when enabled it
         # holds orders whose instrument sits inside a high-impact economic-event
         # window (FOMC/NFP/CPI...). ``offline`` uses only the bundled calendar.
@@ -395,6 +430,7 @@ class LiveTradingEngine:
             "skipped": result.skipped,
             "error": result.error,
             "cycle_type": result.cycle_type,
+            "sleeve_decisions": result.sleeve_decisions,
         }
         self._trade_history.record_cycle(summary)
         if result.order_statuses:
@@ -1431,23 +1467,48 @@ class LiveTradingEngine:
             self._watchdog_timer.start()
 
             if self._respect_market_hours and not force:
-                try:
-                    market_open = self._broker.is_market_open()
-                except Exception:
-                    # Fail open: a broken market-hours check must never
-                    # silently prevent every future cycle from running.
-                    log.warning(
-                        "Could not determine market hours; proceeding with cycle",
-                        exc_info=True,
-                    )
-                    market_open = True
-                if not market_open:
-                    log.info("Cycle %d skipped: market is closed", self._cycle_count)
-                    result.skipped = True
-                    result.error = "skipped: market closed"
-                    self._cycle_history.append(result)
-                    self._persist_cycle_result(result)
-                    return result
+                if cycle_type in EXTENDED_HOURS_CYCLE_TYPES:
+                    # An explicit "premarket"/"afterhours" cycle (see
+                    # firm.live.scheduler's opt-in extended-hours jobs) is
+                    # validated against the configured extended-hours
+                    # window instead of is_market_open() -- that call only
+                    # knows about *regular* trading hours and would always
+                    # say "closed" at, say, 8am. Deliberately narrow: every
+                    # other cycle_type (None/"open"/"intraday"/"close")
+                    # falls through to the unchanged is_market_open() gate
+                    # below exactly as before this feature existed.
+                    if not within_extended_hours_window(
+                        now, cycle_type, self._extended_hours_cfg,
+                        timezone=self._trading_day_timezone,
+                    ):
+                        log.info(
+                            "Cycle %d skipped: outside configured extended-hours "
+                            "window (%s)", self._cycle_count, cycle_type,
+                        )
+                        result.skipped = True
+                        result.error = "skipped: outside extended-hours window"
+                        self._cycle_history.append(result)
+                        self._persist_cycle_result(result)
+                        return result
+                    result.extended_hours_cycle = True
+                else:
+                    try:
+                        market_open = self._broker.is_market_open()
+                    except Exception:
+                        # Fail open: a broken market-hours check must never
+                        # silently prevent every future cycle from running.
+                        log.warning(
+                            "Could not determine market hours; proceeding with cycle",
+                            exc_info=True,
+                        )
+                        market_open = True
+                    if not market_open:
+                        log.info("Cycle %d skipped: market is closed", self._cycle_count)
+                        result.skipped = True
+                        result.error = "skipped: market closed"
+                        self._cycle_history.append(result)
+                        self._persist_cycle_result(result)
+                        return result
 
             cycle_token = object()
             self._active_cycle_token = cycle_token
@@ -1596,6 +1657,9 @@ class LiveTradingEngine:
 
             orders, blackboard = self._orchestrator.step(context, cycle_type=result.cycle_type)
             result.orders_generated = len(orders)
+            sleeve_decisions = getattr(blackboard, "sleeve_decisions", None)
+            if sleeve_decisions:
+                result.sleeve_decisions = sleeve_decisions
 
             proposal = getattr(blackboard, "proposal", None)
             if proposal is not None:
@@ -1674,7 +1738,8 @@ class LiveTradingEngine:
                         return
                 self._warm_broker_universe()
                 statuses, failed = self._execute_orders(
-                    auto_orders, cycle_id=self._cycle_count
+                    auto_orders, cycle_id=self._cycle_count,
+                    extended_hours=result.extended_hours_cycle,
                 )
                 result.orders_submitted = len(statuses)
                 result.order_statuses = [
@@ -2107,7 +2172,10 @@ class LiveTradingEngine:
         return [], orders
 
     def _execute_orders(
-        self, orders: list[dict[str, Any]], cycle_id: int = 0
+        self,
+        orders: list[dict[str, Any]],
+        cycle_id: int = 0,
+        extended_hours: bool = False,
     ) -> tuple[list[tuple[OrderStatus, str]], list[dict[str, Any]]]:
         """Submit orders to the broker.
 
@@ -2122,6 +2190,17 @@ class LiveTradingEngine:
         submission time, and must be threaded through explicitly for the
         persisted trade history to remain traceable back to which strategy
         caused which order (see ``_status_to_dict``).
+
+        ``extended_hours`` is set on every ``OrderRequest`` built here
+        (``run_cycle``'s only caller passes ``result.extended_hours_cycle``,
+        gate-verified true only for a cycle explicitly running inside a
+        configured premarket/afterhours window — see
+        ``firm.live.scheduler.within_extended_hours_window``). ``False`` by
+        default so a regular-hours cycle's orders are unaffected; each
+        broker adapter decides for itself what to do with the flag
+        (``AlpacaBroker`` only honors it on plain limit orders, per
+        Alpaca's own API restriction; ``IBKRBroker`` sets ``outsideRth`` on
+        any order type — see each adapter's submission method).
         """
         from firm.live.execution_safety import Order, RiskProfile, guard_live_submission, guard_order
 
@@ -2210,6 +2289,11 @@ class LiveTradingEngine:
                 # Include the per-cycle order index so two same-symbol/same-side
                 # orders in one cycle still have distinct broker idempotency keys.
                 client_order_id=f"c{cycle_id}-{order_index}-{o['symbol']}-{o['side']}",
+                # See this method's docstring: only true for a cycle
+                # gate-verified to be genuinely running inside a configured
+                # extended-hours window, never a global config toggle
+                # applied regardless of when this cycle actually runs.
+                extended_hours=extended_hours,
             )
             if broker_circuit_open:
                 failed.append({

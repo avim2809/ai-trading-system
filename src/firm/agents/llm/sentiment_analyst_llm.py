@@ -28,6 +28,11 @@ class LLMSentimentAnalyst(SentimentAnalyst, LLMAgentMixin):
         LLMAgentMixin.__init__(self, llm_config=llm_config)
 
     def run(self, ctx: AgentContext, **inputs: Any) -> SignalSet:
+        # Local import: matches LLMAgentMixin._call_llm's own local import of
+        # this exception, so both always resolve against whatever module is
+        # currently in sys.modules (tests patch firm.llm.exceptions there).
+        from firm.llm.exceptions import LLMEnhancementSkipped
+
         quant_result = SentimentAnalyst.run(self, ctx, **inputs)
 
         enhanced_signals: list[Signal] = []
@@ -77,6 +82,9 @@ class LLMSentimentAnalyst(SentimentAnalyst, LLMAgentMixin):
                     asof=sig.asof,
                     meta={**sig.meta, "llm_rationale": parsed.rationale, "llm_enhanced": True},
                 ))
+            except LLMEnhancementSkipped:
+                log.debug("LLM enhancement skipped by policy for %s, using quant", sig.symbol)
+                enhanced_signals.append(sig)
             except Exception:
                 log.warning("LLM enhancement failed for %s, using quant", sig.symbol, exc_info=True)
                 enhanced_signals.append(sig)

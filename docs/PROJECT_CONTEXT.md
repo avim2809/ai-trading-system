@@ -403,6 +403,7 @@ Explicit API request fields override YAML when provided (non-null / non-empty).
 | `allocation_method: joint_optimizer` | `firm.agents.trader` / `firm.portfolio.optimizer` | Joint mean-variance-with-costs QP (`cvxpy`) replacing L1-normalize-to-full-investment sizing. **Disabled by default (not shipped anywhere) — failed its walk-forward+PBO gate** (see `docs/formal_pbo_audit.md`'s `joint_optimizer` section / `docs/remediation_progress.md` #61-62); kept as validated, tested, off-by-default infrastructure only. |
 | `risk.stop_loss_overlay.enabled` | `firm.agents.risk` | Portfolio-level cycle-gated stop-loss (see "Stop-loss / trailing-stop / extended-hours orders" above). **Disabled by default** — pending backtest validation before flipping on for either instance. |
 | `protective_orders` | `firm.agents.execution` | Broker-side stop/trailing-stop orders per strategy (see same section above). **Disabled by default (`{}`)** — also requires a real `broker` handle, only present on the live path (never in a backtest). |
+| `extended_hours_trading.enabled` | `firm.live.scheduler` / `firm.live.engine` | Opt-in premarket/afterhours cycles + `OrderRequest.extended_hours` (see "Extended-hours trading" above). **Disabled by default (`{}`)** — not set in either shipped `config/live*.yaml`. |
 | `llm_open_close_only` | `firm.agents.orchestrator` | Restricts LLM-enhanced `agent_modes` to the day's open/close cycles; every intraday cycle forces `cache_only`. **Enabled by default (`true`)** — deliberately not an opt-in, since it's what keeps the 2026-09-18 `hourly_market_hours` cadence cost-flat. |
 | `FIRM_ALLOW_TRADING` | `firm.live.execution_safety` | Hard env lock; live brokers won't submit unless `=1` |
 
@@ -586,9 +587,40 @@ strategy's own documented "a stop-loss is advisable" ever implemented anywhere:
 - **Extended-hours**: `OrderRequest.extended_hours` sets Alpaca's `extended_hours` flag
   (limit orders only — other order types silently degrade to regular-hours with a logged
   warning, since Alpaca's API doesn't honor it elsewhere) or IBKR's `outsideRth` (every
-  order type). Not currently set anywhere in the live path — the flag exists on the order
-  schema/both brokers but nothing yet decides *when* to submit an extended-hours order or
-  relaxes the engine's regular-hours cycle gate to produce one.
+  order type).
+
+### Extended-hours trading (2026-09-19, opt-in and off by default)
+
+Wires the `OrderRequest.extended_hours` flag above into the live path — previously it
+existed on the order schema/both brokers but nothing ever set it. Config key
+`extended_hours_trading` (`{"enabled": false, "premarket": {...}, "afterhours": {...}}`,
+same shape read by both pieces below):
+
+- **Schedule**: `TradingScheduler._start_extended_hours_jobs` registers up to two
+  additional cron jobs — `premarket` (default `cron:08:00`) and `afterhours` (default
+  `cron:17:00`) — additive to whatever the main `schedule` preset/composite already runs.
+  Only registered per-session when `extended_hours_trading.enabled` **and** that
+  session's own `enabled` are both true; each job passes its own explicit
+  `cycle_type` ("premarket"/"afterhours") through to `LiveTradingEngine.run_cycle`.
+- **Engine gate**: `LiveTradingEngine.run_cycle`'s market-hours check (`_respect_market_hours`)
+  now branches on `cycle_type`: `"premarket"`/`"afterhours"` is validated against the
+  configured `[start, end)` window (default 04:00-09:30 / 16:00-20:00 ET,
+  `firm.live.scheduler.within_extended_hours_window`, Mon-Fri only) instead of
+  `is_market_open()` — a cycle outside that window (including weekends/overnight) is
+  still skipped exactly like a regular closed-market cycle. Every other `cycle_type`
+  (`None`/`"open"`/`"intraday"`/`"close"`) is completely unaffected — still gated by
+  `is_market_open()` as before this feature existed.
+- **Order flag**: only when `run_cycle`'s gate confirms a cycle is genuinely inside its
+  configured window (`CycleResult.extended_hours_cycle`) does `_execute_orders` set
+  `OrderRequest.extended_hours=True` on that cycle's orders — never a blanket config
+  toggle applied regardless of when a cycle actually runs, and never on the separate
+  `ExecutionAgent._maybe_submit_protective_order` broker-resident stop side-channel
+  above (always regular-hours).
+- `extended_hours_trading` must be present in `provider_utils.py`'s allowlist tuple to
+  reach both `TradingScheduler` and `LiveTradingEngine` via the systemd auto-start /
+  `POST /api/live/start` path — added there in the same change as this feature.
+  `config/live.yaml`/`config/live_alpaca.yaml` do **not** set it (feature off on both
+  instances) — enabling it live is a separate decision.
 - Both `risk.stop_loss_overlay` and `protective_orders` must be present in
   `provider_utils.py`'s allowlist tuple to actually reach the engine via the systemd
   auto-start / `POST /api/live/start` path (see "What `resolve_live_startup()` merges"
@@ -709,6 +741,32 @@ design/history: `docs/capital_sleeves_plan.md`.
   `GET /api/live/attribution` prefers exact per-sleeve metrics
   (`Orchestrator.get_sleeve_metrics()`) over the heuristic once a sleeve has ≥2 daily
   snapshots, falling back to the heuristic for any non-sleeved strategy.
+- **A second real bug, found live (2026-09-19)**: the SAME per-sleeve risk check
+  (`RiskAgent.run`, called once per sleeve against only that strategy's own signals) used
+  the blended book's `max_position_pct`/`veto_threshold` unchanged. Fine for a strategy
+  whose sleeve stays diversified, but `stat_arb` (at most 5 pairs / 10 legs,
+  `strategy_params.stat_arb.max_pairs`) legitimately needs 30-90% of its OWN sleeve
+  capital per leg on a typical 2-4-leg day — the shared 5%/50% envelope clipped that so
+  hard it tripped the veto on **every single stat_arb sleeve decision since sleeved mode
+  began on 9/10** (confirmed via journalctl: 9/9 logged decisions were vetoes, 0
+  approved) — that sleeve had been silently frozen on its 9/10 cutover-seed positions for
+  over a week, never once acting on a real signal, with no queryable trace (only
+  free-text log lines). Fixed two ways:
+  - `RiskAgent.sleeve_risk_overrides` (config key, empty by default): a per-strategy
+    override of `max_position_pct`/`max_gross_exposure`/`max_net_exposure`/
+    `veto_threshold`, applied only for the duration of that one `run()` call (save/
+    restore, same pattern as `Orchestrator._apply_cycle_llm_mode`). `config/live_alpaca.
+    yaml` sets `stat_arb: {max_position_pct: 0.50, max_gross_exposure: 2.0,
+    veto_threshold: 0.95}` — this one **is** enabled live (not shipped disabled, unlike
+    every other new knob this session), since it fixes a confirmed active incident.
+  - `Blackboard.sleeve_decisions` (new field, sleeved mode only): every sleeve gets a
+    per-cycle status entry (`"approved"|"rejected"|"no_signal"|"no_debate_results"|
+    "<stage>_failed"`, plus `violations`/`actions` when relevant) — see
+    `Orchestrator._step_sleeved`. Persisted via `CycleResult.sleeve_decisions` ->
+    `LiveTradingEngine._persist_cycle_result` into the same `TradeHistoryStore` cycle
+    records everything else already goes through, and queryable directly via
+    `GET /api/live/sleeves/decisions?strategy=<name>&limit=N` (most recent first) instead
+    of grepping logs to notice a sleeve has stopped trading.
 - **Deliberately not done yet**: a per-sleeve NAV/position/PnL frontend view (still one
   shared-portfolio UI); cross-sleeve LLM-enhancement budget coordination (only matters if
   `bull_researcher`/`bear_researcher`/`debate` are ever switched to `llm_enhanced` — the

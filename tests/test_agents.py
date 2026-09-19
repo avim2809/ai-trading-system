@@ -929,6 +929,46 @@ class TestRiskManager:
         assert not decision.approved
         assert any("VETO" in v for v in decision.violations)
 
+    def test_sleeve_risk_override_unblocks_concentrated_strategy(self):
+        """Real incident (2026-09-19): a strategy whose sleeve legitimately
+        concentrates into a handful of names (e.g. stat_arb's 2-6 active
+        pair legs) gets clipped so hard by the blended book's
+        max_position_pct/veto_threshold that it's vetoed almost every
+        cycle. sleeve_risk_overrides lets that one strategy use a wider
+        envelope without loosening anything for others."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(
+            config={
+                "max_position_pct": 0.05,
+                "max_gross_exposure": 2.0,
+                "veto_threshold": 0.5,
+                "sleeve_risk_overrides": {
+                    "stat_arb": {"max_position_pct": 0.5, "veto_threshold": 0.95},
+                },
+            }
+        )
+        concentrated = TradeProposal(
+            asof=NOW,
+            targets={"JPM": 0.45, "BAC": -0.45},  # 2-leg pairs trade
+        )
+        ctx = AgentContext(now=NOW)
+
+        overridden = risk.run(ctx, proposal=concentrated, strategy="stat_arb")
+        assert overridden.approved
+        assert overridden.adjusted_targets["JPM"] == pytest.approx(0.45)
+        assert overridden.adjusted_targets["BAC"] == pytest.approx(-0.45)
+
+        # Same proposal, no override -- must still be vetoed under the
+        # unmodified default envelope (proves the override didn't leak).
+        not_overridden = risk.run(ctx, proposal=concentrated, strategy="other_strategy")
+        assert not not_overridden.approved
+
+        # Attributes must be restored exactly, not left mutated, so a later
+        # call for a *different* strategy isn't accidentally loosened too.
+        assert risk.max_position_pct == 0.05
+        assert risk.veto_threshold == 0.5
+
     def test_drawdown_circuit_breaker(self):
         from firm.agents.risk import RiskAgent
         from firm.portfolio.state import PortfolioState

@@ -222,7 +222,70 @@ class RiskAgent(Agent):
             stop_loss_cfg.get("max_loss_pct", 0.07)
         )
 
+        # Optional per-strategy override of the exposure/veto envelope below
+        # (max_position_pct, max_gross_exposure, max_net_exposure,
+        # veto_threshold), keyed by strategy name, e.g.
+        # {"stat_arb": {"max_position_pct": 0.5, "veto_threshold": 0.95}}.
+        # Empty by default -- every strategy uses the caps above unchanged.
+        #
+        # Real incident (found 2026-09-19): in capital_allocation_mode
+        # "sleeved", each sleeve's risk check runs against that *one*
+        # strategy's own signals only (see Orchestrator._step_sleeved), so a
+        # concentrated strategy like stat_arb (2-6 active pair legs on a
+        # given day, by design -- max_pairs caps it at 5 pairs / 10 legs,
+        # not this account's full ~25-name universe) routinely needs 30-90%
+        # per leg of its OWN sleeve capital. The shared max_position_pct
+        # (5%, calibrated for the diversified ~25-name blended book) clips
+        # that so hard the >50% veto_threshold trips almost every cycle --
+        # confirmed live: every single stat_arb sleeve decision logged on
+        # the Alpaca instance since sleeved mode began (2026-09-10) was a
+        # VETO, meaning that sleeve had been silently frozen on its
+        # 9/10-cutover seed positions for over a week, never acting on a
+        # real signal. This lets a strategy whose sleeve is inherently
+        # concentrated by design get an envelope sized for *its own* book
+        # instead of the blended book's diversification-oriented caps,
+        # without loosening anything for a strategy that doesn't need it.
+        self.sleeve_risk_overrides: dict[str, dict[str, Any]] = (
+            cfg.get("sleeve_risk_overrides", {}) or {}
+        )
+
     def run(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
+        """Apply this call's ``sleeve_risk_overrides`` (if any) for the
+        strategy named in ``inputs["strategy"]``, then delegate to
+        :meth:`_run_impl`.
+
+        Overrides the caps that would otherwise misfire on a strategy whose
+        sleeve is inherently concentrated by design (see
+        ``sleeve_risk_overrides``'s field docstring above) by temporarily
+        mutating this instance's own attributes for the duration of this
+        one call and restoring them in a ``finally`` -- safe because a
+        single ``RiskAgent`` instance's ``run()`` calls are never made
+        concurrently from different threads (the sleeved-mode loop in
+        ``Orchestrator._step_sleeved`` that calls this per strategy is a
+        plain sequential ``for`` loop), matching the same
+        save/apply/restore-in-finally pattern
+        ``Orchestrator._apply_cycle_llm_mode`` already uses for the same
+        reason.
+        """
+        strategy = inputs.get("strategy")
+        override = self.sleeve_risk_overrides.get(strategy) if strategy else None
+        if not override:
+            return self._run_impl(ctx, **inputs)
+
+        saved = {
+            attr: getattr(self, attr)
+            for attr in ("max_position_pct", "max_gross_exposure", "max_net_exposure", "veto_threshold")
+        }
+        for attr, value in override.items():
+            if attr in saved:
+                setattr(self, attr, value)
+        try:
+            return self._run_impl(ctx, **inputs)
+        finally:
+            for attr, value in saved.items():
+                setattr(self, attr, value)
+
+    def _run_impl(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
         proposal: TradeProposal = inputs["proposal"]
         portfolio = inputs.get("portfolio")
 

@@ -203,6 +203,42 @@ def test_resolve_live_startup_carries_capital_allocation_mode_when_set():
     assert resolved["engine_config"]["real_rebalance_band_pct"] == 0.01
 
 
+def test_resolve_live_startup_carries_extended_hours_trading_when_set():
+    """Same silent-drop risk class as capital_allocation_mode above: without
+    this key in provider_utils' allowlist tuple, config/live.yaml setting
+    extended_hours_trading.enabled: true would never actually reach
+    LiveTradingEngine or TradingScheduler via the systemd auto-start path."""
+    from unittest.mock import patch as _patch
+
+    from firm.live.provider_utils import resolve_live_startup
+
+    fake_yaml = {
+        "risk": {"max_position_pct": 0.05},
+        "extended_hours_trading": {
+            "enabled": True,
+            "premarket": {"enabled": True, "start": "04:00", "end": "09:30"},
+            "afterhours": {"enabled": False},
+        },
+    }
+    with _patch("firm.live.provider_utils.load_live_yaml_defaults", return_value=fake_yaml):
+        resolved = resolve_live_startup()
+    assert resolved["engine_config"]["extended_hours_trading"] == fake_yaml["extended_hours_trading"]
+
+
+def test_resolve_live_startup_extended_hours_trading_absent_from_yaml_is_not_fabricated():
+    """No extended_hours_trading key in config/live.yaml -- the resolved
+    engine_config must not fabricate one; LiveTradingEngine/TradingScheduler
+    both treat "key absent" the same as "feature off"."""
+    from unittest.mock import patch as _patch
+
+    from firm.live.provider_utils import resolve_live_startup
+
+    fake_yaml = {"risk": {"max_position_pct": 0.05}}
+    with _patch("firm.live.provider_utils.load_live_yaml_defaults", return_value=fake_yaml):
+        resolved = resolve_live_startup()
+    assert "extended_hours_trading" not in resolved["engine_config"]
+
+
 def test_resolve_live_startup_costs_absent_from_yaml_leaves_execution_agent_defaults():
     from unittest.mock import patch as _patch
 

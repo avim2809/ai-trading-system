@@ -282,6 +282,17 @@ def resolve_live_startup(
         # order, 2026-09-18) — off by default ({}), same silent-drop bug
         # class as every other key in this tuple.
         "protective_orders",
+        # Opt-in premarket/afterhours trading (see firm.live.scheduler's
+        # EXTENDED_HOURS_CYCLE_TYPES/within_extended_hours_window and
+        # LiveTradingEngine's extended_hours_cycle gate, 2026-09-19) — off
+        # by default ({}, top-level "enabled" defaults False), same
+        # silent-drop bug class as every other key in this tuple. Read by
+        # both LiveTradingEngine (the market-hours gate) and, via
+        # _start_live_scheduler's own copy off engine_config, TradingScheduler
+        # (which premarket/afterhours cron jobs to register) — both need the
+        # *same* resolved dict, which is exactly what this allowlist copy
+        # into engine_config gives them.
+        "extended_hours_trading",
     ):
         if key in yaml_cfg:
             engine_config[key] = yaml_cfg[key]

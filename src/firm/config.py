@@ -105,6 +105,10 @@ class RiskConfig(BaseModel):
     # Optional per-position stop-loss (off unless ``enabled: true``). See
     # firm.agents.risk.RiskAgent._stop_loss_overlay.
     stop_loss_overlay: dict[str, Any] = {}
+    # Optional per-strategy override of the exposure/veto envelope, keyed by
+    # strategy name (empty = no strategy's caps change). See
+    # firm.agents.risk.RiskAgent.sleeve_risk_overrides's field docstring.
+    sleeve_risk_overrides: dict[str, Any] = {}
 
 
 class DataConfig(BaseModel):

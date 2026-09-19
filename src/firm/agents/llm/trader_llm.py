@@ -26,6 +26,11 @@ class LLMTraderAgent(TraderAgent, LLMAgentMixin):
         LLMAgentMixin.__init__(self, llm_config=llm_config)
 
     def run(self, ctx: AgentContext, **inputs: Any) -> TradeProposal:
+        # Local import: matches LLMAgentMixin._call_llm's own local import of
+        # this exception, so both always resolve against whatever module is
+        # currently in sys.modules (tests patch firm.llm.exceptions there).
+        from firm.llm.exceptions import LLMEnhancementSkipped
+
         quant_proposal = TraderAgent.run(self, ctx, **inputs)
 
         if not self._allow_portfolio_llm():
@@ -73,6 +78,8 @@ class LLMTraderAgent(TraderAgent, LLMAgentMixin):
                     per_strategy=quant_proposal.per_strategy,
                     notes=parsed.notes or quant_proposal.notes,
                 )
+        except LLMEnhancementSkipped:
+            log.debug("LLM trader review skipped by policy, using quant proposal")
         except Exception:
             log.warning("LLM trader review failed, using quant proposal", exc_info=True)
 

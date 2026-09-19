@@ -796,6 +796,7 @@ class Orchestrator(Agent):
                 # No signal from this strategy this cycle -- its book simply
                 # doesn't trade, but still needs a mark-to-market snapshot so
                 # its return series has no gaps on no-trade days.
+                bb.sleeve_decisions[strategy] = {"status": "no_signal"}
                 sleeve_portfolio.record_snapshot(pit_view.asof, prices)
                 continue
 
@@ -805,6 +806,7 @@ class Orchestrator(Agent):
             except Exception:
                 log.warning("Sleeve %s bull/bear failed", strategy, exc_info=True)
                 bb.errors.append({"agent": f"sleeve:{strategy}", "error": "bull/bear failed"})
+                bb.sleeve_decisions[strategy] = {"status": "bull_bear_failed"}
                 sleeve_portfolio.record_snapshot(pit_view.asof, prices)
                 continue
             sleeve_bb.theses.extend(bull_theses)
@@ -817,10 +819,12 @@ class Orchestrator(Agent):
             except Exception:
                 log.warning("Sleeve %s debate failed", strategy, exc_info=True)
                 bb.errors.append({"agent": f"sleeve:{strategy}", "error": "debate failed"})
+                bb.sleeve_decisions[strategy] = {"status": "debate_failed"}
                 sleeve_portfolio.record_snapshot(pit_view.asof, prices)
                 continue
             sleeve_bb.debate_results = debate_results
             if not debate_results:
+                bb.sleeve_decisions[strategy] = {"status": "no_debate_results"}
                 sleeve_portfolio.record_snapshot(pit_view.asof, prices)
                 continue
 
@@ -832,6 +836,7 @@ class Orchestrator(Agent):
             except Exception:
                 log.warning("Sleeve %s trader failed", strategy, exc_info=True)
                 bb.errors.append({"agent": f"sleeve:{strategy}", "error": "trader failed"})
+                bb.sleeve_decisions[strategy] = {"status": "trader_failed"}
                 sleeve_portfolio.record_snapshot(pit_view.asof, prices)
                 continue
             sleeve_bb.proposal = proposal
@@ -844,11 +849,17 @@ class Orchestrator(Agent):
             except Exception:
                 log.warning("Sleeve %s risk failed", strategy, exc_info=True)
                 bb.errors.append({"agent": f"sleeve:{strategy}", "error": "risk failed"})
+                bb.sleeve_decisions[strategy] = {"status": "risk_failed"}
                 sleeve_portfolio.record_snapshot(pit_view.asof, prices)
                 continue
             sleeve_bb.risk_decision = decision
             if not decision.approved:
                 log.info("Sleeve %s proposal rejected: %s", strategy, decision.violations)
+                bb.sleeve_decisions[strategy] = {
+                    "status": "rejected",
+                    "violations": list(decision.violations),
+                    "actions": list(decision.actions),
+                }
                 sleeve_portfolio.record_snapshot(pit_view.asof, prices)
                 continue
 
@@ -860,9 +871,19 @@ class Orchestrator(Agent):
             except Exception:
                 log.warning("Sleeve %s execution failed", strategy, exc_info=True)
                 bb.errors.append({"agent": f"sleeve:{strategy}", "error": "execution failed"})
+                bb.sleeve_decisions[strategy] = {
+                    "status": "execution_failed",
+                    "violations": list(decision.violations),
+                    "actions": list(decision.actions),
+                }
                 sleeve_portfolio.record_snapshot(pit_view.asof, prices)
                 continue
             sleeve_bb.execution_report = sleeve_report
+            bb.sleeve_decisions[strategy] = {
+                "status": "approved",
+                "violations": list(decision.violations),
+                "actions": list(decision.actions),
+            }
 
             # Apply this sleeve's own fills to its own book -- exactly the
             # backtest path's mechanism (PortfolioState.update), giving a

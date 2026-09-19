@@ -2129,6 +2129,227 @@ class TestMarketHoursGate:
         mock_orch.step.assert_called_once()
 
 
+class TestExtendedHoursGate:
+    """Regression tests for the opt-in premarket/afterhours cycle gate (see
+    firm.live.scheduler.within_extended_hours_window and
+    LiveTradingEngine.run_cycle's EXTENDED_HOURS_CYCLE_TYPES branch, added
+    2026-09-19). Every non-extended cycle_type (None/"open"/"intraday"/
+    "close") is already covered, unchanged, by TestMarketHoursGate above --
+    this class only covers the new branch itself.
+    """
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_premarket_cycle_skipped_when_feature_off_by_default(
+        self, mock_build, engine_components
+    ):
+        """extended_hours_trading defaults to {} (feature off) -- a
+        "premarket" cycle_type must be treated as outside the window
+        (skipped), never silently falling back to is_market_open()."""
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle(cycle_type="premarket")
+        assert result.skipped is True
+        assert result.error == "skipped: outside extended-hours window"
+        assert result.extended_hours_cycle is False
+        mock_orch.step.assert_not_called()
+
+    @patch("firm.live.engine.build_orchestrator")
+    @patch("firm.live.engine.utcnow")
+    def test_premarket_cycle_runs_inside_configured_window(
+        self, mock_utcnow, mock_build, engine_components
+    ):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+        # 2026-07-27 (Monday) 12:00 UTC == 08:00 ET (EDT) -- inside the
+        # default 04:00-09:30 premarket window.
+        mock_utcnow.return_value = datetime(2026, 7, 27, 12, 0)
+        # is_market_open() must be irrelevant to this branch.
+        broker._market_open = False
+
+        config = {
+            **config,
+            "extended_hours_trading": {"enabled": True, "premarket": {"enabled": True}},
+        }
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle(cycle_type="premarket")
+        assert result.skipped is False
+        assert result.extended_hours_cycle is True
+        mock_orch.step.assert_called_once()
+
+    @patch("firm.live.engine.build_orchestrator")
+    @patch("firm.live.engine.utcnow")
+    def test_premarket_cycle_skipped_outside_configured_window(
+        self, mock_utcnow, mock_build, engine_components
+    ):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_build.return_value = mock_orch
+        # 2026-07-27 22:00 UTC == 18:00 ET -- well past the premarket window
+        # (and not inside afterhours either, since that's not enabled here).
+        mock_utcnow.return_value = datetime(2026, 7, 27, 22, 0)
+
+        config = {
+            **config,
+            "extended_hours_trading": {"enabled": True, "premarket": {"enabled": True}},
+        }
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle(cycle_type="premarket")
+        assert result.skipped is True
+        assert result.error == "skipped: outside extended-hours window"
+        mock_orch.step.assert_not_called()
+
+    @patch("firm.live.engine.build_orchestrator")
+    @patch("firm.live.engine.utcnow")
+    def test_premarket_cycle_skipped_on_weekend_despite_matching_time(
+        self, mock_utcnow, mock_build, engine_components
+    ):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_build.return_value = mock_orch
+        # Saturday 2026-07-25, 12:00 UTC == 08:00 ET -- the time-of-day
+        # matches the window but the calendar day genuinely doesn't.
+        mock_utcnow.return_value = datetime(2026, 7, 25, 12, 0)
+
+        config = {
+            **config,
+            "extended_hours_trading": {"enabled": True, "premarket": {"enabled": True}},
+        }
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle(cycle_type="premarket")
+        assert result.skipped is True
+        mock_orch.step.assert_not_called()
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_force_bypasses_extended_hours_gate_too(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle(cycle_type="premarket", force=True)
+        assert result.skipped is False
+        mock_orch.step.assert_called_once()
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_regular_cycle_type_unaffected_by_extended_hours_config(
+        self, mock_build, engine_components
+    ):
+        """A cycle_type outside EXTENDED_HOURS_CYCLE_TYPES (e.g. "intraday")
+        must still go through the plain is_market_open() gate untouched,
+        even with extended_hours_trading enabled -- the new branch only
+        activates for "premarket"/"afterhours"."""
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_build.return_value = mock_orch
+        broker._market_open = False
+
+        config = {
+            **config,
+            "extended_hours_trading": {"enabled": True, "premarket": {"enabled": True}},
+        }
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle(cycle_type="intraday")
+        assert result.skipped is True
+        assert result.error == "skipped: market closed"
+        mock_orch.step.assert_not_called()
+
+
+class TestExtendedHoursOrderFlag:
+    """Only a cycle explicitly gate-verified to be running inside a
+    configured extended-hours window should have its orders carry
+    ``OrderRequest.extended_hours=True`` (see
+    ``LiveTradingEngine._execute_orders`` and its call site in
+    ``run_cycle``) -- never a global config toggle applied regardless of
+    when the cycle actually runs.
+    """
+
+    class _RecordingBroker(MockBroker):
+        def __init__(self):
+            super().__init__()
+            self.submitted = []
+
+        def submit_order(self, order):
+            self.submitted.append(order)
+            return super().submit_order(order)
+
+    @patch("firm.live.engine.build_orchestrator")
+    @patch("firm.live.engine.utcnow")
+    def test_premarket_cycle_orders_carry_extended_hours_flag(
+        self, mock_utcnow, mock_build, engine_components
+    ):
+        _, feed, _, config = engine_components
+        broker = self._RecordingBroker()
+        queue = ApprovalQueue(broker=broker)
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+        # 08:00 ET -- inside the default premarket window.
+        mock_utcnow.return_value = datetime(2026, 7, 27, 12, 0)
+
+        config = {
+            **config,
+            "extended_hours_trading": {"enabled": True, "premarket": {"enabled": True}},
+        }
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+            approval_mode="full_auto",
+        )
+        engine.start()
+        result = engine.run_cycle(cycle_type="premarket")
+
+        assert result.skipped is False
+        assert len(broker.submitted) == 2
+        assert all(o.extended_hours is True for o in broker.submitted)
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_regular_cycle_orders_do_not_carry_extended_hours_flag(
+        self, mock_build, engine_components
+    ):
+        """Even with extended_hours_trading enabled in config, a regular
+        (non-gate-verified) cycle's orders must not be marked
+        extended_hours -- it's the per-cycle gate outcome that matters, not
+        merely having the feature turned on."""
+        _, feed, _, config = engine_components
+        broker = self._RecordingBroker()
+        queue = ApprovalQueue(broker=broker)
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+
+        config = {
+            **config,
+            "extended_hours_trading": {"enabled": True, "premarket": {"enabled": True}},
+        }
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+            approval_mode="full_auto",
+        )
+        engine.start()
+        result = engine.run_cycle()  # cycle_type=None, market open by default
+
+        assert result.skipped is False
+        assert len(broker.submitted) == 2
+        assert all(o.extended_hours is False for o in broker.submitted)
+
+
 class TestLiveEngineHardening:
     """Regression tests for the live-execution audit fixes."""
 

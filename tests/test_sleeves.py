@@ -208,6 +208,81 @@ class TestSleevedModeSingleStrategyMatchesBlended:
         assert _by_symbol(blended_orders) == _by_symbol(sleeved_orders)
 
 
+class TestSleeveDecisionsLog:
+    """Blackboard.sleeve_decisions -- added 2026-09-19 after a real
+    incident where a sleeve was silently vetoed every cycle for 8+ days
+    with no queryable trace, only free-text journalctl log lines."""
+
+    def test_approved_sleeve_logs_status_approved(self):
+        signals = [_sig("AAPL", "momentum", 1.0), _sig("MSFT", "momentum", -0.5)]
+        orch = _make_orchestrator(
+            analysts=[_analyst_with_signals(*signals)],
+            sleeve_traders={"momentum": TraderAgent(config={"allocation_method": "conviction_weighted"})},
+        )
+        _, bb = orch.step({
+            "pit_view": _pit_view(),
+            "portfolio": PortfolioState(initial_capital=1_000_000.0),
+            "prices": {"AAPL": 150.0, "MSFT": 300.0},
+        })
+
+        assert bb.sleeve_decisions["momentum"]["status"] == "approved"
+
+    def test_no_signal_sleeve_logs_status_no_signal(self):
+        """A sleeve with no signals this cycle still gets a decision entry,
+        not silence -- distinguishing "nothing to trade" from "vetoed"."""
+        signals = [_sig("AAPL", "momentum", 1.0)]
+        orch = _make_orchestrator(
+            analysts=[_analyst_with_signals(*signals)],
+            sleeve_traders={
+                "momentum": TraderAgent(config={"allocation_method": "conviction_weighted"}),
+                "stat_arb": TraderAgent(config={"allocation_method": "conviction_weighted"}),
+            },
+        )
+        _, bb = orch.step({
+            "pit_view": _pit_view(),
+            "portfolio": PortfolioState(initial_capital=1_000_000.0),
+            "prices": {"AAPL": 150.0},
+        })
+
+        assert bb.sleeve_decisions["momentum"]["status"] == "approved"
+        assert bb.sleeve_decisions["stat_arb"]["status"] == "no_signal"
+
+    def test_rejected_sleeve_logs_status_rejected_with_violations(self):
+        """The exact scenario behind the real incident: a concentrated
+        proposal that trips RiskAgent's veto must show up as "rejected"
+        with the actual violation reasons, not just vanish."""
+        signals = [_sig("JPM", "stat_arb", 1.0), _sig("BAC", "stat_arb", -1.0)]
+        strict_risk = RiskAgent(config={
+            "max_position_pct": 0.05, "max_gross_exposure": 2.0, "veto_threshold": 0.3,
+        })
+        orch = _make_orchestrator(
+            analysts=[_analyst_with_signals(*signals)],
+            sleeve_traders={"stat_arb": TraderAgent(config={"allocation_method": "conviction_weighted"})},
+        )
+        orch.risk = strict_risk
+        _, bb = orch.step({
+            "pit_view": _pit_view(),
+            "portfolio": PortfolioState(initial_capital=1_000_000.0),
+            "prices": {"JPM": 350.0, "BAC": 58.0},
+        })
+
+        decision = bb.sleeve_decisions["stat_arb"]
+        assert decision["status"] == "rejected"
+        assert any("VETO" in v for v in decision["violations"])
+
+    def test_sleeve_decisions_persisted_via_cycle_summary(self):
+        """LiveTradingEngine._persist_cycle_result must carry
+        sleeve_decisions into the same summary dict every other per-cycle
+        field already goes through -- see engine.py's CycleResult."""
+        from firm.live.engine import CycleResult
+
+        result = CycleResult(
+            cycle_id=1, timestamp=NOW,
+            sleeve_decisions={"stat_arb": {"status": "rejected", "violations": ["VETO: x"]}},
+        )
+        assert result.sleeve_decisions == {"stat_arb": {"status": "rejected", "violations": ["VETO: x"]}}
+
+
 class TestSleevedModeBrokerThreading:
     """context['broker'] must reach only the final netted real-execution
     pass (the one that actually talks to the broker), never the per-sleeve

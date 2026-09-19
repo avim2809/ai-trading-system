@@ -101,6 +101,72 @@ class TestEnhancementGating:
         assert agent._llm.calls == 0
         assert result.signals[0].score == pytest.approx(0.8)
 
+    def test_cache_only_miss_logs_debug_not_warning(self, monkeypatch, caplog):
+        """A cache_only-policy cache miss raises LLMEnhancementSkipped inside
+        the real LLMAgentMixin._call_llm (not mocked) -- this is expected on
+        every intraday cycle (Orchestrator._apply_cycle_llm_mode), so it must
+        fall back quietly at debug level with no traceback, not spam a
+        misleading WARNING as if it were a genuine failure."""
+        monkeypatch.setattr(
+            "firm.llm.config.enhancement_config",
+            lambda overrides=None: {
+                "policy": "cache_only",
+                "min_abs_score": 0.0,
+                "max_signals_per_agent": 8,
+                "rag_n_results": 2,
+            },
+        )
+        strat = MagicMock()
+        strat.name = "news"
+        strat.generate.return_value = [_sig("AAPL", "news", 0.8)]
+        agent = LLMSentimentAnalyst(strategies=[strat], llm_config={})
+        agent._llm = MockLLMService()
+        agent._retrieve_context = lambda *a, **k: "ctx"
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.sentiment_analyst_llm"):
+            result = agent.run(AgentContext(now=NOW, pit_view=MagicMock()))
+
+        assert agent._llm.calls == 0
+        assert result.signals[0].score == pytest.approx(0.8)
+        assert result.signals[0].meta.get("llm_enhanced") is None
+        assert not any(r.levelname == "WARNING" for r in caplog.records)
+        debug_records = [r for r in caplog.records if r.levelname == "DEBUG"]
+        assert any("skip" in r.message.lower() for r in debug_records)
+        assert all(r.exc_info is None for r in debug_records)
+
+    def test_genuine_llm_error_logs_warning_with_traceback(self, monkeypatch, caplog):
+        """A real LLM failure (network error, bad response, etc.) -- as
+        opposed to the expected cache_only-miss case above -- must remain a
+        loud WARNING with a full traceback so it isn't buried in noise."""
+        monkeypatch.setattr(
+            "firm.llm.config.enhancement_config",
+            lambda overrides=None: {
+                "policy": "live_calls",
+                "min_abs_score": 0.0,
+                "max_signals_per_agent": 8,
+                "rag_n_results": 2,
+            },
+        )
+        strat = MagicMock()
+        strat.name = "news"
+        strat.generate.return_value = [_sig("AAPL", "news", 0.8)]
+        agent = LLMSentimentAnalyst(strategies=[strat], llm_config={})
+        broken = MagicMock()
+        broken.usage_stats = {}
+        broken.chat_json.side_effect = ConnectionError("network down")
+        agent._llm = broken
+        agent._retrieve_context = lambda *a, **k: "ctx"
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.sentiment_analyst_llm"):
+            result = agent.run(AgentContext(now=NOW, pit_view=MagicMock()))
+
+        assert result.signals[0].score == pytest.approx(0.8)
+        assert result.signals[0].meta.get("llm_enhanced") is None
+        warning_records = [r for r in caplog.records if r.levelname == "WARNING"]
+        assert len(warning_records) == 1
+        assert "failed" in warning_records[0].message.lower()
+        assert warning_records[0].exc_info is not None
+
     def test_configured_temperature_reaches_the_llm_call(self, monkeypatch):
         """Regression: enhancement.temperature must reach chat_json/get_cached
         as an explicit per-call override -- these scoring calls feed straight

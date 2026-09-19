@@ -26,6 +26,11 @@ class LLMBearResearcher(BearResearcher, LLMAgentMixin):
         LLMAgentMixin.__init__(self, llm_config=llm_config)
 
     def run(self, ctx: AgentContext, **inputs: Any) -> list[Thesis]:
+        # Local import: matches LLMAgentMixin._call_llm's own local import of
+        # this exception, so both always resolve against whatever module is
+        # currently in sys.modules (tests patch firm.llm.exceptions there).
+        from firm.llm.exceptions import LLMEnhancementSkipped
+
         quant_theses = BearResearcher.run(self, ctx, **inputs)
 
         enhanced: list[Thesis] = []
@@ -74,6 +79,9 @@ class LLMBearResearcher(BearResearcher, LLMAgentMixin):
                     rationale=parsed.rationale or thesis.rationale,
                     supporting=list(thesis.supporting),
                 ))
+            except LLMEnhancementSkipped:
+                log.debug("LLM enhancement skipped by policy for bear %s", thesis.symbol)
+                enhanced.append(thesis)
             except Exception:
                 log.warning("LLM enhancement failed for bear %s", thesis.symbol, exc_info=True)
                 enhanced.append(thesis)

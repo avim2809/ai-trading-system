@@ -25,14 +25,17 @@ import pytest
 
 from firm.live.scheduler import (
     DEFAULT_MARKET_TIMEZONE,
+    EXTENDED_HOURS_CYCLE_TYPES,
     HOURLY_MARKET_HOURS,
     TradingScheduler,
     _pending_approvals_on_disk,
     cycle_had_no_trading_outcome,
+    extended_hours_session_config,
     maybe_catch_up_session_cycle,
     maybe_retry_lost_cycle,
     run_order_reconciliation,
     trading_day_key,
+    within_extended_hours_window,
 )
 
 
@@ -873,5 +876,278 @@ class TestHourlyMarketHoursSchedule:
         try:
             sched.start()
             assert sched.next_run() == sched.next_run(sched._job_id)
+        finally:
+            sched.stop()
+
+
+# ---------------------------------------------------------------------------
+# Extended-hours trading (opt-in, off by default; added 2026-09-19)
+# ---------------------------------------------------------------------------
+
+class TestExtendedHoursSessionConfig:
+    def test_none_when_cfg_is_none(self):
+        assert extended_hours_session_config(None, "premarket") is None
+
+    def test_none_when_top_level_disabled(self):
+        cfg = {"enabled": False, "premarket": {"enabled": True}}
+        assert extended_hours_session_config(cfg, "premarket") is None
+
+    def test_none_when_top_level_enabled_but_session_missing(self):
+        cfg = {"enabled": True}
+        assert extended_hours_session_config(cfg, "premarket") is None
+
+    def test_none_when_top_level_enabled_but_session_disabled(self):
+        cfg = {"enabled": True, "premarket": {"enabled": False}}
+        assert extended_hours_session_config(cfg, "premarket") is None
+
+    def test_returns_session_dict_when_both_enabled(self):
+        cfg = {"enabled": True, "premarket": {"enabled": True, "start": "05:00"}}
+        assert extended_hours_session_config(cfg, "premarket") == {
+            "enabled": True, "start": "05:00",
+        }
+
+    def test_sessions_are_independent(self):
+        cfg = {
+            "enabled": True,
+            "premarket": {"enabled": True},
+            "afterhours": {"enabled": False},
+        }
+        assert extended_hours_session_config(cfg, "premarket") is not None
+        assert extended_hours_session_config(cfg, "afterhours") is None
+
+
+class TestWithinExtendedHoursWindow:
+    """EDT (UTC-4) is in effect for every date used below (2026-07-27, a
+    Monday), so naive-UTC inputs are converted the same way
+    trading_day_key's own tests verify: treated as UTC, then shifted -4h
+    into US/Eastern.
+    """
+
+    _ENABLED_PREMARKET = {"enabled": True, "premarket": {"enabled": True}}
+    _ENABLED_AFTERHOURS = {"enabled": True, "afterhours": {"enabled": True}}
+
+    def test_false_when_feature_disabled(self):
+        now = datetime(2026, 7, 27, 12, 0)  # 08:00 ET -- inside the window
+        assert within_extended_hours_window(now, "premarket", {}) is False
+        assert within_extended_hours_window(now, "premarket", None) is False
+
+    def test_false_when_session_disabled(self):
+        now = datetime(2026, 7, 27, 12, 0)  # 08:00 ET
+        cfg = {"enabled": True, "premarket": {"enabled": False}}
+        assert within_extended_hours_window(now, "premarket", cfg) is False
+
+    def test_true_inside_default_premarket_window(self):
+        now = datetime(2026, 7, 27, 12, 0)  # 08:00 ET, within 04:00-09:30
+        assert within_extended_hours_window(
+            now, "premarket", self._ENABLED_PREMARKET
+        ) is True
+
+    def test_false_outside_default_premarket_window_same_day(self):
+        now = datetime(2026, 7, 27, 14, 0)  # 10:00 ET, past the 09:30 end
+        assert within_extended_hours_window(
+            now, "premarket", self._ENABLED_PREMARKET
+        ) is False
+
+    def test_false_on_weekend_even_inside_time_window(self):
+        now = datetime(2026, 7, 25, 12, 0)  # Saturday, 08:00 ET
+        assert within_extended_hours_window(
+            now, "premarket", self._ENABLED_PREMARKET
+        ) is False
+
+    def test_true_inside_default_afterhours_window(self):
+        now = datetime(2026, 7, 27, 21, 0)  # 17:00 ET, within 16:00-20:00
+        assert within_extended_hours_window(
+            now, "afterhours", self._ENABLED_AFTERHOURS
+        ) is True
+
+    def test_false_outside_default_afterhours_window(self):
+        now = datetime(2026, 7, 28, 1, 0)  # 21:00 ET the prior day, past 20:00 end
+        assert within_extended_hours_window(
+            now, "afterhours", self._ENABLED_AFTERHOURS
+        ) is False
+
+    def test_custom_start_end_override_defaults(self):
+        cfg = {
+            "enabled": True,
+            "premarket": {"enabled": True, "start": "05:00", "end": "06:00"},
+        }
+        inside = datetime(2026, 7, 27, 9, 30)  # 05:30 ET
+        outside = datetime(2026, 7, 27, 12, 0)  # 08:00 ET, outside the narrowed window
+        assert within_extended_hours_window(inside, "premarket", cfg) is True
+        assert within_extended_hours_window(outside, "premarket", cfg) is False
+
+    def test_aware_datetime_also_supported(self):
+        aware = datetime(2026, 7, 27, 12, 0, tzinfo=dt_tz.utc)
+        assert within_extended_hours_window(
+            aware, "premarket", self._ENABLED_PREMARKET
+        ) is True
+
+    def test_end_boundary_is_exclusive(self):
+        # 09:30 ET exactly -- the configured end -- must not count as "inside".
+        now = datetime(2026, 7, 27, 13, 30)
+        assert within_extended_hours_window(
+            now, "premarket", self._ENABLED_PREMARKET
+        ) is False
+
+    def test_start_boundary_is_inclusive(self):
+        # 04:00 ET exactly -- the configured start.
+        now = datetime(2026, 7, 27, 8, 0)
+        assert within_extended_hours_window(
+            now, "premarket", self._ENABLED_PREMARKET
+        ) is True
+
+
+class TestExtendedHoursCycleTypes:
+    def test_contains_exactly_premarket_and_afterhours(self):
+        assert EXTENDED_HOURS_CYCLE_TYPES == frozenset({"premarket", "afterhours"})
+
+
+class TestExtendedHoursSchedule:
+    """TradingScheduler's opt-in premarket/afterhours job registration (see
+    TradingScheduler._start_extended_hours_jobs). Additive to whichever
+    ``schedule`` preset/composite is already active, and off unless
+    ``extended_hours_trading["enabled"]`` is explicitly true.
+    """
+
+    def test_no_jobs_registered_by_default(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule="market_open")
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._premarket_job_id) is None
+            assert sched._scheduler.get_job(sched._afterhours_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_no_jobs_registered_when_top_level_disabled(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            extended_hours_trading={
+                "enabled": False,
+                "premarket": {"enabled": True},
+                "afterhours": {"enabled": True},
+            },
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._premarket_job_id) is None
+            assert sched._scheduler.get_job(sched._afterhours_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_premarket_job_registered_when_enabled(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            extended_hours_trading={
+                "enabled": True, "premarket": {"enabled": True},
+            },
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._premarket_job_id) is not None
+            assert sched._scheduler.get_job(sched._afterhours_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_afterhours_job_registered_when_enabled(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            extended_hours_trading={
+                "enabled": True, "afterhours": {"enabled": True},
+            },
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._afterhours_job_id) is not None
+            assert sched._scheduler.get_job(sched._premarket_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_both_sessions_registered_when_both_enabled(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            extended_hours_trading={
+                "enabled": True,
+                "premarket": {"enabled": True},
+                "afterhours": {"enabled": True},
+            },
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._premarket_job_id) is not None
+            assert sched._scheduler.get_job(sched._afterhours_job_id) is not None
+        finally:
+            sched.stop()
+
+    def test_premarket_job_honours_custom_schedule_cron(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            extended_hours_trading={
+                "enabled": True,
+                "premarket": {"enabled": True, "schedule": "cron:05:15"},
+            },
+        )
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._premarket_job_id)
+            assert str(job.trigger.fields[job.trigger.FIELD_NAMES.index("hour")]) == "5"
+            assert str(job.trigger.fields[job.trigger.FIELD_NAMES.index("minute")]) == "15"
+        finally:
+            sched.stop()
+
+    def test_premarket_job_fires_with_premarket_cycle_type(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            extended_hours_trading={
+                "enabled": True, "premarket": {"enabled": True},
+            },
+        )
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._premarket_job_id)
+            job.func()
+        finally:
+            sched.stop()
+        engine.run_cycle.assert_called_once_with(cycle_type="premarket")
+
+    def test_afterhours_job_fires_with_afterhours_cycle_type(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            extended_hours_trading={
+                "enabled": True, "afterhours": {"enabled": True},
+            },
+        )
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._afterhours_job_id)
+            job.func()
+        finally:
+            sched.stop()
+        engine.run_cycle.assert_called_once_with(cycle_type="afterhours")
+
+    def test_additive_to_hourly_market_hours_composite_schedule(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule=HOURLY_MARKET_HOURS,
+            extended_hours_trading={
+                "enabled": True,
+                "premarket": {"enabled": True},
+                "afterhours": {"enabled": True},
+            },
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._job_id) is not None
+            assert sched._scheduler.get_job(sched._intraday_job_id) is not None
+            assert sched._scheduler.get_job(sched._close_job_id) is not None
+            assert sched._scheduler.get_job(sched._premarket_job_id) is not None
+            assert sched._scheduler.get_job(sched._afterhours_job_id) is not None
         finally:
             sched.stop()

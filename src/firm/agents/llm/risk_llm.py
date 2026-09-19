@@ -26,6 +26,11 @@ class LLMRiskAgent(RiskAgent, LLMAgentMixin):
         LLMAgentMixin.__init__(self, llm_config=llm_config)
 
     def run(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
+        # Local import: matches LLMAgentMixin._call_llm's own local import of
+        # this exception, so both always resolve against whatever module is
+        # currently in sys.modules (tests patch firm.llm.exceptions there).
+        from firm.llm.exceptions import LLMEnhancementSkipped
+
         quant_decision = RiskAgent.run(self, ctx, **inputs)
 
         if not self._allow_risk_llm():
@@ -98,6 +103,8 @@ class LLMRiskAgent(RiskAgent, LLMAgentMixin):
                 violations=merged_violations,
                 actions=merged_actions,
             )
+        except LLMEnhancementSkipped:
+            log.debug("LLM risk review skipped by policy, using quant decision")
         except Exception:
             log.warning("LLM risk review failed, using quant decision", exc_info=True)
 

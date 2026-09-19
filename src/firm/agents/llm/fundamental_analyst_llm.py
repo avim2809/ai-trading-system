@@ -28,6 +28,11 @@ class LLMFundamentalAnalyst(FundamentalAnalyst, LLMAgentMixin):
         LLMAgentMixin.__init__(self, llm_config=llm_config)
 
     def run(self, ctx: AgentContext, **inputs: Any) -> SignalSet:
+        # Local import: matches LLMAgentMixin._call_llm's own local import of
+        # this exception, so both always resolve against whatever module is
+        # currently in sys.modules (tests patch firm.llm.exceptions there).
+        from firm.llm.exceptions import LLMEnhancementSkipped
+
         quant_result = FundamentalAnalyst.run(self, ctx, **inputs)
 
         enhanced_signals: list[Signal] = []
@@ -77,6 +82,9 @@ class LLMFundamentalAnalyst(FundamentalAnalyst, LLMAgentMixin):
                     asof=sig.asof,
                     meta={**sig.meta, "llm_rationale": parsed.rationale, "llm_enhanced": True},
                 ))
+            except LLMEnhancementSkipped:
+                log.debug("LLM enhancement skipped by policy for %s/%s", sig.symbol, sig.strategy)
+                enhanced_signals.append(sig)
             except Exception:
                 log.warning("LLM enhancement failed for %s/%s", sig.symbol, sig.strategy, exc_info=True)
                 enhanced_signals.append(sig)

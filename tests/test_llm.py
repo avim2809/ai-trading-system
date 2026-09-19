@@ -46,6 +46,18 @@ def _mock_strategy(name: str, signals: list[Signal]) -> Any:
     return strat
 
 
+def _skipped_exc_cls(mock_llm_modules: dict) -> type[Exception]:
+    """The fake ``LLMEnhancementSkipped`` class installed by ``mock_llm_modules``.
+
+    Agent modules import this locally (inside ``run``/``_call_llm``) rather
+    than at module scope specifically so they always resolve against
+    whatever is currently in ``sys.modules`` -- i.e. this fake, once the
+    fixture has patched it in -- rather than binding the real class at
+    first import and never seeing the swap.
+    """
+    return mock_llm_modules["firm.llm.exceptions"].LLMEnhancementSkipped
+
+
 class MockLLMService:
     """Fake LLMService that returns canned JSON responses."""
 
@@ -316,6 +328,49 @@ class TestLLMSentimentAnalyst:
         result = agent.run(ctx)
         assert result.signals == []
 
+    def test_skipped_by_policy_logs_debug_not_warning(self, mock_llm_modules, caplog):
+        """cache_only-miss (LLMEnhancementSkipped) is expected on every
+        intraday cycle -- it must fall back quietly at debug, not spam a
+        misleading WARNING as if it were a real failure."""
+        from firm.agents.llm.sentiment_analyst_llm import LLMSentimentAnalyst
+
+        signals = [_sig("AAPL", "news", 0.3)]
+        strat = _mock_strategy("news", signals)
+        agent = LLMSentimentAnalyst(strategies=[strat])
+        skipped = _skipped_exc_cls(mock_llm_modules)
+        agent._call_llm = MagicMock(side_effect=skipped("cache_only miss"))
+        ctx = AgentContext(now=NOW, pit_view=MagicMock())
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.sentiment_analyst_llm"):
+            result = agent.run(ctx)
+
+        assert result.signals[0].score == pytest.approx(0.3)
+        assert result.signals[0].meta.get("llm_enhanced") is None
+        assert not any(r.name == "firm.agents.llm.sentiment_analyst_llm" and r.levelname == "WARNING" for r in caplog.records)
+        debug_records = [r for r in caplog.records if r.name == "firm.agents.llm.sentiment_analyst_llm" and r.levelname == "DEBUG"]
+        assert any("skip" in r.message.lower() for r in debug_records)
+        assert all(r.exc_info is None for r in debug_records)
+
+    def test_genuine_llm_failure_logs_warning_with_traceback(self, mock_llm_modules, caplog):
+        """A real LLM failure must remain a loud WARNING with a traceback --
+        only the expected cache_only-miss case above should be quieted."""
+        from firm.agents.llm.sentiment_analyst_llm import LLMSentimentAnalyst
+
+        signals = [_sig("AAPL", "news", 0.3)]
+        strat = _mock_strategy("news", signals)
+        agent = LLMSentimentAnalyst(strategies=[strat])
+        agent._call_llm = MagicMock(side_effect=RuntimeError("LLM service down"))
+        ctx = AgentContext(now=NOW, pit_view=MagicMock())
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.sentiment_analyst_llm"):
+            result = agent.run(ctx)
+
+        assert result.signals[0].score == pytest.approx(0.3)
+        warning_records = [r for r in caplog.records if r.name == "firm.agents.llm.sentiment_analyst_llm" and r.levelname == "WARNING"]
+        assert len(warning_records) == 1
+        assert "failed" in warning_records[0].message.lower()
+        assert warning_records[0].exc_info is not None
+
 
 # ══════════════════════════════════════════════════════════════════════
 # LLM-Enhanced Technical Analyst
@@ -414,6 +469,44 @@ class TestLLMTechnicalAnalyst:
         assert "75.0" in prompt_sent  # quality_score
         assert "Quant signal score" not in prompt_sent
 
+    def test_skipped_by_policy_logs_debug_not_warning(self, mock_llm_modules, caplog):
+        from firm.agents.llm.technical_analyst_llm import LLMTechnicalAnalyst
+
+        signals = [_sig("AAPL", "momentum", 1.5)]
+        strat = _mock_strategy("momentum", signals)
+        agent = LLMTechnicalAnalyst(strategies=[strat])
+        skipped = _skipped_exc_cls(mock_llm_modules)
+        agent._call_llm = MagicMock(side_effect=skipped("cache_only miss"))
+        ctx = AgentContext(now=NOW, pit_view=MagicMock())
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.technical_analyst_llm"):
+            result = agent.run(ctx)
+
+        assert result.signals[0].score == pytest.approx(1.5)
+        assert result.signals[0].meta.get("llm_enhanced") is None
+        assert not any(r.name == "firm.agents.llm.technical_analyst_llm" and r.levelname == "WARNING" for r in caplog.records)
+        debug_records = [r for r in caplog.records if r.name == "firm.agents.llm.technical_analyst_llm" and r.levelname == "DEBUG"]
+        assert any("skip" in r.message.lower() for r in debug_records)
+        assert all(r.exc_info is None for r in debug_records)
+
+    def test_genuine_llm_failure_logs_warning_with_traceback(self, mock_llm_modules, caplog):
+        from firm.agents.llm.technical_analyst_llm import LLMTechnicalAnalyst
+
+        signals = [_sig("AAPL", "momentum", 1.5)]
+        strat = _mock_strategy("momentum", signals)
+        agent = LLMTechnicalAnalyst(strategies=[strat])
+        agent._call_llm = MagicMock(side_effect=RuntimeError("LLM service down"))
+        ctx = AgentContext(now=NOW, pit_view=MagicMock())
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.technical_analyst_llm"):
+            result = agent.run(ctx)
+
+        assert result.signals[0].score == pytest.approx(1.5)
+        warning_records = [r for r in caplog.records if r.name == "firm.agents.llm.technical_analyst_llm" and r.levelname == "WARNING"]
+        assert len(warning_records) == 1
+        assert "failed" in warning_records[0].message.lower()
+        assert warning_records[0].exc_info is not None
+
 
 # ══════════════════════════════════════════════════════════════════════
 # LLM-Enhanced Fundamental Analyst
@@ -430,6 +523,44 @@ class TestLLMFundamentalAnalyst:
         result = agent.run(ctx)
         assert isinstance(result, SignalSet)
         assert result.domain == "fundamental"
+
+    def test_skipped_by_policy_logs_debug_not_warning(self, mock_llm_modules, caplog):
+        from firm.agents.llm.fundamental_analyst_llm import LLMFundamentalAnalyst
+
+        signals = [_sig("AAPL", "multi_factor", 0.8)]
+        strat = _mock_strategy("multi_factor", signals)
+        agent = LLMFundamentalAnalyst(strategies=[strat])
+        skipped = _skipped_exc_cls(mock_llm_modules)
+        agent._call_llm = MagicMock(side_effect=skipped("cache_only miss"))
+        ctx = AgentContext(now=NOW, pit_view=MagicMock())
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.fundamental_analyst_llm"):
+            result = agent.run(ctx)
+
+        assert result.signals[0].score == pytest.approx(0.8)
+        assert result.signals[0].meta.get("llm_enhanced") is None
+        assert not any(r.name == "firm.agents.llm.fundamental_analyst_llm" and r.levelname == "WARNING" for r in caplog.records)
+        debug_records = [r for r in caplog.records if r.name == "firm.agents.llm.fundamental_analyst_llm" and r.levelname == "DEBUG"]
+        assert any("skip" in r.message.lower() for r in debug_records)
+        assert all(r.exc_info is None for r in debug_records)
+
+    def test_genuine_llm_failure_logs_warning_with_traceback(self, mock_llm_modules, caplog):
+        from firm.agents.llm.fundamental_analyst_llm import LLMFundamentalAnalyst
+
+        signals = [_sig("AAPL", "multi_factor", 0.8)]
+        strat = _mock_strategy("multi_factor", signals)
+        agent = LLMFundamentalAnalyst(strategies=[strat])
+        agent._call_llm = MagicMock(side_effect=RuntimeError("LLM service down"))
+        ctx = AgentContext(now=NOW, pit_view=MagicMock())
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.fundamental_analyst_llm"):
+            result = agent.run(ctx)
+
+        assert result.signals[0].score == pytest.approx(0.8)
+        warning_records = [r for r in caplog.records if r.name == "firm.agents.llm.fundamental_analyst_llm" and r.levelname == "WARNING"]
+        assert len(warning_records) == 1
+        assert "failed" in warning_records[0].message.lower()
+        assert warning_records[0].exc_info is not None
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -479,6 +610,42 @@ class TestLLMBullResearcher:
         theses = agent.run(AgentContext(now=NOW), blackboard=bb)
         assert all(0.0 <= t.conviction <= 1.0 for t in theses)
 
+    def test_skipped_by_policy_logs_debug_not_warning(self, mock_llm_modules, caplog):
+        from firm.agents.llm.bull_researcher_llm import LLMBullResearcher
+
+        bb = Blackboard(asof=NOW)
+        bb.signal_sets.append(_make_signal_set("technical", [_sig("AAPL", "momentum", 1.5)]))
+        agent = LLMBullResearcher()
+        skipped = _skipped_exc_cls(mock_llm_modules)
+        agent._call_llm = MagicMock(side_effect=skipped("cache_only miss"))
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.bull_researcher_llm"):
+            theses = agent.run(AgentContext(now=NOW), blackboard=bb)
+
+        assert len(theses) >= 1
+        assert theses[0].side == "bull"
+        assert not any(r.name == "firm.agents.llm.bull_researcher_llm" and r.levelname == "WARNING" for r in caplog.records)
+        debug_records = [r for r in caplog.records if r.name == "firm.agents.llm.bull_researcher_llm" and r.levelname == "DEBUG"]
+        assert any("skip" in r.message.lower() for r in debug_records)
+        assert all(r.exc_info is None for r in debug_records)
+
+    def test_genuine_llm_failure_logs_warning_with_traceback(self, mock_llm_modules, caplog):
+        from firm.agents.llm.bull_researcher_llm import LLMBullResearcher
+
+        bb = Blackboard(asof=NOW)
+        bb.signal_sets.append(_make_signal_set("technical", [_sig("AAPL", "momentum", 1.5)]))
+        agent = LLMBullResearcher()
+        agent._call_llm = MagicMock(side_effect=RuntimeError("LLM service down"))
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.bull_researcher_llm"):
+            theses = agent.run(AgentContext(now=NOW), blackboard=bb)
+
+        assert len(theses) >= 1
+        warning_records = [r for r in caplog.records if r.name == "firm.agents.llm.bull_researcher_llm" and r.levelname == "WARNING"]
+        assert len(warning_records) == 1
+        assert "failed" in warning_records[0].message.lower()
+        assert warning_records[0].exc_info is not None
+
 
 # ══════════════════════════════════════════════════════════════════════
 # LLM-Enhanced Bear Researcher
@@ -508,6 +675,42 @@ class TestLLMBearResearcher:
 
         theses = agent.run(AgentContext(now=NOW), blackboard=bb)
         assert all(0.0 <= t.conviction <= 1.0 for t in theses)
+
+    def test_skipped_by_policy_logs_debug_not_warning(self, mock_llm_modules, caplog):
+        from firm.agents.llm.bear_researcher_llm import LLMBearResearcher
+
+        bb = Blackboard(asof=NOW)
+        bb.signal_sets.append(_make_signal_set("technical", [_sig("GOOG", "momentum", -1.0)]))
+        agent = LLMBearResearcher()
+        skipped = _skipped_exc_cls(mock_llm_modules)
+        agent._call_llm = MagicMock(side_effect=skipped("cache_only miss"))
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.bear_researcher_llm"):
+            theses = agent.run(AgentContext(now=NOW), blackboard=bb)
+
+        assert len(theses) >= 1
+        assert theses[0].side == "bear"
+        assert not any(r.name == "firm.agents.llm.bear_researcher_llm" and r.levelname == "WARNING" for r in caplog.records)
+        debug_records = [r for r in caplog.records if r.name == "firm.agents.llm.bear_researcher_llm" and r.levelname == "DEBUG"]
+        assert any("skip" in r.message.lower() for r in debug_records)
+        assert all(r.exc_info is None for r in debug_records)
+
+    def test_genuine_llm_failure_logs_warning_with_traceback(self, mock_llm_modules, caplog):
+        from firm.agents.llm.bear_researcher_llm import LLMBearResearcher
+
+        bb = Blackboard(asof=NOW)
+        bb.signal_sets.append(_make_signal_set("technical", [_sig("GOOG", "momentum", -1.0)]))
+        agent = LLMBearResearcher()
+        agent._call_llm = MagicMock(side_effect=RuntimeError("LLM service down"))
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.bear_researcher_llm"):
+            theses = agent.run(AgentContext(now=NOW), blackboard=bb)
+
+        assert len(theses) >= 1
+        warning_records = [r for r in caplog.records if r.name == "firm.agents.llm.bear_researcher_llm" and r.levelname == "WARNING"]
+        assert len(warning_records) == 1
+        assert "failed" in warning_records[0].message.lower()
+        assert warning_records[0].exc_info is not None
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -541,6 +744,41 @@ class TestLLMDebate:
 
         results = agent.run(AgentContext(now=NOW), bull_theses=bull, bear_theses=bear)
         assert all(-1.0 <= r.net_conviction <= 1.0 for r in results)
+
+    def test_skipped_by_policy_logs_debug_not_warning(self, mock_llm_modules, caplog):
+        from firm.agents.llm.debate_llm import LLMDebateAgent
+
+        bull = [Thesis(side="bull", symbol="AAPL", conviction=0.8, rationale="strong", supporting=["momentum"])]
+        bear = [Thesis(side="bear", symbol="AAPL", conviction=0.3, rationale="minor", supporting=["sentiment"])]
+        agent = LLMDebateAgent()
+        skipped = _skipped_exc_cls(mock_llm_modules)
+        agent._call_llm = MagicMock(side_effect=skipped("cache_only miss"))
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.debate_llm"):
+            results = agent.run(AgentContext(now=NOW), bull_theses=bull, bear_theses=bear)
+
+        assert len(results) >= 1
+        assert not any(r.name == "firm.agents.llm.debate_llm" and r.levelname == "WARNING" for r in caplog.records)
+        debug_records = [r for r in caplog.records if r.name == "firm.agents.llm.debate_llm" and r.levelname == "DEBUG"]
+        assert any("skip" in r.message.lower() for r in debug_records)
+        assert all(r.exc_info is None for r in debug_records)
+
+    def test_genuine_llm_failure_logs_warning_with_traceback(self, mock_llm_modules, caplog):
+        from firm.agents.llm.debate_llm import LLMDebateAgent
+
+        bull = [Thesis(side="bull", symbol="AAPL", conviction=0.8, rationale="strong", supporting=["momentum"])]
+        bear = [Thesis(side="bear", symbol="AAPL", conviction=0.3, rationale="minor", supporting=["sentiment"])]
+        agent = LLMDebateAgent()
+        agent._call_llm = MagicMock(side_effect=RuntimeError("LLM service down"))
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.debate_llm"):
+            results = agent.run(AgentContext(now=NOW), bull_theses=bull, bear_theses=bear)
+
+        assert len(results) >= 1
+        warning_records = [r for r in caplog.records if r.name == "firm.agents.llm.debate_llm" and r.levelname == "WARNING"]
+        assert len(warning_records) == 1
+        assert "failed" in warning_records[0].message.lower()
+        assert warning_records[0].exc_info is not None
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -577,6 +815,41 @@ class TestLLMTrader:
         ctx = AgentContext(now=NOW)
         result = agent.run(ctx, debate_results=debate_results)
         assert isinstance(result, TradeProposal)
+
+    def test_skipped_by_policy_logs_debug_not_warning(self, mock_llm_modules, caplog):
+        from firm.agents.llm.trader_llm import LLMTraderAgent
+
+        debate_results = [DebateResult(symbol="AAPL", net_conviction=0.6)]
+        agent = LLMTraderAgent(llm_config={"enhancement": {"enhance_portfolio_review": True}})
+        skipped = _skipped_exc_cls(mock_llm_modules)
+        agent._call_llm = MagicMock(side_effect=skipped("cache_only miss"))
+        ctx = AgentContext(now=NOW)
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.trader_llm"):
+            result = agent.run(ctx, debate_results=debate_results)
+
+        assert isinstance(result, TradeProposal)
+        assert not any(r.name == "firm.agents.llm.trader_llm" and r.levelname == "WARNING" for r in caplog.records)
+        debug_records = [r for r in caplog.records if r.name == "firm.agents.llm.trader_llm" and r.levelname == "DEBUG"]
+        assert any("skip" in r.message.lower() for r in debug_records)
+        assert all(r.exc_info is None for r in debug_records)
+
+    def test_genuine_llm_failure_logs_warning_with_traceback(self, mock_llm_modules, caplog):
+        from firm.agents.llm.trader_llm import LLMTraderAgent
+
+        debate_results = [DebateResult(symbol="AAPL", net_conviction=0.6)]
+        agent = LLMTraderAgent(llm_config={"enhancement": {"enhance_portfolio_review": True}})
+        agent._call_llm = MagicMock(side_effect=RuntimeError("LLM service down"))
+        ctx = AgentContext(now=NOW)
+
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.trader_llm"):
+            result = agent.run(ctx, debate_results=debate_results)
+
+        assert isinstance(result, TradeProposal)
+        warning_records = [r for r in caplog.records if r.name == "firm.agents.llm.trader_llm" and r.levelname == "WARNING"]
+        assert len(warning_records) == 1
+        assert "failed" in warning_records[0].message.lower()
+        assert warning_records[0].exc_info is not None
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -616,6 +889,49 @@ class TestLLMRiskAgent:
         result = agent.run(ctx, proposal=proposal)
         assert isinstance(result, RiskDecision)
         assert result.approved
+
+    def test_skipped_by_policy_logs_debug_not_warning(self, mock_llm_modules, caplog):
+        from firm.agents.llm.risk_llm import LLMRiskAgent
+
+        agent = LLMRiskAgent(
+            config={"max_position_pct": 1.0},
+            llm_config={"enhancement": {"enhance_risk_review": True}},
+        )
+        skipped = _skipped_exc_cls(mock_llm_modules)
+        agent._call_llm = MagicMock(side_effect=skipped("cache_only miss"))
+
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.05})
+        ctx = AgentContext(now=NOW)
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.risk_llm"):
+            result = agent.run(ctx, proposal=proposal)
+
+        assert isinstance(result, RiskDecision)
+        assert result.approved
+        assert not any(r.name == "firm.agents.llm.risk_llm" and r.levelname == "WARNING" for r in caplog.records)
+        debug_records = [r for r in caplog.records if r.name == "firm.agents.llm.risk_llm" and r.levelname == "DEBUG"]
+        assert any("skip" in r.message.lower() for r in debug_records)
+        assert all(r.exc_info is None for r in debug_records)
+
+    def test_genuine_llm_failure_logs_warning_with_traceback(self, mock_llm_modules, caplog):
+        from firm.agents.llm.risk_llm import LLMRiskAgent
+
+        agent = LLMRiskAgent(
+            config={"max_position_pct": 1.0},
+            llm_config={"enhancement": {"enhance_risk_review": True}},
+        )
+        agent._call_llm = MagicMock(side_effect=RuntimeError("LLM service down"))
+
+        proposal = TradeProposal(asof=NOW, targets={"AAPL": 0.05})
+        ctx = AgentContext(now=NOW)
+        with caplog.at_level("DEBUG", logger="firm.agents.llm.risk_llm"):
+            result = agent.run(ctx, proposal=proposal)
+
+        assert isinstance(result, RiskDecision)
+        assert result.approved
+        warning_records = [r for r in caplog.records if r.name == "firm.agents.llm.risk_llm" and r.levelname == "WARNING"]
+        assert len(warning_records) == 1
+        assert "failed" in warning_records[0].message.lower()
+        assert warning_records[0].exc_info is not None
 
 
 # ══════════════════════════════════════════════════════════════════════

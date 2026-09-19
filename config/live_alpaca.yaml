@@ -245,6 +245,27 @@ risk:
   #   strategies: [mean_reversion, stat_arb]
   #   max_loss_pct: 0.07
 
+  # Per-strategy override of the exposure/veto envelope above, for a sleeve
+  # whose OWN book is inherently concentrated by design (capital_allocation_
+  # mode: sleeved runs each strategy's risk check against only that
+  # strategy's own signals — see Orchestrator._step_sleeved). REAL INCIDENT
+  # (2026-09-19): stat_arb trades at most 5 pairs (strategy_params.stat_arb.
+  # max_pairs)/10 legs, so on a typical day with only 2-4 active legs, each
+  # leg legitimately needs 30-90% of the sleeve's OWN capital -- the shared
+  # max_position_pct (5%, sized for the diversified ~25-name blended book)
+  # clipped that so hard it tripped the 50% veto_threshold on EVERY single
+  # stat_arb sleeve decision since sleeved mode began on 9/10 (confirmed via
+  # journalctl: 9/9 logged decisions were VETOs, 0 approved) -- the sleeve
+  # had been silently frozen on its 9/10-cutover seed positions for over a
+  # week, never once acting on a real signal. 50%/0.95 is generous enough
+  # for a 2-leg-concentrated day while still catching a truly degenerate
+  # (near-100%-one-name) proposal. See RiskAgent.sleeve_risk_overrides.
+  sleeve_risk_overrides:
+    stat_arb:
+      max_position_pct: 0.50
+      max_gross_exposure: 2.0
+      veto_threshold: 0.95
+
   # GICS-style sector tags for the 25-name universe (enables max_sector_pct).
   sector_map:
     AAPL: technology

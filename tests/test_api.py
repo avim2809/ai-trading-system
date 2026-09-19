@@ -987,6 +987,45 @@ class TestLiveSleevedModeStart:
 
         client.post("/api/live/stop")
 
+    def test_sleeve_decisions_endpoint_reads_persisted_cycle_history(self, client):
+        """GET /api/live/sleeves/decisions -- added 2026-09-19 after a real
+        incident where a sleeve was silently vetoed every cycle for 8+ days
+        with no queryable trace. This must surface a rejection from real
+        persisted cycle history, filterable by strategy."""
+        # Ensure app.state.trade_history exists (lazily created by
+        # _get_trade_history on first access) before reaching in directly.
+        client.get("/api/live/sleeves/decisions")
+        store = client.app.state.trade_history
+        store.record_cycle({
+            "cycle_id": 1, "timestamp": "2026-09-19T13:30:00",
+            "sleeve_decisions": {
+                "stat_arb": {"status": "rejected", "violations": ["VETO: clipping severity 90.0%"]},
+                "momentum": {"status": "approved", "violations": []},
+            },
+        })
+        store.record_cycle({
+            "cycle_id": 2, "timestamp": "2026-09-19T14:30:00",
+            "sleeve_decisions": {"stat_arb": {"status": "rejected", "violations": ["VETO: x"]}},
+        })
+
+        resp = client.get("/api/live/sleeves/decisions")
+        assert resp.status_code == 200
+        rows = resp.json()
+        assert len(rows) == 3
+        assert rows[0]["cycle_id"] == 2  # most recent first
+
+        filtered = client.get("/api/live/sleeves/decisions?strategy=stat_arb")
+        assert filtered.status_code == 200
+        filtered_rows = filtered.json()
+        assert len(filtered_rows) == 2
+        assert all(r["strategy"] == "stat_arb" for r in filtered_rows)
+        assert all(r["status"] == "rejected" for r in filtered_rows)
+
+    def test_sleeve_decisions_endpoint_empty_when_no_sleeves(self, client):
+        resp = client.get("/api/live/sleeves/decisions")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
 
 class TestKillSwitchResetEndpoint:
     @pytest.fixture(autouse=True)

@@ -60,6 +60,7 @@ def _start_live_scheduler(
     refresh_hour = int(engine_config.get("fundamentals_refresh_hour", 8))
     dynamic_universe_cfg = engine_config.get("danelfin_dynamic_universe") or {}
     sp500_dynamic_universe_cfg = engine_config.get("sp500_dynamic_universe") or {}
+    extended_hours_cfg = engine_config.get("extended_hours_trading") or {}
     try:
         from firm.live.fundamentals_refresh import maybe_refresh_fundamentals_cache_on_start
         from firm.live.pipeline_warmup import PipelineWarmupGate, warmup_wait_seconds
@@ -123,6 +124,7 @@ def _start_live_scheduler(
                         "sector_cache_refresh_day", "sun"
                     ),
                     sp500_static_sector_map=engine_config.get("sector_map") or {},
+                    extended_hours_trading=extended_hours_cfg,
                 )
                 scheduler.start()
                 app.state.live_scheduler = scheduler
@@ -799,6 +801,7 @@ def live_cycles(request: Request) -> list[dict[str, Any]]:
             "orders_submitted": c.orders_submitted,
             "orders_queued": c.orders_queued,
             "error": c.error,
+            "sleeve_decisions": c.sleeve_decisions,
         }
         for c in reversed(engine.cycle_history[-50:])
     ]
@@ -976,6 +979,49 @@ def seed_sleeves(request: Request) -> dict[str, Any]:
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"seeded": True, "sleeves": summary}
+
+
+@router.get("/sleeves/decisions")
+def sleeve_decisions_history(
+    request: Request, strategy: str | None = None, limit: int = 100,
+) -> list[dict[str, Any]]:
+    """Per-sleeve risk-decision history, most recent cycle first.
+
+    Added 2026-09-19 after a real incident: stat_arb's sleeve was silently
+    vetoed on every single cycle for 8+ days on the live Alpaca instance
+    (frozen on stale cutover-seed positions, never once acting on a real
+    signal) with the only trace being free-text journalctl log lines --
+    nothing queryable surfaced that a sleeve had stopped trading. This
+    reads ``Blackboard.sleeve_decisions`` as persisted per-cycle by
+    ``LiveTradingEngine._persist_cycle_result`` (see its own field
+    docstring), so "is this sleeve actually trading" is a query away
+    instead of a log-grepping exercise.
+
+    ``strategy`` filters to one sleeve's decisions only (e.g.
+    ``?strategy=stat_arb``); omitted, returns every sleeve's decision for
+    each cycle that had at least one. Cycles from before this field existed,
+    or from a blended (non-sleeved) engine, simply have no entry and are
+    skipped -- not an error.
+    """
+    store = _get_trade_history(request.app)
+    cycles = store.list_cycles(limit=max(limit * 4, 200))
+    out: list[dict[str, Any]] = []
+    for cycle in cycles:
+        decisions = cycle.get("sleeve_decisions")
+        if not decisions:
+            continue
+        for sleeve_strategy, decision in decisions.items():
+            if strategy and sleeve_strategy != strategy:
+                continue
+            out.append({
+                "cycle_id": cycle.get("cycle_id"),
+                "timestamp": cycle.get("timestamp"),
+                "strategy": sleeve_strategy,
+                **decision,
+            })
+        if len(out) >= limit:
+            break
+    return out[:limit]
 
 
 # ---------------------------------------------------------------------------
