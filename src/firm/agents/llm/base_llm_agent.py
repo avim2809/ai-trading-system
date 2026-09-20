@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from firm.agents.llm.news_anonymizer import anonymize_news_text
 from firm.contracts.models import Signal
 
 log = logging.getLogger(__name__)
@@ -145,9 +146,23 @@ class LLMAgentMixin:
             docs = retriever.retrieve_for_symbol(
                 symbol, query, n_results=n, collections=collections, asof=asof
             )
-            return "\n\n".join(
-                f"[{d.metadata.get('source', '?')}] {d.text}" for d in docs
-            )
+            parts = []
+            for d in docs:
+                text = d.text
+                # Anonymize company identity for "news" docs specifically
+                # (per-doc, via doc_type metadata — not per-collection,
+                # since callers like the bull/bear researchers and risk
+                # agent mix "news" with "sec_filings"/"earnings" in one
+                # call). See news_anonymizer's module docstring for why:
+                # Glasserman & Lin (arXiv 2309.17322) find raw news text
+                # naming the company contaminates the LLM's read with
+                # look-ahead + distraction effects that anonymization
+                # mitigates. "research"/"sec_filings"/"system_docs" don't
+                # carry the same risk profile and are left untouched.
+                if d.metadata.get("doc_type") == "news":
+                    text = anonymize_news_text(text, symbol)
+                parts.append(f"[{d.metadata.get('source', '?')}] {text}")
+            return "\n\n".join(parts)
         except ImportError:
             return ""  # already logged by _get_retriever()
         except Exception:

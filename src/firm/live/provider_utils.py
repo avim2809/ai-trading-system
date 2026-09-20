@@ -293,6 +293,13 @@ def resolve_live_startup(
         # *same* resolved dict, which is exactly what this allowlist copy
         # into engine_config gives them.
         "extended_hours_trading",
+        # Opt-in daily RAG "news" collection ingestion (see
+        # firm.live.news_ingestion_job / firm.live.scheduler.TradingScheduler
+        # and firm.agents.llm.news_anonymizer, 2026-09-20) — off by default
+        # ({"enabled": false}), same silent-drop bug class as every other
+        # key in this tuple. Read by _start_live_scheduler (firm.api.routers.
+        # live) to build the TradingScheduler's news_ingestion kwarg.
+        "news_ingestion",
     ):
         if key in yaml_cfg:
             engine_config[key] = yaml_cfg[key]

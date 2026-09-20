@@ -403,6 +403,10 @@ class TradingScheduler:
         # legs are registered alongside whatever ``schedule`` above already
         # sets up, not a replacement for it.
         extended_hours_trading: dict[str, Any] | None = None,
+        # Opt-in daily RAG "news" collection ingestion (off by default —
+        # see firm.live.news_ingestion_job and the ``news_ingestion``
+        # config block: {"enabled": false, "hour": 7, "days": 3}).
+        news_ingestion: dict[str, Any] | None = None,
     ) -> None:
         if not _HAS_APSCHEDULER:
             raise ImportError(
@@ -440,6 +444,7 @@ class TradingScheduler:
         self._sp500_sector_cache_refresh_day = sp500_sector_cache_refresh_day
         self._sp500_static_sector_map = dict(sp500_static_sector_map or {})
         self._extended_hours_cfg: dict[str, Any] = dict(extended_hours_trading or {})
+        self._news_ingestion_cfg: dict[str, Any] = dict(news_ingestion or {})
         self._scheduler: BackgroundScheduler | None = None
         self._job_id = "live_cycle"
         # Extra legs registered only for the "hourly_market_hours" composite
@@ -449,6 +454,7 @@ class TradingScheduler:
         self._intraday_job_id = "live_cycle_intraday"
         self._close_job_id = "live_cycle_close"
         self._fundamentals_job_id = "fundamentals_refresh"
+        self._news_ingestion_job_id = "news_ingestion"
         self._dynamic_universe_job_id = "danelfin_universe_sync"
         self._sp500_sync_job_id = "sp500_universe_sync"
         self._sp500_sector_refresh_job_id = "sp500_sector_cache_refresh"
@@ -489,6 +495,23 @@ class TradingScheduler:
                     timezone=self._timezone,
                 ),
                 id=self._fundamentals_job_id,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        if self._universe and self._news_ingestion_cfg.get("enabled"):
+            from firm.live.news_ingestion_job import run_scheduled_news_ingestion
+
+            news_days = int(self._news_ingestion_cfg.get("days", 3))
+            self._scheduler.add_job(
+                lambda: run_scheduled_news_ingestion(self._universe, days=news_days),
+                trigger=CronTrigger(
+                    hour=int(self._news_ingestion_cfg.get("hour", 7)),
+                    minute=0,
+                    day_of_week="mon-fri",
+                    timezone=self._timezone,
+                ),
+                id=self._news_ingestion_job_id,
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,
@@ -592,13 +615,15 @@ class TradingScheduler:
             )
         if self._universe:
             log.info(
-                "Scheduler started: schedule=%s, tz=%s, fundamentals_refresh=%02d:00%s%s",
+                "Scheduler started: schedule=%s, tz=%s, fundamentals_refresh=%02d:00%s%s%s",
                 self._schedule_spec, self._timezone, self._fundamentals_refresh_hour,
                 f", danelfin_universe_sync={self._dynamic_universe_sync_hour:02d}:00"
                 if self._dynamic_universe_enabled else "",
                 f", sp500_universe_sync={self._sp500_sync_hour:02d}:00"
                 f" (sector_cache_refresh={self._sp500_sector_cache_refresh_day})"
                 if self._sp500_dynamic_universe_enabled else "",
+                f", news_ingestion={int(self._news_ingestion_cfg.get('hour', 7)):02d}:00"
+                if self._news_ingestion_cfg.get("enabled") else "",
             )
         else:
             log.info("Scheduler started: schedule=%s, tz=%s", self._schedule_spec, self._timezone)

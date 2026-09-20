@@ -76,6 +76,36 @@ capital_allocation_mode: sleeved
 # firm-api refreshes that cache daily at fundamentals_refresh_hour and at boot
 # when older than FIRM_FUNDAMENTALS_REFRESH_MAX_AGE_HOURS (default 24).
 fundamentals_refresh_hour: 8
+
+# Daily ingestion of recent news article text into the RAG "news" collection
+# (see firm.rag.ingestors.news_ingestor.NewsIngestor + the new
+# firm.live.news_ingestion_job scheduler entrypoint, 2026-09-20). The
+# sentiment/fundamental analysts and bull/bear/risk LLM agents already query
+# this collection via _retrieve_context (config/llm.yaml sets llm_enhanced
+# for sentiment/fundamental) but it sat at zero documents in production
+# without this job, so every such call was silently falling back to
+# quant-only. Retrieved "news" text is anonymized (company name + ticker
+# stripped, see firm.agents.llm.news_anonymizer) before it reaches any LLM
+# prompt, per Glasserman & Lin (arXiv 2309.17322)'s look-ahead/distraction
+# mitigation for LLM-read news sentiment.
+#
+# Enabled on this Alpaca instance ONLY (2026-09-20), IBKR (config/live.yaml)
+# deliberately left off as the static control — mirroring this session's
+# other Alpaca-first rollouts (sector scanner 8/30, capital sleeves 9/10).
+# Verified end-to-end with real data before enabling: a manual
+# NewsIngestor.ingest(["AAPL"], days=3) run against the live Massive API key
+# (Yahoo RSS/Tiingo were rate-limited/permission-denied in that one check,
+# but the fallback chain's Massive leg fetched real article title+
+# description text and wrote 18 new chunks into the "news" collection, with
+# correct symbol/doc_type/date metadata) confirms the pipeline genuinely
+# works against production credentials, not just against mocks.
+# "hour" is the daily fire time in schedule_timezone; "days" is the
+# lookback window per run (safe to overlap runs — VectorStore.add_documents
+# dedupes by content hash, so no duplicate ingestion cost).
+news_ingestion:
+  enabled: true
+  hour: 7
+  days: 3
 strategies:
   enabled:
     - momentum

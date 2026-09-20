@@ -592,6 +592,77 @@ class TestTradingSchedulerLifecycle:
         finally:
             sched.stop()
 
+    def test_news_ingestion_job_not_added_by_default(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open", universe=["AAPL", "MSFT"],
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._news_ingestion_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_news_ingestion_job_not_added_when_disabled_explicitly(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open", universe=["AAPL", "MSFT"],
+            news_ingestion={"enabled": False},
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._news_ingestion_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_news_ingestion_job_not_added_without_universe_even_if_enabled(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            news_ingestion={"enabled": True},
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._news_ingestion_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_news_ingestion_job_added_when_enabled(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open", universe=["AAPL", "MSFT"],
+            news_ingestion={"enabled": True, "hour": 6, "days": 2},
+        )
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._news_ingestion_job_id)
+            assert job is not None
+            assert str(job.trigger.fields[job.trigger.FIELD_NAMES.index("hour")]) == "6"
+        finally:
+            sched.stop()
+
+    def test_news_ingestion_job_fires_with_configured_universe_and_days(self):
+        # Patched *before* start() — the job callback does a local
+        # ``from firm.live.news_ingestion_job import run_scheduled_news_
+        # ingestion`` at job-registration time inside start(), so the patch
+        # must be in place before that import executes for the lambda's
+        # closed-over reference to resolve to the mock.
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open", universe=["AAPL", "MSFT"],
+            news_ingestion={"enabled": True, "days": 5},
+        )
+        try:
+            with patch(
+                "firm.live.news_ingestion_job.run_scheduled_news_ingestion"
+            ) as mock_run:
+                sched.start()
+                job = sched._scheduler.get_job(sched._news_ingestion_job_id)
+                job.func()
+            mock_run.assert_called_once_with(["AAPL", "MSFT"], days=5)
+        finally:
+            sched.stop()
+
     def test_dynamic_universe_sync_hour_defaults_to_before_fundamentals(self):
         sched = TradingScheduler(engine=MagicMock(), fundamentals_refresh_hour=8)
         assert sched._dynamic_universe_sync_hour == 7

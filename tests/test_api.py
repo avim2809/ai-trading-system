@@ -1026,6 +1026,29 @@ class TestLiveSleevedModeStart:
         assert resp.status_code == 200
         assert resp.json() == []
 
+    def test_flatten_position_endpoint_closes_a_real_holding(self, client):
+        client.post("/api/live/start", json={
+            "broker": "alpaca_paper", "schedule": "hourly", "strategies": ["momentum"],
+        })
+        engine = client.app.state.live_engine
+        engine._portfolio.holdings = {"AAPL": 40.0}
+
+        resp = client.post("/api/live/positions/AAPL/flatten")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["flattened"] is True
+        assert engine._portfolio.holdings.get("AAPL", 0.0) == 0.0
+
+        client.post("/api/live/stop")
+
+    def test_flatten_position_endpoint_no_engine_returns_400(self, client):
+        resp = client.post("/api/live/positions/AAPL/flatten")
+        assert resp.status_code == 400
+
+    def test_flatten_sleeve_endpoint_no_engine_returns_400(self, client):
+        resp = client.post("/api/live/sleeves/stat_arb/flatten")
+        assert resp.status_code == 400
+
 
 class TestKillSwitchResetEndpoint:
     @pytest.fixture(autouse=True)

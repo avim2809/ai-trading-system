@@ -90,6 +90,33 @@ class ExecutionAgent(Agent):
         # filters out.
         self.rebalance_fraction: float = float(cfg.get("rebalance_fraction", 1.0))
 
+        # Full-close floor for a target_w == 0 symbol (2026-09-20). NOT the
+        # same exemption already tried and reverted for current_w == 0 above
+        # (that regression was about skipping the band on *opening* a new
+        # position, which this doesn't touch) -- this is about *closing* an
+        # existing one all the way to flat. Left alone, a target-0 position
+        # is genuinely subject to asymptotic stranding: rebalance_band_pct
+        # tolerates any remainder under the (5% blended / ~0.3-2.5% sleeved)
+        # band forever, and even above the band, rebalance_fraction geometric
+        # decay (0.7/cycle) only asymptotes toward zero, never reaching it --
+        # a real, cited failure mode in professional portfolio construction
+        # (Gårleanu-Pedersen "aim in front of target" never fully arrives;
+        # the standard fix is a semicontinuous/threshold-holding constraint:
+        # a position is either flat or above a floor, never parked
+        # indefinitely just under one). Deliberately a SEPARATE, MUCH SMALLER
+        # threshold than rebalance_band_pct itself, not a blanket bypass of
+        # it: the codebase's own 3-window A/B (see rebalance_band_pct's own
+        # comment above) found unconditionally forcing full closes at the
+        # *band's* width regressed Sharpe 3.45->0.80 and 8x'd turnover by
+        # fighting the band's real job of suppressing noise-level churn. This
+        # only forces a full, band/fraction-bypassing close once the
+        # remainder is smaller than close_dust_fraction of the *band itself*
+        # (default 20% of it) -- small enough that true single-cycle dust
+        # (what the reverted experiment was actually about) is still left
+        # alone, but a materially-sized position that would otherwise sit
+        # just under the band forever now gets swept once it decays that far.
+        self.close_dust_fraction: float = float(cfg.get("close_dust_fraction", 0.2))
+
         # Broker-resident protective stops (off by default). Keyed by
         # strategy name, mirroring the spirit of RiskAgent's
         # ``stop_loss_overlay`` config (also opt-in, also per-strategy) but
@@ -187,8 +214,22 @@ class ExecutionAgent(Agent):
             # regime_overlay can shrink every target below the band and
             # lock the book at 0% invested) is a real, understood
             # limitation of composing overlays, not fixed here.
-            if self.rebalance_band_pct > 0 and abs(diff_w) < self.rebalance_band_pct:
-                continue
+            # Full-close floor (see close_dust_fraction's field docstring):
+            # a target of exactly 0 with a remaining position bigger than
+            # this much smaller threshold closes in full, bypassing BOTH the
+            # band above and rebalance_fraction below -- otherwise it falls
+            # through to the same band/fraction handling as every other
+            # case, including staying genuinely-dust-tolerant below this
+            # smaller floor.
+            forced_full_close = False
+            if target_w == 0.0 and current_w != 0.0:
+                close_floor = self.rebalance_band_pct * self.close_dust_fraction
+                if abs(current_w) >= close_floor:
+                    forced_full_close = True
+
+            if not forced_full_close:
+                if self.rebalance_band_pct > 0 and abs(diff_w) < self.rebalance_band_pct:
+                    continue
 
             price = prices.get(sym, 0.0)
             if price <= 0:
@@ -197,8 +238,10 @@ class ExecutionAgent(Agent):
 
             # Turnover-aware sizing: close only a fraction of the (already
             # above-band) gap this cycle. 1.0 (default) is a no-op --
-            # byte-identical behavior to before this knob existed.
-            if self.rebalance_fraction < 1.0:
+            # byte-identical behavior to before this knob existed. Skipped
+            # entirely for a forced full close -- the whole point is to
+            # reach flat in one shot, not decay toward it.
+            if self.rebalance_fraction < 1.0 and not forced_full_close:
                 diff_w *= self.rebalance_fraction
 
             dollar_amount = diff_w * nav

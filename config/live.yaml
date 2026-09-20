@@ -64,6 +64,27 @@ extended_hours_trading:
 # firm-api refreshes that cache daily at fundamentals_refresh_hour and at boot
 # when older than FIRM_FUNDAMENTALS_REFRESH_MAX_AGE_HOURS (default 24).
 fundamentals_refresh_hour: 8
+
+# Daily ingestion of recent news article text into the RAG "news" collection
+# (see firm.rag.ingestors.news_ingestor.NewsIngestor + the new
+# firm.live.news_ingestion_job scheduler entrypoint, 2026-09-20) that the
+# sentiment/fundamental analysts and bull/bear/risk LLM agents already query
+# via _retrieve_context (config/llm.yaml already sets llm_enhanced for
+# sentiment/fundamental) but which sits empty without this job — every such
+# call was silently falling back to quant-only. Retrieved "news" text is
+# anonymized (company name + ticker stripped, see
+# firm.agents.llm.news_anonymizer) before it reaches any LLM prompt, per
+# Glasserman & Lin (arXiv 2309.17322)'s look-ahead/distraction mitigation.
+# Off here — IBKR stays the static control instance, mirroring this
+# session's other Alpaca-only rollouts (sector scanner, capital sleeves);
+# see config/live_alpaca.yaml, where this is enabled after an end-to-end
+# verification with real provider data. "hour" is the daily fire time in
+# schedule_timezone; "days" is the lookback window per run (safe to overlap
+# runs — VectorStore.add_documents dedupes by content hash).
+news_ingestion:
+  enabled: false
+  hour: 7
+  days: 3
 strategies:
   enabled:
     - momentum

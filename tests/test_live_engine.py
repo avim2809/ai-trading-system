@@ -3466,3 +3466,139 @@ class TestUpdateStrategyRegimeWeights:
     def test_default_config_has_no_regime_weights_key(self, tmp_path):
         engine = self._engine(tmp_path=tmp_path)
         assert "strategy_regime_weights" not in engine._config
+
+
+class TestFlattenSymbol:
+    """LiveTradingEngine.flatten_symbol -- added 2026-09-20 as the direct
+    operator control for "sell all holdings on this position now," distinct
+    from the normal per-cycle target-weight diff (which only ever acts on
+    the next scheduled cycle)."""
+
+    @patch("firm.live.engine.build_orchestrator")
+    def _engine(self, mock_build, tmp_path):
+        mock_build.return_value = MagicMock()
+        broker = MockBroker()
+        broker.connect()
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+
+    def test_flatten_no_position_is_a_no_op(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path)
+        result = engine.flatten_symbol("AAPL")
+        assert result == {"symbol": "AAPL", "flattened": False, "reason": "no position held"}
+
+    def test_flatten_long_position_submits_full_closing_sell(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path)
+        engine._portfolio.holdings = {"AAPL": 100.0}
+
+        result = engine.flatten_symbol("AAPL")
+
+        assert result["flattened"] is True
+        assert result["order_statuses"][0]["side"] == "sell"
+        assert result["order_statuses"][0]["quantity"] == pytest.approx(100.0)
+        # The portfolio must actually reflect the close, not just the broker.
+        assert engine._portfolio.holdings.get("AAPL", 0.0) == 0.0
+
+    def test_flatten_short_position_submits_full_closing_buy(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path)
+        engine._portfolio.holdings = {"AAPL": -50.0}
+
+        result = engine.flatten_symbol("AAPL")
+
+        assert result["flattened"] is True
+        assert result["order_statuses"][0]["side"] == "buy"
+        assert result["order_statuses"][0]["quantity"] == pytest.approx(50.0)
+        assert engine._portfolio.holdings.get("AAPL", 0.0) == 0.0
+
+    def test_flatten_refuses_while_cycle_in_progress(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path)
+        engine._portfolio.holdings = {"AAPL": 100.0}
+        assert engine._cycle_lock.acquire(blocking=False)
+        try:
+            with pytest.raises(RuntimeError, match="already in progress"):
+                engine.flatten_symbol("AAPL")
+        finally:
+            engine._cycle_lock.release()
+
+    def test_flatten_is_audited_as_a_manual_action(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path)
+        engine._portfolio.holdings = {"AAPL": 100.0}
+        engine._trade_history = TradeHistoryStore(
+            orders_path=str(tmp_path / "orders.json"), cycles_path=str(tmp_path / "cycles.json"),
+        )
+
+        engine.flatten_symbol("AAPL")
+
+        cycles = engine._trade_history.list_cycles()
+        assert any(c.get("manual_action") == "flatten_symbol" for c in cycles)
+        orders = engine._trade_history.list_orders()
+        assert any(o.get("source") == "manual:flatten_symbol" for o in orders)
+
+
+class TestFlattenStrategy:
+    """LiveTradingEngine.flatten_strategy -- blended mode closes real
+    attributed positions immediately; sleeved mode zeroes the virtual
+    sleeve now and defers the real unwind to the next netted pass."""
+
+    @patch("firm.live.engine.build_orchestrator")
+    def _engine(self, mock_build, tmp_path, sleeved: bool = False):
+        mock_orch = MagicMock()
+        mock_orch.capital_allocation_mode = "sleeved" if sleeved else "blended"
+        mock_build.return_value = mock_orch
+        broker = MockBroker()
+        broker.connect()
+        feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+        queue = ApprovalQueue(broker=broker)
+        config = {"initial_capital": 100_000, "memory_log_path": str(tmp_path / "decisions.jsonl")}
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+
+    def test_blended_flattens_attributed_positions(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path)
+        engine._portfolio.holdings = {"AAPL": 100.0, "MSFT": 20.0}
+        engine._attribution.dominant_strategy_by_symbol = lambda: {
+            "AAPL": "momentum", "MSFT": "trend",
+        }
+
+        result = engine.flatten_strategy("momentum")
+
+        assert result["mode"] == "blended_real"
+        assert engine._portfolio.holdings.get("AAPL", 0.0) == 0.0
+        # Unrelated strategy's position must be untouched.
+        assert engine._portfolio.holdings.get("MSFT") == 20.0
+
+    def test_blended_no_attributed_positions_is_a_no_op(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path)
+        engine._attribution.dominant_strategy_by_symbol = lambda: {}
+
+        result = engine.flatten_strategy("momentum")
+        assert result == {"strategy": "momentum", "flattened": False, "reason": "no attributed positions held"}
+
+    def test_sleeved_zeroes_virtual_sleeve_without_real_order(self, tmp_path):
+        from firm.portfolio.state import PortfolioState
+
+        engine = self._engine(tmp_path=tmp_path, sleeved=True)
+        sleeve = PortfolioState(initial_capital=10_000)
+        sleeve.holdings = {"AAPL": 30.0}
+        engine._orchestrator._sleeve_portfolios = {"stat_arb": sleeve}
+        # The REAL broker/portfolio must be untouched by a sleeved flatten --
+        # only the virtual sleeve is zeroed; the real unwind is deferred.
+        engine._portfolio.holdings = {"AAPL": 100.0}
+
+        result = engine.flatten_strategy("stat_arb")
+
+        assert result["mode"] == "sleeved_virtual_zeroed"
+        assert sleeve.holdings == {}
+        assert engine._portfolio.holdings == {"AAPL": 100.0}
+
+    def test_sleeved_no_sleeve_for_strategy_is_a_no_op(self, tmp_path):
+        engine = self._engine(tmp_path=tmp_path, sleeved=True)
+        engine._orchestrator._sleeve_portfolios = {}
+
+        result = engine.flatten_strategy("stat_arb")
+        assert result == {"strategy": "stat_arb", "flattened": False, "reason": "no sleeve for this strategy"}

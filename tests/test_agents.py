@@ -1922,6 +1922,77 @@ class TestExecution:
         assert len(report.fills) == 1
         assert report.fills[0]["side"] == "sell"
 
+    def test_target_zero_below_close_dust_floor_still_tolerated(self):
+        """A target of 0 with a genuinely tiny remainder (below
+        close_dust_fraction * band) is still left alone -- this is exactly
+        the case the reverted current_w==0 exemption's 3-window A/B
+        protects (see rebalance_band_pct's field docstring): don't force a
+        trade on true single-cycle dust."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(config={"rebalance_band_pct": 0.05})
+        portfolio = PortfolioState(initial_capital=500_000)
+        portfolio.holdings = {"AAPL": 10}  # ~0.003 weight -- well under 0.05*0.2=0.01
+        prices = {"AAPL": 150.0}
+
+        decision = RiskDecision(approved=True, adjusted_targets={})
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+        )
+        assert report.fills == []
+
+    def test_target_zero_above_close_dust_floor_forces_full_close(self):
+        """The actual fix: a materially-sized position (well above the
+        small close-dust floor, but still under the full rebalance band)
+        with target 0 must close in FULL this cycle, not asymptote toward
+        zero via rebalance_fraction or sit forever under the band."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"rebalance_band_pct": 0.05, "rebalance_fraction": 0.5},
+        )
+        portfolio = PortfolioState(initial_capital=500_000)
+        # ~0.03 weight: above close_dust_floor (0.05*0.2=0.01) but below the
+        # full 0.05 band -- today's (pre-fix) logic would skip this forever.
+        portfolio.holdings = {"AAPL": 100}
+        prices = {"AAPL": 150.0}
+
+        decision = RiskDecision(approved=True, adjusted_targets={})
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+        )
+        assert len(report.fills) == 1
+        fill = report.fills[0]
+        assert fill["side"] == "sell"
+        # Full close, not scaled by rebalance_fraction=0.5.
+        assert fill["quantity"] == pytest.approx(100.0)
+
+    def test_target_zero_full_close_ignores_rebalance_band_entirely(self):
+        """A forced full close must bypass the band check even though the
+        deviation itself (current_w - 0) would otherwise be compared
+        against it -- distinguishing this from the ordinary above-band
+        trading path, which is unaffected (see the two tests above it)."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        # A very wide band that would normally suppress any deviation under
+        # 50% of NAV -- but a forced full close must ignore it once above
+        # the (much smaller) close-dust floor.
+        execution = ExecutionAgent(config={"rebalance_band_pct": 0.50})
+        portfolio = PortfolioState(initial_capital=500_000)
+        # ~0.13 weight: above the 0.5*0.2=0.10 close-dust floor, but still
+        # (deliberately) inside the oversized 0.50 band.
+        portfolio.holdings = {"AAPL": 500}
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={})
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+        )
+        assert len(report.fills) == 1
+        assert report.fills[0]["quantity"] == pytest.approx(500.0)
+
     def test_rebalance_fraction_trades_only_a_fraction_of_the_gap(self):
         """Turnover-aware sizing: with rebalance_fraction=0.5, only half the
         (already above-band) gap to target should be traded this cycle --

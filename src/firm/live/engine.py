@@ -1304,6 +1304,156 @@ class LiveTradingEngine:
                 log.warning("Failed to persist freshly-seeded sleeve portfolios", exc_info=True)
         return summary
 
+    def flatten_symbol(self, symbol: str) -> dict[str, Any]:
+        """Force an immediate, complete exit of *symbol*'s REAL broker
+        position, outside the normal cycle (2026-09-20).
+
+        The direct answer to "sell all holdings on some position" -- the
+        normal per-cycle path only ever *diffs toward* a target weight next
+        scheduled cycle (even with Phase 1's close-dust-floor fix, that's
+        still bounded by when the next cycle runs); this submits a real
+        closing order right now. Refuses (raises ``RuntimeError``) rather
+        than blocking if a scheduled cycle is already mid-flight, to avoid
+        two code paths racing to submit orders for the same book — retry
+        once the in-flight cycle finishes. No-op (returns
+        ``{"flattened": False}``) if nothing is actually held.
+        """
+        if not self._cycle_lock.acquire(blocking=False):
+            raise RuntimeError(
+                f"Cannot flatten {symbol}: a scheduled cycle is already in progress — retry shortly"
+            )
+        try:
+            return self.run_on_cycle_worker(self._flatten_symbol_on_worker, symbol, timeout=60)
+        finally:
+            self._cycle_lock.release()
+
+    def _flatten_symbol_on_worker(self, symbol: str) -> dict[str, Any]:
+        shares = self._portfolio.holdings.get(symbol, 0.0)
+        if shares == 0.0:
+            return {"symbol": symbol, "flattened": False, "reason": "no position held"}
+
+        prices = self._broker.get_current_prices([symbol])
+        price = prices.get(symbol, 0.0)
+        if price <= 0:
+            raise RuntimeError(
+                f"No usable current price for {symbol} — refusing to submit a flatten order blind"
+            )
+        side = "sell" if shares > 0 else "buy"
+        quantity = abs(shares)
+        order = {
+            "symbol": symbol,
+            "side": side,
+            "shares": -shares,
+            "quantity": quantity,
+            "notional": quantity * price,
+            "price": price,
+            "strategy": "manual_flatten",
+            "est_commission": 0.0,
+            "est_slippage": 0.0,
+            "est_spread": 0.0,
+            "est_impact": 0.0,
+            "est_cost": 0.0,
+        }
+        statuses, failed = self._execute_orders([order])
+        if statuses:
+            self._portfolio.update([order], prices, cost=0.0)
+        self._record_manual_action(
+            "flatten_symbol",
+            {"symbol": symbol},
+            statuses=statuses,
+            failed=failed,
+        )
+        return {
+            "symbol": symbol,
+            "flattened": bool(statuses) and not failed,
+            "order_statuses": [self._status_to_dict(s, "manual_flatten") for s, _ in statuses],
+            "failed": failed,
+        }
+
+    def flatten_strategy(self, strategy: str) -> dict[str, Any]:
+        """Force *strategy* to hold nothing going forward (2026-09-20).
+
+        Blended mode: closes every REAL position currently dominant-
+        attributed to *strategy* (``PerformanceAttribution.
+        dominant_strategy_by_symbol()`` — the same heuristic already used
+        for order attribution and the stop-loss overlay in blended mode)
+        immediately, same mechanism as :meth:`flatten_symbol` per-symbol.
+
+        Sleeved mode: zeroes *strategy*'s own virtual ``PortfolioState``
+        immediately (it stops contributing any target weight from this
+        point on) — deliberately does NOT submit a real order directly for
+        just this sleeve's share, since another sleeve may hold the same
+        symbol and the real book is only ever safely unwound by netting
+        every sleeve's targets together (see ``Orchestrator._step_sleeved``).
+        The real broker-side unwind of whatever this zeroing implies
+        completes on the next scheduled cycle's netted execution pass, the
+        same well-tested path every other rebalance already goes through.
+        """
+        if self._orchestrator.capital_allocation_mode == "sleeved":
+            sleeve_portfolio = self._orchestrator._sleeve_portfolios.get(strategy)
+            if sleeve_portfolio is None:
+                return {"strategy": strategy, "flattened": False, "reason": "no sleeve for this strategy"}
+            symbols = list(sleeve_portfolio.holdings)
+            sleeve_portfolio.holdings = {}
+            self._record_manual_action(
+                "flatten_strategy_sleeve", {"strategy": strategy, "symbols": symbols},
+            )
+            return {
+                "strategy": strategy,
+                "flattened": True,
+                "mode": "sleeved_virtual_zeroed",
+                "symbols": symbols,
+                "note": "real broker unwind completes on the next scheduled cycle's netted pass",
+            }
+
+        symbol_strategy = self._attribution.dominant_strategy_by_symbol()
+        symbols = [
+            sym for sym, owner in symbol_strategy.items()
+            if owner == strategy and self._portfolio.holdings.get(sym, 0.0) != 0.0
+        ]
+        if not symbols:
+            return {"strategy": strategy, "flattened": False, "reason": "no attributed positions held"}
+        if not self._cycle_lock.acquire(blocking=False):
+            raise RuntimeError(
+                f"Cannot flatten {strategy}: a scheduled cycle is already in progress — retry shortly"
+            )
+        try:
+            results = self.run_on_cycle_worker(
+                lambda: [self._flatten_symbol_on_worker(sym) for sym in symbols], timeout=120,
+            )
+        finally:
+            self._cycle_lock.release()
+        return {"strategy": strategy, "flattened": True, "mode": "blended_real", "results": results}
+
+    def _record_manual_action(
+        self,
+        kind: str,
+        details: dict[str, Any],
+        *,
+        statuses: list[tuple[OrderStatus, str]] | None = None,
+        failed: list[dict[str, Any]] | None = None,
+    ) -> None:
+        """Persist an operator-triggered action (flatten, etc.) to the same
+        durable cycle-history store every scheduled cycle already writes to
+        -- an audit trail distinct from ordinary order flow, mirroring the
+        ``sleeve_decisions`` pattern added earlier today."""
+        if self._trade_history is None:
+            return
+        entry = {
+            "cycle_id": None,
+            "timestamp": utcnow().isoformat(),
+            "manual_action": kind,
+            "details": details,
+        }
+        self._trade_history.record_cycle(entry)
+        if statuses:
+            self._trade_history.record_orders(
+                [self._status_to_dict(s, strat) for s, strat in statuses],
+                source=f"manual:{kind}",
+            )
+        if failed:
+            log.warning("Manual action %s had %d failed order(s): %s", kind, len(failed), failed)
+
     def reset_kill_switch(self) -> dict[str, Any]:
         """Clear the drawdown kill switch and re-arm trading.
 
@@ -2215,10 +2365,19 @@ class LiveTradingEngine:
         # +max_position_pct in one cycle is a legitimate rebalance and trades
         # ~2x the single-position cap, so the cap here is doubled to avoid
         # blocking that case while still catching a genuinely runaway order.
+        # Allowlist is the active trading universe UNION every symbol
+        # currently held (2026-09-20): a symbol that fell out of the
+        # tradeable universe (e.g. dynamic-universe removal, or an operator
+        # narrowing `strategies`/`universe` config) must still be closeable
+        # -- exiting a position you already hold is never a new risk the
+        # allowlist needs to guard against, only *opening* an off-universe
+        # one is. Without this, a removed symbol's leftover position could
+        # never actually be sold through this path at all.
+        allowlist = set(self._data_feed._universe) | set(self._portfolio.holdings)
         risk_profile = RiskProfile(
             account_equity=self._portfolio.nav,
             max_position_notional=2.0 * self._max_position_pct * self._portfolio.nav,
-            symbol_allowlist=self._data_feed._universe,
+            symbol_allowlist=list(allowlist),
             require_stop=False,
         )
 

@@ -61,6 +61,7 @@ def _start_live_scheduler(
     dynamic_universe_cfg = engine_config.get("danelfin_dynamic_universe") or {}
     sp500_dynamic_universe_cfg = engine_config.get("sp500_dynamic_universe") or {}
     extended_hours_cfg = engine_config.get("extended_hours_trading") or {}
+    news_ingestion_cfg = engine_config.get("news_ingestion") or {}
     try:
         from firm.live.fundamentals_refresh import maybe_refresh_fundamentals_cache_on_start
         from firm.live.pipeline_warmup import PipelineWarmupGate, warmup_wait_seconds
@@ -125,6 +126,7 @@ def _start_live_scheduler(
                     ),
                     sp500_static_sector_map=engine_config.get("sector_map") or {},
                     extended_hours_trading=extended_hours_cfg,
+                    news_ingestion=news_ingestion_cfg,
                 )
                 scheduler.start()
                 app.state.live_scheduler = scheduler
@@ -756,6 +758,38 @@ def live_positions_summary(request: Request) -> dict[str, Any]:
         "n_long": sum(1 for p in positions if p.quantity > 0),
         "n_short": sum(1 for p in positions if p.quantity < 0),
     }
+
+
+@router.post("/positions/{symbol}/flatten")
+def flatten_position(symbol: str, request: Request) -> dict[str, Any]:
+    """Immediately close *symbol*'s entire real position, outside the
+    normal per-cycle rebalance (2026-09-20) — the direct operator control
+    for "sell all holdings on this position now," not the next scheduled
+    cycle. See ``LiveTradingEngine.flatten_symbol``'s docstring for exactly
+    what this does and doesn't do (it submits a real closing order; it does
+    not remove the symbol from any strategy's universe)."""
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        raise HTTPException(status_code=400, detail="Live engine is not running")
+    try:
+        return engine.flatten_symbol(symbol.upper())
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/sleeves/{strategy}/flatten")
+def flatten_sleeve(strategy: str, request: Request) -> dict[str, Any]:
+    """Force *strategy* to hold nothing going forward (2026-09-20). See
+    ``LiveTradingEngine.flatten_strategy``'s docstring — blended mode closes
+    real positions immediately; sleeved mode zeroes the virtual sleeve now
+    and the real unwind completes on the next scheduled netted pass."""
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        raise HTTPException(status_code=400, detail="Live engine is not running")
+    try:
+        return engine.flatten_strategy(strategy)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/account")
