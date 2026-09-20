@@ -11,7 +11,7 @@
 - [Memory-keeping habits](feedback_memory_habits.md) — user wants proactive, thorough memory updates, not just on request
 - [Full-stack sync](feedback_full_stack_sync.md) — always verify frontend against real backend shapes and rebuild frontend/dist, not just backend fixes
 - [Danelfin integration](project_danelfin_integration.md) — DECOMMISSIONED 8/16 (account closed): config/timer/API-key disabled on both live instances, restarted+verified
-- [Autonomous scope calls](feedback_autonomous_scope_calls.md) — user wants paid-data capabilities maximally wired in even without A/B; still no anti-bot bypass or silent heavy infra
+- [Autonomous scope calls](feedback_autonomous_scope_calls.md) — user wants paid-data capabilities maximally wired in even without A/B; still no anti-bot bypass or silent heavy infra; 9/20: reconfirmed for full overnight builds + disk/CPU/service-restart authorization
 - [Production incident priority](feedback_production_incident_priority.md) — fix currently-broken live-trading bugs now, in-session, not as a deferred follow-up
 - [Alpaca paper instance incident](project_alpaca_paper_instance_incident.md) — 8/6: initial_capital config bug halted new Alpaca instance all day; found+fixed a kill-switch persistence safety bug in shared engine.py
 - [8/16 deep audit outage fixes](project_deep_audit_aug16_outage_fixes.md) — IBKR 5-day zero-trade outage (stale connection post nightly gateway restart) + Alpaca order rejections (long/short flip splitting) fixed; Discord alerts now severity-colored embeds
@@ -27,3 +27,4 @@
 - [Pattern recognition feature](project_pattern_recognition_feature.md) — Strategy #13, 5 phases + full follow-up pass (scheduled job, ONNX, isolated CNN/PPO env); live on both instances 9/9
 - [Capital sleeves feature](project_capital_sleeves_feature.md) — per-strategy capital/P&L, A/B found+fixed a real rebalance-band bug pre-cutover; live on Alpaca only 9/10, IBKR stays blended control
 - [Repo doc & memory upkeep](feedback_repo_doc_and_memory_upkeep.md) — keep docs/claude-memory + PROJECT_CONTEXT.md/.cursor/rules in sync as things change, don't let staleness accumulate again
+- [Proactive trading system 9/20](project_proactive_trading_system.md) — 5-phase overnight build (exits/flatten, reflection rollup+recs, real news, CNN patterns, universe incubation)+frontend; full plan in /root/.claude/plans/lively-stirring-lagoon.md

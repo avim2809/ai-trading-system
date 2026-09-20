@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: feedback
   originSessionId: d187bdf3-58a0-49c4-ae8b-81294f53899d
-  modified: 2026-07-31T07:54:06.627Z
+  modified: 2026-09-20T08:44:13.511Z
 ---
 
 When the user says things like "continue all, I'm going to sleep", "do not
@@ -39,3 +39,25 @@ engine/systemd process) — that kind of infrastructure decision was made
 via a lighter-weight design choice (a synthetic paper ledger instead)
 rather than either asking permission or building the heavier version
 unreviewed.
+
+**Reconfirmed and extended 2026-09-20** ([[project_proactive_trading_system]]):
+going to bed, the user explicitly said "implement all of the plan end to
+end" and, when asked whether ML training could compete with the live
+engines for CPU, said to just stop the services (market was closed) and
+restart once done — then separately, unprompted, added "you also are
+authorized to clear disk and free memory and cpu as you need to work on
+this without my consent." This is a strengthening of the same pattern:
+stopping/restarting live services repeatedly, running real training jobs,
+and clearing caches/disk space are all pre-authorized for this kind of
+overnight, fully-autonomous multi-phase build — not just data-integration
+work as the original note scoped it. The one guardrail volunteered
+alongside it: throttle heavy compute (nice/low-priority) so it doesn't
+starve anything still running, and prefer safe/reversible cleanup (package
+caches, not user data) even though the grant was unconditional.
+Enable-vs-disable judgment calls on validated features ("enable if
+validation supports it") were also explicitly delegated rather than
+deferred to morning review, matching this note's existing "accept the
+tradeoff explicitly" pattern — see the CNN pattern-scoring decision
+in [[project_proactive_trading_system]] for how that judgment was actually
+exercised (retrained + validated before enabling, not enabled on the
+strength of the request alone).
