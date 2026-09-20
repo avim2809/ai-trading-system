@@ -887,6 +887,37 @@ confirmed with real money on the line, not just simulated.
 
 ---
 
+## Proactive trading system (2026-09-20)
+
+A single-session initiative to make the system genuinely proactive rather than
+periodically rebalancing: react to news, read chart patterns, actively manage
+which symbols get real capital, decisively exit positions, and capture every
+day's decisions for offline review. Built after a research pass (3 codebase
+mapping agents + 1 professional-practices research agent) found most of the
+underlying infrastructure already existed but was inert, buggy, or missing one
+connecting piece — this closed those specific gaps rather than rebuilding
+anything that already worked. Full plan/rationale + citations:
+`/root/.claude/plans/lively-stirring-lagoon.md` (session-local, not in the repo).
+
+| Gap | Fix | Where |
+|-----|-----|-------|
+| A target-0 position could get asymptotically stranded (band tolerates dust forever; `rebalance_fraction` decay never fully reaches zero) | `ExecutionAgent`'s new `close_dust_fraction`: a materially-sized position (above a floor much smaller than the band) closes in full, bypassing the band/fraction — deliberately narrower than "always force-close," which a prior 3-window A/B found regressed Sharpe 3.45→0.80 | `agents/execution.py` |
+| No operator control to fully exit a position/strategy on demand | `LiveTradingEngine.flatten_symbol`/`flatten_strategy` + `POST /api/live/positions/{symbol}/flatten` / `/sleeves/{strategy}/flatten` | `live/engine.py`, `api/routers/live.py`, `frontend` LiveDashboard |
+| `hourly_market_hours`'s ~7 cycles/day silently dropped 6 of every 7 decisions from reflection (bare-date, first-writer-wins key) | `TradingMemoryLog.store_decision` keys by `date#cycle_id`; new `reflect_day()` aggregates a whole day into ONE LLM reflection call (cost stays flat) | `agents/memory.py` |
+| Reflection was purely read-only, no way to act on a conclusion | `DailyReflectionRecommendation` — a bounded, pre-enumerated action (`reduce_position_limit`/`flag_strategy_for_review`/`no_action`), never auto-applied (no source found supports an LLM reflection loop auto-adjusting its own config — SR 11-7, TradeTrap arXiv 2512.02261). `GET /api/memory/recommendations` + human `POST /api/live/recommendations/{date}/apply`, which reuses `RiskAgent.sleeve_risk_overrides` | `llm/schemas.py`, `api/routers/{decisions,live}.py`, `frontend` Decisions page |
+| `sentiment`/`fundamental` LLM agents queried a `news` RAG collection that had zero documents — silent quant-only fallback every time | Daily `news_ingestion` scheduler job populates it via the existing `NewsIngestor`; retrieved news text anonymized (company/ticker stripped) per Glasserman & Lin (arXiv 2309.17322) before reaching any prompt | `live/news_ingestion_job.py`, `agents/llm/news_anonymizer.py` — Alpaca only, verified end-to-end against production credentials |
+| `pattern_recognition`'s validated CNN/GAF layer was fully built but never called live; named rule-based patterns alone have no edge after data-snooping correction (Marshall & Cahan) while learned CNN features do (Jiang/Kelly/Xiu, JF 2023) | `firm.patterns.ml.inference` (fail-soft ONNX wrapper) scores each rule-based candidate's quality. Re-trained the model on real cached history after the on-disk artifact (probably trained on synthetic smoke-test data) validated *worse* than rule-based; the retrained one improved walk-forward Sharpe 0.415→0.645. `cnn_scoring_enabled` gate defaults **off** — model-file presence alone must never imply live usage | `patterns/ml/inference.py`, `strategies/pattern_recognition.py` — enabled on both instances after validation |
+| New symbols entered the live universe with real capital immediately; removal never closed the position | `dynamic_universe_state`'s schema gains `candidate`→`active` (incubation_days, default 5, mirrors `min_dwell_days`'s removal-side convention); `RiskAgent.incubating_symbols` zeroes a candidate's target weight until promoted; `sp500_universe_sync` now calls `flatten_symbol` on dwell-removal | `live/{dynamic_universe_state,danelfin_universe_sync,sp500_universe_sync}.py`, `agents/risk.py` — Alpaca only |
+
+**Deliberately not done**: a fully autonomous reflection→config loop (every
+source found routes this through human review, not automation); after-hours
+limit-order pricing for Alpaca (extended_hours_trading stayed IBKR-only, see
+its own section above); performance-gated (vs. time-gated) incubation
+promotion (a second overfit-prone gate wasn't worth it without a track record
+on the simpler version first).
+
+---
+
 ## Troubleshooting
 
 | Symptom | Check |
