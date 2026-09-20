@@ -33,6 +33,10 @@ import type {
   LiveAlertsResponse,
   DecisionEntry,
   LessonsDigest,
+  FlattenPositionResponse,
+  FlattenSleeveResponse,
+  Recommendation,
+  ApplyRecommendationResponse,
   SystemResources,
   PatternMatchRecord,
   PatternScanQuery,
@@ -196,6 +200,19 @@ export const api = {
       body: JSON.stringify({ reason }),
     }),
 
+  // Immediate, hard-to-reverse real-order actions outside the normal
+  // per-cycle rebalance — callers must confirm with the user before
+  // invoking these (see LiveDashboard.tsx).
+  flattenPosition: (symbol: string) =>
+    fetchJson<FlattenPositionResponse>(`/live/positions/${symbol}/flatten`, {
+      method: 'POST',
+    }),
+
+  flattenSleeve: (strategy: string) =>
+    fetchJson<FlattenSleeveResponse>(`/live/sleeves/${strategy}/flatten`, {
+      method: 'POST',
+    }),
+
   getLiveConfig: () => fetchJson<LiveConfig>('/live/config'),
 
   updateLiveConfig: (config: LiveConfig) =>
@@ -265,6 +282,14 @@ export const api = {
 
   getLessons: (limit = 10) =>
     fetchJson<LessonsDigest>(`/memory/lessons?limit=${limit}`),
+
+  getRecommendations: (pendingOnly = true) =>
+    fetchJson<Recommendation[]>(`/memory/recommendations?pending_only=${pendingOnly}`),
+
+  applyRecommendation: (date: string) =>
+    fetchJson<ApplyRecommendationResponse>(`/live/recommendations/${date}/apply`, {
+      method: 'POST',
+    }),
 
   // ── Pattern Recognition (Phase 3: on-demand scan API) ──
   //

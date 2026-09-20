@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
@@ -7,6 +7,78 @@ import { renderWithProviders } from '../test/utils'
 import LiveDashboard from './LiveDashboard'
 
 describe('LiveDashboard', () => {
+  const runningStatus = {
+    state: 'running', broker: 'ibkr_paper', broker_connected: true, next_run: null,
+    active_strategies: ['momentum'], approval_mode: 'full_auto', uptime_seconds: 10, last_cycle: null,
+  }
+
+  it('flattens a position after confirmation and shows the result', async () => {
+    let flattenCalled = false
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json(runningStatus)),
+      http.post('http://localhost/api/live/positions/:symbol/flatten', ({ params }) => {
+        flattenCalled = true
+        return HttpResponse.json({
+          symbol: params.symbol, flattened: true,
+          order_statuses: [{ order_id: 'o1', symbol: 'AAPL', side: 'sell', quantity: 1, filled_quantity: 1, avg_fill_price: 332.5, status: 'filled', strategy: 'manual_flatten', timestamp: null }],
+          failed: [],
+        })
+      }),
+    )
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderWithProviders(<LiveDashboard />)
+    await screen.findByText('AAPL')
+
+    // The Positions table's row renders before the Strategy Sleeves
+    // table's row, so the position's own "Flatten" button is the first.
+    await user.click(screen.getAllByText('Flatten')[0]!)
+    expect(confirmSpy).toHaveBeenCalled()
+    await waitFor(() => expect(flattenCalled).toBe(true))
+    expect(await screen.findByText(/AAPL: flattened \(1 order\)/)).toBeInTheDocument()
+    confirmSpy.mockRestore()
+  })
+
+  it('does not call the flatten endpoint when the confirm dialog is declined', async () => {
+    let flattenCalled = false
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json(runningStatus)),
+      http.post('http://localhost/api/live/positions/:symbol/flatten', () => {
+        flattenCalled = true
+        return HttpResponse.json({ symbol: 'AAPL', flattened: true, order_statuses: [], failed: [] })
+      }),
+    )
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const user = userEvent.setup()
+    renderWithProviders(<LiveDashboard />)
+    await screen.findByText('AAPL')
+
+    await user.click(screen.getAllByText('Flatten')[0]!)
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(flattenCalled).toBe(false)
+    confirmSpy.mockRestore()
+  })
+
+  it('shows a no-op reason when flattening a strategy sleeve with nothing held', async () => {
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json(runningStatus)),
+      http.post('http://localhost/api/live/sleeves/:strategy/flatten', ({ params }) =>
+        HttpResponse.json({ strategy: params.strategy, flattened: false, reason: 'no attributed positions held' })),
+    )
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    renderWithProviders(<LiveDashboard />)
+    await screen.findByText('Strategy Sleeves')
+
+    // Two "Flatten" buttons render: one per open position (AAPL), one per
+    // active strategy sleeve (momentum) — the sleeve row is the last one.
+    const flattenButtons = screen.getAllByText('Flatten')
+    await user.click(flattenButtons[flattenButtons.length - 1]!)
+    expect(await screen.findByText(/momentum: not flattened — no attributed positions held/)).toBeInTheDocument()
+    confirmSpy.mockRestore()
+  })
+
+
   it('shows the stopped state with a Start Engine button', async () => {
     renderWithProviders(<LiveDashboard />)
     await waitFor(() => expect(screen.getByText('Engine is stopped.')).toBeInTheDocument())

@@ -109,4 +109,84 @@ describe('api client', () => {
     await api.getDecisions()
     expect(capturedUrl).toContain('limit=50')
   })
+
+  it('flattenPosition() POSTs to the per-symbol flatten endpoint and returns the result', async () => {
+    let capturedMethod = ''
+    let capturedUrl = ''
+    server.use(
+      http.post('http://localhost/api/live/positions/:symbol/flatten', ({ request, params }) => {
+        capturedMethod = request.method
+        capturedUrl = request.url
+        expect(params.symbol).toBe('AAPL')
+        return HttpResponse.json({ symbol: 'AAPL', flattened: true, order_statuses: [], failed: [] })
+      }),
+    )
+    const res = await api.flattenPosition('AAPL')
+    expect(capturedMethod).toBe('POST')
+    expect(capturedUrl).toContain('/live/positions/AAPL/flatten')
+    expect(res.flattened).toBe(true)
+  })
+
+  it('flattenPosition() surfaces a no-op reason when nothing is held', async () => {
+    server.use(
+      http.post('http://localhost/api/live/positions/:symbol/flatten', () =>
+        HttpResponse.json({ symbol: 'MSFT', flattened: false, reason: 'no position held' })),
+    )
+    const res = await api.flattenPosition('MSFT')
+    expect(res.flattened).toBe(false)
+    expect(res.reason).toBe('no position held')
+  })
+
+  it('flattenSleeve() POSTs to the per-strategy flatten endpoint', async () => {
+    let capturedUrl = ''
+    server.use(
+      http.post('http://localhost/api/live/sleeves/:strategy/flatten', ({ request }) => {
+        capturedUrl = request.url
+        return HttpResponse.json({ strategy: 'momentum', flattened: true, mode: 'blended_real', results: [] })
+      }),
+    )
+    const res = await api.flattenSleeve('momentum')
+    expect(capturedUrl).toContain('/live/sleeves/momentum/flatten')
+    expect(res.mode).toBe('blended_real')
+  })
+
+  it('getRecommendations() defaults to pending_only=true', async () => {
+    let capturedUrl = ''
+    server.use(
+      http.get('http://localhost/api/memory/recommendations', ({ request }) => {
+        capturedUrl = request.url
+        return HttpResponse.json([])
+      }),
+    )
+    await api.getRecommendations()
+    expect(capturedUrl).toContain('pending_only=true')
+  })
+
+  it('getRecommendations(false) passes pending_only=false through', async () => {
+    let capturedUrl = ''
+    server.use(
+      http.get('http://localhost/api/memory/recommendations', ({ request }) => {
+        capturedUrl = request.url
+        return HttpResponse.json([])
+      }),
+    )
+    await api.getRecommendations(false)
+    expect(capturedUrl).toContain('pending_only=false')
+  })
+
+  it('applyRecommendation() POSTs to the apply endpoint for the given date', async () => {
+    let capturedUrl = ''
+    let capturedMethod = ''
+    server.use(
+      http.post('http://localhost/api/live/recommendations/:date/apply', ({ request }) => {
+        capturedUrl = request.url
+        capturedMethod = request.method
+        return HttpResponse.json({ date: '2026-09-18', action: 'reduce_position_limit', applied: true })
+      }),
+    )
+    const res = await api.applyRecommendation('2026-09-18')
+    expect(capturedMethod).toBe('POST')
+    expect(capturedUrl).toContain('/live/recommendations/2026-09-18/apply')
+    expect(res.applied).toBe(true)
+  })
 })

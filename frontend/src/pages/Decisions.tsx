@@ -1,6 +1,7 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
-import type { DecisionEntry, LessonsDigest } from '../api/types'
+import type { DecisionEntry, LessonsDigest, Recommendation } from '../api/types'
 import Spinner from '../components/Spinner'
 import StatusBadge from '../components/StatusBadge'
 
@@ -54,6 +55,107 @@ function LessonsDigestPanel() {
   )
 }
 
+const ACTION_LABEL: Record<string, string> = {
+  reduce_position_limit: 'Reduce position limit',
+  flag_strategy_for_review: 'Flag strategy for review',
+  no_action: 'No action',
+}
+
+// Human-gated queue of daily-reflection recommendations (2026-09-20) — a
+// reflection's conclusion never touches live risk config on its own (see
+// firm.llm.schemas.DailyReflectionRecommendation); applying one here is the
+// one explicit, human-triggered path that does. GET .../recommendations
+// (pending_only, the default) already excludes "no_action" and
+// already-applied entries, so anything rendered here is genuinely
+// actionable.
+function RecommendationsPanel() {
+  const qc = useQueryClient()
+  const [confirmDate, setConfirmDate] = useState<string | null>(null)
+  const [applyMsg, setApplyMsg] = useState<{ text: string; error: boolean } | null>(null)
+
+  const { data: recommendations } = useQuery<Recommendation[]>({
+    queryKey: ['recommendations'],
+    queryFn: () => api.getRecommendations(true),
+    refetchInterval: 30000,
+  })
+
+  const applyMut = useMutation({
+    mutationFn: (date: string) => api.applyRecommendation(date),
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['recommendations'] })
+      setConfirmDate(null)
+      setApplyMsg({ text: `Applied "${ACTION_LABEL[data.action] ?? data.action}" for ${data.date}.`, error: false })
+    },
+    onError: (err) => setApplyMsg({ text: (err as Error).message, error: true }),
+  })
+
+  if (!recommendations || recommendations.length === 0) return null
+
+  return (
+    <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 mb-6">
+      <h3 className="text-sm font-semibold text-slate-300 mb-1">Pending Recommendations</h3>
+      <p className="text-xs text-slate-500 mb-4">
+        Daily-reflection conclusions awaiting explicit human review — applying one changes live risk config.
+      </p>
+      {applyMsg && (
+        <div className={`mb-3 rounded-lg border p-3 text-sm ${applyMsg.error ? 'bg-red-900/20 border-red-700/50 text-red-400' : 'bg-emerald-900/10 border-emerald-700/40 text-emerald-300'}`}>
+          {applyMsg.text}
+        </div>
+      )}
+      <div className="space-y-3">
+        {recommendations.map((r) => (
+          <div key={r.date} className="bg-slate-900/50 border border-slate-700/50 rounded-lg p-4">
+            <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+              <div className="flex items-center gap-3 flex-wrap min-w-0">
+                <span className="font-mono text-sm text-slate-200">{r.date}</span>
+                <span className="px-2 py-0.5 rounded text-xs font-mono border bg-blue-900/20 border-blue-700/40 text-blue-300">
+                  {ACTION_LABEL[r.action] ?? r.action}
+                </span>
+                {r.strategy && <span className="text-xs text-slate-400">{r.strategy}</span>}
+              </div>
+              {confirmDate === r.date ? (
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-xs text-amber-400">Apply this recommendation?</span>
+                  <button
+                    onClick={() => applyMut.mutate(r.date)}
+                    disabled={applyMut.isPending}
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors flex items-center gap-2"
+                  >
+                    {applyMut.isPending && <Spinner className="h-3 w-3" />}
+                    Yes, Apply
+                  </button>
+                  <button
+                    onClick={() => setConfirmDate(null)}
+                    className="px-2 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setApplyMsg(null); setConfirmDate(r.date) }}
+                  className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg border border-emerald-700 text-emerald-400 hover:bg-emerald-900/20 transition-colors"
+                >
+                  Apply
+                </button>
+              )}
+            </div>
+            {r.action === 'reduce_position_limit' && (
+              <p className="text-xs text-slate-500 mb-1">
+                Cut {r.strategy}'s max position size by {(r.reduce_by_pct * 100).toFixed(0)}%.
+              </p>
+            )}
+            <p className="text-sm text-slate-300">{r.rationale}</p>
+            {r.rollup_reflection && (
+              <p className="text-xs text-slate-500 mt-2 italic">{r.rollup_reflection}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Decisions() {
   const { data: decisions, isLoading, error } = useQuery<DecisionEntry[]>({
     queryKey: ['decisions'],
@@ -89,6 +191,7 @@ export default function Decisions() {
       </div>
 
       <LessonsDigestPanel />
+      <RecommendationsPanel />
 
       {!decisions || decisions.length === 0 ? (
         <div className="bg-slate-800 rounded-xl border border-slate-700 p-12 text-center">

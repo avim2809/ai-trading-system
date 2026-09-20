@@ -5,7 +5,7 @@ import { api } from '../api/client'
 import type {
   LiveStatus, LiveStartRequest, BrokerPosition, AccountInfo, CycleRecord,
   PendingApproval, StrategyInfo, LiveAlertsResponse, PositionsSummary,
-  LivePortfolioHistory, LiveAttribution,
+  LivePortfolioHistory, LiveAttribution, FlattenPositionResponse, FlattenSleeveResponse,
 } from '../api/types'
 import MetricCard from '../components/MetricCard'
 import StatusBadge from '../components/StatusBadge'
@@ -186,6 +186,65 @@ export default function LiveDashboard() {
     mutationFn: () => api.resetKillSwitch(),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['live-alerts'] }),
   })
+
+  // Manual flatten actions — immediate, hard-to-reverse real-order actions
+  // outside the normal per-cycle rebalance, so both require an explicit
+  // confirm() before firing and surface their outcome (success/failure/
+  // no-op reason) in a shared banner rather than silently succeeding.
+  const [flattenMsg, setFlattenMsg] = useState<{ text: string; error: boolean } | null>(null)
+
+  const invalidateAfterFlatten = () => {
+    qc.invalidateQueries({ queryKey: ['live-positions'] })
+    qc.invalidateQueries({ queryKey: ['live-positions-summary'] })
+    qc.invalidateQueries({ queryKey: ['live-attribution'] })
+  }
+
+  const flattenPositionMut = useMutation({
+    mutationFn: (symbol: string) => api.flattenPosition(symbol),
+    onSuccess: (data: FlattenPositionResponse) => {
+      invalidateAfterFlatten()
+      setFlattenMsg(
+        data.flattened
+          ? {
+              text: `${data.symbol}: flattened (${data.order_statuses?.length ?? 0} order${(data.order_statuses?.length ?? 0) === 1 ? '' : 's'}).`,
+              error: (data.failed?.length ?? 0) > 0,
+            }
+          : { text: `${data.symbol}: not flattened — ${data.reason ?? 'unknown reason'}.`, error: false },
+      )
+    },
+    onError: (err) => setFlattenMsg({ text: (err as Error).message, error: true }),
+  })
+
+  const flattenSleeveMut = useMutation({
+    mutationFn: (strategy: string) => api.flattenSleeve(strategy),
+    onSuccess: (data: FlattenSleeveResponse) => {
+      invalidateAfterFlatten()
+      if (!data.flattened) {
+        setFlattenMsg({ text: `${data.strategy}: not flattened — ${data.reason ?? 'unknown reason'}.`, error: false })
+      } else if (data.mode === 'sleeved_virtual_zeroed') {
+        setFlattenMsg({ text: `${data.strategy}: sleeve zeroed (${data.symbols?.length ?? 0} symbol${(data.symbols?.length ?? 0) === 1 ? '' : 's'}) — ${data.note ?? ''}`, error: false })
+      } else {
+        setFlattenMsg({ text: `${data.strategy}: flattened (${data.results?.length ?? 0} symbol${(data.results?.length ?? 0) === 1 ? '' : 's'} closed).`, error: false })
+      }
+    },
+    onError: (err) => setFlattenMsg({ text: (err as Error).message, error: true }),
+  })
+
+  const handleFlattenPosition = (symbol: string) => {
+    if (!window.confirm(`Immediately close the entire position in ${symbol}? This submits a real closing order right now, outside the normal rebalance cycle, and cannot be undone.`)) {
+      return
+    }
+    setFlattenMsg(null)
+    flattenPositionMut.mutate(symbol)
+  }
+
+  const handleFlattenSleeve = (strategy: string) => {
+    if (!window.confirm(`Flatten the "${strategy}" sleeve? This closes its held positions (or zeroes its virtual sleeve in sleeved mode) right now, outside the normal rebalance cycle, and cannot be undone.`)) {
+      return
+    }
+    setFlattenMsg(null)
+    flattenSleeveMut.mutate(strategy)
+  }
 
   if (isLoading) {
     return (
@@ -599,6 +658,15 @@ export default function LiveDashboard() {
         </div>
       )}
 
+      {/* Flatten action result — shared between per-position and per-sleeve
+          flatten buttons below, since both are the same kind of one-off
+          manual override and land in the same part of the page. */}
+      {isRunning && flattenMsg && (
+        <div className={`mb-6 rounded-xl border p-4 text-sm ${flattenMsg.error ? 'bg-red-900/20 border-red-700/50 text-red-400' : 'bg-slate-800 border-slate-700 text-slate-300'}`}>
+          {flattenMsg.text}
+        </div>
+      )}
+
       {/* Positions Table */}
       {isRunning && (
         <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden mb-6">
@@ -632,6 +700,7 @@ export default function LiveDashboard() {
                   <th className="px-4 py-3 text-slate-400 font-medium text-right">Avg Cost</th>
                   <th className="px-4 py-3 text-slate-400 font-medium text-right">Market Value</th>
                   <th className="px-4 py-3 text-slate-400 font-medium text-right">Unrealized P&L</th>
+                  <th className="px-4 py-3 text-slate-400 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -653,12 +722,60 @@ export default function LiveDashboard() {
                     <td className={`px-4 py-3 text-right font-mono text-xs ${pos.unrealized_pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
                       {pos.unrealized_pnl >= 0 ? '+' : ''}{formatCurrency(pos.unrealized_pnl)}
                     </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => handleFlattenPosition(pos.symbol)}
+                        disabled={flattenPositionMut.isPending && flattenPositionMut.variables === pos.symbol}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-700 text-red-400 hover:bg-red-900/20 disabled:opacity-40 transition-colors"
+                      >
+                        Flatten
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Strategy Sleeves — active_strategies is always populated when
+          running, in both blended and sleeved capital modes, unlike the
+          attribution query above (which can lag/fail independently), so
+          it's the reliable source for "what sleeves currently exist to
+          flatten." */}
+      {isRunning && status && status.active_strategies.length > 0 && (
+        <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden mb-6">
+          <div className="px-5 py-3 border-b border-slate-700">
+            <h3 className="text-sm font-semibold text-slate-300">Strategy Sleeves</h3>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-700 text-left">
+                  <th className="px-4 py-3 text-slate-400 font-medium">Strategy</th>
+                  <th className="px-4 py-3 text-slate-400 font-medium text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {status.active_strategies.map((strat) => (
+                  <tr key={strat} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                    <td className="px-4 py-3 font-mono text-xs text-blue-400">{strat}</td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        onClick={() => handleFlattenSleeve(strat)}
+                        disabled={flattenSleeveMut.isPending && flattenSleeveMut.variables === strat}
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-700 text-red-400 hover:bg-red-900/20 disabled:opacity-40 transition-colors"
+                      >
+                        Flatten
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 

@@ -47,6 +47,12 @@ export const handlers = [
   http.post(`${API}/live/approvals/:id/reject`, () => HttpResponse.json({ status: 'rejected' })),
   http.get(`${API}/live/config`, () => HttpResponse.json(m.mockLiveConfig)),
   http.put(`${API}/live/config`, () => HttpResponse.json({ status: 'updated' })),
+  http.post(`${API}/live/positions/:symbol/flatten`, () => HttpResponse.json(m.mockFlattenPosition)),
+  http.post(`${API}/live/sleeves/:strategy/flatten`, () => HttpResponse.json(m.mockFlattenSleeve)),
+  http.post(`${API}/live/recommendations/:date/apply`, () => HttpResponse.json({
+    date: '2026-09-18', action: 'reduce_position_limit', applied: true,
+    strategy: 'stat_arb', new_max_position_pct: 0.04,
+  })),
 
   http.get(`${API}/llm/providers`, () => HttpResponse.json({ providers: m.mockLLMProviders })),
   http.get(`${API}/llm/config`, () => HttpResponse.json(m.mockLLMConfig)),
@@ -73,6 +79,9 @@ export const handlers = [
 
   http.get(`${API}/memory/decisions`, () => HttpResponse.json(m.mockDecisions)),
   http.get(`${API}/memory/lessons`, () => HttpResponse.json(m.mockLessons)),
+  // Default: empty (nothing pending) — RecommendationsPanel.test.tsx cases
+  // that need pending entries override this with server.use().
+  http.get(`${API}/memory/recommendations`, () => HttpResponse.json([])),
 
   http.get(`${API}/system/resources`, () => HttpResponse.json(m.mockSystemResources)),
   http.post(`${API}/system/restart`, () => HttpResponse.json({ status: 'restarting' })),

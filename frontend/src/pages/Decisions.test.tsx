@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { server } from '../test/server'
 import { renderWithProviders } from '../test/utils'
@@ -58,6 +59,66 @@ describe('Decisions', () => {
     renderWithProviders(<Decisions />)
     await waitFor(() => expect(screen.getByText('2026-07-21')).toBeInTheDocument())
     expect(screen.queryByText(/Per-strategy breakdown/)).not.toBeInTheDocument()
+  })
+
+  it('renders no recommendations panel when nothing is pending', async () => {
+    renderWithProviders(<Decisions />)
+    await waitFor(() => expect(screen.getByText('2026-07-21')).toBeInTheDocument())
+    expect(screen.queryByText('Pending Recommendations')).not.toBeInTheDocument()
+  })
+
+  it('shows a pending recommendation with its rationale, and applies it after confirmation', async () => {
+    let applyCalled = false
+    server.use(
+      http.get('http://localhost/api/memory/recommendations', () => HttpResponse.json([
+        {
+          date: '2026-09-18', rollup_reflection: 'stat_arb underperformed for 3 consecutive days.',
+          action: 'reduce_position_limit', strategy: 'stat_arb', reduce_by_pct: 0.2,
+          rationale: 'stat_arb has a negative rolling Sharpe over the last 5 sessions.',
+        },
+      ])),
+      http.post('http://localhost/api/live/recommendations/:date/apply', ({ params }) => {
+        applyCalled = true
+        return HttpResponse.json({ date: params.date, action: 'reduce_position_limit', applied: true, strategy: 'stat_arb', new_max_position_pct: 0.04 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<Decisions />)
+    await waitFor(() => expect(screen.getByText('Pending Recommendations')).toBeInTheDocument())
+    expect(screen.getByText(/stat_arb has a negative rolling Sharpe/)).toBeInTheDocument()
+    expect(screen.getByText('Reduce position limit')).toBeInTheDocument()
+
+    await user.click(screen.getByText('Apply'))
+    expect(screen.getByText('Apply this recommendation?')).toBeInTheDocument()
+    await user.click(screen.getByText('Yes, Apply'))
+
+    await waitFor(() => expect(applyCalled).toBe(true))
+    expect(await screen.findByText(/Applied "Reduce position limit" for 2026-09-18/)).toBeInTheDocument()
+  })
+
+  it('cancels the confirm step without calling apply', async () => {
+    let applyCalled = false
+    server.use(
+      http.get('http://localhost/api/memory/recommendations', () => HttpResponse.json([
+        {
+          date: '2026-09-18', rollup_reflection: null,
+          action: 'flag_strategy_for_review', strategy: 'gann', reduce_by_pct: 0,
+          rationale: 'gann has been flat for 10 sessions.',
+        },
+      ])),
+      http.post('http://localhost/api/live/recommendations/:date/apply', () => {
+        applyCalled = true
+        return HttpResponse.json({ date: '2026-09-18', action: 'flag_strategy_for_review', applied: true, flagged: true })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<Decisions />)
+    await waitFor(() => expect(screen.getByText('Pending Recommendations')).toBeInTheDocument())
+
+    await user.click(screen.getByText('Apply'))
+    await user.click(screen.getByText('Cancel'))
+    expect(applyCalled).toBe(false)
+    expect(screen.queryByText('Apply this recommendation?')).not.toBeInTheDocument()
   })
 
   it('splits a structured reflection into what-worked / what-failed columns', async () => {

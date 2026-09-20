@@ -6,7 +6,7 @@
 import type {
   StrategyInfo, ConfigDefaults, RunSummary, LiveStatus, LiveConfig, LiveAlertsResponse,
   BrokerPosition, AccountInfo, CycleRecord, PendingApproval, ApprovalDetail, DecisionEntry,
-  LessonsDigest,
+  LessonsDigest, Recommendation, FlattenPositionResponse, FlattenSleeveResponse,
   LLMProvider, LLMConfig, LLMCacheStats, RAGStats, EmbeddingModelInfo, LogTailResponse,
   BlackboardView, OrderRecord, SystemResources, PatternMatchRecord, PatternSummary,
 } from '../api/types'
@@ -163,6 +163,27 @@ export const mockLessons: LessonsDigest = {
   total: 3,
   counts: { correct: 2, incorrect: 1, partial: 0, unknown: 0 },
   recent_lessons: ['Trust the signal in trending regimes', 'Wait for confirmation before sizing up'],
+}
+
+export const mockRecommendations: Recommendation[] = [
+  {
+    date: '2026-09-18', rollup_reflection: 'stat_arb underperformed for 3 consecutive days.',
+    action: 'reduce_position_limit', strategy: 'stat_arb', reduce_by_pct: 0.2,
+    rationale: 'stat_arb has a negative rolling Sharpe over the last 5 sessions.',
+  },
+]
+
+export const mockFlattenPosition: FlattenPositionResponse = {
+  symbol: 'AAPL', flattened: true,
+  order_statuses: [
+    { order_id: 'o-flat-1', symbol: 'AAPL', side: 'sell', quantity: 1, filled_quantity: 1, avg_fill_price: 332.5, status: 'filled', strategy: 'manual_flatten', timestamp: '2026-09-20T14:00:00' },
+  ],
+  failed: [],
+}
+
+export const mockFlattenSleeve: FlattenSleeveResponse = {
+  strategy: 'momentum', flattened: true, mode: 'blended_real',
+  results: [mockFlattenPosition],
 }
 
 // GET /patterns/scan returns [] until a scan has been triggered at least

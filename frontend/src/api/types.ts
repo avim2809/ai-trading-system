@@ -643,6 +643,81 @@ export interface PatternSummary {
   last_scan: PatternScanMeta | null
 }
 
+// ── Manual Flatten Actions (2026-09-20) ──
+//
+// POST /api/live/positions/{symbol}/flatten and
+// POST /api/live/sleeves/{strategy}/flatten — an operator's direct "close
+// this now" outside the normal per-cycle rebalance. See
+// LiveTradingEngine.flatten_symbol/flatten_strategy's docstrings.
+
+export interface FailedOrder {
+  symbol: string
+  side: string
+  quantity: number
+  error: string
+  [key: string]: unknown
+}
+
+export interface FlattenPositionResponse {
+  symbol: string
+  flattened: boolean
+  /** Present only when an actual submit was attempted — absent on the
+   * no-op "nothing held" case, where `reason` is set instead. */
+  order_statuses?: OrderRecord[]
+  failed?: FailedOrder[]
+  /** Present only on the no-op case (e.g. "no position held"). */
+  reason?: string
+}
+
+export interface FlattenSleeveResponse {
+  strategy: string
+  flattened: boolean
+  /** `blended_real`: closed every real position attributed to this
+   * strategy immediately. `sleeved_virtual_zeroed`: zeroed the virtual
+   * sleeve now; the real broker-side unwind completes on the next
+   * scheduled cycle's netted pass (see `note`). Absent on the no-op case. */
+  mode?: 'blended_real' | 'sleeved_virtual_zeroed'
+  /** `blended_real` only: one flatten result per symbol closed. */
+  results?: FlattenPositionResponse[]
+  /** `sleeved_virtual_zeroed` only: symbols whose virtual sleeve holding was zeroed. */
+  symbols?: string[]
+  /** `sleeved_virtual_zeroed` only. */
+  note?: string
+  /** Present only on the no-op case ("no attributed positions held" /
+   * "no sleeve for this strategy"). */
+  reason?: string
+}
+
+// ── Daily-Reflection Recommendations (2026-09-20) ──
+//
+// GET /api/memory/recommendations — a human-gated queue; applying one is a
+// separate explicit action via POST /api/live/recommendations/{date}/apply
+// (see firm.llm.schemas.DailyReflectionRecommendation).
+
+export interface Recommendation {
+  date: string
+  rollup_reflection: string | null
+  action: 'reduce_position_limit' | 'flag_strategy_for_review' | 'no_action'
+  strategy: string
+  /** Only meaningful for `reduce_position_limit` — fraction to cut
+   * max_position_pct by (0.2 = cut by 20%). */
+  reduce_by_pct: number
+  rationale: string
+  /** Absent until a human applies it via the apply endpoint. */
+  applied?: boolean
+}
+
+export interface ApplyRecommendationResponse {
+  date: string
+  action: string
+  applied: true
+  strategy?: string
+  /** `reduce_position_limit` only. */
+  new_max_position_pct?: number
+  /** `flag_strategy_for_review` only. */
+  flagged?: boolean
+}
+
 // ── System Resources ──
 
 export interface SystemResources {
