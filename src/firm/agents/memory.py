@@ -112,6 +112,7 @@ class TradingMemoryLog:
         notes: str = "",
         nav_at_decision: float | None = None,
         per_strategy: dict[str, dict[str, float]] | None = None,
+        cycle_id: int | None = None,
     ) -> None:
         """Record a pending decision immediately after the orchestrator runs.
 
@@ -121,9 +122,10 @@ class TradingMemoryLog:
                               approved TradeProposal.
             notes:            Optional brief context (regime, top signals, etc.).
             nav_at_decision:  Portfolio NAV at decision time, persisted so a
-                              later ``reflect()`` call can compute the return
-                              even if the caller (e.g. the live engine)
-                              restarted and lost any in-memory pointer to it.
+                              later ``reflect()``/``reflect_day()`` call can
+                              compute the return even if the caller (e.g. the
+                              live engine) restarted and lost any in-memory
+                              pointer to it.
             per_strategy:     {strategy: {symbol: weight}} attribution of the
                               final blended targets (``TradeProposal.
                               per_strategy``) — without this, a reflection
@@ -134,11 +136,26 @@ class TradingMemoryLog:
                               recording which strategy placed an order;
                               fed into reflect()'s own prompt below, not
                               just stored for display.
+            cycle_id:         The engine's per-cycle counter (2026-09-20).
+                              Real incident: under the "hourly_market_hours"
+                              schedule (~7 cycles/trading day), the storage
+                              key used to be *just* ``date`` with
+                              first-writer-wins idempotency — only the day's
+                              very first cycle's decision was ever stored;
+                              the other ~6 silently vanished. Passing
+                              ``cycle_id`` makes the storage key
+                              ``f"{date}#{cycle_id}"`` so every cycle's
+                              decision survives. ``None`` (the old call
+                              shape) preserves exact legacy behavior — one
+                              entry per date, keyed by date alone — so
+                              existing callers/tests are unaffected.
         """
-        if self._idempotency_check(date):
+        key = self._storage_key(date, cycle_id)
+        if self._idempotency_check(key):
             return
         entry = {
             "date": date,
+            "cycle_id": cycle_id,
             "status": "pending",
             "proposal_weights": proposal_weights,
             "per_strategy": per_strategy or {},
@@ -153,7 +170,7 @@ class TradingMemoryLog:
             "lesson": None,
         }
         self._append(entry)
-        log.debug("Memory: stored pending decision for %s", date)
+        log.debug("Memory: stored pending decision for %s (cycle_id=%s)", date, cycle_id)
 
     # ── Phase B ─────────────────────────────────────────────────────────────
 
@@ -200,54 +217,9 @@ class TradingMemoryLog:
             f"Target weights: {json.dumps(pending.get('proposal_weights', {}), indent=2)}"
             f"{per_strategy_block}"
         )
-        messages = [
-            {"role": "system", "content": _REFLECTION_SYSTEM},
-            {"role": "user", "content": user_prompt},
-        ]
-        # A schema-validation failure here (confirmed live: degenerate
-        # word-repetition loops, garbled JSON) permanently collapses this
-        # decision's self-assessment to "unknown" with no way to recover
-        # it later — unlike every other LLM+schema call site in this
-        # codebase, which falls back to a quant-only value that's still
-        # useful. One retry costs nothing this deferred/off-critical-path
-        # call isn't latency-sensitive, and a bad sample is often a one-off
-        # sampling hiccup rather than a systematic prompt problem.
-        parsed: DecisionReflection | None = None
-        for attempt in range(1, _REFLECTION_MAX_ATTEMPTS + 1):
-            try:
-                raw = llm_service.chat_json(messages)
-                parsed = parse_llm_response(
-                    DecisionReflection, raw,
-                    context=f"memory/{date} (attempt {attempt}/{_REFLECTION_MAX_ATTEMPTS})",
-                )
-            except Exception as exc:
-                log.warning(
-                    "Memory: LLM reflection call failed for %s (attempt %d/%d): %s",
-                    date, attempt, _REFLECTION_MAX_ATTEMPTS, exc, exc_info=True,
-                )
-                parsed = None
-            if parsed is not None:
-                break
-
-        if parsed is not None:
-            verdict, what_worked, what_failed, lesson = (
-                parsed.verdict, parsed.what_worked, parsed.what_failed, parsed.lesson,
-            )
-            # Rendered prose kept for backward-compat prompt injection
-            # (get_context()) — existing consumers read a single string,
-            # not the structured fields.
-            reflection = (
-                f"{verdict.upper()}. "
-                + (f"What worked: {what_worked} " if what_worked else "")
-                + (f"What failed: {what_failed} " if what_failed else "")
-                + (f"Lesson: {lesson}" if lesson else "")
-            ).strip()
-        else:
-            verdict, what_worked, what_failed, lesson = "unknown", "", "", ""
-            reflection = (
-                f"Outcome: {raw_return:+.2%} raw / {alpha:+.2%} alpha. "
-                "(reflection unavailable)"
-            )
+        verdict, what_worked, what_failed, lesson, reflection, _rec = self._call_reflection_llm(
+            user_prompt, label=date, raw_return=raw_return, alpha=alpha, llm_service=llm_service,
+        )
 
         entry = {
             **pending,
@@ -266,6 +238,238 @@ class TradingMemoryLog:
             date, raw_return * 100, alpha * 100, verdict,
         )
         return reflection
+
+    def reflect_day(
+        self,
+        date: str,
+        raw_return: float,
+        benchmark_return: float,
+        llm_service: Any,
+    ) -> str | None:
+        """Aggregate every cycle's still-pending decision for *date* into
+        ONE daily-rollup LLM reflection call (2026-09-20).
+
+        Replaces per-cycle reflection under the "hourly_market_hours"
+        schedule: reflecting ~7 times/trading day would multiply LLM cost
+        the same way running the full pipeline hourly would have (see
+        Orchestrator._apply_cycle_llm_mode) — this keeps reflection cost at
+        one call/day while ``store_decision``'s ``cycle_id`` key still keeps
+        every individual cycle's decision on disk (see its own docstring).
+
+        Writes ONE entry keyed ``f"{date}#rollup"`` with ``status:
+        "reflected"`` — after this, ``find_all_pending()`` stops returning
+        *any* of that date's per-cycle pending entries (it excludes dates
+        that already have a "reflected" entry), so this is naturally
+        idempotent: calling it again for an already-rolled-up date is a
+        no-op via the same idempotency check every other entry uses.
+
+        May optionally include a bounded ``DailyReflectionRecommendation``
+        (see its own docstring) — never applied automatically; surfaced via
+        ``list_recommendations()``/the live API for a human to act on.
+        """
+        key = self._storage_key(date, "rollup")
+        if self._idempotency_check(key):
+            log.debug("Memory: %s already has a daily rollup — skipping", date)
+            return None
+
+        entries = self._load_all()
+        day_entries = sorted(
+            (
+                e for e in entries.values()
+                if e.get("date") == date and e.get("status") == "pending"
+            ),
+            key=lambda e: e.get("cycle_id") or 0,
+        )
+        if not day_entries:
+            log.debug("Memory: no pending entries for %s — skipping daily rollup", date)
+            return None
+
+        alpha = raw_return - benchmark_return
+        # Combine per-strategy attribution across the day's cycles -- a
+        # later cycle's target for a given (strategy, symbol) pair
+        # supersedes an earlier one, matching how the real book actually
+        # evolved intraday.
+        combined_per_strategy: dict[str, dict[str, float]] = {}
+        for e in day_entries:
+            for strat, weights in (e.get("per_strategy") or {}).items():
+                combined_per_strategy.setdefault(strat, {}).update(weights)
+        notes = "; ".join(n for n in (e.get("notes") for e in day_entries) if n)
+        final_weights = day_entries[-1].get("proposal_weights", {})
+        per_strategy_block = (
+            f"\nCombined per-strategy attribution across the day's "
+            f"{len(day_entries)} decision cycle(s): "
+            f"{json.dumps(combined_per_strategy, indent=2)}"
+            if combined_per_strategy
+            else ""
+        )
+        user_prompt = (
+            f"Decision date: {date} ({len(day_entries)} decision cycle(s) that day)\n"
+            f"Portfolio return: {raw_return:+.2%}\n"
+            f"Benchmark return: {benchmark_return:+.2%}\n"
+            f"Alpha: {alpha:+.2%}\n\n"
+            f"Notes across the day's cycles: {notes or 'none'}\n"
+            f"Final target weights at day's last cycle: {json.dumps(final_weights, indent=2)}"
+            f"{per_strategy_block}\n\n"
+            "If, and only if, this day's outcome clearly points to one specific "
+            "strategy that should be sized down or flagged for review, you may "
+            'set "recommendation" to {"action": "reduce_position_limit"|'
+            '"flag_strategy_for_review", "strategy": "<name>", "reduce_by_pct": '
+            'float (0-1, only for reduce_position_limit), "rationale": "..."}. '
+            'Otherwise leave it {"action": "no_action"}. One bad day is not '
+            "sufficient evidence — only recommend an action for a clear, "
+            "specific, named strategy failure, not a vague market-wide move."
+        )
+        verdict, what_worked, what_failed, lesson, reflection, recommendation = (
+            self._call_reflection_llm(
+                user_prompt, label=date, raw_return=raw_return, alpha=alpha,
+                llm_service=llm_service,
+            )
+        )
+
+        entry = {
+            "date": date,
+            # A non-None sentinel (not a real int cycle_id) so
+            # _storage_key/_load_all's own re-keying reproduces exactly the
+            # "date#rollup" key this method's idempotency check above uses
+            # -- a bare-date key would collide with legacy pre-cycle_id log
+            # entries and wouldn't match this method's own re-check.
+            "cycle_id": "rollup",
+            "status": "reflected",
+            "proposal_weights": final_weights,
+            "per_strategy": combined_per_strategy,
+            "notes": notes,
+            "nav_at_decision": day_entries[0].get("nav_at_decision"),
+            "raw_return": raw_return,
+            "benchmark_return": benchmark_return,
+            "reflection": reflection,
+            "verdict": verdict,
+            "what_worked": what_worked,
+            "what_failed": what_failed,
+            "lesson": lesson,
+            "recommendation": recommendation.model_dump() if recommendation else None,
+            "n_cycles": len(day_entries),
+        }
+        self._append(entry)
+        log.info(
+            "Memory: daily rollup reflection for %s (%d cycles) — return %+.2f%%, "
+            "alpha %+.2f%%, verdict=%s",
+            date, len(day_entries), raw_return * 100, alpha * 100, verdict,
+        )
+        return reflection
+
+    def _call_reflection_llm(
+        self,
+        user_prompt: str,
+        *,
+        label: str,
+        raw_return: float,
+        alpha: float,
+        llm_service: Any,
+    ) -> tuple[str, str, str, str, str, "DailyReflectionRecommendation | None"]:
+        """Shared LLM-call/retry/parse logic for both ``reflect()`` and
+        ``reflect_day()`` — returns
+        ``(verdict, what_worked, what_failed, lesson, reflection_text, recommendation)``.
+        """
+        messages = [
+            {"role": "system", "content": _REFLECTION_SYSTEM},
+            {"role": "user", "content": user_prompt},
+        ]
+        # A schema-validation failure here (confirmed live: degenerate
+        # word-repetition loops, garbled JSON) permanently collapses this
+        # decision's self-assessment to "unknown" with no way to recover
+        # it later — unlike every other LLM+schema call site in this
+        # codebase, which falls back to a quant-only value that's still
+        # useful. One retry costs nothing this deferred/off-critical-path
+        # call isn't latency-sensitive, and a bad sample is often a one-off
+        # sampling hiccup rather than a systematic prompt problem.
+        parsed: DecisionReflection | None = None
+        for attempt in range(1, _REFLECTION_MAX_ATTEMPTS + 1):
+            try:
+                raw = llm_service.chat_json(messages)
+                parsed = parse_llm_response(
+                    DecisionReflection, raw,
+                    context=f"memory/{label} (attempt {attempt}/{_REFLECTION_MAX_ATTEMPTS})",
+                )
+            except Exception as exc:
+                log.warning(
+                    "Memory: LLM reflection call failed for %s (attempt %d/%d): %s",
+                    label, attempt, _REFLECTION_MAX_ATTEMPTS, exc, exc_info=True,
+                )
+                parsed = None
+            if parsed is not None:
+                break
+
+        if parsed is not None:
+            verdict, what_worked, what_failed, lesson = (
+                parsed.verdict, parsed.what_worked, parsed.what_failed, parsed.lesson,
+            )
+            recommendation = parsed.recommendation
+            # Rendered prose kept for backward-compat prompt injection
+            # (get_context()) — existing consumers read a single string,
+            # not the structured fields.
+            reflection = (
+                f"{verdict.upper()}. "
+                + (f"What worked: {what_worked} " if what_worked else "")
+                + (f"What failed: {what_failed} " if what_failed else "")
+                + (f"Lesson: {lesson}" if lesson else "")
+            ).strip()
+        else:
+            verdict, what_worked, what_failed, lesson = "unknown", "", "", ""
+            recommendation = None
+            reflection = (
+                f"Outcome: {raw_return:+.2%} raw / {alpha:+.2%} alpha. "
+                "(reflection unavailable)"
+            )
+        return verdict, what_worked, what_failed, lesson, reflection, recommendation
+
+    def list_recommendations(self, pending_only: bool = True) -> list[dict[str, Any]]:
+        """Every daily-rollup recommendation on record, most recent first.
+
+        ``pending_only=True`` (default) filters to actionable
+        (``action != "no_action"``) recommendations that haven't already
+        been applied (see ``mark_recommendation_applied``) — the only
+        entries actually worth a human's attention. Each dict includes
+        ``date`` and ``rollup_reflection`` alongside the recommendation
+        fields, so the API layer needs no separate lookup to show context
+        for why it was proposed. This is intentionally read-only data
+        assembly — nothing here applies a recommendation; that's a
+        separate, explicit human action (see ``firm.api.routers.live``'s
+        recommendations endpoints).
+        """
+        entries = sorted(
+            self._load_all().values(), key=lambda e: e.get("date", ""), reverse=True,
+        )
+        out: list[dict[str, Any]] = []
+        for e in entries:
+            rec = e.get("recommendation")
+            if not rec:
+                continue
+            if pending_only and (rec.get("action") == "no_action" or rec.get("applied")):
+                continue
+            out.append({
+                "date": e.get("date"),
+                "rollup_reflection": e.get("reflection"),
+                **rec,
+            })
+        return out
+
+    def mark_recommendation_applied(self, date: str) -> bool:
+        """Mark *date*'s daily-rollup recommendation as applied.
+
+        Called only after a human explicitly approves it via
+        ``POST /api/live/recommendations/{date}/apply`` — this method
+        itself never decides whether to apply anything, only records that
+        it happened. Returns False if no rollup with an actionable
+        recommendation exists for *date*.
+        """
+        entries = self._load_all()
+        entry = entries.get(self._storage_key(date, "rollup"))
+        if entry is None or not entry.get("recommendation"):
+            return False
+        entry = dict(entry)
+        entry["recommendation"] = {**entry["recommendation"], "applied": True}
+        self._append(entry)
+        return True
 
     # ── Context injection ────────────────────────────────────────────────────
 
@@ -333,11 +537,25 @@ class TradingMemoryLog:
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 
-    def _load_all(self) -> dict[str, dict]:
-        """Parse the JSONL file and return a dict keyed by date.
+    @staticmethod
+    def _storage_key(date: str, cycle_id: int | str | None) -> str:
+        """Idempotency/supersede key for an entry (2026-09-20).
 
-        When multiple entries share the same date (pending overwritten by
-        reflected), the last one wins — this is the desired supersede semantics.
+        ``cycle_id is None`` preserves the original bare-``date`` key
+        exactly (legacy callers, and any date whose entries pre-date this
+        change) — only a caller that actually supplies a ``cycle_id`` gets
+        the finer-grained composite key.
+        """
+        return date if cycle_id is None else f"{date}#{cycle_id}"
+
+    def _load_all(self) -> dict[str, dict]:
+        """Parse the JSONL file and return a dict keyed by ``_storage_key``.
+
+        When multiple entries share the same key (pending overwritten by
+        reflected), the last one wins — this is the desired supersede
+        semantics. Entries written before ``cycle_id`` existed have none
+        (``obj.get("cycle_id")`` is ``None``), so they key by bare date,
+        identical to before this field existed.
         """
         if not self._path.exists():
             return {}
@@ -348,7 +566,7 @@ class TradingMemoryLog:
                 if not line:
                     continue
                 obj = json.loads(line)
-                entries[obj["date"]] = obj
+                entries[self._storage_key(obj["date"], obj.get("cycle_id"))] = obj
         except Exception as exc:
             log.warning(
                 "Memory: error reading log at %s: %s", self._path, exc, exc_info=True,
@@ -356,6 +574,10 @@ class TradingMemoryLog:
         return entries
 
     def _find_pending(self, date: str) -> dict | None:
+        """Legacy single-entry lookup — used by ``reflect()``'s original
+        per-decision path. Returns the bare-``date``-keyed entry only (a
+        cycle_id-keyed entry is only ever looked up via ``reflect_day``'s
+        own date-scan), so this stays correct for pre-cycle_id log data."""
         entries = self._load_all()
         entry = entries.get(date)
         if entry and entry.get("status") == "pending":
@@ -379,15 +601,27 @@ class TradingMemoryLog:
         restarted between the decision and the outcome becoming known (e.g.
         the live engine after a process restart) can still find and reflect
         on it — nothing is lost just because the in-process pointer was.
+
+        Excludes any date that already has a "reflected" entry (2026-09-20)
+        — once ``reflect_day()`` writes that date's rollup, its remaining
+        per-cycle pending entries (there can be several, one per cycle_id)
+        must stop being returned here, or every future call would keep
+        re-surfacing them forever with nothing to actually do about it.
         """
         entries = self._load_all()
-        pending = [e for e in entries.values() if e.get("status") == "pending"]
-        return sorted(pending, key=lambda e: e["date"])
+        reflected_dates = {e["date"] for e in entries.values() if e.get("status") == "reflected"}
+        pending = [
+            e for e in entries.values()
+            if e.get("status") == "pending" and e["date"] not in reflected_dates
+        ]
+        return sorted(pending, key=lambda e: (e["date"], e.get("cycle_id") or 0))
 
-    def _idempotency_check(self, date: str) -> bool:
-        """Return True if a pending or reflected entry already exists for date."""
+    def _idempotency_check(self, key: str) -> bool:
+        """Return True if a pending or reflected entry already exists for
+        this storage key (see ``_storage_key`` — bare date for legacy
+        callers, ``date#cycle_id`` otherwise)."""
         entries = self._load_all()
-        return date in entries
+        return key in entries
 
     def _append(self, entry: dict) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)

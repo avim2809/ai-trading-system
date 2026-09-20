@@ -39,6 +39,19 @@ def client():
     return TestClient(app)
 
 
+def _reflection_llm_stub(recommendation: dict) -> Any:
+    """A MagicMock LLM service returning a fixed reflection payload with the
+    given recommendation, for TradingMemoryLog.reflect_day() tests."""
+    from unittest.mock import MagicMock
+
+    llm = MagicMock()
+    llm.chat_json.return_value = {
+        "verdict": "incorrect", "what_worked": "", "what_failed": "x", "lesson": "l",
+        "recommendation": recommendation,
+    }
+    return llm
+
+
 # ------------------------------------------------------------------
 # Meta endpoints
 # ------------------------------------------------------------------
@@ -516,6 +529,40 @@ class TestMemoryDecisionsAPI:
         assert data["total"] == 1
         assert data["counts"]["correct"] == 1
         assert data["recent_lessons"] == ["size up on confirmed regime"]
+
+    def test_recommendations_empty(self, client):
+        r = client.get("/api/memory/recommendations")
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_recommendations_lists_actionable_daily_rollup(self, client):
+        from unittest.mock import MagicMock
+
+        from firm.agents.memory import TradingMemoryLog
+
+        log = TradingMemoryLog()
+        log.store_decision(
+            date="2026-01-01", proposal_weights={"AAPL": 0.05}, cycle_id=1, nav_at_decision=100_000,
+        )
+        llm = MagicMock()
+        llm.chat_json.return_value = {
+            "verdict": "incorrect", "what_worked": "", "what_failed": "x", "lesson": "l",
+            "recommendation": {
+                "action": "reduce_position_limit", "strategy": "stat_arb",
+                "reduce_by_pct": 0.25, "rationale": "repeated losses",
+            },
+        }
+        log.reflect_day(date="2026-01-01", raw_return=-0.04, benchmark_return=0.0, llm_service=llm)
+
+        r = client.get("/api/memory/recommendations")
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data) == 1
+        assert data[0]["action"] == "reduce_position_limit"
+        assert data[0]["strategy"] == "stat_arb"
+
+        r_all = client.get("/api/memory/recommendations?pending_only=false")
+        assert len(r_all.json()) == 1
 
 
 # ------------------------------------------------------------------
@@ -1048,6 +1095,44 @@ class TestLiveSleevedModeStart:
     def test_flatten_sleeve_endpoint_no_engine_returns_400(self, client):
         resp = client.post("/api/live/sleeves/stat_arb/flatten")
         assert resp.status_code == 400
+
+    def test_apply_recommendation_no_engine_returns_400(self, client):
+        resp = client.post("/api/live/recommendations/2026-01-01/apply")
+        assert resp.status_code == 400
+
+    def test_apply_recommendation_reduces_sleeve_position_limit(self, client):
+        client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+        engine = client.app.state.live_engine
+        engine._memory.store_decision(
+            date="2026-01-01", proposal_weights={"AAPL": 0.05}, cycle_id=1, nav_at_decision=100_000,
+        )
+        engine._orchestrator.risk.max_position_pct = 0.05
+        engine._memory.reflect_day(
+            date="2026-01-01", raw_return=-0.04, benchmark_return=0.0,
+            llm_service=_reflection_llm_stub({
+                "action": "reduce_position_limit", "strategy": "stat_arb",
+                "reduce_by_pct": 0.4, "rationale": "x",
+            }),
+        )
+
+        resp = client.post("/api/live/recommendations/2026-01-01/apply")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["applied"] is True
+        assert body["new_max_position_pct"] == pytest.approx(0.03)
+        assert engine._orchestrator.risk.sleeve_risk_overrides["stat_arb"]["max_position_pct"] == pytest.approx(0.03)
+
+        # A second apply must refuse -- already applied.
+        resp2 = client.post("/api/live/recommendations/2026-01-01/apply")
+        assert resp2.status_code == 409
+
+        client.post("/api/live/stop")
+
+    def test_apply_recommendation_not_found_returns_404(self, client):
+        client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
+        resp = client.post("/api/live/recommendations/2026-01-01/apply")
+        assert resp.status_code == 404
+        client.post("/api/live/stop")
 
 
 class TestKillSwitchResetEndpoint:

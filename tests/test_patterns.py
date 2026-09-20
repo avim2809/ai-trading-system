@@ -481,3 +481,97 @@ def test_pattern_recognition_is_registered():
 
     assert "pattern_recognition" in list_strategies()
     assert get("pattern_recognition") is PatternRecognitionStrategy
+
+
+# ---------------------------------------------------------------------------
+# CNN/GAF quality-scoring wiring (firm.patterns.ml.inference) -- candidate
+# detection is unchanged either way; only which score becomes the signal's
+# quality/confidence should differ. See test_pattern_ml_inference.py for the
+# scoring module itself.
+# ---------------------------------------------------------------------------
+
+_BULL_FLAG_ANCHORS = [
+    (0, 100.0), (4, 90.0), (10, 120.0), (14, 117.0), (18, 119.0),
+    (22, 116.0), (26, 118.0), (30, 130.0),
+]
+
+
+def test_pattern_recognition_falls_back_to_rule_based_when_cnn_unavailable(monkeypatch):
+    from firm.strategies import pattern_recognition as pr_module
+
+    monkeypatch.setattr(pr_module.cnn_inference, "is_available", lambda: False)
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy().generate(pit_view)
+
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig.meta["scoring_mode"] == "rule_based"
+    assert sig.meta["cnn_quality_fraction"] is None
+    expected_fraction = min(sig.meta["quality_score"] / 100.0, 1.0)
+    assert sig.confidence == pytest.approx(expected_fraction)
+    assert sig.score == pytest.approx(expected_fraction)  # bull flag -> long -> +sign
+
+
+def test_pattern_recognition_uses_cnn_quality_when_available(monkeypatch):
+    """CNN score should replace the rule-based quality score whenever the
+    scorer returns a value, without touching candidate detection at all --
+    same matches, same pattern/direction, only the score/confidence numbers
+    change.
+    """
+    from firm.strategies import pattern_recognition as pr_module
+
+    monkeypatch.setattr(pr_module.cnn_inference, "is_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.cnn_inference, "score_pattern_quality", lambda close, confirm_index: 0.9
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    # cnn_scoring_enabled defaults False (2026-09-20) -- explicit opt-in
+    # required in addition to is_available(), since the on-disk model
+    # artifact was validated to hurt performance; must be set explicitly
+    # here to exercise the CNN path at all.
+    signals = PatternRecognitionStrategy(
+        params={"cnn_scoring_enabled": True},
+    ).generate(pit_view)
+
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig.meta["scoring_mode"] == "cnn"
+    assert sig.meta["cnn_quality_fraction"] == pytest.approx(0.9)
+    assert sig.confidence == pytest.approx(0.9)
+    assert sig.score == pytest.approx(0.9)
+    # Rule-based score is still recorded for comparison, just not used.
+    assert sig.meta["rule_based_quality_fraction"] == pytest.approx(
+        min(sig.meta["quality_score"] / 100.0, 1.0)
+    )
+    assert sig.meta["pattern"] in ("bull_flag", "pennant")
+    assert sig.meta["direction"] == "long"
+
+
+def test_pattern_recognition_falls_back_when_cnn_scorer_returns_none(monkeypatch):
+    """CNN reports itself available but declines to score this particular
+    match (e.g. not enough history before confirm_index) -- must fall back
+    to the rule-based score for that signal, not drop it or crash.
+    """
+    from firm.strategies import pattern_recognition as pr_module
+
+    monkeypatch.setattr(pr_module.cnn_inference, "is_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.cnn_inference, "score_pattern_quality", lambda close, confirm_index: None
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy().generate(pit_view)
+
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig.meta["scoring_mode"] == "rule_based"
+    expected_fraction = min(sig.meta["quality_score"] / 100.0, 1.0)
+    assert sig.confidence == pytest.approx(expected_fraction)

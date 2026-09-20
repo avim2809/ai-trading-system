@@ -35,6 +35,19 @@ Signal logic:
        signal it as +quality/100 (long) or -quality/100 (short); consumers
        z-score across the universe in the analyst layer like every other
        strategy.
+    5. The "quality" fed into that score is, when available, the CNN/GAF
+       image validator's learned score (``firm.patterns.ml.inference``) —
+       not the rule-based scanner's own geometric ``quality_score``. Named
+       rule-based chart patterns have no consistently replicated edge once
+       corrected for data-snooping (Marshall & Cahan; Sullivan/Timmermann/
+       White), whereas a CNN trained on raw price-chart images does show
+       real out-of-sample edge (Jiang/Kelly/Xiu, J. Finance 2023) — so the
+       rule-based scanner is used here only as a candidate generator (where
+       a pattern-like shape/breakout exists at all), with the CNN deciding
+       how good it actually is. If the ONNX model or ``onnxruntime`` isn't
+       available at runtime, this falls back cleanly to the original
+       rule-based ``quality_score`` — never a hard failure. See
+       ``firm.patterns.ml.inference`` for the fail-soft contract.
 
 Portfolio construction approach:
     Entry/stop/target/risk-reward for the winning pattern are carried in
@@ -60,6 +73,7 @@ import numpy as np
 import pandas as pd
 
 from firm.contracts.models import Signal
+from firm.patterns.ml import inference as cnn_inference
 from firm.patterns.scanner import scan_symbol
 from firm.strategies.base import BaseStrategy, PitView
 from firm.strategies.registry import register
@@ -103,6 +117,19 @@ class PatternRecognitionStrategy(BaseStrategy):
         # firm.patterns.match.PatternMatch.pattern (e.g. ["cup_handle",
         # "head_shoulders_top"]) to restrict the scan to.
         "enabled_patterns": None,
+        # Off by default (2026-09-20) -- deliberately NOT implied by ONNX
+        # model file presence alone. A real walk-forward comparison on
+        # cached data (2010-2023) found the CNN-reweighted signal WORSE
+        # across every metric than the rule-based-only scanner (Sharpe
+        # 0.415->0.314, max DD 3.85%->4.63%, whole-book Sharpe also worse)
+        # against the model artifact that happened to be on disk --
+        # consistent with that artifact having been trained on the CLI's
+        # synthetic-data default, not real cached history (unconfirmed --
+        # see docs/pattern_recognition_plan.md, no training-run entry for
+        # the CNN unlike XGBoost/PPO). Flip true only after a real training
+        # run (scripts/train_cnn_validator.py --data-source cache) is
+        # re-validated the same way and clearly wins.
+        "cnn_scoring_enabled": False,
     }
 
     def __init__(self, params: dict | None = None):
@@ -128,7 +155,18 @@ class PatternRecognitionStrategy(BaseStrategy):
         if prices_df.empty:
             return []
 
+        # One availability check per generate() call (the underlying session
+        # load is itself a cached lazy singleton -- see
+        # firm.patterns.ml.inference._load_session) so the active scoring
+        # mode is logged clearly without spamming per-symbol.
+        cnn_available = bool(p["cnn_scoring_enabled"]) and cnn_inference.is_available()
+        log.info(
+            "pattern_recognition: quality scoring mode=%s",
+            "cnn" if cnn_available else "rule_based",
+        )
+
         signals: list[Signal] = []
+        cnn_scored = 0
         for symbol, sym_df in prices_df.groupby("symbol"):
             sym_df = sym_df.sort_values("date")
             try:
@@ -152,7 +190,19 @@ class PatternRecognitionStrategy(BaseStrategy):
                 continue
 
             direction_sign = 1.0 if best.direction == "long" else -1.0
-            quality_fraction = min(best.quality_score / 100.0, 1.0)
+            rule_based_fraction = min(best.quality_score / 100.0, 1.0)
+            cnn_quality = None
+            if cnn_available:
+                cnn_quality = cnn_inference.score_pattern_quality(
+                    ohlcv["close"].to_numpy(dtype=float), best.confirm_index,
+                )
+            if cnn_quality is not None:
+                quality_fraction = cnn_quality
+                scoring_mode = "cnn"
+                cnn_scored += 1
+            else:
+                quality_fraction = rule_based_fraction
+                scoring_mode = "rule_based"
             signals.append(
                 Signal(
                     symbol=str(symbol),
@@ -169,6 +219,9 @@ class PatternRecognitionStrategy(BaseStrategy):
                         "target": best.target,
                         "risk_reward": best.risk_reward,
                         "quality_score": best.quality_score,
+                        "rule_based_quality_fraction": rule_based_fraction,
+                        "cnn_quality_fraction": cnn_quality,
+                        "scoring_mode": scoring_mode,
                         "score_breakdown": best.score_breakdown,
                         "volume_ratio": best.volume_ratio,
                         "duration_bars": best.duration_bars,
@@ -179,6 +232,7 @@ class PatternRecognitionStrategy(BaseStrategy):
             )
 
         log.info(
-            "pattern_recognition: %d symbols scanned, %d signals", len(universe), len(signals)
+            "pattern_recognition: %d symbols scanned, %d signals (%d CNN-scored, %d rule-based)",
+            len(universe), len(signals), cnn_scored, len(signals) - cnn_scored,
         )
         return signals

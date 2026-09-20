@@ -34,3 +34,16 @@ def get_lessons(limit: int = Query(10, ge=1, le=100)) -> dict[str, Any]:
     from firm.agents.memory import TradingMemoryLog
 
     return TradingMemoryLog().summarize_lessons(n=limit)
+
+
+@router.get("/recommendations")
+def list_recommendations(pending_only: bool = Query(True)) -> list[dict[str, Any]]:
+    """Bounded, pre-enumerated recommendations from daily reflection
+    rollups (2026-09-20) — see ``firm.llm.schemas.DailyReflectionRecommendation``
+    for exactly what these can and can't say (never a free-form config
+    edit). Read-only: applying one is a separate, explicit action via
+    ``POST /api/live/recommendations/{date}/apply``, since that needs the
+    running live engine, not just the on-disk log this reads."""
+    from firm.agents.memory import TradingMemoryLog
+
+    return TradingMemoryLog().list_recommendations(pending_only=pending_only)

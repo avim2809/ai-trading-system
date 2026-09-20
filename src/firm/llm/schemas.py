@@ -41,7 +41,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 log = logging.getLogger(__name__)
 
@@ -162,6 +162,56 @@ class PortfolioReviewResponse(BaseModel):
     _coerce_notes = field_validator("notes", mode="before")(_coerce_str)
 
 
+class DailyReflectionRecommendation(BaseModel):
+    """Bounded, pre-enumerated action a daily reflection may propose
+    (``firm.agents.memory.TradingMemoryLog.reflect_day``), added 2026-09-20.
+
+    Deliberately NOT free-form config: every real-world model-risk
+    framework we found (SR 11-7) and every LLM-self-reflection failure mode
+    we found (rationalization, hindsight bias, reward hacking -- see
+    TradeTrap, arXiv 2512.02261) routes a reflection's conclusion through
+    independent human review before it can touch live behavior, never an
+    auto-apply loop. This schema is the enforcement mechanism: the LLM can
+    only ever pick from this fixed menu, never write an arbitrary key/value
+    into engine config. ``action="no_action"`` (the default) means exactly
+    that -- most days should produce no recommendation at all.
+
+    Surfaced read-only via GET /api/live/recommendations; a human applies
+    one explicitly via POST /api/live/recommendations/{id}/apply, which
+    routes through the *existing* PUT /live/config -> update_risk()/
+    update_strategies() path -- this schema never mutates anything itself.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    action: Literal["reduce_position_limit", "flag_strategy_for_review", "no_action"] = "no_action"
+    strategy: str = ""
+    # Only meaningful for reduce_position_limit -- how much to cut
+    # max_position_pct by, as a fraction of its current value (0.2 = cut by
+    # 20%). Clamped defensively at apply time too, not just here.
+    reduce_by_pct: float = 0.0
+    rationale: str = ""
+
+    _coerce_strategy = field_validator("strategy", mode="before")(_coerce_str)
+    _coerce_rationale = field_validator("rationale", mode="before")(_coerce_str)
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def _coerce_action(cls, v: Any) -> Any:
+        return v if v in ("reduce_position_limit", "flag_strategy_for_review", "no_action") else "no_action"
+
+    @field_validator("reduce_by_pct", mode="before")
+    @classmethod
+    def _coerce_reduce_by_pct(cls, v: Any) -> float:
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return 0.0
+        if f != f:  # NaN
+            return 0.0
+        return max(0.0, min(1.0, f))
+
+
 class DecisionReflection(BaseModel):
     """Portfolio decision retrospective prompt contract (``firm.agents.memory``).
 
@@ -184,6 +234,11 @@ class DecisionReflection(BaseModel):
     what_worked: str = ""
     what_failed: str = ""
     lesson: str = ""
+    # Optional, bounded recommendation -- see DailyReflectionRecommendation's
+    # own docstring. Only meaningfully populated by reflect_day()'s daily
+    # rollup prompt; reflect()'s original per-decision prompt doesn't ask
+    # for one, so it stays the all-defaults "no_action" there.
+    recommendation: DailyReflectionRecommendation = Field(default_factory=DailyReflectionRecommendation)
 
     _coerce_what_worked = field_validator("what_worked", mode="before")(_coerce_str)
     _coerce_what_failed = field_validator("what_failed", mode="before")(_coerce_str)

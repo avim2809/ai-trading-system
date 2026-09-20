@@ -22,6 +22,20 @@ dependencies = [
     "pyarrow",
     "requests",
     "statsmodels",
+    # CPU-only ONNX inference for the pattern_recognition strategy's CNN/GAF
+    # quality scorer (firm.patterns.ml.inference) -- deliberately a direct,
+    # declared dependency rather than relying on it arriving transitively via
+    # chromadb (the `llm` extra): pattern_recognition is enabled in both live
+    # configs today and should get CNN scoring on a plain `pip install -e .`
+    # too. Confirmed a genuine cp314 wheel exists as of 2026-09-09
+    # (docs/pattern_recognition_plan.md's "no Python 3.14 wheel yet" note is
+    # now stale) and that it was already installed+importable here at
+    # ~40MB RSS/~0.1s import time -- negligible next to this host's 2-core/
+    # 3.3GB constraint. Training itself still needs torch/pyts, which do NOT
+    # have cp314 wheels and stay confined to the isolated .venv-ml
+    # environment (see firm.patterns.ml.cnn_validator) -- this is inference
+    # (CPUExecutionProvider) only, never added here.
+    "onnxruntime",
     # Joint constrained portfolio optimizer (src/firm/portfolio/optimizer.py)
     # -- expresses the L1 transaction-cost term, the sqrt-market-impact
     # (3/2-power) term, and the SOC vol constraint exactly, with real solver

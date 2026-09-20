@@ -777,6 +777,48 @@ def flatten_position(symbol: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.post("/recommendations/{date}/apply")
+def apply_recommendation(date: str, request: Request) -> dict[str, Any]:
+    """Apply a daily-reflection recommendation for *date* (2026-09-20).
+
+    The one place a reflection's conclusion is allowed to touch live
+    behavior — and only via this explicit, human-triggered call, never
+    automatically (see ``firm.llm.schemas.DailyReflectionRecommendation``'s
+    docstring for why). Only two actions exist:
+    - ``reduce_position_limit``: cuts that strategy's
+      ``RiskAgent.sleeve_risk_overrides[strategy]["max_position_pct"]`` by
+      the recommended fraction, reusing the exact same mechanism built
+      2026-09-19 for the stat_arb sleeve-veto fix — a strategy that doesn't
+      already have an override starts from the shared ``max_position_pct``.
+    - ``flag_strategy_for_review``: no engine mutation, just marks the
+      recommendation applied/acknowledged.
+    """
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        raise HTTPException(status_code=400, detail="Live engine is not running")
+
+    recs = engine._memory.list_recommendations(pending_only=False)
+    rec = next((r for r in recs if r["date"] == date and r.get("action") != "no_action"), None)
+    if rec is None:
+        raise HTTPException(status_code=404, detail=f"No recommendation found for {date}")
+    if rec.get("applied"):
+        raise HTTPException(status_code=409, detail=f"Recommendation for {date} was already applied")
+
+    detail: dict[str, Any] = {}
+    if rec["action"] == "reduce_position_limit":
+        strategy = rec["strategy"]
+        risk = engine._orchestrator.risk
+        overrides = risk.sleeve_risk_overrides.setdefault(strategy, {})
+        current = overrides.get("max_position_pct", risk.max_position_pct)
+        overrides["max_position_pct"] = current * (1.0 - rec["reduce_by_pct"])
+        detail = {"strategy": strategy, "new_max_position_pct": overrides["max_position_pct"]}
+    elif rec["action"] == "flag_strategy_for_review":
+        detail = {"strategy": rec["strategy"], "flagged": True}
+
+    engine._memory.mark_recommendation_applied(date)
+    return {"date": date, "action": rec["action"], "applied": True, **detail}
+
+
 @router.post("/sleeves/{strategy}/flatten")
 def flatten_sleeve(strategy: str, request: Request) -> dict[str, Any]:
     """Force *strategy* to hold nothing going forward (2026-09-20). See

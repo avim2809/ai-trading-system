@@ -287,3 +287,156 @@ class TestSummarizeLessons:
         summary = log.summarize_lessons()
         assert summary["counts"]["unknown"] == 1
         assert summary["recent_lessons"] == []
+
+
+class TestCycleIdStorage:
+    """store_decision's cycle_id key -- added 2026-09-20 to fix a real
+    incident: under the ~7-cycles/trading-day "hourly_market_hours"
+    schedule, the old bare-date idempotency key meant only the day's very
+    first cycle's decision was ever stored; the other ~6 silently
+    vanished."""
+
+    def test_multiple_cycles_same_day_all_stored(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.2}, cycle_id=2)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.3}, cycle_id=3)
+
+        entries = log.list_decisions()
+        assert len(entries) == 3
+        assert {e["cycle_id"] for e in entries} == {1, 2, 3}
+
+    def test_same_cycle_id_is_idempotent(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.99}, cycle_id=1)
+
+        entries = log.list_decisions()
+        assert len(entries) == 1
+        assert entries[0]["proposal_weights"] == {"AAPL": 0.1}
+
+    def test_legacy_no_cycle_id_still_one_entry_per_date(self, tmp_path):
+        """cycle_id=None (the old call shape) must reproduce exactly the
+        original bare-date idempotency -- no behavior change for a caller
+        that doesn't opt in."""
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1})
+        log.store_decision(date="2026-01-01", proposal_weights={"MSFT": 0.2})
+        assert len(log.list_decisions()) == 1
+
+
+class TestReflectDay:
+    def _llm(self, **overrides):
+        llm = MagicMock()
+        payload = {
+            "verdict": "correct", "what_worked": "w", "what_failed": "", "lesson": "l",
+            "recommendation": {"action": "no_action"},
+        }
+        payload.update(overrides)
+        llm.chat_json.return_value = payload
+        return llm
+
+    def test_aggregates_all_of_a_day_s_cycles_into_one_reflection(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(
+            date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1,
+            per_strategy={"momentum": {"AAPL": 0.1}}, nav_at_decision=100_000,
+        )
+        log.store_decision(
+            date="2026-01-01", proposal_weights={"AAPL": 0.15, "MSFT": 0.05}, cycle_id=2,
+            per_strategy={"momentum": {"AAPL": 0.15}, "trend": {"MSFT": 0.05}},
+        )
+
+        llm = self._llm()
+        reflection = log.reflect_day(
+            date="2026-01-01", raw_return=0.02, benchmark_return=0.01, llm_service=llm,
+        )
+
+        assert reflection is not None
+        assert llm.chat_json.call_count == 1  # one LLM call for the whole day, not per cycle
+        prompt = llm.chat_json.call_args[0][0][1]["content"]
+        assert "2 decision cycle(s)" in prompt
+
+        entries = log.list_decisions()
+        rollup = next(e for e in entries if e.get("cycle_id") == "rollup")
+        assert rollup["status"] == "reflected"
+        assert rollup["n_cycles"] == 2
+        # Later cycle's AAPL target supersedes the earlier one.
+        assert rollup["per_strategy"]["momentum"]["AAPL"] == 0.15
+        assert rollup["per_strategy"]["trend"]["MSFT"] == 0.05
+
+    def test_per_cycle_entries_excluded_from_pending_after_rollup(self, tmp_path):
+        """The real incident's fix: after a daily rollup, find_all_pending()
+        must stop re-surfacing that day's per-cycle entries forever."""
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.2}, cycle_id=2)
+        assert len(log.find_all_pending()) == 2
+
+        log.reflect_day(date="2026-01-01", raw_return=0.02, benchmark_return=0.01, llm_service=self._llm())
+
+        assert log.find_all_pending() == []
+
+    def test_calling_twice_for_same_date_is_a_no_op_second_time(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        llm = self._llm()
+        log.reflect_day(date="2026-01-01", raw_return=0.02, benchmark_return=0.01, llm_service=llm)
+
+        result = log.reflect_day(date="2026-01-01", raw_return=0.02, benchmark_return=0.01, llm_service=llm)
+
+        assert result is None
+        assert llm.chat_json.call_count == 1  # not called again
+
+    def test_no_pending_entries_returns_none(self, tmp_path):
+        log = _log(tmp_path)
+        result = log.reflect_day(
+            date="2026-01-01", raw_return=0.0, benchmark_return=0.0, llm_service=self._llm(),
+        )
+        assert result is None
+
+    def test_recommendation_is_stored_and_listed(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        llm = self._llm(recommendation={
+            "action": "reduce_position_limit", "strategy": "stat_arb",
+            "reduce_by_pct": 0.3, "rationale": "repeated veto pattern",
+        })
+
+        log.reflect_day(date="2026-01-01", raw_return=-0.05, benchmark_return=0.0, llm_service=llm)
+
+        recs = log.list_recommendations()
+        assert len(recs) == 1
+        assert recs[0]["action"] == "reduce_position_limit"
+        assert recs[0]["strategy"] == "stat_arb"
+        assert recs[0]["reduce_by_pct"] == 0.3
+        assert recs[0]["date"] == "2026-01-01"
+
+    def test_no_action_recommendation_not_listed_by_default(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        log.reflect_day(date="2026-01-01", raw_return=0.01, benchmark_return=0.01, llm_service=self._llm())
+
+        assert log.list_recommendations() == []
+        assert log.list_recommendations(pending_only=False) != []
+
+    def test_mark_recommendation_applied_excludes_from_pending(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        log.reflect_day(date="2026-01-01", raw_return=-0.05, benchmark_return=0.0, llm_service=self._llm(
+            recommendation={
+                "action": "reduce_position_limit", "strategy": "stat_arb",
+                "reduce_by_pct": 0.3, "rationale": "x",
+            },
+        ))
+        assert len(log.list_recommendations()) == 1
+
+        applied = log.mark_recommendation_applied("2026-01-01")
+
+        assert applied is True
+        assert log.list_recommendations() == []
+        assert log.list_recommendations(pending_only=False)[0]["applied"] is True
+
+    def test_mark_recommendation_applied_returns_false_when_nothing_to_apply(self, tmp_path):
+        log = _log(tmp_path)
+        assert log.mark_recommendation_applied("2026-01-01") is False

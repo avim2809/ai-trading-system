@@ -1823,6 +1823,11 @@ class LiveTradingEngine:
                     notes=f"cycle={self._cycle_count}; {regime}".strip("; "),
                     nav_at_decision=self._portfolio.nav,
                     per_strategy=dict(proposal.per_strategy),
+                    # Real incident fixed 2026-09-20: without this, the
+                    # bare-date idempotency key meant only the day's first
+                    # of ~7 hourly_market_hours cycles was ever stored —
+                    # see TradingMemoryLog.store_decision's own docstring.
+                    cycle_id=self._cycle_count,
                 )
 
             if not orders:
@@ -2166,30 +2171,46 @@ class LiveTradingEngine:
             log.warning(
                 "Skipping reflection on %d pending decision(s) (dates: %s) — "
                 "no LLM service available",
-                len(pending), [e["date"] for e in pending],
+                len(pending), sorted({e["date"] for e in pending}),
             )
             return
 
-        current_nav = self._portfolio.nav
+        # Group by date (2026-09-20): under "hourly_market_hours",
+        # find_all_pending() can return several entries per date (one per
+        # cycle_id) — reflect ONCE per date via reflect_day's aggregate
+        # rollup, not once per entry, or this would multiply LLM reflection
+        # cost the same way running the full pipeline hourly would have
+        # (see Orchestrator._apply_cycle_llm_mode's identical rationale).
+        # The earliest cycle's nav_at_decision is that day's opening
+        # baseline for the return calculation, not each entry's own NAV.
+        earliest_by_date: dict[str, dict] = {}
         for entry in pending:
-            prev_nav = entry.get("nav_at_decision")
+            d = entry["date"]
+            if d not in earliest_by_date or (entry.get("cycle_id") or 0) < (
+                earliest_by_date[d].get("cycle_id") or 0
+            ):
+                earliest_by_date[d] = entry
+
+        current_nav = self._portfolio.nav
+        for date, first_entry in earliest_by_date.items():
+            prev_nav = first_entry.get("nav_at_decision")
             if not prev_nav or prev_nav <= 0:
                 log.debug(
                     "Skipping reflection for %s — no nav_at_decision recorded "
-                    "(pre-dates this fix)", entry["date"],
+                    "(pre-dates this fix)", date,
                 )
                 continue
             raw_return = (current_nav / prev_nav) - 1.0
-            benchmark_return = self._lookup_benchmark_return(pit_view, entry["date"], now)
+            benchmark_return = self._lookup_benchmark_return(pit_view, date, now)
             try:
-                self._memory.reflect(
-                    date=entry["date"],
+                self._memory.reflect_day(
+                    date=date,
                     raw_return=raw_return,
                     benchmark_return=benchmark_return,
                     llm_service=llm,
                 )
             except Exception:
-                log.warning("Memory reflection failed for %s", entry["date"], exc_info=True)
+                log.warning("Memory daily-rollup reflection failed for %s", date, exc_info=True)
 
     def _lookup_benchmark_return(
         self, pit_view: Any, decision_date: str, now: datetime,
