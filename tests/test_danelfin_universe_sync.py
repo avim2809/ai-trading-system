@@ -28,7 +28,7 @@ def _best_stocks_df(rows: list[tuple[str, str]]) -> pd.DataFrame:
 
 class TestComputeUniverseUpdate:
     def test_additions_capped_at_max_dynamic_symbols(self):
-        new_universe, new_state, additions, removals = compute_universe_update(
+        new_universe, new_state, additions, removals, promotions = compute_universe_update(
             static_universe=["AAPL"],
             dynamic_state={},
             today_best_stocks=_best_stocks_df([("NVDA", "tech"), ("AMD", "tech"), ("XOM", "energy")]),
@@ -38,13 +38,20 @@ class TestComputeUniverseUpdate:
         )
         assert additions == ["NVDA", "AMD"]
         assert removals == []
+        assert promotions == []
         assert set(new_universe) == {"AAPL", "NVDA", "AMD"}
-        assert new_state["NVDA"] == {"sector": "tech", "added_date": "2026-08-02", "consecutive_absent_days": 0}
+        assert new_state["NVDA"] == {
+            "sector": "tech",
+            "added_date": "2026-08-02",
+            "consecutive_absent_days": 0,
+            "status": "candidate",
+            "candidate_since": "2026-08-02",
+        }
 
     def test_static_universe_never_touched_even_if_in_best_stocks(self):
         """A statically-configured symbol appearing in today's list must not
         be duplicated into dynamic_state or double-counted against the cap."""
-        new_universe, new_state, additions, removals = compute_universe_update(
+        new_universe, new_state, additions, removals, _promotions = compute_universe_update(
             static_universe=["AAPL"],
             dynamic_state={},
             today_best_stocks=_best_stocks_df([("AAPL", "tech"), ("NVDA", "tech")]),
@@ -59,7 +66,7 @@ class TestComputeUniverseUpdate:
     def test_absence_counter_increments_and_resets(self):
         state = {"NVDA": {"sector": "tech", "added_date": "2026-07-01", "consecutive_absent_days": 2}}
         # NVDA absent today -> increments to 3
-        _, new_state, _, removals = compute_universe_update(
+        _, new_state, _, removals, _promotions = compute_universe_update(
             static_universe=["AAPL"],
             dynamic_state=state,
             today_best_stocks=_best_stocks_df([("AMD", "tech")]),
@@ -71,7 +78,7 @@ class TestComputeUniverseUpdate:
         assert removals == []
 
         # NVDA reappears -> resets to 0
-        _, new_state2, _, _ = compute_universe_update(
+        _, new_state2, _, _, _promotions2 = compute_universe_update(
             static_universe=["AAPL"],
             dynamic_state=new_state,
             today_best_stocks=_best_stocks_df([("NVDA", "tech")]),
@@ -84,7 +91,7 @@ class TestComputeUniverseUpdate:
     def test_removal_only_after_dwell_threshold(self):
         state = {"NVDA": {"sector": "tech", "added_date": "2026-07-01", "consecutive_absent_days": 4}}
         # One more absent day reaches min_dwell_days=5 -> removed
-        new_universe, new_state, additions, removals = compute_universe_update(
+        new_universe, new_state, additions, removals, _promotions = compute_universe_update(
             static_universe=["AAPL"],
             dynamic_state=state,
             today_best_stocks=_best_stocks_df([]),
@@ -98,7 +105,7 @@ class TestComputeUniverseUpdate:
 
     def test_removal_does_not_fire_before_dwell_threshold(self):
         state = {"NVDA": {"sector": "tech", "added_date": "2026-07-01", "consecutive_absent_days": 1}}
-        _, new_state, _, removals = compute_universe_update(
+        _, new_state, _, removals, _promotions = compute_universe_update(
             static_universe=["AAPL"],
             dynamic_state=state,
             today_best_stocks=_best_stocks_df([]),
@@ -115,7 +122,7 @@ class TestComputeUniverseUpdate:
         verify static symbols are simply never candidates for addition and
         the static base is always included in new_universe regardless of
         best_stocks content."""
-        new_universe, _, additions, _ = compute_universe_update(
+        new_universe, _, additions, _, _promotions = compute_universe_update(
             static_universe=["AAPL", "MSFT"],
             dynamic_state={},
             today_best_stocks=_best_stocks_df([]),
@@ -131,7 +138,7 @@ class TestComputeUniverseUpdate:
             "NVDA": {"sector": "tech", "added_date": "2026-07-01", "consecutive_absent_days": 0},
             "XOM": {"sector": "energy", "added_date": "2026-07-01", "consecutive_absent_days": 0},
         }
-        _, new_state, additions, removals = compute_universe_update(
+        _, new_state, additions, removals, _promotions = compute_universe_update(
             static_universe=["AAPL"],
             dynamic_state=state,
             today_best_stocks=pd.DataFrame(),
@@ -149,7 +156,7 @@ class TestComputeUniverseUpdate:
             "NVDA": {"sector": "tech", "added_date": "2026-07-01", "consecutive_absent_days": 0},
             "AMD": {"sector": "tech", "added_date": "2026-07-01", "consecutive_absent_days": 0},
         }
-        _, _, additions, _ = compute_universe_update(
+        _, _, additions, _, _promotions = compute_universe_update(
             static_universe=["AAPL"],
             dynamic_state=state,
             today_best_stocks=_best_stocks_df([("XOM", "energy")]),
@@ -162,7 +169,7 @@ class TestComputeUniverseUpdate:
     def test_rank_order_preserved_when_selecting_additions(self):
         """Given more candidates than slots, the top-ranked ones (first rows,
         best_stocks is assumed rank-ordered) should win the available slots."""
-        new_universe, _, additions, _ = compute_universe_update(
+        new_universe, _, additions, _, _promotions = compute_universe_update(
             static_universe=[],
             dynamic_state={},
             today_best_stocks=_best_stocks_df([("NVDA", "tech"), ("AMD", "tech"), ("XOM", "energy")]),
@@ -171,6 +178,115 @@ class TestComputeUniverseUpdate:
             today="2026-08-02",
         )
         assert additions == ["NVDA"]
+
+
+class TestIncubation:
+    def test_new_symbol_enters_as_candidate(self):
+        _, new_state, additions, _, promotions = compute_universe_update(
+            static_universe=["AAPL"],
+            dynamic_state={},
+            today_best_stocks=_best_stocks_df([("NVDA", "tech")]),
+            max_dynamic_symbols=10,
+            min_dwell_days=5,
+            today="2026-08-02",
+            incubation_days=5,
+        )
+        assert additions == ["NVDA"]
+        assert promotions == []
+        assert new_state["NVDA"]["status"] == "candidate"
+        assert new_state["NVDA"]["candidate_since"] == "2026-08-02"
+
+    def test_candidate_promotes_to_active_after_incubation_days(self):
+        state = {
+            "NVDA": {
+                "sector": "tech",
+                "added_date": "2026-08-01",
+                "consecutive_absent_days": 0,
+                "status": "candidate",
+                "candidate_since": "2026-08-01",
+            }
+        }
+        # Only 4 days elapsed (incubation_days=5) -> not yet promoted.
+        _, new_state, _, _, promotions = compute_universe_update(
+            static_universe=["AAPL"],
+            dynamic_state=state,
+            today_best_stocks=_best_stocks_df([("NVDA", "tech")]),
+            max_dynamic_symbols=10,
+            min_dwell_days=5,
+            today="2026-08-05",
+            incubation_days=5,
+        )
+        assert promotions == []
+        assert new_state["NVDA"]["status"] == "candidate"
+
+        # 5 days elapsed -> promoted, and returned in promotions.
+        _, new_state2, _, _, promotions2 = compute_universe_update(
+            static_universe=["AAPL"],
+            dynamic_state=state,
+            today_best_stocks=_best_stocks_df([("NVDA", "tech")]),
+            max_dynamic_symbols=10,
+            min_dwell_days=5,
+            today="2026-08-06",
+            incubation_days=5,
+        )
+        assert promotions2 == ["NVDA"]
+        assert new_state2["NVDA"]["status"] == "active"
+
+    def test_candidate_absent_long_enough_still_dwell_removed(self):
+        """A candidate not yet promoted must still be removable via the
+        unchanged absence/dwell mechanism -- incubation only gates capital,
+        never blocks removal."""
+        state = {
+            "NVDA": {
+                "sector": "tech",
+                "added_date": "2026-08-01",
+                "consecutive_absent_days": 4,
+                "status": "candidate",
+                "candidate_since": "2026-08-01",
+            }
+        }
+        _, new_state, _, removals, promotions = compute_universe_update(
+            static_universe=["AAPL"],
+            dynamic_state=state,
+            today_best_stocks=_best_stocks_df([]),
+            max_dynamic_symbols=10,
+            min_dwell_days=5,
+            today="2026-08-06",
+            incubation_days=5,
+        )
+        assert removals == ["NVDA"]
+        assert "NVDA" not in new_state
+        assert promotions == []
+
+    def test_entry_with_no_status_key_treated_as_active_not_promoted(self):
+        """State persisted before this field existed must never be
+        retroactively re-incubated."""
+        state = {
+            "NVDA": {"sector": "tech", "added_date": "2026-07-01", "consecutive_absent_days": 0}
+        }
+        _, new_state, _, _, promotions = compute_universe_update(
+            static_universe=["AAPL"],
+            dynamic_state=state,
+            today_best_stocks=_best_stocks_df([("NVDA", "tech")]),
+            max_dynamic_symbols=10,
+            min_dwell_days=5,
+            today="2026-08-06",
+            incubation_days=5,
+        )
+        assert promotions == []
+        assert "status" not in new_state["NVDA"]
+
+    def test_default_incubation_days_is_five(self):
+        _, new_state, additions, _, _ = compute_universe_update(
+            static_universe=["AAPL"],
+            dynamic_state={},
+            today_best_stocks=_best_stocks_df([("NVDA", "tech")]),
+            max_dynamic_symbols=10,
+            min_dwell_days=5,
+            today="2026-08-02",
+        )
+        assert additions == ["NVDA"]
+        assert new_state["NVDA"]["status"] == "candidate"
 
 
 class TestDynamicUniverseStatePersistence:

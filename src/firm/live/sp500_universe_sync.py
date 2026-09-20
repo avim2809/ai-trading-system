@@ -167,6 +167,7 @@ def sync_once(
     max_dynamic_symbols: int,
     min_dwell_days: int,
     liquidity_lookback_days: int = 30,
+    incubation_days: int = 5,
 ) -> dict[str, Any]:
     """Fetch today's FMP S&P 500 membership, rank sector-balanced candidates
     by trailing liquidity, and apply any dynamic universe additions/removals
@@ -269,8 +270,8 @@ def sync_once(
     )
 
     today = utcnow().date().isoformat()
-    new_universe, new_state, additions, removals = compute_universe_update(
-        static_universe, state, ranked, max_dynamic_symbols, min_dwell_days, today,
+    new_universe, new_state, additions, removals, promotions = compute_universe_update(
+        static_universe, state, ranked, max_dynamic_symbols, min_dwell_days, today, incubation_days,
     )
     save_dynamic_universe_state(state_path, new_state)
 
@@ -283,7 +284,40 @@ def sync_once(
             "sp500_universe_sync: +%s -%s (universe now %d symbols)",
             additions, removals, len(new_universe),
         )
+        # Close the removal->exit gap: dwell-removal above only drops a
+        # symbol from the universe/state, it never touches its real broker
+        # position. Runs AFTER update_universe so flatten_symbol's own
+        # _execute_orders allowlist union (which unions in currently-held
+        # symbols specifically so an out-of-universe symbol can still be
+        # closed) sees the symbol as already out of the active universe.
+        # Per-symbol try/except: one bad flatten (e.g. a stale/no price)
+        # must not block the rest of the removals or crash the sync job —
+        # a failed flatten leaves a real position needing manual attention,
+        # logged loudly, rather than silently dropping the whole batch.
+        for sym in removals:
+            try:
+                engine.flatten_symbol(sym)
+            except Exception:
+                log.warning(
+                    "sp500_universe_sync: failed to flatten removed symbol "
+                    "%s — position may need manual attention; continuing "
+                    "with remaining removals", sym, exc_info=True,
+                )
+    elif promotions:
+        log.info("sp500_universe_sync: promoted from candidate to active: %s", promotions)
     else:
         log.debug("sp500_universe_sync: no universe changes (%d dynamic symbols held)", len(new_state))
 
-    return {"universe": new_universe, "additions": additions, "removals": removals}
+    # Recomputed fresh every call (not just deltas) so a promotion-only
+    # cycle (no additions/removals) still updates the incubation lock —
+    # mirrors update_universe's own "replace the whole list every call"
+    # pattern.
+    incubating = {sym for sym, entry in new_state.items() if entry.get("status") == "candidate"}
+    engine.update_incubating_symbols(incubating)
+
+    return {
+        "universe": new_universe,
+        "additions": additions,
+        "removals": removals,
+        "promotions": promotions,
+    }

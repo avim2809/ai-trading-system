@@ -428,6 +428,15 @@ sp500_dynamic_universe:
   min_dwell_days_before_removal: 5
   liquidity_lookback_days: 30
   sector_cache_refresh_day: "sun"
+  # Incubation period (2026-09-20): a newly-added candidate symbol is
+  # capital-locked (RiskAgent.incubating_symbols zeroes its target weight,
+  # upstream signals still run normally) for this many consecutive days
+  # before real capital can touch it -- the entry-side "buffer zone"/
+  # "incubation" convention, sized to match min_dwell_days_before_removal's
+  # exit-side dwell delay. Strictly more conservative than pre-incubation
+  # behavior (a candidate gets LESS exposure, never more), so safe to
+  # enable directly rather than ship disabled first.
+  incubation_days: 5
 
 # ──────────────────────────────────────────────────────────────
 # Transaction costs — must match your actual broker schedule

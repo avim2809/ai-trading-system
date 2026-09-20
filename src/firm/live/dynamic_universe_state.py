@@ -14,7 +14,21 @@ restarts on disk, mirroring the plain read/write idiom already used for
 (log + fall back to empty state), ``mkdir(parents=True)`` before write.
 
 Schema: ``{symbol: {"sector": str, "added_date": "YYYY-MM-DD",
-"consecutive_absent_days": int}}``.
+"consecutive_absent_days": int, "status": "candidate" | "active",
+"candidate_since": "YYYY-MM-DD"}}``.
+
+``status``/``candidate_since`` (added 2026-09-20) implement an incubation
+period for newly-added symbols: a professional-practice "buffer zone"
+(index-provider methodology) / "incubation" (practitioner convention) for a
+dynamically-grown universe, so real capital doesn't touch a candidate name
+the moment it's added -- see ``firm.live.danelfin_universe_sync.
+compute_universe_update`` (``incubation_days``) for the promotion logic and
+``firm.agents.risk.RiskAgent.incubating_symbols`` for the enforcement
+mechanism. ``added_date`` is kept alongside ``candidate_since`` for
+backward compat/display; promotion logic only ever reads
+``candidate_since``. An entry with no ``status`` key at all (state
+persisted before this field existed) is treated as already ``"active"`` --
+never retroactively re-incubated.
 """
 
 from __future__ import annotations

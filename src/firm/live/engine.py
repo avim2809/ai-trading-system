@@ -564,6 +564,27 @@ class LiveTradingEngine:
         }
         log.info("Live engine sector_map updated: %s", sector_map)
 
+    def update_incubating_symbols(self, symbols: set[str] | list[str]) -> None:
+        """Replace the risk agent's dynamic-universe incubation lock,
+        effective next cycle (2026-09-20).
+
+        Mirrors ``update_sector_map``'s exact pattern: mutates
+        ``self._orchestrator.risk.incubating_symbols`` directly (no
+        orchestrator rebuild needed) and syncs
+        ``_config['incubating_symbols']`` so a later rebuild (any other
+        ``update_*`` that calls ``build_orchestrator`` again) doesn't
+        silently drop it. Called by ``sp500_universe_sync.sync_once`` every
+        run — not just on a delta — with the current full set of
+        "candidate" (not yet incubation-graduated) dynamic-universe
+        symbols, so a promotion-only cycle (no additions/removals) still
+        updates the lock. See ``RiskAgent.incubating_symbols``'s field
+        docstring for the actual enforcement mechanism.
+        """
+        symbols = set(symbols)
+        self._orchestrator.risk.incubating_symbols = symbols
+        self._config = {**self._config, "incubating_symbols": sorted(symbols)}
+        log.info("Live engine incubating_symbols updated: %s", sorted(symbols))
+
     def update_news_guard(
         self,
         enabled: bool | None = None,

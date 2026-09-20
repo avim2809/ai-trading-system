@@ -249,6 +249,23 @@ class RiskAgent(Agent):
             cfg.get("sleeve_risk_overrides", {}) or {}
         )
 
+        # Optional dynamic-universe incubation lock (off/empty by default —
+        # no behavior change for anyone who doesn't set this). Populated
+        # live by LiveTradingEngine.update_incubating_symbols, called every
+        # sp500_universe_sync.sync_once run with the current full set of
+        # "candidate" (not yet incubation-graduated) dynamic-universe
+        # symbols — see firm.live.danelfin_universe_sync.
+        # compute_universe_update's incubation_days/promotions and
+        # firm.live.dynamic_universe_state's schema docstring for the full
+        # design (professional-practice "buffer zone"/"incubation"
+        # convention: paper/shadow-track a newly-added candidate for a
+        # fixed window before real capital touches it). Enforced as a
+        # post-hoc target-weight zeroing in _apply_incubation_lock below —
+        # the same seam _stop_loss_overlay/sleeve_risk_overrides already
+        # use — so a candidate's own upstream strategies/signals still run
+        # normally, only the final committed weight is locked at zero.
+        self.incubating_symbols: set[str] = set(cfg.get("incubating_symbols", []))
+
     def run(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
         """Apply this call's ``sleeve_risk_overrides`` (if any) for the
         strategy named in ``inputs["strategy"]``, then delegate to
@@ -297,6 +314,12 @@ class RiskAgent(Agent):
             "RiskAgent evaluating proposal asof=%s: %d names, gross=%.3f",
             ctx.now, len(targets), original_gross,
         )
+
+        # Runs FIRST, ahead of every other cap, so no later stage computes
+        # against a nonzero incubating-symbol weight.
+        targets, v, a = self._apply_incubation_lock(targets)
+        violations.extend(v)
+        actions.extend(a)
 
         targets, v, a = self._clip_position_sizes(targets)
         violations.extend(v)
@@ -473,6 +496,34 @@ class RiskAgent(Agent):
     # ------------------------------------------------------------------
     # constraint helpers – each returns (targets, violations, actions)
     # ------------------------------------------------------------------
+
+    def _apply_incubation_lock(
+        self, targets: dict[str, float]
+    ) -> tuple[dict[str, float], list[str], list[str]]:
+        """Zero the target weight for any symbol in ``self.incubating_symbols``.
+
+        A dynamically-added candidate symbol's own strategies/signals run
+        completely normally upstream — this only intervenes on the final
+        committed weight, the same post-hoc seam ``_stop_loss_overlay`` and
+        ``sleeve_risk_overrides`` already use. Complete no-op when
+        ``incubating_symbols`` is empty (the default), matching today's
+        behavior exactly for anyone who doesn't set it.
+        """
+        if not self.incubating_symbols:
+            return targets, [], []
+        violations: list[str] = []
+        actions: list[str] = []
+        adjusted = dict(targets)
+        for sym in self.incubating_symbols:
+            w = adjusted.get(sym, 0.0)
+            if w != 0.0:
+                actions.append(f"Zeroed {sym} target ({w:.4f} -> 0.0000): symbol is incubating")
+                log.info(
+                    "Risk incubation lock: %s target %.4f zeroed (dynamic-"
+                    "universe candidate still incubating)", sym, w,
+                )
+                adjusted[sym] = 0.0
+        return adjusted, violations, actions
 
     def _clip_position_sizes(
         self, targets: dict[str, float]

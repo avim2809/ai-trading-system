@@ -118,6 +118,9 @@ def _start_live_scheduler(
                     sp500_dynamic_universe_min_dwell_days=int(
                         sp500_dynamic_universe_cfg.get("min_dwell_days_before_removal", 5)
                     ),
+                    sp500_dynamic_universe_incubation_days=int(
+                        sp500_dynamic_universe_cfg.get("incubation_days", 5)
+                    ),
                     sp500_liquidity_lookback_days=int(
                         sp500_dynamic_universe_cfg.get("liquidity_lookback_days", 30)
                     ),

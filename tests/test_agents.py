@@ -969,6 +969,43 @@ class TestRiskManager:
         assert risk.max_position_pct == 0.05
         assert risk.veto_threshold == 0.5
 
+    def test_incubating_symbol_target_zeroed(self):
+        """A dynamic-universe candidate symbol (RiskAgent.incubating_symbols,
+        set live by LiveTradingEngine.update_incubating_symbols) must have
+        its target weight forced to zero -- real capital never touches a
+        symbol still in its incubation window -- while an unrelated
+        symbol's target is untouched."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(
+            config={"max_position_pct": 1.0, "incubating_symbols": ["NVDA"]}
+        )
+        proposal = TradeProposal(
+            asof=NOW,
+            targets={"NVDA": 0.20, "AAPL": 0.15},
+        )
+        ctx = AgentContext(now=NOW)
+        decision = risk.run(ctx, proposal=proposal)
+
+        assert decision.adjusted_targets["NVDA"] == pytest.approx(0.0)
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.15)
+        assert any("incubat" in a.lower() for a in decision.actions)
+
+    def test_empty_incubating_symbols_is_a_complete_no_op(self):
+        """Default (empty incubating_symbols) must match today's behavior
+        exactly -- no actions/violations added, no targets touched."""
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={"max_position_pct": 1.0})
+        assert risk.incubating_symbols == set()
+        proposal = TradeProposal(asof=NOW, targets={"NVDA": 0.20, "AAPL": 0.15})
+        ctx = AgentContext(now=NOW)
+        decision = risk.run(ctx, proposal=proposal)
+
+        assert decision.adjusted_targets["NVDA"] == pytest.approx(0.20)
+        assert decision.adjusted_targets["AAPL"] == pytest.approx(0.15)
+        assert not any("incubat" in a.lower() for a in decision.actions)
+
     def test_drawdown_circuit_breaker(self):
         from firm.agents.risk import RiskAgent
         from firm.portfolio.state import PortfolioState

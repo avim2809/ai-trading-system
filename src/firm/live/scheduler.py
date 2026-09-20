@@ -388,6 +388,7 @@ class TradingScheduler:
         sp500_sector_cache_path: str = "data/sp500_sector_map.json",
         sp500_dynamic_universe_max_symbols: int = 10,
         sp500_dynamic_universe_min_dwell_days: int = 5,
+        sp500_dynamic_universe_incubation_days: int = 5,
         sp500_liquidity_lookback_days: int = 30,
         sp500_sync_hour: int | None = None,
         sp500_sector_cache_refresh_day: str = "sun",
@@ -435,6 +436,7 @@ class TradingScheduler:
         self._sp500_sector_cache_path = sp500_sector_cache_path
         self._sp500_dynamic_universe_max_symbols = int(sp500_dynamic_universe_max_symbols)
         self._sp500_dynamic_universe_min_dwell_days = int(sp500_dynamic_universe_min_dwell_days)
+        self._sp500_dynamic_universe_incubation_days = int(sp500_dynamic_universe_incubation_days)
         self._sp500_liquidity_lookback_days = int(sp500_liquidity_lookback_days)
         self._sp500_sync_hour = (
             int(sp500_sync_hour)
@@ -551,6 +553,7 @@ class TradingScheduler:
                     max_dynamic_symbols=self._sp500_dynamic_universe_max_symbols,
                     min_dwell_days=self._sp500_dynamic_universe_min_dwell_days,
                     liquidity_lookback_days=self._sp500_liquidity_lookback_days,
+                    incubation_days=self._sp500_dynamic_universe_incubation_days,
                 ),
                 trigger=CronTrigger(
                     hour=self._sp500_sync_hour,

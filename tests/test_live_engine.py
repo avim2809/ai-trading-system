@@ -1532,6 +1532,31 @@ class TestEngineConfigUpdates:
         assert "sector_map" not in engine._config
 
     @patch("firm.live.engine.build_orchestrator")
+    def test_update_incubating_symbols_mutates_risk_agent_and_syncs_config(
+        self, mock_build, engine_components,
+    ):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        mock_build.return_value.risk.incubating_symbols = set()
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+
+        engine.update_incubating_symbols({"NVDA", "AMD"})
+        assert engine._orchestrator.risk.incubating_symbols == {"NVDA", "AMD"}
+        assert engine._config["incubating_symbols"] == ["AMD", "NVDA"]
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_update_incubating_symbols_accepts_list_and_replaces(
+        self, mock_build, engine_components,
+    ):
+        broker, feed, queue, config = engine_components
+        mock_build.return_value = MagicMock()
+        mock_build.return_value.risk.incubating_symbols = {"OLD"}
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+
+        engine.update_incubating_symbols(["NVDA"])
+        assert engine._orchestrator.risk.incubating_symbols == {"NVDA"}
+
+    @patch("firm.live.engine.build_orchestrator")
     def test_daily_trade_limit_forces_manual_approval(self, mock_build, engine_components):
         broker, feed, queue, config = engine_components
         orders = _make_orders()

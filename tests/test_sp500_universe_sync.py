@@ -581,3 +581,152 @@ class TestSyncOnce:
             )
         assert result["removals"] == ["NVDA"]
         engine.update_universe.assert_called_once()
+
+    def test_removal_triggers_flatten_symbol(self, tmp_path):
+        """Closes the removal->exit gap: a dwell-removed symbol's real
+        broker position must actually be closed, not just dropped from the
+        universe/state."""
+        sector_cache_path = tmp_path / "sectors.json"
+        save_sector_cache(
+            sector_cache_path,
+            {"NVDA": {"sector": "technology", "source": "fmp", "as_of": "2026-08-01"}},
+        )
+        state_path = tmp_path / "state.json"
+        save_dynamic_universe_state(
+            state_path,
+            {"NVDA": {"sector": "technology", "added_date": "2026-08-01", "consecutive_absent_days": 4}},
+        )
+        engine = self._make_engine()
+        with patch("firm.live.sp500_universe_sync.FMPProvider") as mock_fmp_cls:
+            mock_fmp_cls.return_value.get_universe_constituents_with_sectors.return_value = _constituents_df(
+                [("MSFT", "technology")]
+            )
+            result = sync_once(
+                engine,
+                state_path=state_path,
+                sector_cache_path=sector_cache_path,
+                static_universe=["AAPL"],
+                static_sector_map={"AAPL": "technology"},
+                max_dynamic_symbols=10,
+                min_dwell_days=5,
+            )
+        assert result["removals"] == ["NVDA"]
+        engine.flatten_symbol.assert_called_once_with("NVDA")
+        # flatten_symbol must run after update_universe has already taken
+        # the symbol out of the active universe (allowlist-union ordering).
+        assert engine.update_universe.call_args[0][0] is not None
+        assert "NVDA" not in engine.update_universe.call_args[0][0]
+
+    def test_flatten_failure_for_one_symbol_does_not_prevent_others_or_crash(self, tmp_path):
+        """One bad flatten (e.g. no usable price) must not block remaining
+        removals or crash the sync job -- logged and continued."""
+        sector_cache_path = tmp_path / "sectors.json"
+        save_sector_cache(
+            sector_cache_path,
+            {
+                "NVDA": {"sector": "technology", "source": "fmp", "as_of": "2026-08-01"},
+                "XOM": {"sector": "energy", "source": "fmp", "as_of": "2026-08-01"},
+            },
+        )
+        state_path = tmp_path / "state.json"
+        save_dynamic_universe_state(
+            state_path,
+            {
+                "NVDA": {"sector": "technology", "added_date": "2026-08-01", "consecutive_absent_days": 4},
+                "XOM": {"sector": "energy", "added_date": "2026-08-01", "consecutive_absent_days": 4},
+            },
+        )
+        engine = self._make_engine()
+        engine.flatten_symbol.side_effect = [
+            RuntimeError("no usable current price"),
+            {"symbol": "XOM", "flattened": True},
+        ]
+        with patch("firm.live.sp500_universe_sync.FMPProvider") as mock_fmp_cls:
+            mock_fmp_cls.return_value.get_universe_constituents_with_sectors.return_value = _constituents_df(
+                [("MSFT", "technology")]
+            )
+            result = sync_once(
+                engine,
+                state_path=state_path,
+                sector_cache_path=sector_cache_path,
+                static_universe=["AAPL"],
+                static_sector_map={"AAPL": "technology"},
+                max_dynamic_symbols=10,
+                min_dwell_days=5,
+            )
+        assert set(result["removals"]) == {"NVDA", "XOM"}
+        assert engine.flatten_symbol.call_count == 2
+
+    def test_incubating_set_updated_on_promotion_only_cycle(self, tmp_path):
+        """A promotion (candidate -> active) with no additions/removals
+        this cycle must still update the engine's incubating-symbol set --
+        the whole set is recomputed fresh every call, not just deltas."""
+        sector_cache_path = tmp_path / "sectors.json"
+        save_sector_cache(
+            sector_cache_path,
+            {"NVDA": {"sector": "technology", "source": "fmp", "as_of": "2026-08-01"}},
+        )
+        state_path = tmp_path / "state.json"
+        save_dynamic_universe_state(
+            state_path,
+            {
+                "NVDA": {
+                    "sector": "technology",
+                    "added_date": "2026-08-01",
+                    "consecutive_absent_days": 0,
+                    "status": "candidate",
+                    "candidate_since": "2026-08-01",
+                }
+            },
+        )
+        engine = self._make_engine()
+        with patch("firm.live.sp500_universe_sync.FMPProvider") as mock_fmp_cls, patch(
+            "firm.live.sp500_universe_sync.utcnow"
+        ) as mock_utcnow:
+            mock_fmp_cls.return_value.get_universe_constituents_with_sectors.return_value = _constituents_df(
+                [("NVDA", "technology")]
+            )
+            mock_utcnow.return_value = pd.Timestamp("2026-08-10")
+            result = sync_once(
+                engine,
+                state_path=state_path,
+                sector_cache_path=sector_cache_path,
+                static_universe=["AAPL"],
+                static_sector_map={"AAPL": "technology"},
+                max_dynamic_symbols=10,
+                min_dwell_days=5,
+                incubation_days=5,
+            )
+        assert result["additions"] == []
+        assert result["removals"] == []
+        assert result["promotions"] == ["NVDA"]
+        engine.update_universe.assert_not_called()
+        engine.update_incubating_symbols.assert_called_once_with(set())
+
+    def test_new_addition_is_incubating_and_reported_to_engine(self, tmp_path):
+        """A fresh addition this cycle is a candidate -- the engine's
+        incubating set must include it immediately."""
+        sector_cache_path = tmp_path / "sectors.json"
+        save_sector_cache(
+            sector_cache_path,
+            {"NVDA": {"sector": "technology", "source": "fmp", "as_of": "2026-08-01"}},
+        )
+        prices_df = pd.DataFrame(
+            [{"symbol": "NVDA", "date": "2026-08-01", "close": 100.0, "volume": 1000.0}]
+        )
+        engine = self._make_engine(prices_df)
+        with patch("firm.live.sp500_universe_sync.FMPProvider") as mock_fmp_cls:
+            mock_fmp_cls.return_value.get_universe_constituents_with_sectors.return_value = _constituents_df(
+                [("NVDA", "technology")]
+            )
+            result = sync_once(
+                engine,
+                state_path=tmp_path / "state.json",
+                sector_cache_path=sector_cache_path,
+                static_universe=["AAPL"],
+                static_sector_map={"AAPL": "technology"},
+                max_dynamic_symbols=10,
+                min_dwell_days=5,
+            )
+        assert result["additions"] == ["NVDA"]
+        engine.update_incubating_symbols.assert_called_once_with({"NVDA"})

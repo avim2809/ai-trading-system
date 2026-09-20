@@ -26,6 +26,7 @@ wrapper an APScheduler job (see ``firm.live.scheduler``) actually calls.
 from __future__ import annotations
 
 import logging
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +45,8 @@ def compute_universe_update(
     max_dynamic_symbols: int,
     min_dwell_days: int,
     today: str,
-) -> tuple[list[str], dict[str, dict[str, Any]], list[str], list[str]]:
+    incubation_days: int = 5,
+) -> tuple[list[str], dict[str, dict[str, Any]], list[str], list[str], list[str]]:
     """Compute the next universe + dynamic state from today's best-stocks snapshot.
 
     Args:
@@ -52,8 +54,11 @@ def compute_universe_update(
                              by absence tracking or removal, regardless of
                              whether they also appear in ``today_best_stocks``.
         dynamic_state:      Current ``{symbol: {"sector", "added_date",
-                             "consecutive_absent_days"}}`` for symbols this
-                             module previously added.
+                             "consecutive_absent_days", "status",
+                             "candidate_since"}}`` for symbols this module
+                             previously added — see
+                             ``firm.live.dynamic_universe_state``'s module
+                             docstring for the full schema.
         today_best_stocks:  Today's real Danelfin best_stocks() snapshot
                              (``symbol``, ``sector`` columns at minimum),
                              assumed rank-ordered (best first) — an empty
@@ -66,9 +71,23 @@ def compute_universe_update(
         max_dynamic_symbols: Cap on total dynamically-held symbols at once.
         min_dwell_days:     Consecutive absent days required before removal.
         today:              ISO date string, stamped onto newly-added entries.
+        incubation_days:    Consecutive calendar days a newly-added symbol
+                             must remain a "candidate" (still present in
+                             ``today_best_stocks``) before it's promoted to
+                             "active" — the entry-side counterpart to
+                             ``min_dwell_days``'s exit-side dwell delay,
+                             same asymmetric-but-comparable-magnitude
+                             buffer-zone/incubation convention. A candidate
+                             can still be dwell-removed exactly like an
+                             active symbol if it goes absent — this only
+                             gates when real capital is allowed to touch it
+                             while present (see ``RiskAgent.
+                             incubating_symbols``), not absence tracking.
 
     Returns:
-        ``(new_universe, new_dynamic_state, additions, removals)``.
+        ``(new_universe, new_dynamic_state, additions, removals, promotions)``
+        — ``promotions`` is the list of symbols that flipped
+        candidate -> active on this call.
     """
     static_set = set(static_universe)
     has_data = not today_best_stocks.empty and "symbol" in today_best_stocks.columns
@@ -83,7 +102,9 @@ def compute_universe_update(
     removals: list[str] = []
 
     # Absence tracking + dwell-based removal — dynamic symbols only, never
-    # the statically-configured base universe.
+    # the statically-configured base universe. Unchanged by incubation: a
+    # "candidate" is removed on exactly the same absence/dwell mechanism as
+    # an "active" symbol.
     for sym in list(new_state.keys()):
         if sym in today_symbols:
             new_state[sym]["consecutive_absent_days"] = 0
@@ -94,8 +115,27 @@ def compute_universe_update(
                 del new_state[sym]
                 removals.append(sym)
 
+    # Incubation promotion — a "candidate" still present today graduates to
+    # "active" once it's been held >= incubation_days. An entry with no
+    # "status" key at all (state persisted before this field existed) is
+    # treated as already active and is never a promotion candidate.
+    promotions: list[str] = []
+    today_date = date.fromisoformat(today)
+    for sym, entry in new_state.items():
+        if entry.get("status") != "candidate" or sym not in today_symbols:
+            continue
+        candidate_since = entry.get("candidate_since") or entry.get("added_date")
+        if not candidate_since:
+            continue
+        since_date = date.fromisoformat(candidate_since)
+        if (today_date - since_date).days >= incubation_days:
+            entry["status"] = "active"
+            promotions.append(sym)
+
     # Additions — capped at max_dynamic_symbols total dynamic holdings,
-    # preserving today_best_stocks' own rank order (best first).
+    # preserving today_best_stocks' own rank order (best first). Enters as
+    # a "candidate": capital-locked via RiskAgent.incubating_symbols until
+    # incubation_days elapses (see promotion loop above).
     additions: list[str] = []
     if has_data:
         slots = max(0, max_dynamic_symbols - len(new_state))
@@ -108,13 +148,15 @@ def compute_universe_update(
                 "sector": sector_by_symbol.get(sym, "unknown"),
                 "added_date": today,
                 "consecutive_absent_days": 0,
+                "status": "candidate",
+                "candidate_since": today,
             }
             additions.append(sym)
             slots -= 1
 
     dynamic_only = [s for s in new_state if s not in static_set]
     new_universe = list(dict.fromkeys(list(static_universe) + dynamic_only))
-    return new_universe, new_state, additions, removals
+    return new_universe, new_state, additions, removals, promotions
 
 
 def sync_once(
@@ -152,7 +194,7 @@ def sync_once(
 
     state = load_dynamic_universe_state(state_path)
     today = utcnow().date().isoformat()
-    new_universe, new_state, additions, removals = compute_universe_update(
+    new_universe, new_state, additions, removals, promotions = compute_universe_update(
         static_universe, state, best_stocks_df, max_dynamic_symbols, min_dwell_days, today,
     )
     save_dynamic_universe_state(state_path, new_state)
@@ -166,7 +208,14 @@ def sync_once(
             "danelfin_universe_sync: +%s -%s (universe now %d symbols)",
             additions, removals, len(new_universe),
         )
+    elif promotions:
+        log.info("danelfin_universe_sync: promoted from candidate to active: %s", promotions)
     else:
         log.debug("danelfin_universe_sync: no universe changes (%d dynamic symbols held)", len(new_state))
 
-    return {"universe": new_universe, "additions": additions, "removals": removals}
+    return {
+        "universe": new_universe,
+        "additions": additions,
+        "removals": removals,
+        "promotions": promotions,
+    }
