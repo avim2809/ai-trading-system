@@ -345,6 +345,15 @@ risk:
       max_position_pct: 0.50
       max_gross_exposure: 2.0
       veto_threshold: 0.95
+    # volatility_breakout only signals on symbols that just broke out of a
+    # vol squeeze (strategies/volatility_breakout.py) -- usually 0-2 names
+    # out of the whole universe, so a single name can legitimately need
+    # 50-100% of the sleeve's own capital. Same root cause as stat_arb/
+    # event_driven above.
+    volatility_breakout:
+      max_position_pct: 0.50
+      max_gross_exposure: 2.0
+      veto_threshold: 0.95
 
   # GICS-style sector tags for the 25-name universe (enables max_sector_pct).
   sector_map:

@@ -10,6 +10,50 @@ from typing import Any
 from firm.llm.cache import ResponseCache
 
 
+def parse_json_object(raw: str) -> dict[str, Any]:
+    """Parse *raw* as a JSON object, recovering an embedded ``{...}`` if the
+    completion wrapped it in prose/markdown fences.
+
+    Shared by ``chat_json`` (a fresh live call) and any ``cache_only``
+    consumer reading a previously-cached completion back
+    (``LLMAgentMixin._call_llm`` in ``firm.agents.llm.base_llm_agent``) so
+    both get the same embedded-object recovery instead of a bare
+    ``json.loads`` failing on a response the live path would have parsed.
+    """
+    def _as_dict(parsed: Any) -> dict[str, Any]:
+        if not isinstance(parsed, dict):
+            raise json.JSONDecodeError("expected a JSON object", raw, 0)
+        return parsed
+
+    try:
+        return _as_dict(json.loads(raw))
+    except json.JSONDecodeError:
+        # Best-effort recovery of an embedded object; never return a
+        # partial/non-object value silently – raise so callers fall back.
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start >= 0 and end > start:
+            return _as_dict(json.loads(raw[start:end]))
+        raise
+
+
+def _looks_like_json_object(raw: str) -> bool:
+    """Cheap check used only to decide whether a ``json_mode`` completion is
+    safe to cache -- never raises, unlike ``parse_json_object``.
+
+    A model that ignores ``json_mode`` and returns plain text would
+    otherwise get cached unconditionally, and a later ``cache_only`` read
+    of the identical prompt would keep replaying that same unusable text
+    for up to ``cache_ttl_hours`` instead of just falling back for that one
+    call.
+    """
+    try:
+        parse_json_object(raw)
+        return True
+    except json.JSONDecodeError:
+        return False
+
+
 class LLMService:
     """Thin wrapper around LiteLLM providing caching, usage tracking, and JSON mode."""
 
@@ -124,7 +168,7 @@ class LLMService:
         self._total_tokens += tokens_in + tokens_out
         self._total_cost += cost
 
-        if self._cache is not None:
+        if self._cache is not None and not (json_mode and not _looks_like_json_object(content)):
             self._cache.put(cache_key, content, served_model, tokens_in, tokens_out, cost)
 
         return content
@@ -218,22 +262,7 @@ class LLMService:
     ) -> dict[str, Any]:
         """Chat with json_mode enabled, returning parsed JSON dict."""
         raw = self.chat(messages, model=model, json_mode=True, **kwargs)
-
-        def _as_dict(parsed: Any) -> dict[str, Any]:
-            if not isinstance(parsed, dict):
-                raise json.JSONDecodeError("expected a JSON object", raw, 0)
-            return parsed
-
-        try:
-            return _as_dict(json.loads(raw))
-        except json.JSONDecodeError:
-            # Best-effort recovery of an embedded object; never return a
-            # partial/non-object value silently – raise so callers fall back.
-            start = raw.find("{")
-            end = raw.rfind("}") + 1
-            if start >= 0 and end > start:
-                return _as_dict(json.loads(raw[start:end]))
-            raise
+        return parse_json_object(raw)
 
     @property
     def usage_stats(self) -> dict[str, Any]:

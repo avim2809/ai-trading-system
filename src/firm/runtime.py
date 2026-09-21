@@ -95,8 +95,8 @@ def build_orchestrator(config: dict):
     llm_config: dict = dict(config.get("llm_config") or {})
     if not llm_config:
         try:
-            from firm.llm.config import provider_config
-            llm_config = provider_config()
+            from firm.llm.config import llm_service_config
+            llm_config = llm_service_config()
         except Exception:
             llm_config = {}
     bt_policy = config.get("backtest_policy")

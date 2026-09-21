@@ -54,10 +54,10 @@ def agent_step(req: StepRequest):
         "strategy_params": req.strategy_params,
     }
     try:
-        from firm.llm.config import load_llm_config, provider_config
+        from firm.llm.config import load_llm_config, llm_service_config
         llm_yaml = load_llm_config()
         config["agent_modes"] = llm_yaml.get("agent_modes", {})
-        config["llm_config"] = provider_config()
+        config["llm_config"] = llm_service_config(llm_yaml)
         config["backtest_policy"] = llm_yaml.get("backtest_policy", "cache_only")
     except Exception:
         log.warning("Could not load LLM config for agent step; using quant agents", exc_info=True)

@@ -336,19 +336,18 @@ class LLMAgentMixin:
         if policy == "cache_only":
             cached = llm.get_cached(messages, json_mode=json_mode, **call_kwargs)
             if cached is None:
-                log.debug("enhancement policy=cache_only: cache miss, skipping LLM")
+                log.info("enhancement policy=cache_only: cache miss, skipping LLM")
                 raise LLMEnhancementSkipped("cache_only miss")
             if json_mode:
-                import json
-                return json.loads(cached)
+                from firm.llm.provider import parse_json_object
+                return parse_json_object(cached)
             return cached
 
         if json_mode:
             result = llm.chat_json(messages, **call_kwargs)
         else:
             result = llm.chat(messages, **call_kwargs)
-        self._llm_log.append({
-            "system_preview": system[:100],
-            "tokens": getattr(llm, "usage_stats", {}).get("last_tokens", 0),
-        })
+        tokens = getattr(llm, "usage_stats", {}).get("last_tokens", 0)
+        self._llm_log.append({"system_preview": system[:100], "tokens": tokens})
+        log.info("LLM enhancement call succeeded (policy=live_calls, tokens=%s)", tokens)
         return result

@@ -437,6 +437,21 @@ class IBKRBroker(Broker):
 
         if order.extended_hours:
             ib_order.outsideRth = True
+            if order.order_type == "market":
+                # IBKR does not honor outsideRth on a market order routed
+                # SMART -- IB Gateway silently queues it as PreSubmitted
+                # until the next regular session instead of filling it now
+                # (IB Warning 2109). Genuine outside-RTH execution requires
+                # a limit order, same restriction as AlpacaBroker's.
+                log.warning(
+                    "Extended-hours %s order for %s is a MARKET order -- IBKR "
+                    "typically ignores outsideRth for market/SMART orders and "
+                    "will queue it for the next regular session instead of "
+                    "filling it now (see Warning 2109 if IB Gateway echoes "
+                    "it back). Use a limit order for genuine outside-RTH "
+                    "execution.",
+                    action, order.symbol,
+                )
 
         if order.client_order_id:
             ib_order.orderRef = order.client_order_id

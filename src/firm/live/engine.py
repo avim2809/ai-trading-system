@@ -2329,11 +2329,13 @@ class LiveTradingEngine:
         """Lazy-initialise the LLM service for reflection calls.
 
         Prefers an explicit ``config["llm_config"]``; falls back to
-        ``config/llm.yaml``'s ``provider`` section (default model, fallback
-        models, load-balancing) so a live engine started via the API — which
-        does not currently thread ``llm_config`` through — still picks up
-        the configured fallback/load-balance behaviour instead of silently
-        reverting to the hardcoded Groq-only default.
+        :func:`firm.llm.config.llm_service_config` (``provider`` section —
+        default model, fallback models, load-balancing — merged with the
+        ``optimization`` section's ``cache_enabled``/``cache_db``) so a live
+        engine started via the API — which does not currently thread
+        ``llm_config`` through — still picks up the configured
+        fallback/load-balance/cache behaviour instead of silently reverting
+        to the hardcoded Groq-only, default-cache-path behavior.
         """
         if self._llm_service is not None:
             return self._llm_service
@@ -2341,8 +2343,8 @@ class LiveTradingEngine:
             from firm.llm.provider import LLMService
             llm_config = self._config.get("llm_config")
             if not llm_config:
-                from firm.llm.config import provider_config
-                llm_config = provider_config()
+                from firm.llm.config import llm_service_config
+                llm_config = llm_service_config()
             self._llm_service = LLMService(llm_config)
         except Exception:
             log.warning("LLM service unavailable — memory reflection disabled", exc_info=True)
@@ -2409,8 +2411,14 @@ class LiveTradingEngine:
         default so a regular-hours cycle's orders are unaffected; each
         broker adapter decides for itself what to do with the flag
         (``AlpacaBroker`` only honors it on plain limit orders, per
-        Alpaca's own API restriction; ``IBKRBroker`` sets ``outsideRth`` on
-        any order type — see each adapter's submission method).
+        Alpaca's own API restriction). ``IBKRBroker`` *sets* ``outsideRth``
+        on any order type, but IBKR itself only actually honors it on
+        limit orders — a market order with the flag set is queued until
+        the next regular session instead, same practical restriction as
+        Alpaca's. ``ExecutionAgent`` only ever emits market orders today,
+        so IBKR's premarket/afterhours cycles currently have no real
+        effect on execution timing despite being enabled — see
+        ``IBKRBroker._submit_order_once_unlocked``.
         """
         from firm.live.execution_safety import Order, RiskProfile, guard_live_submission, guard_order
 

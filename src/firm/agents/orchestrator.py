@@ -358,7 +358,7 @@ class Orchestrator(Agent):
             restore.append((agent, enhancement_cfg.get("policy", self._NO_POLICY)))
             enhancement_cfg["policy"] = "cache_only"
         if restore:
-            log.debug(
+            log.info(
                 "cycle_type=%s: forcing %d LLM-enhanced agent(s) to "
                 "cache_only for this cycle (no live LLM calls)",
                 cycle_type, len(restore),
@@ -888,10 +888,17 @@ class Orchestrator(Agent):
             # Apply this sleeve's own fills to its own book -- exactly the
             # backtest path's mechanism (PortfolioState.update), giving a
             # realistic, cost-aware, independently-compounding ledger.
+            #
+            # update() never appends to `.history` -- only record_snapshot()
+            # does -- and get_sleeve_metrics() (which powers /attribution for
+            # sleeved strategies) requires len(history) >= 2 or it silently
+            # drops the strategy. Always snapshot after applying fills (not
+            # only on no-fill cycles) so a sleeve that trades every cycle
+            # still accumulates NAV/return history instead of being
+            # permanently invisible in attribution.
             if sleeve_report.fills:
                 sleeve_portfolio.update(sleeve_report.fills, prices, cost=sleeve_report.costs)
-            else:
-                sleeve_portfolio.record_snapshot(pit_view.asof, prices)
+            sleeve_portfolio.record_snapshot(pit_view.asof, prices)
 
             sleeve_nav = sleeve_portfolio.nav
             for sym, w in decision.adjusted_targets.items():
@@ -909,6 +916,21 @@ class Orchestrator(Agent):
         combined_targets = {
             sym: dollar / real_nav for sym, dollar in sym_dollar_targets.items()
         }
+
+        # The top-level blackboard needs its own `proposal` (not just each
+        # `sleeve_bb.proposal` set above) because
+        # `LiveTradingEngine._run_cycle_work` only calls
+        # `self._memory.store_decision(...)` -- and therefore only feeds
+        # `_maybe_reflect`/`reflect_day` -- when
+        # `getattr(blackboard, "proposal", None)` is truthy. Netted,
+        # post-aggregation targets are the sleeved-mode analogue of the
+        # blended path's single `TradeProposal`.
+        bb.proposal = TradeProposal(
+            asof=pit_view.asof,
+            targets=combined_targets,
+            per_strategy=per_strategy_weights,
+            notes=f"sleeved: netted across {len(per_strategy_weights)} sleeve(s)",
+        )
 
         real_ctx = AgentContext(
             now=pit_view.asof, pit_view=pit_view, portfolio=real_portfolio, **ctx_kwargs,

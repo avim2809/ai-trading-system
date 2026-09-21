@@ -333,6 +333,33 @@ class TestSleevedModeIndependentCompounding:
         assert sleeve.holdings.get("AAPL") == pytest.approx(10_000.0)  # $1M / $100
         assert sleeve.cash == pytest.approx(0.0, abs=1.0)
 
+    def test_trading_sleeve_still_gets_a_snapshot_every_cycle(self):
+        """Regression: the sleeved step used ``if fills: update() else:
+        record_snapshot()`` -- record_snapshot() is the only thing that
+        appends to ``PortfolioState.history``, so a sleeve that has real
+        fills on every cycle never took a snapshot and accumulated zero
+        history. get_sleeve_metrics() requires len(history) >= 2 to include
+        a strategy, so the more a sleeve traded, the less visible it was in
+        attribution -- permanently invisible for one that never misses a
+        cycle. Fix: always record_snapshot() after applying fills."""
+        signals = [_sig("AAPL", "trend", 1.0)]
+        orch = _make_orchestrator(
+            analysts=[_analyst_with_signals(*signals)],
+            sleeve_traders={"trend": TraderAgent(config={"allocation_method": "conviction_weighted"})},
+        )
+        real_portfolio = PortfolioState(initial_capital=1_000_000.0)
+        # Same signal fires on every cycle -> this sleeve has real fills
+        # every time, never taking the old "no fills" branch.
+        for _ in range(3):
+            orch.step(
+                {"pit_view": _pit_view(), "portfolio": real_portfolio, "prices": {"AAPL": 100.0}},
+            )
+
+        sleeve = orch._sleeve_portfolios["trend"]
+        assert len(sleeve.history) == 3  # one snapshot per cycle, not zero
+        metrics = orch.get_sleeve_metrics()
+        assert "trend" in metrics  # no longer silently dropped from attribution
+
     def test_two_sleeves_split_capital_and_compound_independently(self):
         analyst = _analyst_with_signals(
             _sig("AAPL", "momentum", 1.0), _sig("MSFT", "trend", 1.0),
@@ -484,6 +511,43 @@ class TestSleevedModeNetting:
             {"pit_view": _pit_view(), "portfolio": real_portfolio, "prices": {"AAPL": 100.0}},
         )
         assert orders == []
+
+
+class TestSleevedModeStoresProposalForMemory:
+    """``_step_sleeved`` must set the top-level blackboard's ``proposal``
+    (not just each ``sleeve_bb.proposal``), matching the blended path
+    (``step``) -- ``LiveTradingEngine._run_cycle_work`` only calls
+    ``self._memory.store_decision(...)`` when
+    ``getattr(blackboard, "proposal", None)`` is truthy, so leaving it
+    unset silently stops every sleeved-mode cycle from ever being stored
+    (and therefore ever being reflected on)."""
+
+    def test_step_sleeved_sets_top_level_blackboard_proposal(self):
+        analyst = _analyst_with_signals(
+            _sig("AAPL", "momentum", 1.0), _sig("MSFT", "trend", 1.0),
+        )
+        orch = _make_orchestrator(
+            analysts=[analyst],
+            sleeve_traders={
+                "momentum": TraderAgent(config={"allocation_method": "conviction_weighted"}),
+                "trend": TraderAgent(config={"allocation_method": "conviction_weighted"}),
+            },
+            config={"strategy_capital_weights": {"momentum": 0.5, "trend": 0.5}},
+        )
+        real_portfolio = PortfolioState(initial_capital=1_000_000.0)
+        orders, bb = orch.step(
+            {
+                "pit_view": _pit_view(), "portfolio": real_portfolio,
+                "prices": {"AAPL": 100.0, "MSFT": 100.0},
+            },
+        )
+        assert orders, "sanity: this scenario should actually generate real orders"
+        assert bb.proposal is not None, (
+            "bb.proposal must be set in sleeved mode too, or the live "
+            "engine's store_decision(...) call is silently skipped every cycle"
+        )
+        assert set(bb.proposal.targets) == {"AAPL", "MSFT"}
+        assert set(bb.proposal.per_strategy) == {"momentum", "trend"}
 
 
 class TestSleevePersistenceRoundTrip:

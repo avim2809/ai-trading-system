@@ -10,6 +10,7 @@ silently accepted it as a fake zero price and every order got skipped with
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -690,6 +691,44 @@ class TestNativeOrderTypes:
         broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=10, order_type="market"))
         order = state["trade"].order
         assert order.outsideRth is False
+
+    def test_extended_hours_market_order_logs_ignored_warning(self, caplog):
+        """outsideRth=True on a MarketOrder is silently ignored by IBKR
+        (Warning 2109) -- the order queues until the next regular session
+        instead of filling outside RTH. Submitting a market order with
+        extended_hours=True must log a loud warning instead of silently
+        no-op'ing."""
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=59)
+        ib, state = _fake_ib(["Filled"])
+        broker._ib = ib
+        with caplog.at_level(logging.WARNING, logger="firm.brokers.ibkr"):
+            broker.submit_order(
+                OrderRequest(
+                    symbol="AAPL", side="buy", quantity=10, order_type="market",
+                    extended_hours=True,
+                )
+            )
+        order = state["trade"].order
+        assert order.outsideRth is True
+        assert any(
+            "MARKET order" in r.message and "AAPL" in r.message
+            for r in caplog.records
+        )
+
+    def test_extended_hours_limit_order_does_not_log_ignored_warning(self, caplog):
+        """The same combination on a LIMIT order is the one IBKR actually
+        honors -- no warning should fire."""
+        broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=60)
+        ib, state = _fake_ib(["Filled"])
+        broker._ib = ib
+        with caplog.at_level(logging.WARNING, logger="firm.brokers.ibkr"):
+            broker.submit_order(
+                OrderRequest(
+                    symbol="AAPL", side="buy", quantity=10, order_type="limit",
+                    limit_price=100.0, extended_hours=True,
+                )
+            )
+        assert not any("MARKET order" in r.message for r in caplog.records)
 
 
 class TestSubmitOrderTimeoutRecovery:

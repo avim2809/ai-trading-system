@@ -41,18 +41,24 @@ approval_mode: "full_auto"
 llm_open_close_only: true
 
 # Pre-market/after-hours trading (firm.live.scheduler's opt-in
-# EXTENDED_HOURS_CYCLE_TYPES). Enabled 2026-09-19 on IBKR ONLY: IBKR's
-# outsideRth flag works on any order type, but ExecutionAgent always emits
-# plain market orders today, and Alpaca's API only honors extended_hours on
-# LIMIT orders -- enabling this on Alpaca right now would be a silent
-# no-op (every order would degrade back to regular-hours, logged as a
-# warning). Revisit Alpaca once an extended-hours limit-pricing policy
-# exists for ExecutionAgent. Standard US equity windows (pre-market
+# EXTENDED_HOURS_CYCLE_TYPES). Enabled on IBKR ONLY: Alpaca's API only
+# honors extended_hours on LIMIT orders, and ExecutionAgent always emits
+# plain market orders today, so enabling this on Alpaca would be a silent
+# no-op (logged as a warning). Standard US equity windows (pre-market
 # 04:00-09:30 ET, after-hours 16:00-20:00 ET) via the defaults in
-# firm.live.scheduler._DEFAULT_EXTENDED_HOURS_WINDOWS. IBKR paper's
-# simulated outside-RTH fills for market orders are not necessarily
-# realistic (thin/no liquidity simulation) -- treat early results as
-# exploratory, not a live P&L signal, until validated.
+# firm.live.scheduler._DEFAULT_EXTENDED_HOURS_WINDOWS.
+#
+# IBKR has the identical restriction, just less obviously: it *accepts*
+# outsideRth on a market order but only actually honors it on a limit
+# order — a market order just queues until the next regular session (IB
+# Warning 2109), so this is currently a no-op for its stated purpose on
+# IBKR too, same as Alpaca would be. Left enabled (harmless — no failed
+# orders, no crashed cycles, just no early execution) so the schedule/
+# plumbing keeps getting exercised; do not treat any premarket/afterhours
+# fill as validated outside-RTH execution until ExecutionAgent can emit
+# limit orders for extended-hours cycles. See
+# IBKRBroker._submit_order_once_unlocked's warning log
+# (src/firm/brokers/ibkr.py) for detection of this on future occurrences.
 extended_hours_trading:
   enabled: true
   premarket:

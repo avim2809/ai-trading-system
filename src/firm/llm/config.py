@@ -143,6 +143,27 @@ def optimization_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     return _section(cfg, "optimization", _OPTIMIZATION_DEFAULTS)
 
 
+def llm_service_config(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the config dict :class:`firm.llm.provider.LLMService` expects.
+
+    ``LLMService.__init__`` reads model/provider knobs (``default_model``,
+    ``fallback_models``, ``load_balance``, ``temperature``, ``max_tokens``,
+    ``request_timeout`` — the ``provider`` section) *and* two cache knobs
+    (``cache_enabled``, ``cache_db`` — from the ``optimization`` section)
+    out of the single flat dict it's constructed with. ``provider_config()``
+    alone never includes the ``optimization`` section, so a construction
+    site that passes just that dict silently loses any non-default
+    ``cache_enabled``/``cache_db`` instead of merely defaulting it.
+    """
+    cfg = cfg if cfg is not None else load_llm_config()
+    merged = provider_config(cfg)
+    opt = optimization_config(cfg)
+    for key in ("cache_enabled", "cache_db"):
+        if key in opt:
+            merged[key] = opt[key]
+    return merged
+
+
 def enhancement_config(
     cfg: dict[str, Any] | None = None,
     overrides: dict[str, Any] | None = None,

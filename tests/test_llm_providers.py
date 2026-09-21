@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -95,6 +96,92 @@ class TestBuildLLMService:
         svc = LLMService({"default_model": "groq/llama-3.3-70b-versatile", "request_timeout": 42, "cache_enabled": False})
         assert svc.chat([{"role": "user", "content": "hi"}]) == "ok"
         assert captured.get("timeout") == 42
+
+
+class TestJsonModeCaching:
+    """Confirmed live 2026-09-21: a fallback model ignored json_mode and
+    replied with plain chit-chat ("Hi there! How can I help you today?").
+    That got cached unconditionally, so every later cache_only read of the
+    identical prompt replayed the same unusable text for days instead of
+    the one-off call just falling back to quant. A json_mode completion
+    that doesn't parse as a JSON object must not be persisted to the
+    cache -- the next live call gets a fair retry instead of a poisoned
+    cache hit."""
+
+    @staticmethod
+    def _fake_completion(content: str):
+        def _completion(**kwargs):
+            resp = type("R", (), {})()
+            resp.choices = [type("C", (), {"message": type("M", (), {"content": content})()})()]
+            resp.usage = None
+            resp._hidden_params = {}
+            resp.model = kwargs.get("model")
+            return resp
+        return _completion
+
+    def _service(self, tmp_path, monkeypatch, content: str) -> LLMService:
+        monkeypatch.setattr("litellm.completion", self._fake_completion(content))
+        return LLMService({
+            "default_model": "groq/llama-3.3-70b-versatile",
+            "cache_enabled": True,
+            "cache_db": str(tmp_path / "cache.db"),
+        })
+
+    def test_non_json_response_is_not_cached(self, tmp_path, monkeypatch):
+        svc = self._service(tmp_path, monkeypatch, "Hi there! How can I help you today?")
+        messages = [{"role": "user", "content": "sentiment?"}]
+
+        svc.chat(messages, json_mode=True)
+
+        assert svc.get_cached(messages, json_mode=True) is None
+
+    def test_valid_json_response_is_cached(self, tmp_path, monkeypatch):
+        svc = self._service(tmp_path, monkeypatch, '{"conviction": 0.5}')
+        messages = [{"role": "user", "content": "sentiment?"}]
+
+        svc.chat(messages, json_mode=True)
+
+        assert svc.get_cached(messages, json_mode=True) == '{"conviction": 0.5}'
+
+    def test_non_json_mode_response_still_cached(self, tmp_path, monkeypatch):
+        """The guard only applies to json_mode calls -- a plain chat
+        response is free-text by design and must cache as before."""
+        svc = self._service(tmp_path, monkeypatch, "just some prose")
+        messages = [{"role": "user", "content": "summarize"}]
+
+        svc.chat(messages, json_mode=False)
+
+        assert svc.get_cached(messages, json_mode=False) == "just some prose"
+
+
+class TestParseJsonObject:
+    def test_recovers_embedded_object_from_prose(self):
+        from firm.llm.provider import parse_json_object
+        raw = 'Sure, here you go:\n{"conviction": 0.7}\nHope that helps!'
+        assert parse_json_object(raw) == {"conviction": 0.7}
+
+    def test_raises_on_pure_prose_with_no_object(self):
+        from firm.llm.provider import parse_json_object
+        with pytest.raises(json.JSONDecodeError):
+            parse_json_object("Hi there! How can I help you today?")
+
+    def test_cache_only_path_recovers_embedded_object(self):
+        """The cache_only branch in _call_llm must use the same recovery
+        logic as chat_json -- confirmed live, it previously did a bare
+        json.loads and failed on a response chat_json would have parsed
+        fine."""
+        from firm.agents.llm.base_llm_agent import LLMAgentMixin
+
+        class FakeLLM:
+            def get_cached(self, *a, **kw):
+                return 'Sure:\n{"conviction": 0.6}\nEnjoy!'
+
+        mixin = LLMAgentMixin(llm_config={"enhancement": {"policy": "cache_only"}})
+        mixin._llm = FakeLLM()
+
+        result = mixin._call_llm("system", "user", json_mode=True)
+
+        assert result == {"conviction": 0.6}
 
 
 class TestPromptCache:
