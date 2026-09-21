@@ -21,7 +21,19 @@ Environment=FIRM_LLM_CONFIG=config/llm_ab_llm.yaml
 ExecStartPre=/local/store/git/ai-trading-system/scripts/wait_for_ibgateway.sh
 ExecStart=/local/store/git/ai-trading-system/.venv/bin/firm-api
 Restart=always
+# Geometric backoff (systemd >=254): 10s, 20s, 40s, 80s, then holds at 160s
+# for every restart after. A single transient crash still recovers as fast
+# as before (first retry unchanged at 10s); a persistent failure (bad
+# config, a dead dependency) backs off instead of retrying every 10s
+# forever, which would otherwise hammer whatever it's failing against
+# (e.g. IB Gateway login) indefinitely. No StartLimitBurst cap on top of
+# this: the broker-reconnect logic in the app itself is already
+# self-healing once the underlying outage clears (see docs/PROJECT_CONTEXT.md
+# "Broker & host failover"), so retrying forever at the slower ceiling is
+# the right default rather than giving up and requiring a manual restart.
 RestartSec=10
+RestartSteps=4
+RestartMaxDelaySec=160
 TimeoutStopSec=120
 KillMode=mixed
 

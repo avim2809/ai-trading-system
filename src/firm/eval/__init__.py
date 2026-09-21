@@ -28,6 +28,7 @@ from firm.eval.overfitting import (
     walk_forward_overfitting,
 )
 from firm.eval.robustness import MonteCarloAnalyzer
+from firm.eval.tca import aggregate_tca, compute_tca_record
 
 
 def __getattr__(name: str):
@@ -58,5 +59,7 @@ __all__ = [
     "verdict",
     "walk_forward_overfitting",
     "MonteCarloAnalyzer",
+    "aggregate_tca",
+    "compute_tca_record",
     "BacktestReport",
 ]

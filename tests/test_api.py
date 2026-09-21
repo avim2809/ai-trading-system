@@ -1213,6 +1213,123 @@ class TestKillSwitchResetEndpoint:
         client.post("/api/live/stop")
 
 
+class TestLiveTCAEndpoint:
+    """GET /api/live/tca: realized-vs-modeled execution cost aggregated
+    from real persisted order history (no mocked aggregation)."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_broker(self, monkeypatch, tmp_path):
+        import firm.api.routers.live as live_mod
+        from tests.test_brokers import MockBroker
+
+        # MockBroker fills AAPL at a fixed 150.0 -- see tests/test_brokers.py.
+        monkeypatch.setattr(live_mod, "_create_broker", lambda broker_type: MockBroker())
+        monkeypatch.setattr(live_mod, "_APPROVALS_PATH", str(tmp_path / "approvals.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_ORDERS_PATH", str(tmp_path / "order_history.json"))
+        monkeypatch.setattr(live_mod, "_TRADE_HISTORY_CYCLES_PATH", str(tmp_path / "cycle_history.json"))
+        monkeypatch.setattr(live_mod, "_KILL_SWITCH_STATE_PATH", str(tmp_path / "kill_switch_state.json"))
+        monkeypatch.setattr(live_mod, "_STATE_DB_PATH", str(tmp_path / "live_state.db"))
+        monkeypatch.setattr(live_mod, "_MEMORY_LOG_PATH", str(tmp_path / "decisions.jsonl"))
+
+    def _mock_cycle_deps(self, monkeypatch, order: dict):
+        from unittest.mock import MagicMock
+
+        import pandas as pd
+
+        import firm.data.providers.fallback as fallback_mod
+        import firm.live.engine as engine_mod
+
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([order], None)
+        monkeypatch.setattr(engine_mod, "build_orchestrator", lambda config: mock_orch)
+
+        mock_provider = MagicMock()
+        mock_provider.get_prices.return_value = pd.DataFrame()
+        mock_provider.get_fundamentals.return_value = pd.DataFrame()
+        mock_provider.get_news_sentiment.return_value = pd.DataFrame()
+        monkeypatch.setattr(fallback_mod, "FallbackProvider", lambda *a, **k: mock_provider)
+
+    def test_no_engine_and_no_history_returns_empty_aggregate(self, client):
+        resp = client.get("/api/live/tca")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["n_orders"] == 0
+        assert body["n_computable"] == 0
+
+    def test_real_cycle_produces_real_aggregated_slippage(self, client, monkeypatch):
+        """Decision price 149 vs. MockBroker's fixed 150.0 AAPL fill must
+        surface as a real, non-zero, non-fabricated ~67bps adverse
+        slippage once run through a real cycle and read back over HTTP --
+        not a mocked-out aggregation."""
+        order = {
+            "symbol": "AAPL", "side": "buy", "quantity": 10, "price": 149.0,
+            "strategy": "momentum", "notional": 1490.0,
+            "est_commission": 0.5, "est_slippage": 0.75, "est_spread": 0.3, "est_impact": 0.1,
+            "est_cost": 1.65,
+        }
+        self._mock_cycle_deps(monkeypatch, order)
+        client.post("/api/live/start", json={
+            "broker": "alpaca_paper", "schedule": "hourly",
+            "approval_mode": "full_auto", "initial_capital": 100_000,
+        })
+        engine = client.app.state.live_engine
+        engine.run_cycle(force=True)
+        client.post("/api/live/stop")
+
+        resp = client.get("/api/live/tca")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["n_orders"] == 1
+        assert body["n_computable"] == 1
+        assert body["realized_slippage_bps"]["mean"] == pytest.approx((1.0 / 149.0) * 10_000)
+        assert body["by_strategy"]["momentum"]["n"] == 1
+
+    def test_strategy_filter_excludes_other_strategies(self, client, monkeypatch):
+        order = {
+            "symbol": "AAPL", "side": "buy", "quantity": 10, "price": 149.0,
+            "strategy": "momentum", "notional": 1490.0,
+        }
+        self._mock_cycle_deps(monkeypatch, order)
+        client.post("/api/live/start", json={
+            "broker": "alpaca_paper", "schedule": "hourly",
+            "approval_mode": "full_auto", "initial_capital": 100_000,
+        })
+        engine = client.app.state.live_engine
+        engine.run_cycle(force=True)
+        client.post("/api/live/stop")
+
+        resp = client.get("/api/live/tca", params={"strategy": "trend"})
+        assert resp.status_code == 200
+        assert resp.json()["n_orders"] == 0
+
+    def test_days_filter_excludes_old_orders(self, client, monkeypatch):
+        """A ``days`` window must exclude an order timestamped well before
+        it -- exercised against the same in-memory TradeHistoryStore the
+        endpoint reads (mutating the persisted JSON file on disk directly
+        wouldn't be seen, since the store singleton doesn't reload after
+        construction)."""
+        order = {
+            "symbol": "AAPL", "side": "buy", "quantity": 10, "price": 149.0,
+            "strategy": "momentum", "notional": 1490.0,
+        }
+        self._mock_cycle_deps(monkeypatch, order)
+        client.post("/api/live/start", json={
+            "broker": "alpaca_paper", "schedule": "hourly",
+            "approval_mode": "full_auto", "initial_capital": 100_000,
+        })
+        engine = client.app.state.live_engine
+        engine.run_cycle(force=True)
+        client.post("/api/live/stop")
+
+        store = client.app.state.trade_history
+        assert len(store._orders) == 1
+        store._orders[0]["timestamp"] = "2020-01-01T00:00:00"
+
+        resp = client.get("/api/live/tca", params={"days": 1})
+        assert resp.status_code == 200
+        assert resp.json()["n_orders"] == 0
+
+
 class TestCapitalGateEndpoint:
     @pytest.fixture(autouse=True)
     def _mock_broker(self, monkeypatch, tmp_path):

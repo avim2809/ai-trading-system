@@ -1,0 +1,8 @@
+[Unit]
+Description=Backup live-trading state (kill-switch, live_state.db, decision memory, approvals, execution audit) to a second on-disk location
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/local/store/git/ai-trading-system
+ExecStart=/local/store/git/ai-trading-system/scripts/backup_live_state.sh

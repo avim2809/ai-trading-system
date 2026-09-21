@@ -303,6 +303,91 @@ incident response:
 5. Positions/cash need no manual reconciliation — the first cycle after
    restart re-syncs both from the broker automatically.
 
+### Host resource exhaustion (disk / memory / CPU) — mostly automatic
+
+Unlike a broker disconnect, the host running out of disk, memory, or CPU
+headroom isn't something the trading pipeline can route around — it's the
+substrate everything else runs on. `TradingScheduler` runs a
+`resource_health_check` job every 15 minutes (`firm.live.scheduler.
+run_resource_health_check`, stdlib-only: `shutil.disk_usage`,
+`/proc/meminfo`, `os.getloadavg()`) that samples the host and pushes a real
+alert through the same pipeline as a kill-switch trip or a broker outage —
+log line, `GET /api/live/alerts`, and the configured webhook.
+
+| Metric | Warn | Critical | Why here |
+|---|---|---|---|
+| Disk free (on the filesystem holding the repo + `data*/` dirs) | ≤5GB free or ≥85% used | ≤2GB free or ≥95% used | Both a free-GB and a used-% trigger fire independently — either alone crossing its bar is enough, so this still catches a much bigger disk that's simply filling up as well as this one's actual 20GB root volume. |
+| Memory available (`MemAvailable`, not `MemFree` — accounts for reclaimable cache) | ≤15% of total | ≤8% of total | Expressed as a % of total so the same default still means something if the box is ever resized. |
+| CPU load, 5-min average per core | ≥1.5 | ≥3.0 | The 5-minute figure, not 1-minute, so a brief burst doesn't page anyone; sustained overload on a 2-core box does. |
+
+All six numbers are overridable per-instance via `HEALTH_CHECK_<NAME>` env
+vars (e.g. `HEALTH_CHECK_DISK_WARN_FREE_GB`) without a code change — see the
+`_HEALTH_CHECK_DEFAULTS` dict in `firm.live.scheduler` for the exact keys.
+Each metric only re-alerts on a severity *change* (into a breach, an
+escalation, or a recovery back to "ok" — sent as an `info`-severity
+`..._recovered` alert), not every 15 minutes it stays breached, so a
+sustained issue doesn't spam the webhook.
+
+This job runs regardless of whether the trading engine itself is running or
+halted — the host can run low on resources either way — and is registered
+once per live instance (IBKR on :8000, Alpaca on :8001 each run their own
+scheduler against the same physical disk, so a disk alert from either one
+means the same underlying filesystem).
+
+**What this does *not* cover:** per-process memory (e.g. a leak inside this
+one Python process specifically, as opposed to the host overall), inode
+exhaustion, and any filesystem other than the one holding the repo. None of
+these have caused a real incident here; add a check if one does.
+
+#### Disk-space crisis — runbook
+
+What to do, in order, if a `host_disk_low` alert fires (or `df -h /` shows
+the disk critically full) — reclaiming space safely without touching
+anything the live engines need to keep running:
+
+1. **Confirm severity and where the space actually went:**
+   ```
+   df -h /
+   du -xhd1 / 2>/dev/null | sort -rh | head -10   # top-level offenders
+   du -xhd1 /local/store/git/ai-trading-system 2>/dev/null | sort -rh | head -15
+   ```
+2. **Check the usual suspects first, cheapest/safest to clear:**
+   - `journalctl --disk-usage` then `journalctl --vacuum-size=200M` (or
+     `--vacuum-time=7d`) — systemd's own journal is unbounded by default on
+     many installs and is pure log history, never state this system needs.
+   - `/var/cache/apt` (`apt-get clean`) and `~/.cache/pip` — package-manager
+     caches, always safe to clear and always safe to repopulate.
+   - Stray SQLite `-wal`/`-shm` sidecar files under `data*/` that are large
+     relative to their `.db` (`ls -la data*/*.db*`) — normal in small
+     amounts (an open connection's not-yet-checkpointed writes); one that's
+     grown to many times its `.db`'s size suggests something is holding a
+     long-lived read transaction open and blocking `PRAGMA wal_checkpoint`,
+     worth investigating rather than just deleting (deleting a `-wal` file
+     that hasn't been checkpointed loses those writes).
+   - Test-suite artifacts: a misconfigured mock in a test that patches
+     `firm.config.get_settings()` without setting `cache_dir`/similarly
+     path-like fields can make a real directory tree accumulate on disk on
+     every test run (this has happened before — see git history for
+     "disk-bloat"). `find . -maxdepth 2 -iname "*MagicMock*"` from the repo
+     root is the tell; if found, it's a test bug to fix, not just a
+     directory to delete.
+3. **Never delete, even under pressure:** anything under `data/` or
+   `data_alpaca/` that isn't a `.db-wal`/`.db-shm` sidecar —
+   `kill_switch_state.json`, `live_state.db`, `approvals.json`,
+   `execution_audit.jsonl`, `dynamic_universe_state.json` are exactly the
+   durable state this system depends on (see "Host crash / process restart"
+   above); `.env` (never committed, no other copy unless you made one).
+4. **If genuinely out of easy slack**, `.venv` (~2GB) is fully
+   reproducible from `pyproject.toml`/`requirements` via `setup.sh`, and
+   `frontend/node_modules` (if present; the running services only need
+   `frontend/dist`) is reproducible via `npm install` — both are legitimate
+   to delete and rebuild if nothing above freed enough, but rebuilding
+   `.venv` on this 2-core box is slow, so exhaust steps 2-3 first.
+5. **Re-check `df -h /`** and confirm the `host_disk_low` alert clears (an
+   `info`/`..._recovered` alert fires automatically once the next
+   15-minute check sees it below the warn threshold again — no manual
+   reset needed).
+
 ### Losing the host entirely (disk failure, VPS termination, etc.)
 
 There is no warm standby today, so this is a manual rebuild, not a failover:
@@ -311,12 +396,18 @@ There is no warm standby today, so this is a manual rebuild, not a failover:
    install IB Gateway + `ai-trading.service`.
 2. Restore `.env` (broker credentials, API keys) from your secrets backup —
    these are deliberately never committed to the repo.
-3. Restore the `data/` directory from backup if you have one (kill-switch
-   state, `live_state.db`, execution audit) — **optional**, not required for
-   correctness: if `data/` is missing entirely, the engine starts fresh
-   (un-halted, empty history) and re-syncs cash/holdings from the broker on
-   the first cycle, same as any restart. Only do this if you specifically
-   want to preserve halt state or historical continuity.
+3. Restore the `data/`/`data_alpaca/` state (kill-switch state,
+   `live_state.db`, execution audit, decision memory) from
+   `scripts/backup_live_state.sh`'s daily archives (`deploy/
+   backup-live-state.timer`, see "Backups" below) if you have them —
+   **optional**, not required for correctness: if `data/` is missing
+   entirely, the engine starts fresh (un-halted, empty history) and
+   re-syncs cash/holdings from the broker on the first cycle, same as any
+   restart. Only do this if you specifically want to preserve halt state or
+   historical continuity. **Note this backup lives on the same disk as
+   everything else** — it survives an accidental `rm -rf data/`, not a
+   whole-disk failure; if this scenario is a whole-disk loss, this backup
+   is gone too unless you've separately copied it off-box.
 4. Log into IB Gateway on the new host with the same account — **IBKR allows
    only one active Gateway/TWS session per account**, so the old host's
    Gateway session must actually be down first, not just the trading process.
@@ -327,19 +418,64 @@ There is no warm standby today, so this is a manual rebuild, not a failover:
    unexpected positions (e.g. you're pointed at the wrong account), it will
    adopt them silently rather than erroring.
 
-### Monitoring recommendations (not yet automated end-to-end)
+### Backups
 
+`scripts/backup_live_state.sh`, run daily by `deploy/backup-live-state.timer`
+(+ `.service`, both `systemctl enable --now backup-live-state.timer` once
+installed like the other units in `deploy/`), tars `data/`/`data_alpaca/`
+(excluding the large, fully-reproducible `vectordb`/`cache`/`logs`/`models`
+subdirs) to `/local/store/backups/ai-trading-live-state/` — a different
+directory tree on the **same** disk, not a different disk. It keeps the
+newest 14 daily archives (`LIVE_STATE_BACKUP_RETAIN`) and each one is a few
+MB, negligible next to the constraints in "Host resource exhaustion" above.
+
+**What this protects against:** an accidental `rm -rf data/`, a bad script,
+a botched manual edit — the archive is a separate, untouched copy.
+**What this does *not* protect against:** losing the disk itself (hardware
+failure, corrupted filesystem) — there is exactly one physical disk on this
+host (`lsblk`/`df -h /` show a single `sda2` volume), so anything that takes
+the disk down takes both the live data *and* this backup with it. Real
+protection against that needs the backup archive copied somewhere off this
+box — network storage, another host, a cloud bucket — none of which are
+configured today; wiring that up is an infrastructure decision (credentials,
+a destination, egress cost) for a human to make, not something to bolt on
+silently. Until that exists, this on-disk backup is strictly better than
+the "nothing at all" status quo, not a substitute for a real one.
+
+### Monitoring recommendations
+
+- **Host disk/memory/CPU is now automated** — see "Host resource
+  exhaustion" above. What's still *not* automated: an external
+  dead-man's-switch if the process itself stops running entirely (systemd's
+  `Restart=always` + geometric backoff, see below, handles the process
+  coming back; nothing external confirms it actually did).
 - Poll `GET /api/health` and `GET /api/live/status` externally (e.g. cron +
   curl, or a real uptime monitor) — `broker.connected=false` sustained across
   several polls is the earliest external signal of the disconnect scenarios
   above, ahead of the in-engine `broker_disconnected_sustained` alert
   threshold.
 - Set `ALERT_WEBHOOK_URL` (`firm.live.notifications.build_alert_callback()`)
-  to route `broker_disconnected_sustained`, `cycle_watchdog_timeout`, and
-  `drawdown_breach` alerts to Slack/email/pager rather than relying on
-  someone tailing `journalctl` or polling `/api/live/alerts`.
+  to route `broker_disconnected_sustained`, `cycle_watchdog_timeout`,
+  `drawdown_breach`, and `host_disk_low`/`host_memory_low`/`host_cpu_high`
+  alerts to Slack/email/pager rather than relying on someone tailing
+  `journalctl` or polling `/api/live/alerts`.
 - No built-in Prometheus/Datadog exporter exists; the JSON endpoints above are
   the integration point if you wire one up.
+- **True redundancy would need a second host** — both live instances share
+  one physical box, one disk, one kernel. Nothing in this section makes a
+  hardware failure survivable; it only makes an *impending* resource problem
+  visible before it becomes one, and gets a crashed process back up faster
+  without hammering whatever it crashed against. A real warm/cold standby on
+  separate hardware is a genuine improvement but an infrastructure decision
+  (a second box, plus a real off-box backup destination — see "Durable live
+  state" backups below), not something to build silently into this repo.
+- `ai-trading.service`/`ai-trading-alpaca.service`'s `Restart=always` now
+  backs off geometrically on repeated failures (`RestartSteps=4`,
+  `RestartMaxDelaySec=160s`: 10s/20s/40s/80s, then holding at 160s) instead
+  of retrying every 10s indefinitely — a single transient crash still
+  recovers just as fast as before (first retry unchanged at 10s); a
+  persistent failure no longer hammers whatever it's failing against (e.g.
+  repeated IB Gateway login attempts) every 10s forever.
 
 ---
 

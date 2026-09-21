@@ -28,12 +28,18 @@ from firm.live.scheduler import (
     EXTENDED_HOURS_CYCLE_TYPES,
     HOURLY_MARKET_HOURS,
     TradingScheduler,
+    _check_cpu,
+    _check_disk,
+    _check_memory,
     _pending_approvals_on_disk,
+    check_resource_health,
     cycle_had_no_trading_outcome,
     extended_hours_session_config,
     maybe_catch_up_session_cycle,
     maybe_retry_lost_cycle,
     run_order_reconciliation,
+    run_position_reconciliation,
+    run_resource_health_check,
     trading_day_key,
     within_extended_hours_window,
 )
@@ -485,6 +491,235 @@ class TestRunOrderReconciliation:
 
 
 # ---------------------------------------------------------------------------
+# run_position_reconciliation
+# ---------------------------------------------------------------------------
+
+class TestRunPositionReconciliation:
+    def test_skipped_when_engine_not_running(self):
+        engine = _mock_engine(is_running=False)
+        run_position_reconciliation(engine)
+        engine.check_reconciliation.assert_not_called()
+
+    def test_skipped_when_engine_shutting_down(self):
+        engine = _mock_engine(shutting_down=True)
+        run_position_reconciliation(engine)
+        engine.check_reconciliation.assert_not_called()
+
+    def test_delegates_to_engine_check_reconciliation(self):
+        engine = _mock_engine()
+        run_position_reconciliation(engine)
+        engine.check_reconciliation.assert_called_once()
+
+    def test_swallows_engine_errors(self):
+        engine = _mock_engine()
+        engine.check_reconciliation.side_effect = RuntimeError("boom")
+        run_position_reconciliation(engine)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Resource health check (disk / memory / CPU)
+# ---------------------------------------------------------------------------
+
+class TestCheckDisk:
+    def test_ok_when_plenty_of_space(self, tmp_path):
+        usage = MagicMock(total=100 * 1024 ** 3, used=10 * 1024 ** 3, free=90 * 1024 ** 3)
+        with patch("firm.live.scheduler.shutil.disk_usage", return_value=usage):
+            result = _check_disk(str(tmp_path))
+        assert result["severity"] == "ok"
+        assert result["free_gb"] == pytest.approx(90.0, abs=0.1)
+
+    def test_warning_below_free_threshold(self):
+        usage = MagicMock(total=20 * 1024 ** 3, used=16 * 1024 ** 3, free=4 * 1024 ** 3)
+        with patch("firm.live.scheduler.shutil.disk_usage", return_value=usage):
+            result = _check_disk(".")
+        assert result["severity"] == "warning"
+
+    def test_critical_below_free_threshold(self):
+        usage = MagicMock(total=20 * 1024 ** 3, used=19 * 1024 ** 3, free=1 * 1024 ** 3)
+        with patch("firm.live.scheduler.shutil.disk_usage", return_value=usage):
+            result = _check_disk(".")
+        assert result["severity"] == "critical"
+
+    def test_critical_from_used_pct_even_with_free_gb_above_threshold(self):
+        # A much bigger disk can cross the used-% threshold while still
+        # having several GB nominally free -- either signal alone must
+        # be enough to trip the check.
+        usage = MagicMock(total=1000 * 1024 ** 3, used=970 * 1024 ** 3, free=30 * 1024 ** 3)
+        with patch("firm.live.scheduler.shutil.disk_usage", return_value=usage):
+            result = _check_disk(".")
+        assert result["severity"] == "critical"
+
+    def test_returns_none_on_oserror(self):
+        with patch("firm.live.scheduler.shutil.disk_usage", side_effect=OSError("nope")):
+            assert _check_disk("/does/not/exist") is None
+
+    def test_thresholds_overridable_via_env(self, monkeypatch):
+        monkeypatch.setenv("HEALTH_CHECK_DISK_WARN_FREE_GB", "1000")
+        usage = MagicMock(total=100 * 1024 ** 3, used=10 * 1024 ** 3, free=90 * 1024 ** 3)
+        with patch("firm.live.scheduler.shutil.disk_usage", return_value=usage):
+            result = _check_disk(".")
+        assert result["severity"] == "warning"  # 90GB free now below the overridden 1000GB bar
+
+    def test_invalid_env_override_falls_back_to_default(self, monkeypatch, caplog):
+        monkeypatch.setenv("HEALTH_CHECK_DISK_WARN_FREE_GB", "not-a-number")
+        usage = MagicMock(total=100 * 1024 ** 3, used=10 * 1024 ** 3, free=90 * 1024 ** 3)
+        with patch("firm.live.scheduler.shutil.disk_usage", return_value=usage):
+            result = _check_disk(".")
+        assert result["severity"] == "ok"  # default (5GB) used instead of the bad override
+
+
+class TestCheckMemory:
+    def test_ok_when_plenty_available(self):
+        meminfo = "MemTotal:       10000000 kB\nMemAvailable:    5000000 kB\n"
+        with patch("builtins.open", return_value=_fake_file(meminfo)):
+            result = _check_memory()
+        assert result["severity"] == "ok"
+        assert result["available_pct"] == pytest.approx(50.0, abs=0.1)
+
+    def test_critical_when_available_low(self):
+        meminfo = "MemTotal:       10000000 kB\nMemAvailable:     500000 kB\n"
+        with patch("builtins.open", return_value=_fake_file(meminfo)):
+            result = _check_memory()
+        assert result["severity"] == "critical"
+
+    def test_returns_none_on_oserror(self):
+        with patch("builtins.open", side_effect=OSError("no /proc here")):
+            assert _check_memory() is None
+
+    def test_returns_none_when_memtotal_missing(self):
+        with patch("builtins.open", return_value=_fake_file("SomeOtherField: 1 kB\n")):
+            assert _check_memory() is None
+
+
+class TestCheckCpu:
+    def test_ok_under_light_load(self):
+        with patch("firm.live.scheduler.os.getloadavg", return_value=(0.1, 0.2, 0.1)), \
+             patch("firm.live.scheduler.os.cpu_count", return_value=2):
+            result = _check_cpu()
+        assert result["severity"] == "ok"
+        assert result["load_per_core"] == pytest.approx(0.1, abs=0.01)
+
+    def test_critical_under_heavy_sustained_load(self):
+        with patch("firm.live.scheduler.os.getloadavg", return_value=(7.0, 7.0, 7.0)), \
+             patch("firm.live.scheduler.os.cpu_count", return_value=2):
+            result = _check_cpu()
+        assert result["severity"] == "critical"
+
+    def test_returns_none_on_oserror(self):
+        with patch("firm.live.scheduler.os.getloadavg", side_effect=OSError("unsupported")):
+            assert _check_cpu() is None
+
+
+def _fake_file(contents: str):
+    """A context-manager mock standing in for ``open(...)`` returning *contents*."""
+    handle = MagicMock()
+    handle.__enter__.return_value = contents.splitlines(keepends=True)
+    handle.__exit__.return_value = False
+    return handle
+
+
+class TestCheckResourceHealth:
+    def test_aggregates_all_three_metrics_when_all_measurable(self):
+        ok_disk = MagicMock(total=100 * 1024 ** 3, used=1 * 1024 ** 3, free=99 * 1024 ** 3)
+        meminfo = "MemTotal:       10000000 kB\nMemAvailable:    5000000 kB\n"
+        with patch("firm.live.scheduler.shutil.disk_usage", return_value=ok_disk), \
+             patch("builtins.open", return_value=_fake_file(meminfo)), \
+             patch("firm.live.scheduler.os.getloadavg", return_value=(0.1, 0.1, 0.1)), \
+             patch("firm.live.scheduler.os.cpu_count", return_value=2):
+            result = check_resource_health()
+        assert set(result) == {"disk", "memory", "cpu"}
+        assert all(m["severity"] == "ok" for m in result.values())
+
+    def test_one_unmeasurable_metric_does_not_block_the_others(self):
+        ok_disk = MagicMock(total=100 * 1024 ** 3, used=1 * 1024 ** 3, free=99 * 1024 ** 3)
+        with patch("firm.live.scheduler.shutil.disk_usage", return_value=ok_disk), \
+             patch("builtins.open", side_effect=OSError("no /proc here")), \
+             patch("firm.live.scheduler.os.getloadavg", return_value=(0.1, 0.1, 0.1)), \
+             patch("firm.live.scheduler.os.cpu_count", return_value=2):
+            result = check_resource_health()
+        assert set(result) == {"disk", "cpu"}  # memory dropped, not raised
+
+
+class TestRunResourceHealthCheck:
+    def test_alerts_once_on_transition_into_a_breach(self):
+        engine = MagicMock()
+        state: dict[str, str] = {}
+        with patch(
+            "firm.live.scheduler.check_resource_health",
+            return_value={"disk": {"severity": "warning", "message": "low disk"}},
+        ):
+            run_resource_health_check(engine, state)
+        engine._emit_alert.assert_called_once_with(
+            "host_disk_low", "warning", "low disk",
+        )
+        assert state == {"disk": "warning"}
+
+    def test_does_not_realert_while_severity_is_unchanged(self):
+        engine = MagicMock()
+        state = {"disk": "warning"}
+        with patch(
+            "firm.live.scheduler.check_resource_health",
+            return_value={"disk": {"severity": "warning", "message": "still low"}},
+        ):
+            run_resource_health_check(engine, state)
+        engine._emit_alert.assert_not_called()
+
+    def test_alerts_on_escalation(self):
+        engine = MagicMock()
+        state = {"disk": "warning"}
+        with patch(
+            "firm.live.scheduler.check_resource_health",
+            return_value={"disk": {"severity": "critical", "message": "critical now"}},
+        ):
+            run_resource_health_check(engine, state)
+        engine._emit_alert.assert_called_once_with(
+            "host_disk_low", "critical", "critical now",
+        )
+        assert state == {"disk": "critical"}
+
+    def test_alerts_recovery_as_info_with_recovered_kind(self):
+        engine = MagicMock()
+        state = {"disk": "critical"}
+        with patch(
+            "firm.live.scheduler.check_resource_health",
+            return_value={"disk": {"severity": "ok", "message": "back to normal"}},
+        ):
+            run_resource_health_check(engine, state)
+        engine._emit_alert.assert_called_once_with(
+            "host_disk_low_recovered", "info", "back to normal",
+        )
+        assert state == {"disk": "ok"}
+
+    def test_does_not_gate_on_engine_running_or_shutting_down(self):
+        # Unlike run_order_reconciliation/maybe_retry_lost_cycle, a resource
+        # crunch matters whether or not the trading engine is active.
+        engine = _mock_engine(is_running=False, shutting_down=True)
+        with patch(
+            "firm.live.scheduler.check_resource_health",
+            return_value={"disk": {"severity": "critical", "message": "low"}},
+        ):
+            run_resource_health_check(engine, {})
+        engine._emit_alert.assert_called_once()
+
+    def test_swallows_measurement_errors(self):
+        engine = MagicMock()
+        with patch(
+            "firm.live.scheduler.check_resource_health", side_effect=RuntimeError("boom"),
+        ):
+            run_resource_health_check(engine, {})  # must not raise
+        engine._emit_alert.assert_not_called()
+
+    def test_defaults_to_a_fresh_state_dict_when_none_given(self):
+        engine = MagicMock()
+        with patch(
+            "firm.live.scheduler.check_resource_health",
+            return_value={"disk": {"severity": "warning", "message": "low"}},
+        ):
+            run_resource_health_check(engine)  # no state arg -- must not raise
+        engine._emit_alert.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # TradingScheduler
 # ---------------------------------------------------------------------------
 
@@ -536,6 +771,24 @@ class TestTradingSchedulerLifecycle:
         try:
             sched.start()
             assert sched._scheduler.get_job(sched._order_reconciliation_job_id) is not None
+        finally:
+            sched.stop()
+
+    def test_resource_health_job_added_regardless_of_schedule(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule="hourly")
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._resource_health_job_id) is not None
+        finally:
+            sched.stop()
+
+    def test_position_reconciliation_job_added_regardless_of_schedule(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule="hourly")
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._position_reconciliation_job_id) is not None
         finally:
             sched.stop()
 
@@ -660,6 +913,61 @@ class TestTradingSchedulerLifecycle:
                 job = sched._scheduler.get_job(sched._news_ingestion_job_id)
                 job.func()
             mock_run.assert_called_once_with(["AAPL", "MSFT"], days=5)
+        finally:
+            sched.stop()
+
+    def test_capital_reallocation_job_not_added_by_default(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule="market_open")
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._capital_reallocation_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_capital_reallocation_job_not_added_when_disabled_explicitly(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            capital_reallocation={"enabled": False},
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._capital_reallocation_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_capital_reallocation_job_added_when_enabled(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            capital_reallocation={"enabled": True, "day_of_week": "mon", "hour": 5},
+        )
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._capital_reallocation_job_id)
+            assert job is not None
+            assert str(job.trigger.fields[job.trigger.FIELD_NAMES.index("hour")]) == "5"
+        finally:
+            sched.stop()
+
+    def test_capital_reallocation_job_fires_scheduled_check(self):
+        # Patched before start() -- the job callback does a local import at
+        # registration time inside start(), same reason as the equivalent
+        # news_ingestion test above.
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            capital_reallocation={"enabled": True},
+        )
+        try:
+            with patch(
+                "firm.live.capital_reallocation_job.run_scheduled_capital_reallocation_check"
+            ) as mock_run:
+                sched.start()
+                job = sched._scheduler.get_job(sched._capital_reallocation_job_id)
+                job.func()
+            mock_run.assert_called_once_with(engine)
         finally:
             sched.stop()
 

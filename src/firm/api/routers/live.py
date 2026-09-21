@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
@@ -62,6 +62,7 @@ def _start_live_scheduler(
     sp500_dynamic_universe_cfg = engine_config.get("sp500_dynamic_universe") or {}
     extended_hours_cfg = engine_config.get("extended_hours_trading") or {}
     news_ingestion_cfg = engine_config.get("news_ingestion") or {}
+    capital_reallocation_cfg = engine_config.get("capital_reallocation") or {}
     try:
         from firm.live.fundamentals_refresh import maybe_refresh_fundamentals_cache_on_start
         from firm.live.pipeline_warmup import PipelineWarmupGate, warmup_wait_seconds
@@ -130,6 +131,7 @@ def _start_live_scheduler(
                     sp500_static_sector_map=engine_config.get("sector_map") or {},
                     extended_hours_trading=extended_hours_cfg,
                     news_ingestion=news_ingestion_cfg,
+                    capital_reallocation=capital_reallocation_cfg,
                 )
                 scheduler.start()
                 app.state.live_scheduler = scheduler
@@ -213,6 +215,14 @@ class StartRequest(BaseModel):
     capital_allocation_mode: str | None = None
     strategy_capital_weights: dict[str, float] | None = None
     real_rebalance_band_pct: float | None = None
+    # Adaptive per-sleeve capital reweighting scheduled check (off unless
+    # ``enabled: true``) -- see firm.live.capital_reallocation_job. Same
+    # start-time-only treatment as capital_allocation_mode itself: what it
+    # gates is whether TradingScheduler registers the periodic recommendation
+    # job, which is decided once at scheduler boot, not a single mutable
+    # engine attribute -- so, like news_ingestion/sp500_dynamic_universe,
+    # deliberately not part of ConfigUpdateRequest/PUT /live/config either.
+    capital_reallocation: dict[str, Any] | None = None
 
 
 class ConfigUpdateStrategies(BaseModel):
@@ -631,6 +641,8 @@ def live_start(body: StartRequest, request: Request) -> dict[str, Any]:
             engine_config["strategy_capital_weights"] = body.strategy_capital_weights
         if body.real_rebalance_band_pct is not None:
             engine_config["real_rebalance_band_pct"] = body.real_rebalance_band_pct
+        if body.capital_reallocation is not None:
+            engine_config["capital_reallocation"] = body.capital_reallocation
 
         try:
             result = _start_live_engine(
@@ -837,6 +849,37 @@ def flatten_sleeve(strategy: str, request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.get("/capital-reallocation/recommendation")
+def capital_reallocation_recommendation(request: Request) -> dict[str, Any]:
+    """Read-only: what each sleeve's capital weight would become right now
+    if reallocated — see ``LiveTradingEngine.
+    get_capital_reallocation_recommendation``/``firm.live.
+    capital_reallocation`` for the mechanism. Never mutates anything;
+    callable at any time regardless of whether the scheduled
+    ``capital_reallocation`` check is enabled."""
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        raise HTTPException(status_code=400, detail="Live engine is not running")
+    return engine.get_capital_reallocation_recommendation()
+
+
+@router.post("/capital-reallocation/apply")
+def capital_reallocation_apply(request: Request) -> dict[str, Any]:
+    """Human-triggered: actually move capital between sleeves to the
+    freshly-recomputed recommended split. The one place this
+    mechanism is allowed to touch live capital, and only via this
+    explicit call — the scheduled check (``firm.live.
+    capital_reallocation_job``) only ever computes and logs a
+    recommendation, never applies one."""
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        raise HTTPException(status_code=400, detail="Live engine is not running")
+    try:
+        return engine.apply_capital_reallocation()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/account")
 def live_account(request: Request) -> dict[str, Any]:
     engine = getattr(request.app.state, "live_engine", None)
@@ -986,6 +1029,43 @@ def live_attribution(request: Request) -> dict[str, dict[str, float]]:
     return metrics
 
 
+@router.get("/tca")
+def live_tca(
+    request: Request,
+    limit: int = 2000,
+    days: int | None = None,
+    strategy: str | None = None,
+) -> dict[str, Any]:
+    """Transaction-cost analysis: realized (broker fill) vs. modeled
+    (``ExecutionAgent``'s pre-trade estimate) execution cost, aggregated
+    over persisted order history. Pure read — computes nothing live and
+    cannot affect trading.
+
+    Reads the same ``order_history.json`` records ``GET /live/orders``
+    does (see ``LiveTradingEngine._status_to_dict``'s ``order`` parameter
+    for how a record gets both the decision-time price/estimate and the
+    broker's, possibly later-reconciled, actual fill), so this can't
+    diverge from what the dashboard's order list already shows.
+
+    ``limit`` bounds how many of the most recent persisted orders are
+    considered before the other filters apply (raise it to cover a wider
+    window); ``days`` then restricts to those timestamped in the last N
+    days; ``strategy`` restricts to one strategy. See ``firm.eval.tca`` for
+    why an order with no known realized fill price is counted in
+    ``n_unknown_fill`` but excluded from every bps statistic rather than
+    treated as zero slippage.
+    """
+    from firm.eval.tca import aggregate_tca
+    from firm.time_utils import utcnow
+
+    store = _get_trade_history(request.app)
+    orders = store.list_orders(limit=limit)
+    if strategy is not None:
+        orders = [o for o in orders if o.get("strategy") == strategy]
+    since = utcnow() - timedelta(days=days) if days is not None else None
+    return aggregate_tca(orders, since=since)
+
+
 @router.delete("/cycles")
 def clear_cycles(request: Request) -> dict[str, Any]:
     """Wipe the in-memory cycle/order history.
@@ -1016,6 +1096,22 @@ def live_alerts(request: Request) -> dict[str, Any]:
         "halted": engine.halted,
         "alerts": list(reversed(engine.alerts[-100:])),
     }
+
+
+@router.get("/reconciliation")
+def live_reconciliation(request: Request) -> dict[str, Any]:
+    """On-demand broker-vs-internal reconciliation check.
+
+    Queries the broker fresh on every call (read-only — see
+    ``LiveTradingEngine.check_reconciliation``, which never submits/cancels
+    an order or corrects portfolio state) rather than only returning the
+    last scheduled result, so "are we in sync right now" doesn't require
+    waiting for the next periodic run.
+    """
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        return {"status": "unknown", "reason": "Live engine is not running", "discrepancies": []}
+    return engine.check_reconciliation()
 
 
 @router.post("/kill-switch/reset")

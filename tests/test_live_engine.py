@@ -19,6 +19,7 @@ import pytest
 from firm.agents.blackboard import Blackboard
 from firm.brokers.base import (
     BrokerError,
+    BrokerPosition,
     OrderRequest,
     OrderStatus,
 )
@@ -315,6 +316,160 @@ class TestPortfolioSync:
         assert any(d["type"] == "position_mismatch" for d in discreps)
         warnings = [r for r in caplog.records if r.levelname == "WARNING"]
         assert any("Position mismatch AAPL" in r.message for r in warnings)
+
+
+# ---------------------------------------------------------------------------
+# LiveTradingEngine.check_reconciliation
+# ---------------------------------------------------------------------------
+
+def _make_reconciliation_engine(
+    broker,
+    tmp_path,
+    *,
+    capital_allocation_mode: str = "blended",
+    sleeve_portfolios: dict[str, PortfolioState] | None = None,
+    initial_capital: float = 100_000,
+):
+    """A LiveTradingEngine with a MagicMock orchestrator standing in for
+    the real agent pipeline -- check_reconciliation only reads
+    capital_allocation_mode/_sleeve_portfolios off it, never calls step()."""
+    feed = LiveDataFeed(providers={}, universe=["AAPL", "MSFT"])
+    queue = ApprovalQueue(broker=broker)
+    config = {
+        "initial_capital": initial_capital,
+        "memory_log_path": str(tmp_path / "decisions.jsonl"),
+    }
+    with patch("firm.live.engine.build_orchestrator") as mock_build:
+        mock_orch = MagicMock()
+        mock_orch.capital_allocation_mode = capital_allocation_mode
+        mock_orch._sleeve_portfolios = sleeve_portfolios or {}
+        mock_build.return_value = mock_orch
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+
+
+class TestPositionReconciliation:
+    """LiveTradingEngine.check_reconciliation: the periodic/on-demand
+    broker-vs-internal net position/cash check (see the method's own
+    docstring) -- distinct from sync_portfolio_from_broker in that it never
+    corrects state, only reports and alerts."""
+
+    def test_detects_genuine_mismatch(self, tmp_path):
+        broker = MockBroker(initial_cash=100_000)
+        broker.connect()
+        broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=10))
+        engine = _make_reconciliation_engine(broker, tmp_path)
+        # Internal book never picked up the fill (e.g. a missed confirmation).
+        engine.portfolio.cash = 100_000
+        engine.portfolio.holdings = {}
+
+        result = engine.check_reconciliation()
+
+        assert result["status"] == "mismatch"
+        assert any(d["type"] == "position_mismatch" and d["symbol"] == "AAPL" for d in result["discrepancies"])
+        assert any(a["kind"] == "portfolio_reconciliation_mismatch" for a in engine.alerts)
+
+    def test_tiny_float_noise_is_not_a_mismatch(self, tmp_path):
+        broker = MockBroker(initial_cash=100_000)
+        broker.connect()
+        engine = _make_reconciliation_engine(broker, tmp_path)
+        engine.portfolio.cash = 100_000 - 0.004  # sub-cent float noise only
+        engine.portfolio.holdings = {}
+
+        result = engine.check_reconciliation()
+
+        assert result["status"] == "ok"
+        assert result["discrepancies"] == []
+        assert not any(a["kind"] == "portfolio_reconciliation_mismatch" for a in engine.alerts)
+
+    def test_broker_failure_does_not_raise_false_alert(self, tmp_path):
+        broker = MockBroker(initial_cash=100_000)
+        broker.connect()
+        engine = _make_reconciliation_engine(broker, tmp_path)
+
+        def _boom():
+            raise BrokerError("IB Gateway unreachable")
+
+        broker.get_account = _boom  # type: ignore[method-assign]
+
+        result = engine.check_reconciliation()
+
+        assert result["status"] == "unknown"
+        assert result["discrepancies"] == []
+        assert not any(a["kind"] == "portfolio_reconciliation_mismatch" for a in engine.alerts)
+        assert engine.last_reconciliation == result
+
+    def test_unsettled_open_order_does_not_read_as_drift(self, tmp_path):
+        """A just-submitted, not-yet-filled order explains the gap between
+        internal (already reflecting the intended trade) and the broker's
+        current (pre-fill) position -- it must not alert."""
+        broker = MockBroker(initial_cash=100_000)
+        broker.connect()
+        broker._orders["o1"] = OrderStatus(
+            order_id="o1", symbol="AAPL", side="buy", quantity=10,
+            filled_quantity=0.0, status="pending",
+        )
+        engine = _make_reconciliation_engine(broker, tmp_path)
+        engine.portfolio.holdings = {"AAPL": 10}
+        engine.portfolio.cash = 100_000
+
+        result = engine.check_reconciliation()
+
+        assert result["status"] == "ok"
+
+    def test_sleeved_mode_nets_across_sleeves_before_comparing(self, tmp_path):
+        """The wrong behavior would compare a single sleeve's virtual slice
+        against the whole real broker account; only the sum across every
+        sleeve should be compared."""
+        broker = MockBroker(initial_cash=0)
+        broker.connect()
+        broker._cash = 40_000
+        broker._positions["AAPL"] = BrokerPosition(
+            symbol="AAPL", quantity=100, avg_cost=150.0, market_value=15_000,
+        )
+        sleeve_a = PortfolioState(initial_capital=50_000)
+        sleeve_a.cash = 20_000
+        sleeve_a.holdings = {"AAPL": 40}
+        sleeve_b = PortfolioState(initial_capital=50_000)
+        sleeve_b.cash = 20_000
+        sleeve_b.holdings = {"AAPL": 60}
+        engine = _make_reconciliation_engine(
+            broker, tmp_path, capital_allocation_mode="sleeved",
+            sleeve_portfolios={"momentum": sleeve_a, "trend": sleeve_b},
+        )
+
+        result = engine.check_reconciliation()
+
+        assert result["status"] == "ok"
+        assert result["internal_cash"] == 40_000
+        assert result["mode"] == "sleeved"
+
+    def test_sleeved_mode_flags_real_drift_in_the_net_sum(self, tmp_path):
+        broker = MockBroker(initial_cash=0)
+        broker.connect()
+        broker._cash = 40_000
+        broker._positions["AAPL"] = BrokerPosition(
+            symbol="AAPL", quantity=100, avg_cost=150.0, market_value=15_000,
+        )
+        sleeve_a = PortfolioState(initial_capital=50_000)
+        sleeve_a.cash = 20_000
+        sleeve_a.holdings = {"AAPL": 40}
+        sleeve_b = PortfolioState(initial_capital=50_000)
+        sleeve_b.cash = 20_000
+        sleeve_b.holdings = {"AAPL": 40}  # sums to 80, real broker net is 100
+        engine = _make_reconciliation_engine(
+            broker, tmp_path, capital_allocation_mode="sleeved",
+            sleeve_portfolios={"momentum": sleeve_a, "trend": sleeve_b},
+        )
+
+        result = engine.check_reconciliation()
+
+        assert result["status"] == "mismatch"
+        assert any(
+            d["type"] == "position_mismatch" and d["symbol"] == "AAPL"
+            for d in result["discrepancies"]
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -2818,7 +2973,7 @@ class TestExecutionSafetyGate:
         assert failed == []
         # Strategy attribution must survive submission — needed for a
         # traceable trade history, not just the bare fill.
-        assert {strategy for _, strategy in statuses} == {"momentum", "trend"}
+        assert {strategy for _, strategy, _ in statuses} == {"momentum", "trend"}
 
     def test_live_broker_submits_with_env(self, tmp_path, monkeypatch):
         monkeypatch.setenv("FIRM_ALLOW_TRADING", "1")
@@ -2827,6 +2982,90 @@ class TestExecutionSafetyGate:
         statuses, failed = engine._execute_orders(_make_orders())
         assert len(statuses) == 2
         assert failed == []
+
+
+# ---------------------------------------------------------------------------
+# TCA plumbing: _execute_orders/_status_to_dict carrying decision-time
+# context (price, est_*) alongside the broker's real fill so
+# firm.eval.tca can compute realized-vs-modeled cost from the persisted
+# record alone. See tests/test_tca.py for the pure-calculation coverage;
+# this class covers only that the plumbing hands the right shape through.
+# ---------------------------------------------------------------------------
+
+class TestExecuteOrdersTcaPlumbing:
+    @patch("firm.live.engine.build_orchestrator")
+    def _engine(self, mock_build, tmp_path):
+        mock_build.return_value = MagicMock()
+        broker = MockBroker()  # fills AAPL at a fixed 150.0 (see tests/test_brokers.py)
+        broker.connect()
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {
+            "initial_capital": 100_000,
+            "memory_log_path": str(tmp_path / "decisions.jsonl"),
+        }
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine._broker_type = "ibkr_paper"
+        return engine, broker
+
+    def test_status_tuple_carries_the_original_order_dict(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FIRM_EXECUTION_AUDIT", str(tmp_path / "audit.jsonl"))
+        engine, broker = self._engine(tmp_path=tmp_path)
+        order = {
+            "symbol": "AAPL", "side": "buy", "quantity": 10, "price": 149.0,
+            "strategy": "momentum", "notional": 1490.0,
+            "est_commission": 0.5, "est_slippage": 0.75, "est_spread": 0.3, "est_impact": 0.1,
+            "est_cost": 1.65,
+        }
+        statuses, failed = engine._execute_orders([order])
+        assert failed == []
+        assert len(statuses) == 1
+        status, strategy, carried_order = statuses[0]
+        assert strategy == "momentum"
+        assert carried_order == order
+        assert status.avg_fill_price == 150.0  # MockBroker's fixed AAPL fill price
+
+    def test_merged_record_feeds_a_computable_realistic_tca_record(self, tmp_path, monkeypatch):
+        """End-to-end through the real plumbing (not a hand-built dict, as
+        in test_tca.py): decision price 149 vs. MockBroker's fixed 150.0
+        AAPL fill must come out as a real ~67bps adverse slippage once run
+        through _status_to_dict + firm.eval.tca."""
+        from firm.eval.tca import compute_tca_record
+
+        monkeypatch.setenv("FIRM_EXECUTION_AUDIT", str(tmp_path / "audit.jsonl"))
+        engine, broker = self._engine(tmp_path=tmp_path)
+        order = {
+            "symbol": "AAPL", "side": "buy", "quantity": 10, "price": 149.0,
+            "strategy": "momentum", "notional": 1490.0,
+            "est_commission": 0.5, "est_slippage": 0.75, "est_spread": 0.3, "est_impact": 0.1,
+            "est_cost": 1.65,
+        }
+        statuses, failed = engine._execute_orders([order])
+        assert failed == []
+        status, strategy, carried_order = statuses[0]
+
+        merged = engine._status_to_dict(status, strategy, order=carried_order)
+        assert merged["price"] == 149.0
+        assert merged["est_slippage"] == 0.75
+
+        tca = compute_tca_record(merged)
+        assert tca["computable"] is True
+        assert tca["realized_slippage_bps"] == pytest.approx((1.0 / 149.0) * 10_000)
+
+    def test_status_to_dict_without_order_omits_decision_fields(self):
+        """Backward-compat default (``order=None``, e.g. the separate
+        approval-queue submission path in firm.live.approval, which this
+        change does not touch): must not fabricate price/est_* keys that
+        were never actually known at that call site."""
+        status = OrderStatus(
+            order_id="o1", symbol="AAPL", side="buy", quantity=10,
+            filled_quantity=10, avg_fill_price=150.0, status="filled",
+        )
+        merged = LiveTradingEngine._status_to_dict(status, "momentum")
+        assert "price" not in merged
+        assert "est_cost" not in merged
 
 
 # ---------------------------------------------------------------------------

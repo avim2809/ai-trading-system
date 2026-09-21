@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily backup of live-trading state
+
+[Timer]
+# Off-hours in both US market time and this server's local time (Asia/
+# Jerusalem, confirmed via timedatectl -- see best-stocks-arm.timer's same
+# note) so it never runs anywhere near a live trading cycle.
+OnCalendar=*-*-* 09:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

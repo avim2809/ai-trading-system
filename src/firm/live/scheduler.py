@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import threading
 from datetime import datetime
 from datetime import time as dt_time
@@ -363,6 +364,234 @@ def run_order_reconciliation(engine: LiveTradingEngine) -> None:
         log.error("Order-history reconciliation job failed", exc_info=True)
 
 
+def run_position_reconciliation(engine: LiveTradingEngine) -> None:
+    """Diff the broker's real account against the engine's internally
+    tracked net position/cash, independent of the trading-cycle schedule.
+
+    Pure observability (see ``LiveTradingEngine.check_reconciliation``):
+    never corrects portfolio state or affects order routing, only raises an
+    alert through the existing alert path when a real discrepancy is found.
+    Runs on its own interval rather than only at cycle start, so a
+    once-daily cycle schedule doesn't leave drift unnoticed for a full
+    trading day.
+    """
+    if not engine.is_running or getattr(engine, "_shutting_down", False):
+        return
+    try:
+        engine.check_reconciliation()
+    except Exception:
+        log.error("Position reconciliation job failed", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Host resource monitoring (disk / memory / CPU).
+#
+# This process is the only thing watching its own host: there is no
+# external uptime monitor today, and every other job in this module reasons
+# about the *trading* pipeline, not the box it runs on. A resource crunch
+# (disk full, memory pressure, sustained CPU overload) otherwise surfaces
+# only once it breaks something downstream — a failed write, a wedged
+# process, an OOM kill — with no advance warning.
+#
+# Stdlib-only (``shutil``/``os.getloadavg``/``/proc/meminfo``): psutil is
+# present in this venv but only as a transitive dependency of an unrelated
+# package, not a direct one of this project, so nothing operationally
+# load-bearing should rely on it still being there tomorrow.
+# ---------------------------------------------------------------------------
+
+# Defaults sized for this deployment's actual host (2 cores, a single root
+# filesystem shared by the OS, both services' data/ dirs, and the venv) —
+# override any of these via ``HEALTH_CHECK_<NAME>`` env vars without a code
+# change. Two tiers per resource: "warn" gives an operator time to react
+# before things degrade; "crit" is close to the point actual failures start
+# (disk: writes start failing; memory: the OOM killer starts picking
+# processes; CPU: cycles/requests start timing out).
+_HEALTH_CHECK_DEFAULTS: dict[str, float] = {
+    # Free space in GB / used-% on the filesystem holding the repo + data
+    # dirs. Warn at 5GB free (~25% of a 20GB root disk) leaves real runway;
+    # crit at 2GB free sits below the level that actually caused failures
+    # rather than exactly at it, so the alert lands before, not during.
+    "disk_warn_free_gb": 5.0,
+    "disk_crit_free_gb": 2.0,
+    "disk_warn_used_pct": 85.0,
+    "disk_crit_used_pct": 95.0,
+    # % of total RAM still available (MemAvailable, not MemFree — accounts
+    # for reclaimable cache instead of alerting on a healthy page cache).
+    # Expressed as a percentage rather than a fixed GB figure so the same
+    # default still means something if the box is ever resized.
+    "mem_warn_avail_pct": 15.0,
+    "mem_crit_avail_pct": 8.0,
+    # 5-minute load average per core (smoother than the 1-minute figure —
+    # a brief burst shouldn't page anyone). >1.0/core means work is queuing;
+    # 1.5 gives margin for normal bursts, 3.0 is sustained thrashing on a
+    # 2-core box.
+    "cpu_warn_load_per_core": 1.5,
+    "cpu_crit_load_per_core": 3.0,
+}
+
+
+def _health_threshold(name: str) -> float:
+    env_key = f"HEALTH_CHECK_{name.upper()}"
+    raw = os.getenv(env_key)
+    if raw is None:
+        return _HEALTH_CHECK_DEFAULTS[name]
+    try:
+        return float(raw)
+    except ValueError:
+        log.warning("Ignoring invalid %s=%r, using default", env_key, raw)
+        return _HEALTH_CHECK_DEFAULTS[name]
+
+
+def _check_disk(path: str) -> dict[str, Any] | None:
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        log.warning("Disk health check: could not stat %s", path, exc_info=True)
+        return None
+    free_gb = usage.free / (1024 ** 3)
+    used_pct = (usage.used / usage.total * 100) if usage.total else 0.0
+    severity = "ok"
+    if free_gb <= _health_threshold("disk_crit_free_gb") or used_pct >= _health_threshold(
+        "disk_crit_used_pct"
+    ):
+        severity = "critical"
+    elif free_gb <= _health_threshold("disk_warn_free_gb") or used_pct >= _health_threshold(
+        "disk_warn_used_pct"
+    ):
+        severity = "warning"
+    return {
+        "severity": severity,
+        "free_gb": round(free_gb, 2),
+        "used_pct": round(used_pct, 1),
+        "message": f"Disk free: {free_gb:.2f} GB ({used_pct:.0f}% used) on {path}",
+    }
+
+
+def _check_memory() -> dict[str, Any] | None:
+    """Linux-only (``/proc/meminfo``) — this deploys exclusively to a
+    bare-metal Linux host (see CLAUDE.md), never anywhere that lacks it.
+    """
+    try:
+        info: dict[str, int] = {}
+        with open("/proc/meminfo", encoding="utf-8") as f:
+            for line in f:
+                key, _, rest = line.partition(":")
+                parts = rest.split()
+                if parts:
+                    info[key] = int(parts[0])  # kB
+    except OSError:
+        log.warning("Memory health check: could not read /proc/meminfo", exc_info=True)
+        return None
+    total = info.get("MemTotal", 0)
+    available = info.get("MemAvailable", 0)
+    if not total:
+        return None
+    available_pct = available / total * 100
+    severity = "ok"
+    if available_pct <= _health_threshold("mem_crit_avail_pct"):
+        severity = "critical"
+    elif available_pct <= _health_threshold("mem_warn_avail_pct"):
+        severity = "warning"
+    return {
+        "severity": severity,
+        "available_pct": round(available_pct, 1),
+        "message": f"Memory available: {available_pct:.0f}% ({available / 1_048_576:.2f} GB)",
+    }
+
+
+def _check_cpu() -> dict[str, Any] | None:
+    try:
+        _, load5, _ = os.getloadavg()
+    except OSError:
+        log.warning("CPU health check: getloadavg() unavailable", exc_info=True)
+        return None
+    cpu_count = os.cpu_count() or 1
+    load_per_core = load5 / cpu_count
+    severity = "ok"
+    if load_per_core >= _health_threshold("cpu_crit_load_per_core"):
+        severity = "critical"
+    elif load_per_core >= _health_threshold("cpu_warn_load_per_core"):
+        severity = "warning"
+    return {
+        "severity": severity,
+        "load_per_core": round(load_per_core, 2),
+        "message": f"CPU load (5-min avg): {load_per_core:.2f} per core across {cpu_count} core(s)",
+    }
+
+
+def check_resource_health(path: str = ".") -> dict[str, dict[str, Any]]:
+    """Classify this host's disk/memory/CPU against the thresholds above.
+
+    Returns one entry per metric that could be measured (keyed
+    ``"disk"``/``"memory"``/``"cpu"``), each with a ``severity`` of
+    ``"ok"``/``"warning"``/``"critical"``. Each measurement is independent
+    so one that can't be taken (e.g. an unreadable ``/proc/meminfo``) never
+    blocks the other two.
+    """
+    metrics: dict[str, dict[str, Any]] = {}
+    disk = _check_disk(path)
+    if disk is not None:
+        metrics["disk"] = disk
+    memory = _check_memory()
+    if memory is not None:
+        metrics["memory"] = memory
+    cpu = _check_cpu()
+    if cpu is not None:
+        metrics["cpu"] = cpu
+    return metrics
+
+
+_HEALTH_ALERT_KIND = {
+    "disk": "host_disk_low",
+    "memory": "host_memory_low",
+    "cpu": "host_cpu_high",
+}
+
+
+def run_resource_health_check(
+    engine: LiveTradingEngine, state: dict[str, str] | None = None,
+) -> None:
+    """Sample this host's disk/memory/CPU and push a real alert through the
+    engine's existing alert pipeline (log + ``GET /api/live/alerts`` +
+    webhook, see ``LiveTradingEngine._emit_alert`` /
+    ``firm.live.notifications``) once a threshold is breached — the same
+    channel a kill-switch trip or a broker outage already uses, rather than
+    a second, separate notification path.
+
+    Deliberately does not gate on ``engine.is_running``/``_shutting_down``
+    the way the other jobs in this module do: the host can run low on disk
+    or memory whether or not the trading engine happens to be active right
+    now, and ``_emit_alert`` doesn't depend on engine state either.
+
+    *state* is a small dict the caller owns across ticks (one per
+    engine/scheduler), mapping metric name -> last-alerted severity, so a
+    sustained breach pages once on the transition into it — and once more
+    on recovery — instead of every tick it remains there.
+    """
+    if state is None:
+        state = {}
+    try:
+        metrics = check_resource_health()
+    except Exception:
+        log.error("Resource health check failed", exc_info=True)
+        return
+    for name, metric in metrics.items():
+        severity = metric["severity"]
+        previous = state.get(name, "ok")
+        if severity == previous:
+            continue
+        state[name] = severity
+        context = {k: v for k, v in metric.items() if k not in ("severity", "message")}
+        if severity == "ok":
+            engine._emit_alert(
+                f"{_HEALTH_ALERT_KIND[name]}_recovered", "info", metric["message"], **context,
+            )
+        else:
+            engine._emit_alert(
+                _HEALTH_ALERT_KIND[name], severity, metric["message"], **context,
+            )
+
+
 class TradingScheduler:
     """Runs :meth:`LiveTradingEngine.run_cycle` on a configurable schedule."""
 
@@ -408,6 +637,14 @@ class TradingScheduler:
         # see firm.live.news_ingestion_job and the ``news_ingestion``
         # config block: {"enabled": false, "hour": 7, "days": 3}).
         news_ingestion: dict[str, Any] | None = None,
+        # Opt-in adaptive per-sleeve capital reweighting check (off by
+        # default — see firm.live.capital_reallocation_job and the
+        # ``capital_reallocation`` config block: {"enabled": false,
+        # "day_of_week": "sun", "hour": 6, ...}). Sleeved mode only; a
+        # no-op in blended mode regardless of this flag (guarded inside
+        # the job itself, not here, so this scheduler doesn't need to know
+        # the engine's capital_allocation_mode).
+        capital_reallocation: dict[str, Any] | None = None,
     ) -> None:
         if not _HAS_APSCHEDULER:
             raise ImportError(
@@ -447,6 +684,7 @@ class TradingScheduler:
         self._sp500_static_sector_map = dict(sp500_static_sector_map or {})
         self._extended_hours_cfg: dict[str, Any] = dict(extended_hours_trading or {})
         self._news_ingestion_cfg: dict[str, Any] = dict(news_ingestion or {})
+        self._capital_reallocation_cfg: dict[str, Any] = dict(capital_reallocation or {})
         self._scheduler: BackgroundScheduler | None = None
         self._job_id = "live_cycle"
         # Extra legs registered only for the "hourly_market_hours" composite
@@ -457,11 +695,18 @@ class TradingScheduler:
         self._close_job_id = "live_cycle_close"
         self._fundamentals_job_id = "fundamentals_refresh"
         self._news_ingestion_job_id = "news_ingestion"
+        self._capital_reallocation_job_id = "capital_reallocation_check"
         self._dynamic_universe_job_id = "danelfin_universe_sync"
         self._sp500_sync_job_id = "sp500_universe_sync"
         self._sp500_sector_refresh_job_id = "sp500_sector_cache_refresh"
         self._lost_cycle_retry_job_id = "lost_cycle_retry"
         self._order_reconciliation_job_id = "order_reconciliation"
+        self._position_reconciliation_job_id = "position_reconciliation"
+        self._resource_health_job_id = "resource_health_check"
+        # Owned by this scheduler instance (one per engine/live instance) so
+        # run_resource_health_check's alert-on-transition logic persists
+        # across ticks rather than resetting every call.
+        self._resource_health_state: dict[str, str] = {}
         # Extended-hours legs (see _start_extended_hours_jobs) — only
         # registered when self._extended_hours_cfg["enabled"] is true.
         self._premarket_job_id = "live_cycle_premarket"
@@ -514,6 +759,29 @@ class TradingScheduler:
                     timezone=self._timezone,
                 ),
                 id=self._news_ingestion_job_id,
+                replace_existing=True,
+                max_instances=1,
+                coalesce=True,
+            )
+        if self._capital_reallocation_cfg.get("enabled"):
+            from firm.live.capital_reallocation_job import (
+                run_scheduled_capital_reallocation_check,
+            )
+
+            # Weekly by default -- rolling Sharpe/Sortino over a
+            # 30-60 day window barely moves day to day, so a daily check
+            # would mostly just log the same recommendation repeatedly.
+            # Runs before market open so a human reviewing it has the full
+            # trading day to decide whether to apply it.
+            self._scheduler.add_job(
+                lambda: run_scheduled_capital_reallocation_check(self._engine),
+                trigger=CronTrigger(
+                    day_of_week=self._capital_reallocation_cfg.get("day_of_week", "sun"),
+                    hour=int(self._capital_reallocation_cfg.get("hour", 6)),
+                    minute=0,
+                    timezone=self._timezone,
+                ),
+                id=self._capital_reallocation_job_id,
                 replace_existing=True,
                 max_instances=1,
                 coalesce=True,
@@ -583,6 +851,34 @@ class TradingScheduler:
             lambda: run_order_reconciliation(self._engine),
             trigger=IntervalTrigger(minutes=15),
             id=self._order_reconciliation_job_id,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        # Unconditional (no universe/config gate) and independent of the
+        # trading schedule, same rationale as order reconciliation above.
+        # 30 minutes rather than order reconciliation's 15: position/cash
+        # drift is a slower-moving signal (it only changes on a fill), so
+        # there's no benefit to polling it as tightly as order status.
+        self._scheduler.add_job(
+            lambda: run_position_reconciliation(self._engine),
+            trigger=IntervalTrigger(minutes=30),
+            id=self._position_reconciliation_job_id,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+        # Unconditional (no universe/config gate) and independent of the
+        # trading schedule, same as order reconciliation above — the host
+        # this runs on needs watching regardless of what's configured to
+        # trade on it. 15 minutes matches reconciliation's cadence: cheap
+        # stdlib syscalls, no reason to poll less often, and frequent enough
+        # that a fast-moving leak (e.g. an unbounded log/cache) is caught
+        # with hours of runway rather than found the next time someone looks.
+        self._scheduler.add_job(
+            lambda: run_resource_health_check(self._engine, self._resource_health_state),
+            trigger=IntervalTrigger(minutes=15),
+            id=self._resource_health_job_id,
             replace_existing=True,
             max_instances=1,
             coalesce=True,

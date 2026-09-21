@@ -23,7 +23,13 @@ Environment=FIRM_LLM_CONFIG=config/llm_ab_llm.yaml
 # No IB Gateway dependency — Alpaca's REST API needs no local gateway process.
 ExecStart=/local/store/git/ai-trading-system/.venv/bin/firm-api
 Restart=always
+# See ai-trading.service's matching comment: geometric backoff (10s/20s/
+# 40s/80s, holding at 160s) instead of retrying every 10s forever against a
+# persistent failure, while a single transient crash still recovers as fast
+# as before.
 RestartSec=10
+RestartSteps=4
+RestartMaxDelaySec=160
 TimeoutStopSec=120
 KillMode=mixed
 

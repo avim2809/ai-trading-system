@@ -76,8 +76,15 @@ _ALERT_TITLES = {
     "broker_disconnected_sustained": "Broker Disconnected (Sustained)",
     "broker_submission_circuit_open": "Order Submission Circuit Open",
     "reconciliation_degraded": "Reconciliation Degraded",
+    "portfolio_reconciliation_mismatch": "Broker/Internal Position Mismatch",
     "order_risk_cap_blocked": "Order Blocked — Risk Cap",
     "live_trading_locked": "Live Trading Locked",
+    "host_disk_low": "Host Disk Space Low",
+    "host_disk_low_recovered": "Host Disk Space Recovered",
+    "host_memory_low": "Host Memory Pressure",
+    "host_memory_low_recovered": "Host Memory Recovered",
+    "host_cpu_high": "Host CPU Load High",
+    "host_cpu_high_recovered": "Host CPU Load Recovered",
 }
 
 # Friendly labels for context kwargs engine.py attaches to specific alerts
@@ -96,6 +103,10 @@ _CONTEXT_LABELS = {
     "blocking_event": "Blocking Event",
     "symbol": "Symbol",
     "audit_id": "Audit ID",
+    "free_gb": "Free Disk (GB)",
+    "used_pct": "Disk Used",
+    "available_pct": "Memory Available",
+    "load_per_core": "CPU Load / Core",
 }
 
 # Alert-dict keys that already have a dedicated place in the embed (title,
@@ -110,11 +121,18 @@ def _alert_title(kind: str) -> str:
     return _ALERT_TITLES.get(kind, kind.replace("_", " ").title())
 
 
+_PLAIN_PERCENT_FIELDS = {"used_pct", "available_pct"}  # already 0-100, not a 0-1 fraction
+
+
 def _format_field_value(key: str, value: Any) -> str:
     if isinstance(value, bool):
         return "Yes" if value else "No"
     if isinstance(value, float):
-        return f"{value:.1%}" if key == "drawdown" else f"{value:,.2f}"
+        if key == "drawdown":
+            return f"{value:.1%}"
+        if key in _PLAIN_PERCENT_FIELDS:
+            return f"{value:.1f}%"
+        return f"{value:,.2f}"
     if isinstance(value, (list, tuple, set)):
         rendered = ", ".join(str(v) for v in value)
         return rendered or "—"

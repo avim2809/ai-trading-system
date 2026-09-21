@@ -268,6 +268,11 @@ class LiveTradingEngine:
         # optional sink (e.g. Slack/email) invoked with each alert dict.
         self._alerts: list[dict[str, Any]] = []
         self._alert_callback = alert_callback
+        # Most recent broker-vs-internal reconciliation result (see
+        # check_reconciliation) — cached so GET /api/live/reconciliation and
+        # any other status consumer can report "as of the last check" even
+        # between the scheduler's own periodic runs.
+        self._last_reconciliation: dict[str, Any] | None = None
         self._peak_equity = float(initial_capital)
         # Diagnostic breadcrumbs for *how* the current peak was set — without
         # these, a drawdown trip only tells you the peak and trip NAV, not
@@ -326,6 +331,12 @@ class LiveTradingEngine:
     @property
     def portfolio(self) -> PortfolioState:
         return self._portfolio
+
+    @property
+    def last_reconciliation(self) -> dict[str, Any] | None:
+        """Result of the most recent :meth:`check_reconciliation` call, or
+        ``None`` before the first one has run."""
+        return self._last_reconciliation
 
     @property
     def cycle_history(self) -> list[CycleResult]:
@@ -404,6 +415,167 @@ class LiveTradingEngine:
         except Exception:
             log.warning("Order-history reconciliation failed", exc_info=True)
             return 0
+
+    # ------------------------------------------------------------------
+    # Broker-vs-internal position/cash reconciliation.
+    #
+    # ``self._portfolio`` is only ever refreshed from the broker once, at
+    # the start of each cycle (see sync_portfolio_from_broker in
+    # _run_cycle_work) -- it is never updated as this cycle's own orders
+    # fill. Between cycles it is therefore a *snapshot as of the last
+    # sync*, not a live mirror. This check exists to catch drift the next
+    # cycle's silent self-correction would otherwise paper over unnoticed
+    # (a missed fill confirmation, a manual trade, a bug) -- it never
+    # writes back to portfolio state itself, only reports.
+    # ------------------------------------------------------------------
+
+    # Cash tolerance: a floor (small accounts, pure rounding) plus a
+    # fraction of broker cash (scales with account size) -- wide enough to
+    # absorb commission-timing/float noise, narrow enough that a materially
+    # missed fill still trips it.
+    _RECONCILE_CASH_TOLERANCE_FLOOR = 1.0
+    _RECONCILE_CASH_TOLERANCE_RELATIVE = 0.0005
+    # Position tolerance: order sizing always rounds to whole shares (see
+    # _execute_orders), so any genuine drift is at least a full share --
+    # this only absorbs float representation noise, not real quantity.
+    _RECONCILE_POSITION_TOLERANCE = 1e-4
+
+    def _internal_net_position(self) -> tuple[float, dict[str, float]]:
+        """This engine's current belief about net cash/holdings.
+
+        Blended mode has one shared ``PortfolioState`` -- return it as-is.
+        Sleeved mode keeps each strategy's book virtual and independent
+        (see ``Orchestrator._sleeve_portfolios``); none of them individually
+        corresponds to the real broker account, only their sum does, since
+        the broker only ever sees the final netted order per symbol across
+        all sleeves. Falls back to the top-level (broker-mirrored)
+        ``self._portfolio`` when no sleeve has been allocated yet (e.g.
+        immediately after startup, before the first cycle runs).
+        """
+        if self._orchestrator.capital_allocation_mode == "sleeved":
+            sleeves = getattr(self._orchestrator, "_sleeve_portfolios", None) or {}
+            if sleeves:
+                net_cash = sum(p.cash for p in sleeves.values())
+                net_holdings: dict[str, float] = {}
+                for p in sleeves.values():
+                    for sym, qty in p.holdings.items():
+                        net_holdings[sym] = net_holdings.get(sym, 0.0) + qty
+                return net_cash, net_holdings
+        return self._portfolio.cash, dict(self._portfolio.holdings)
+
+    def check_reconciliation(self) -> dict[str, Any]:
+        """Compare the broker's real account state, queried right now,
+        against this engine's internally tracked net position/cash.
+
+        Read-only and side-effect-free on trading/portfolio state: this
+        never corrects ``self._portfolio`` or any sleeve book, it only
+        reports and (when a discrepancy exceeds tolerance) raises an alert
+        via the existing ``_emit_alert``/webhook path for a human to
+        investigate. A broker query failure (network blip, outage) reports
+        ``status="unknown"`` rather than treating "couldn't check" as "found
+        a mismatch" -- an unreachable broker says nothing about whether
+        internal state actually matches it.
+
+        Open (unfilled) orders are netted out of the position comparison
+        the same way ``portfolio_sync.sync_portfolio_from_broker`` does, so
+        an order that was just submitted and hasn't settled yet doesn't
+        read as drift.
+        """
+        now = utcnow()
+        try:
+            account = self._broker.get_account()
+            broker_positions = self._broker.get_positions()
+        except Exception as exc:
+            log.warning("Reconciliation: broker query failed", exc_info=True)
+            result = {
+                "status": "unknown",
+                "checked_at": now.isoformat(),
+                "reason": f"broker query failed: {exc}",
+                "discrepancies": [],
+            }
+            self._last_reconciliation = result
+            return result
+
+        pending: dict[str, float] = {}
+        try:
+            for o in self._broker.get_open_orders():
+                remaining = max(0.0, o.quantity - o.filled_quantity)
+                if remaining <= 0:
+                    continue
+                sign = 1.0 if o.side == "buy" else -1.0
+                pending[o.symbol] = pending.get(o.symbol, 0.0) + sign * remaining
+        except Exception:
+            # Degrades to "no in-flight orders known" rather than failing
+            # the whole check -- a position gap that's really just a
+            # settling order may then look like a mismatch, but that's
+            # still safer than treating "can't tell" as "definitely fine".
+            log.warning(
+                "Reconciliation: could not fetch open orders; position "
+                "diffs may include still-settling fills", exc_info=True,
+            )
+
+        internal_cash, internal_holdings = self._internal_net_position()
+        broker_cash = float(account.get("cash", 0.0))
+        broker_map = {p.symbol: p.quantity for p in broker_positions}
+
+        discrepancies: list[dict[str, Any]] = []
+
+        cash_tolerance = max(
+            self._RECONCILE_CASH_TOLERANCE_FLOOR,
+            self._RECONCILE_CASH_TOLERANCE_RELATIVE * abs(broker_cash),
+        )
+        cash_diff = broker_cash - internal_cash
+        if abs(cash_diff) > cash_tolerance:
+            discrepancies.append({
+                "type": "cash_mismatch",
+                "internal": round(internal_cash, 2),
+                "broker": round(broker_cash, 2),
+                "diff": round(cash_diff, 2),
+                "tolerance": round(cash_tolerance, 2),
+            })
+
+        for sym in sorted(set(internal_holdings) | set(broker_map)):
+            internal_qty = internal_holdings.get(sym, 0.0)
+            broker_qty = broker_map.get(sym, 0.0)
+            expected_qty = broker_qty + pending.get(sym, 0.0)
+            # Explained by an order still settling at the broker either way
+            # round (internal ahead of or behind the current broker read).
+            if abs(internal_qty - expected_qty) <= self._RECONCILE_POSITION_TOLERANCE:
+                continue
+            if abs(internal_qty - broker_qty) <= self._RECONCILE_POSITION_TOLERANCE:
+                continue
+            discrepancies.append({
+                "type": "position_mismatch",
+                "symbol": sym,
+                "internal": internal_qty,
+                "broker": broker_qty,
+                "diff": round(broker_qty - internal_qty, 4),
+            })
+
+        result = {
+            "status": "mismatch" if discrepancies else "ok",
+            "checked_at": now.isoformat(),
+            "mode": self._orchestrator.capital_allocation_mode,
+            "internal_cash": round(internal_cash, 2),
+            "broker_cash": round(broker_cash, 2),
+            "discrepancies": discrepancies,
+        }
+        self._last_reconciliation = result
+
+        if discrepancies:
+            detail = "; ".join(
+                f"{d['type']}"
+                f"{' ' + d['symbol'] if 'symbol' in d else ''}"
+                f": internal={d['internal']} broker={d['broker']}"
+                for d in discrepancies
+            )
+            self._emit_alert(
+                "portfolio_reconciliation_mismatch", "warning",
+                f"Broker/internal reconciliation found {len(discrepancies)} "
+                f"discrepancy(ies) beyond tolerance: {detail}",
+                discrepancies=discrepancies,
+            )
+        return result
 
     def clear_cycle_history(self) -> int:
         """Wipe the in-memory cycle/order history. Returns the count removed.
@@ -1325,6 +1497,60 @@ class LiveTradingEngine:
                 log.warning("Failed to persist freshly-seeded sleeve portfolios", exc_info=True)
         return summary
 
+    def get_capital_reallocation_recommendation(self, **overrides: Any) -> dict[str, Any]:
+        """Read-only: what :meth:`apply_capital_reallocation` would do right
+        now. Safe to call at any time, regardless of whether
+        the scheduled ``capital_reallocation`` check is enabled -- this is
+        the visibility half of the mechanism and is deliberately
+        independent of whether the periodic check is turned on. See
+        ``firm.live.capital_reallocation_job.compute_recommendation``.
+        """
+        from firm.live.capital_reallocation_job import compute_recommendation, reallocation_params
+
+        cfg = dict((self._config or {}).get("capital_reallocation") or {})
+        params = reallocation_params(cfg)
+        params.update(overrides)
+        return compute_recommendation(self, **params)
+
+    def apply_capital_reallocation(self) -> dict[str, Any]:
+        """Human-triggered: recompute the recommendation fresh and actually
+        move capital between sleeves to match it.
+
+        Always recomputes rather than accepting a caller-supplied weights
+        dict, so what gets applied can never drift from what a human most
+        recently reviewed via :meth:`get_capital_reallocation_recommendation`
+        -- the same "apply re-derives, never trusts a stale blob" principle
+        already used by ``POST /api/live/recommendations/{date}/apply``.
+        The scheduled ``capital_reallocation.enabled`` check has no bearing
+        on whether this is callable -- it only gates the periodic
+        visibility check; this action is always explicit and human-gated,
+        never automatic (see ``firm.live.capital_reallocation_job``).
+        """
+        from firm.live.capital_reallocation import weights_only
+
+        recommendation = self.get_capital_reallocation_recommendation()
+        if not recommendation["sleeves"]:
+            raise ValueError(recommendation.get("note", "capital_reallocation: nothing to apply"))
+
+        new_weights = weights_only(recommendation["sleeves"])
+        summary = self._orchestrator.apply_capital_reallocation(new_weights)
+        self._config = {**self._config, "strategy_capital_weights": new_weights}
+        self._record_manual_action(
+            "capital_reallocation_apply", {"new_weights": new_weights, "summary": summary},
+        )
+        if self._state_store is not None:
+            try:
+                self._state_store.save_sleeve_portfolios(
+                    self._orchestrator.export_sleeve_portfolios()
+                )
+            except Exception:
+                log.warning(
+                    "Failed to persist sleeve portfolios after capital reallocation",
+                    exc_info=True,
+                )
+        log.info("Applied capital reallocation: %s", new_weights)
+        return {"recommendation": recommendation, "summary": summary}
+
     def flatten_symbol(self, symbol: str) -> dict[str, Any]:
         """Force an immediate, complete exit of *symbol*'s REAL broker
         position, outside the normal cycle (2026-09-20).
@@ -1387,7 +1613,9 @@ class LiveTradingEngine:
         return {
             "symbol": symbol,
             "flattened": bool(statuses) and not failed,
-            "order_statuses": [self._status_to_dict(s, "manual_flatten") for s, _ in statuses],
+            "order_statuses": [
+                self._status_to_dict(s, "manual_flatten", order=o) for s, _, o in statuses
+            ],
             "failed": failed,
         }
 
@@ -1451,7 +1679,7 @@ class LiveTradingEngine:
         kind: str,
         details: dict[str, Any],
         *,
-        statuses: list[tuple[OrderStatus, str]] | None = None,
+        statuses: list[tuple[OrderStatus, str, dict[str, Any]]] | None = None,
         failed: list[dict[str, Any]] | None = None,
     ) -> None:
         """Persist an operator-triggered action (flatten, etc.) to the same
@@ -1469,7 +1697,7 @@ class LiveTradingEngine:
         self._trade_history.record_cycle(entry)
         if statuses:
             self._trade_history.record_orders(
-                [self._status_to_dict(s, strat) for s, strat in statuses],
+                [self._status_to_dict(s, strat, order=o) for s, strat, o in statuses],
                 source=f"manual:{kind}",
             )
         if failed:
@@ -1919,7 +2147,7 @@ class LiveTradingEngine:
                 )
                 result.orders_submitted = len(statuses)
                 result.order_statuses = [
-                    self._status_to_dict(s, strategy) for s, strategy in statuses
+                    self._status_to_dict(s, strategy, order=o) for s, strategy, o in statuses
                 ]
                 result.failed_orders = failed
                 result.orders_failed = len(failed)
@@ -2388,7 +2616,7 @@ class LiveTradingEngine:
         orders: list[dict[str, Any]],
         cycle_id: int = 0,
         extended_hours: bool = False,
-    ) -> tuple[list[tuple[OrderStatus, str]], list[dict[str, Any]]]:
+    ) -> tuple[list[tuple[OrderStatus, str, dict[str, Any]]], list[dict[str, Any]]]:
         """Submit orders to the broker.
 
         Returns ``(statuses, failed)`` where *failed* lists the orders whose
@@ -2397,11 +2625,14 @@ class LiveTradingEngine:
         deterministic ``client_order_id`` so the broker can deduplicate a
         re-submission of the same cycle's order.
 
-        ``statuses`` is ``(OrderStatus, strategy)`` pairs, not bare
-        ``OrderStatus`` — the originating strategy is only known here, at
-        submission time, and must be threaded through explicitly for the
-        persisted trade history to remain traceable back to which strategy
-        caused which order (see ``_status_to_dict``).
+        ``statuses`` is ``(OrderStatus, strategy, order)`` triples, not bare
+        ``OrderStatus`` — the originating strategy and the pre-submission
+        order dict (decision-time ``price`` + ``est_*`` cost fields) are
+        only known here, at submission time, and must be threaded through
+        explicitly for the persisted trade history to remain traceable back
+        to which strategy caused which order and for realized-vs-modeled
+        cost to be computable at all afterward (see ``_status_to_dict`` and
+        ``firm.eval.tca``).
 
         ``extended_hours`` is set on every ``OrderRequest`` built here
         (``run_cycle``'s only caller passes ``result.extended_hours_cycle``,
@@ -2449,7 +2680,7 @@ class LiveTradingEngine:
             require_stop=False,
         )
 
-        statuses: list[tuple[OrderStatus, str]] = []
+        statuses: list[tuple[OrderStatus, str, dict[str, Any]]] = []
         failed: list[dict[str, Any]] = []
         # Circuit breaker: confirmed live 2026-08-07 that once the broker
         # connection is in a bad state (IBKR Gateway stalled mid-cycle after
@@ -2534,14 +2765,17 @@ class LiveTradingEngine:
             try:
                 status = self._broker.submit_order(req)
                 consecutive_broker_failures = 0
-                # Paired with req.strategy here (not read back off `status`
-                # later): OrderStatus is a broker-level type with no notion
-                # of which of *our* strategies caused it — this is the only
-                # point where that link still exists, and losing it here
-                # means the persisted trade history can never answer "which
-                # strategy placed this order" (needed for reflection/
-                # lessons-learned, not just display).
-                statuses.append((status, req.strategy))
+                # Paired with req.strategy and the original order dict `o`
+                # here (not read back off `status` later): OrderStatus is a
+                # broker-level type with no notion of which of *our*
+                # strategies caused it, or what price/cost this order was
+                # decided against — this is the only point where either
+                # link still exists, and losing it here means the persisted
+                # trade history can never answer "which strategy placed
+                # this order" (needed for reflection/lessons-learned, not
+                # just display) or "was the modeled cost estimate right"
+                # (needed for TCA — see firm.eval.tca).
+                statuses.append((status, req.strategy, o))
                 log.info("Submitted: %s %s %.2f %s → %s",
                          req.side, req.symbol, req.quantity, req.order_type, status.status)
             except BrokerError as exc:
@@ -2634,8 +2868,22 @@ class LiveTradingEngine:
         return fills
 
     @staticmethod
-    def _status_to_dict(s: OrderStatus, strategy: str = "") -> dict[str, Any]:
-        return {
+    def _status_to_dict(
+        s: OrderStatus, strategy: str = "", order: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Serialize a broker fill confirmation, optionally merging in the
+        originating order's decision-time context.
+
+        ``order`` is the pre-submission order dict (``ExecutionAgent``'s
+        ``price``/``notional``/``est_*`` fields — see its docstring) from
+        the same call that produced *s*. Merging it onto this same
+        persisted record, rather than a separately-keyed one, is what lets
+        ``firm.eval.tca`` compute realized-vs-modeled cost later purely by
+        reading order history — no separate store, and it stays correct
+        across ``order_reconciliation``'s later in-place status/fill
+        corrections since those only touch their own keys.
+        """
+        d = {
             "order_id": s.order_id,
             "symbol": s.symbol,
             "side": s.side,
@@ -2646,3 +2894,9 @@ class LiveTradingEngine:
             "timestamp": s.timestamp.isoformat() if s.timestamp else None,
             "strategy": strategy,
         }
+        if order is not None:
+            d["price"] = order.get("price")
+            d["notional"] = order.get("notional")
+            for key in ("est_commission", "est_slippage", "est_spread", "est_impact", "est_cost"):
+                d[key] = order.get(key)
+        return d
