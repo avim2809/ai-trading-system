@@ -221,6 +221,13 @@ class Settings(BaseSettings):
     # Orchestrator.__init__'s docstring for why the blended-mode band alone
     # silently produces zero real turnover once capital is split many ways.
     real_rebalance_band_pct: float | None = None
+    # Adaptive per-sleeve capital reweighting scheduled check (off unless
+    # ``enabled: true``). Live-only (read by firm.live.scheduler /
+    # firm.live.capital_reallocation_job against a running sleeved
+    # engine's own NAV history) — declared here for schema-consistency
+    # with the other config blocks in this class, not because the
+    # backtest path consumes it. See firm.live.capital_reallocation.
+    capital_reallocation: dict[str, Any] = Field(default_factory=dict)
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

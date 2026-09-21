@@ -788,3 +788,100 @@ class TestSleeveMetrics:
         metrics = orch.get_sleeve_metrics()
         expected_total_return = 110.0 / 100.0 - 1.0
         assert metrics["momentum"]["total_return"] == pytest.approx(expected_total_return)
+
+    def test_get_sleeve_metrics_includes_n_days_sample_size(self):
+        """firm.live.capital_reallocation gates reweighting on how much
+        daily history backs a sleeve's ratio -- get_sleeve_metrics must
+        expose that count, not just the ratios themselves."""
+        orch = _make_orchestrator(analysts=[], sleeve_traders={"momentum": TraderAgent()})
+        portfolio = orch._get_or_create_sleeve_portfolio("momentum", 1.0)
+        portfolio.holdings = {"AAPL": 100.0}
+        for i, price in enumerate((100.0, 105.0, 110.0)):
+            portfolio.record_snapshot(NOW + timedelta(days=i), {"AAPL": price})
+
+        metrics = orch.get_sleeve_metrics()
+        # 3 distinct-day snapshots -> pct_change().dropna() drops the first
+        # (NaN) row, leaving 2 daily return observations.
+        assert metrics["momentum"]["n_days"] == 2
+
+
+class TestSleeveCapitalWeightsPublicAccessor:
+    def test_matches_private_implementation(self):
+        orch = _make_orchestrator(
+            analysts=[],
+            sleeve_traders={"momentum": TraderAgent(), "trend": TraderAgent()},
+            config={"strategy_capital_weights": {"momentum": 0.6}},
+        )
+        assert orch.sleeve_capital_weights() == orch._sleeve_capital_weights()
+        assert orch.sleeve_capital_weights() == {"momentum": 0.6, "trend": 0.4}
+
+
+class TestApplyCapitalReallocation:
+    """Orchestrator.apply_capital_reallocation -- the actual cash-moving
+    mechanism a capital-reallocation recommendation is applied through
+    (firm.live.capital_reallocation_job / POST /api/live/capital-
+    reallocation/apply never mutate anything themselves)."""
+
+    def test_raises_outside_sleeved_mode(self):
+        orch = _make_orchestrator(analysts=[])  # blended (no sleeve_traders)
+        with pytest.raises(ValueError, match="not in sleeved mode"):
+            orch.apply_capital_reallocation({"momentum": 1.0})
+
+    def test_raises_before_any_sleeve_has_traded(self):
+        orch = _make_orchestrator(analysts=[], sleeve_traders={"momentum": TraderAgent()})
+        with pytest.raises(ValueError, match="no sleeve portfolios exist"):
+            orch.apply_capital_reallocation({"momentum": 1.0})
+
+    def test_moves_cash_between_sleeves_to_hit_target_nav(self):
+        orch = _make_orchestrator(
+            analysts=[],
+            sleeve_traders={"momentum": TraderAgent(), "mean_reversion": TraderAgent()},
+        )
+        momentum = orch._get_or_create_sleeve_portfolio("momentum", 0.5)
+        mean_reversion = orch._get_or_create_sleeve_portfolio("mean_reversion", 0.5)
+        assert momentum.nav == pytest.approx(500_000.0)
+        assert mean_reversion.nav == pytest.approx(500_000.0)
+
+        summary = orch.apply_capital_reallocation({"momentum": 0.7, "mean_reversion": 0.3})
+
+        assert momentum.nav == pytest.approx(700_000.0)
+        assert mean_reversion.nav == pytest.approx(300_000.0)
+        # Holdings are never touched -- only cash moves.
+        assert momentum.holdings == {}
+        assert mean_reversion.holdings == {}
+        assert summary["momentum"]["cash_delta"] == pytest.approx(200_000.0)
+        assert summary["mean_reversion"]["cash_delta"] == pytest.approx(-200_000.0)
+        # The new split becomes the baseline for any later rebuild/reallocation.
+        assert orch.sleeve_capital_weights() == {"momentum": 0.7, "mean_reversion": 0.3}
+
+    def test_holdings_marked_to_market_are_preserved_in_nav_target(self):
+        orch = _make_orchestrator(
+            analysts=[],
+            sleeve_traders={"momentum": TraderAgent(), "mean_reversion": TraderAgent()},
+        )
+        momentum = orch._get_or_create_sleeve_portfolio("momentum", 0.5)
+        mean_reversion = orch._get_or_create_sleeve_portfolio("mean_reversion", 0.5)
+        momentum.holdings = {"AAPL": 1_000.0}
+        momentum.get_weights({"AAPL": 100.0})  # marks _last_prices so .nav reflects it
+
+        total_nav_before = momentum.nav + mean_reversion.nav
+        orch.apply_capital_reallocation({"momentum": 0.6, "mean_reversion": 0.4})
+
+        assert momentum.holdings == {"AAPL": 1_000.0}  # untouched
+        assert momentum.nav == pytest.approx(0.6 * total_nav_before)
+        assert mean_reversion.nav == pytest.approx(0.4 * total_nav_before)
+
+    def test_strategy_missing_from_new_weights_keeps_its_current_share(self):
+        """A caller bug that omits a sleeve from the target map must not
+        silently zero that sleeve's capital."""
+        orch = _make_orchestrator(
+            analysts=[],
+            sleeve_traders={"momentum": TraderAgent(), "mean_reversion": TraderAgent()},
+        )
+        momentum = orch._get_or_create_sleeve_portfolio("momentum", 0.5)
+        mean_reversion = orch._get_or_create_sleeve_portfolio("mean_reversion", 0.5)
+
+        orch.apply_capital_reallocation({"momentum": 0.8})  # mean_reversion omitted
+
+        assert mean_reversion.nav == pytest.approx(500_000.0)  # unchanged
+        assert momentum.nav == pytest.approx(800_000.0)

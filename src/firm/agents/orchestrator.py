@@ -760,7 +760,76 @@ class Orchestrator(Agent):
             if returns.empty:
                 continue
             result[strategy] = compute_all_metrics(returns)
+            # Sample size, not one of compute_all_metrics' own fields --
+            # consumers that tilt on these numbers (e.g.
+            # firm.live.capital_reallocation) need to know how much daily
+            # history backs a ratio before trusting it, since a 3-day
+            # Sharpe is mostly noise.
+            result[strategy]["n_days"] = float(len(returns))
         return result
+
+    def sleeve_capital_weights(self) -> dict[str, float]:
+        """Public accessor for :meth:`_sleeve_capital_weights` -- each
+        sleeved strategy's current target fraction of total capital (the
+        last-applied split, or the original static config split if no
+        reallocation has ever run). This is the baseline
+        ``firm.live.capital_reallocation`` tilts away from, and what
+        :meth:`apply_capital_reallocation` updates going forward.
+        """
+        return self._sleeve_capital_weights()
+
+    def apply_capital_reallocation(self, new_weights: dict[str, float]) -> dict[str, dict[str, float]]:
+        """Move capital between existing sleeves to match *new_weights* now.
+
+        Adjusts each sleeve's ``cash`` so its NAV lands on
+        ``new_weights[strategy] * (sum of every sleeve's current NAV)``,
+        holdings left untouched -- the same "adjust cash, don't touch
+        positions" technique :meth:`seed_sleeve_portfolios_from_attribution`
+        already established for cutover seeding. A sleeve's actual
+        positions only move once its own next trading cycle runs; this call
+        changes how much cash it has to work with from that cycle on, not
+        its book today. Uses each sleeve's own last-marked price
+        (``PortfolioState.nav``) rather than a fresh quote -- sleeves already
+        mark on every live cycle, so this is at most one cycle stale, and it
+        avoids a broker dependency for what is otherwise pure bookkeeping.
+
+        A strategy missing from *new_weights* keeps its current actual NAV
+        share unchanged (not zeroed) -- callers are expected to pass a
+        complete map (this is exactly what
+        ``firm.live.capital_reallocation.weights_only`` produces), so a
+        missing key most likely means a caller bug, and silently
+        zeroing a sleeve's capital on a bug is the wrong failure mode.
+
+        Also updates ``self._strategy_capital_weights`` so any later
+        orchestrator rebuild, or any strategy added afterward, uses the new
+        split rather than the stale pre-reallocation one.
+
+        Refuses (``ValueError``) outside sleeved mode or before any sleeve
+        has ever traded -- there is nothing to reallocate between yet.
+        """
+        if self.capital_allocation_mode != "sleeved":
+            raise ValueError("apply_capital_reallocation: engine is not in sleeved mode")
+        if not self._sleeve_portfolios:
+            raise ValueError("apply_capital_reallocation: no sleeve portfolios exist yet")
+
+        total_nav = sum(p.nav for p in self._sleeve_portfolios.values())
+        summary: dict[str, dict[str, float]] = {}
+        for strategy, portfolio in self._sleeve_portfolios.items():
+            old_nav = portfolio.nav
+            default_weight = (old_nav / total_nav) if total_nav > 1e-9 else 0.0
+            weight = float(new_weights[strategy]) if strategy in new_weights else default_weight
+            target_capital = weight * total_nav
+            delta = target_capital - old_nav
+            portfolio.cash += delta
+            summary[strategy] = {
+                "old_nav": old_nav,
+                "weight_applied": weight,
+                "new_target_capital": target_capital,
+                "cash_delta": delta,
+            }
+        self._strategy_capital_weights = dict(new_weights)
+        log.info("Applied capital reallocation across %d sleeve(s): %s", len(summary), summary)
+        return summary
 
     def _step_sleeved(
         self, context: dict[str, Any], extended_hours: bool = False,

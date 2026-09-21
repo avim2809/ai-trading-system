@@ -267,6 +267,14 @@ def resolve_live_startup(
         "capital_allocation_mode",
         "strategy_capital_weights",
         "real_rebalance_band_pct",
+        # Adaptive per-sleeve capital reweighting scheduled check (see
+        # firm.live.capital_reallocation_job) — off by default
+        # ({"enabled": false}), same silent-drop bug class as every other
+        # key in this tuple: without this, config/live_alpaca.yaml could
+        # set capital_reallocation.enabled: true and it would never reach
+        # _start_live_scheduler's copy of engine_config via the systemd
+        # auto-start path.
+        "capital_reallocation",
         # Orchestrator._llm_open_close_only opt-out valve (see
         # config/live.yaml's "hourly_market_hours" schedule comment,
         # 2026-09-18) — same silent-drop bug class as conviction_smoothing_

@@ -72,6 +72,34 @@ protective_orders:
 # post-restart cycle, or every sleeve starts from zero positions instead).
 capital_allocation_mode: sleeved
 
+# ──────────────────────────────────────────────────────────────
+# Adaptive per-sleeve capital reweighting (firm.live.capital_reallocation)
+# — DISABLED. `strategy_capital_weights` above is a static
+# split fixed at cutover; when enabled, this periodically recomputes it
+# from each sleeve's own trailing `metric` (via Orchestrator.
+# get_sleeve_metrics(), the same numbers GET /api/live/attribution
+# reports), tilted toward better recent risk-adjusted performance and
+# floor/cap-clamped so one bad or good stretch can't swing the whole
+# book. Even when enabled, this only computes and logs a recommendation
+# on the configured cadence (see firm.live.capital_reallocation_job) —
+# it never reallocates capital by itself. A human reviews
+# GET /api/live/capital-reallocation/recommendation and applies it
+# explicitly via POST .../apply, or doesn't.
+#
+# Not yet validated against historical data — leave disabled until that
+# pass happens (see docs/capital_sleeves_plan.md for this instance's own
+# validate-before-cutover precedent).
+# ──────────────────────────────────────────────────────────────
+capital_reallocation:
+  enabled: false
+  day_of_week: sun
+  hour: 6
+  metric: sortino_ratio
+  floor_pct: 0.03
+  cap_pct: 0.35
+  min_track_days: 30
+  tilt_strength: 0.25
+
 # Live cycles read ``data/cache/combined/fundamentals`` only (no per-cycle API).
 # firm-api refreshes that cache daily at fundamentals_refresh_hour and at boot
 # when older than FIRM_FUNDAMENTALS_REFRESH_MAX_AGE_HOURS (default 24).

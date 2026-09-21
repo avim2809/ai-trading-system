@@ -119,6 +119,23 @@ strategy_regime_weights:
       regime_hmm: 0.5
       volatility_breakout: 0.8
 
+# Adaptive per-sleeve capital reweighting (off by default; sleeved mode
+# only, see capital_allocation_mode in config/live_alpaca.yaml). Weekly
+# check: reweights each sleeve toward its trailing `metric`, floored/capped
+# so one bad or good stretch can't swing the whole book. Never auto-applies
+# even when enabled — see firm.live.capital_reallocation_job and
+# POST /api/live/capital-reallocation/apply. Not yet validated against
+# historical data; leave disabled until that pass happens.
+capital_reallocation:
+  enabled: false
+  day_of_week: sun
+  hour: 6
+  metric: sortino_ratio
+  floor_pct: 0.03
+  cap_pct: 0.35
+  min_track_days: 30
+  tilt_strength: 0.25
+
 # Per-strategy params — mirrored in config/live.yaml for IBKR paper runs.
 strategy_params:
   stat_arb:
