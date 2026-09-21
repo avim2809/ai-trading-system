@@ -9,6 +9,7 @@ Applies a constraint pipeline to the proposed target weights:
 5. ADV/participation-rate liquidity cap (if point-in-time price data available)
 6. Volatility targeting (scale weights to achieve target vol)
 7. Drawdown circuit breaker (reduce exposure when drawdown > threshold)
+8. Factor-exposure cap (market beta / momentum; opt-in, see ``factor_risk``)
 
 If the cumulative adjustments are too severe the proposal is **vetoed**
 (``RiskDecision.approved = False``).
@@ -266,6 +267,39 @@ class RiskAgent(Agent):
         # normally, only the final committed weight is locked at zero.
         self.incubating_symbols: set[str] = set(cfg.get("incubating_symbols", []))
 
+        # Optional factor-exposure overlay (off by default — absent
+        # ``factor_risk`` config is a complete no-op). Per-name/sector caps
+        # only see raw weights, so a book that's individually diversified by
+        # those measures can still be one concentrated bet on a shared
+        # underlying factor (e.g. several names that each pass
+        # max_position_pct/max_sector_pct but all carry high market beta or
+        # the same momentum tilt). Computes the book's net weighted exposure
+        # to a small, explainable factor set — market beta and price
+        # momentum from price history already available via ctx.pit_view,
+        # plus sector via the existing static sector_map/
+        # _cap_sector_concentration rather than a second sector model — see
+        # firm.agents._factor_risk for the exposure math.
+        #
+        # Visibility and enforcement are separate opt-ins on purpose:
+        # ``report`` computes and logs exposures (and records
+        # last_factor_exposures) without touching targets, so the model's
+        # numbers can be sanity-checked against a real book before
+        # ``enabled`` is ever turned on to let it clip weights.
+        factor_cfg = cfg.get("factor_risk", {}) or {}
+        self.factor_risk_enabled: bool = bool(factor_cfg.get("enabled", False))
+        self.factor_risk_report_enabled: bool = bool(factor_cfg.get("report", False))
+        self.factor_risk_benchmark_symbol: str = factor_cfg.get("benchmark_symbol", "SPY")
+        self.max_beta_exposure: float | None = factor_cfg.get("max_beta_exposure")
+        self.max_momentum_exposure: float | None = factor_cfg.get("max_momentum_exposure")
+        self.factor_beta_lookback_days: int = int(factor_cfg.get("beta_lookback_days", 60))
+        self.factor_momentum_lookback_days: int = int(
+            factor_cfg.get("momentum_lookback_days", 60)
+        )
+        # Last computed exposures, for external read-only inspection (e.g. a
+        # future API/UI panel) — {} until at least one cycle has run this
+        # overlay with a pit_view available.
+        self.last_factor_exposures: dict[str, Any] = {}
+
     def run(self, ctx: AgentContext, **inputs: Any) -> RiskDecision:
         """Apply this call's ``sleeve_risk_overrides`` (if any) for the
         strategy named in ``inputs["strategy"]``, then delegate to
@@ -346,6 +380,11 @@ class RiskAgent(Agent):
 
         if self.correlation_threshold:
             targets, v, a = self._cap_correlated_exposure(targets, ctx)
+            violations.extend(v)
+            actions.extend(a)
+
+        if self.factor_risk_enabled or self.factor_risk_report_enabled:
+            targets, v, a = self._factor_risk_overlay(targets, ctx)
             violations.extend(v)
             actions.extend(a)
 
@@ -778,6 +817,90 @@ class RiskAgent(Agent):
                 )
 
         return adjusted, violations, actions
+
+    def _factor_risk_overlay(
+        self,
+        targets: dict[str, float],
+        ctx: AgentContext,
+    ) -> tuple[dict[str, float], list[str], list[str]]:
+        """Compute net factor exposures and, if enabled, clip on breach.
+
+        Always computes and stores ``self.last_factor_exposures`` when a
+        pit_view is available — even under report-only mode with no limits
+        configured — so the exposures are inspectable before ``enabled`` is
+        ever turned on. Breaches scale *all* weights down by a single
+        factor (never up): beta and momentum are both linear in the target
+        weights, so one uniform scale satisfies whichever of the two limits
+        is more binding, the same "never lever up past other caps"
+        convention as ``_vol_targeting``/``_cvar_overlay`` above.
+        """
+        pit_view = getattr(ctx, "pit_view", None)
+        if pit_view is None:
+            return targets, [], []
+
+        from firm.agents._factor_risk import portfolio_factor_exposures
+
+        try:
+            exposures = portfolio_factor_exposures(
+                pit_view,
+                targets,
+                benchmark_symbol=self.factor_risk_benchmark_symbol,
+                beta_lookback_days=self.factor_beta_lookback_days,
+                momentum_lookback_days=self.factor_momentum_lookback_days,
+            )
+        except Exception as exc:
+            log.warning(
+                "Factor risk overlay: exposure computation failed (%s)",
+                exc, exc_info=True,
+            )
+            return targets, [], []
+
+        self.last_factor_exposures = exposures
+        log.info(
+            "Factor exposures: beta=%.3f momentum=%.3f (%d/%d symbols priced)",
+            exposures["beta"], exposures["momentum"],
+            len(exposures["per_symbol"]), len(targets),
+        )
+
+        if not self.factor_risk_enabled:
+            return targets, [], []
+
+        violations: list[str] = []
+        scale = 1.0
+
+        beta_exp = exposures["beta"]
+        if self.max_beta_exposure is not None and abs(beta_exp) > self.max_beta_exposure:
+            scale = min(scale, self.max_beta_exposure / abs(beta_exp))
+            violations.append(
+                f"Portfolio beta exposure {beta_exp:.3f} exceeds cap "
+                f"{self.max_beta_exposure}"
+            )
+
+        mom_exp = exposures["momentum"]
+        if (
+            self.max_momentum_exposure is not None
+            and abs(mom_exp) > self.max_momentum_exposure
+        ):
+            scale = min(scale, self.max_momentum_exposure / abs(mom_exp))
+            violations.append(
+                f"Portfolio momentum exposure {mom_exp:.3f} exceeds cap "
+                f"{self.max_momentum_exposure}"
+            )
+
+        if scale >= 1.0 - 1e-12:
+            return targets, [], []
+
+        scaled = {s: w * scale for s, w in targets.items()}
+        log.warning(
+            "Risk scale: factor exposure breach (beta=%.3f, momentum=%.3f) — "
+            "scaled all weights by %.4f",
+            beta_exp, mom_exp, scale,
+        )
+        return (
+            scaled,
+            violations,
+            [f"Scaled all weights by {scale:.4f} (factor-risk overlay)"],
+        )
 
     def _cvar_overlay(
         self,

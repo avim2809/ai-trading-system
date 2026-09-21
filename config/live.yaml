@@ -282,6 +282,22 @@ risk:
   # cvar_confidence: 0.95
   # cvar_lookback_days: 60
 
+  # Factor-exposure overlay (market beta / momentum) — catches a book that
+  # clears every per-name/sector cap above while still being one
+  # concentrated bet on a shared factor (e.g. several high-beta,
+  # momentum-tilted names). Off by default pending a dedicated backtest
+  # validation pass — do not enable without first reviewing
+  # RiskAgent.last_factor_exposures (or `report: true` below) against real
+  # cycles. See RiskAgent._factor_risk_overlay / firm.agents._factor_risk.
+  # factor_risk:
+  #   enabled: false
+  #   report: false          # true: compute + log exposures, no enforcement
+  #   benchmark_symbol: SPY
+  #   max_beta_exposure: 1.2
+  #   max_momentum_exposure: 0.6
+  #   beta_lookback_days: 60
+  #   momentum_lookback_days: 60
+
   # Per-position stop-loss for mean_reversion/stat_arb — both strategies'
   # own docstrings call for one ("reversals can fail spectacularly during
   # momentum-driven crashes") but neither the strategy layer nor this agent

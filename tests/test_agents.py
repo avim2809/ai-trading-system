@@ -1565,6 +1565,238 @@ class TestRiskManager:
         decision = risk.run(ctx, proposal=proposal)
         assert decision.adjusted_targets["TAIL"] == pytest.approx(0.3)
 
+    # ── Factor-exposure overlay (market beta / momentum) ──
+
+    @staticmethod
+    def _beta_pit_view(n_days: int = 30):
+        """SPY (benchmark) plus HIGH (exactly 2x SPY's daily return each
+        day) and LOW (exactly 0.5x) — beta is a linear covariance ratio, so
+        scaling one return series by a constant scales its beta by that
+        same constant regardless of the actual return magnitudes, giving an
+        exact expected beta to assert against (2.0 / 0.5)."""
+        import pandas as pd
+
+        dates = pd.bdate_range("2023-01-01", periods=n_days)
+        base_returns = [0.01, -0.02, 0.015, -0.005, 0.02] * (n_days // 5 + 1)
+        rows = []
+        px = {"SPY": 100.0, "HIGH": 100.0, "LOW": 100.0}
+        for i, d in enumerate(dates):
+            r = base_returns[i]
+            px["SPY"] *= 1 + r
+            px["HIGH"] *= 1 + 2 * r
+            px["LOW"] *= 1 + 0.5 * r
+            for sym, price in px.items():
+                rows.append({"date": d, "symbol": sym, "close": price, "volume": 1_000_000})
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def _momentum_pit_view():
+        """Three symbols, one trailing return step each: A +10%, B flat,
+        C -10% — a symmetric 3-point distribution whose z-scores work out
+        to exactly +1.0 / 0.0 / -1.0 (sample std with these three points is
+        0.1), so the expected values are exact, not approximate."""
+        import pandas as pd
+
+        dates = pd.bdate_range("2023-01-01", periods=2)
+        rows = []
+        for sym, ret in (("A", 0.10), ("B", 0.0), ("C", -0.10)):
+            rows.append({"date": dates[0], "symbol": sym, "close": 100.0})
+            rows.append({"date": dates[1], "symbol": sym, "close": 100.0 * (1 + ret)})
+        return pd.DataFrame(rows)
+
+    def test_beta_exposure_matches_known_scalar_multiple(self):
+        from firm.agents._factor_risk import compute_beta_exposures
+
+        class _View:
+            asof = NOW
+            universe = ["SPY", "HIGH", "LOW"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._beta_pit_view()
+
+        betas = compute_beta_exposures(
+            _View(), ["HIGH", "LOW"], benchmark_symbol="SPY", lookback_days=30
+        )
+        assert betas["HIGH"] == pytest.approx(2.0, rel=1e-6)
+        assert betas["LOW"] == pytest.approx(0.5, rel=1e-6)
+
+    def test_momentum_zscore_known_values(self):
+        from firm.agents._factor_risk import compute_momentum_zscores
+
+        class _View:
+            asof = NOW
+            universe = ["A", "B", "C"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._momentum_pit_view()
+
+        z = compute_momentum_zscores(_View(), ["A", "B", "C"], lookback_days=5)
+        assert z["A"] == pytest.approx(1.0, rel=1e-6)
+        assert z["B"] == pytest.approx(0.0, abs=1e-9)
+        assert z["C"] == pytest.approx(-1.0, rel=1e-6)
+
+    def test_portfolio_factor_exposures_weighted_sum(self):
+        """Portfolio-level exposure is the target-weighted sum of the
+        per-symbol readings, and only held (nonzero-weight) symbols
+        contribute even though the momentum z-score is scaled against the
+        full universe."""
+        from firm.agents._factor_risk import portfolio_factor_exposures
+
+        class _View:
+            asof = NOW
+            universe = ["A", "B", "C"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._momentum_pit_view()
+
+        exposures = portfolio_factor_exposures(
+            _View(), {"A": 0.6, "C": 0.2}, momentum_lookback_days=5,
+        )
+        assert exposures["momentum"] == pytest.approx(0.6 * 1.0 + 0.2 * -1.0, rel=1e-6)
+        assert set(exposures["per_symbol"]) == {"A", "C"}
+
+    def test_factor_risk_disabled_by_default(self):
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent()
+        assert risk.factor_risk_enabled is False
+        assert risk.factor_risk_report_enabled is False
+        assert risk.last_factor_exposures == {}
+
+    def test_factor_risk_overlay_noop_when_disabled(self):
+        """Absent ``factor_risk`` config must not change behavior even with
+        a pit_view present and a real breach condition in the data — this
+        overlay must be a strict no-op for both currently-running live
+        instances, neither of which sets this config section."""
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["SPY", "HIGH"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._beta_pit_view()
+
+        risk = RiskAgent(config={"max_position_pct": 1.0})
+        proposal = TradeProposal(asof=NOW, targets={"HIGH": 0.5})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["HIGH"] == pytest.approx(0.5)
+        assert risk.last_factor_exposures == {}
+
+    def test_factor_risk_report_only_computes_without_clipping(self):
+        """``report: true`` exposes exposures for inspection but must not
+        touch targets — visibility and enforcement are separate opt-ins."""
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["SPY", "HIGH"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._beta_pit_view()
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "factor_risk": {"report": True, "beta_lookback_days": 30},
+        })
+        proposal = TradeProposal(asof=NOW, targets={"HIGH": 0.5})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["HIGH"] == pytest.approx(0.5)
+        assert risk.last_factor_exposures["beta"] == pytest.approx(0.5 * 2.0, rel=1e-6)
+
+    def test_factor_risk_overlay_clips_on_beta_breach(self, caplog):
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["SPY", "HIGH"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._beta_pit_view()
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "max_net_exposure": 1.0,
+            "factor_risk": {
+                "enabled": True,
+                "max_beta_exposure": 0.5,
+                "beta_lookback_days": 30,
+            },
+        })
+        proposal = TradeProposal(asof=NOW, targets={"HIGH": 0.4})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        with caplog.at_level("WARNING", logger="firm.agents.risk"):
+            decision = risk.run(ctx, proposal=proposal)
+        # portfolio beta = 0.4 * 2.0 = 0.8 > 0.5 cap -> scale = 0.5 / 0.8 = 0.625
+        assert decision.adjusted_targets["HIGH"] == pytest.approx(0.4 * 0.625, rel=1e-4)
+        assert any("beta" in v.lower() for v in decision.violations)
+        assert any("factor" in r.message.lower() for r in caplog.records)
+
+    def test_factor_risk_overlay_clips_on_momentum_breach(self, caplog):
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["A", "B", "C"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._momentum_pit_view()
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "factor_risk": {
+                "enabled": True,
+                "max_momentum_exposure": 0.2,
+                "momentum_lookback_days": 5,
+            },
+        })
+        proposal = TradeProposal(asof=NOW, targets={"A": 0.4})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        with caplog.at_level("WARNING", logger="firm.agents.risk"):
+            decision = risk.run(ctx, proposal=proposal)
+        # momentum z(A) = 1.0 -> exposure = 0.4 > 0.2 cap -> scale = 0.5
+        assert decision.adjusted_targets["A"] == pytest.approx(0.2, rel=1e-4)
+        assert any("momentum" in v.lower() for v in decision.violations)
+
+    def test_factor_risk_overlay_within_limits_not_scaled(self):
+        """A generous limit that isn't breached must leave weights exactly
+        unchanged — this overlay only ever de-risks, never levers up."""
+        from firm.agents.risk import RiskAgent
+
+        class _View:
+            asof = NOW
+            universe = ["SPY", "HIGH"]
+
+            def prices(self, symbols=None, lookback_days=60):
+                return TestRiskManager._beta_pit_view()
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "factor_risk": {
+                "enabled": True,
+                "max_beta_exposure": 5.0,
+                "beta_lookback_days": 30,
+            },
+        })
+        proposal = TradeProposal(asof=NOW, targets={"HIGH": 0.4})
+        ctx = AgentContext(now=NOW, pit_view=_View())
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["HIGH"] == pytest.approx(0.4)
+
+    def test_factor_risk_overlay_noop_without_pit_view(self):
+        from firm.agents.risk import RiskAgent
+
+        risk = RiskAgent(config={
+            "max_position_pct": 1.0,
+            "factor_risk": {"enabled": True, "max_beta_exposure": 0.1},
+        })
+        proposal = TradeProposal(asof=NOW, targets={"HIGH": 0.5})
+        ctx = AgentContext(now=NOW, pit_view=None)
+        decision = risk.run(ctx, proposal=proposal)
+        assert decision.adjusted_targets["HIGH"] == pytest.approx(0.5)
+
     # ── Seasonality exposure overlay (PART 3 of the remediation plan) ──
 
     @staticmethod
