@@ -3023,6 +3023,47 @@ class TestBrokerReconnect:
         assert sustained["reconnected"] is False
 
     @patch("firm.live.engine.build_orchestrator")
+    def test_sustained_failure_escalates_even_when_reconnect_keeps_succeeding(
+        self, mock_build, engine_components
+    ):
+        """Confirmed live 2026-09-21: IBKR's connection/API session kept
+        reconnecting successfully every single cycle while its ushmds
+        historical-data farm stayed broken underneath, so every one of 14
+        consecutive zero-trade cycles reported reconnected=True. A
+        reconnect only proves the socket/session is alive, not that the
+        cycle's actual data path works — the sustained-failure escalation
+        must fire on consecutive_failures alone, not be gated on
+        reconnected being False."""
+        broker, feed, queue, config = engine_components
+        config = {**config, "broker_disconnect_alert_threshold": 3}
+
+        class ReconnectsButNeverWorksBroker(MockBroker):
+            def get_current_prices(self, symbols):
+                raise BrokerError("no usable prices — data farm broken")
+
+            def reconnect(self):
+                # Connection layer itself is healthy — this always "succeeds".
+                pass
+
+        broker = ReconnectsButNeverWorksBroker()
+        mock_build.return_value = MagicMock()
+
+        engine = self._make_engine(broker, feed, queue, config)
+        engine.start()
+
+        results = [engine.run_cycle() for _ in range(3)]
+
+        for result in results[:2]:
+            assert not any(a["kind"] == "broker_disconnected_sustained" for a in result.alerts)
+
+        last = results[2]
+        assert any(a["kind"] == "broker_disconnected_sustained" for a in last.alerts)
+        sustained = next(a for a in last.alerts if a["kind"] == "broker_disconnected_sustained")
+        assert sustained["severity"] == "critical"
+        assert sustained["consecutive_failures"] == 3
+        assert sustained["reconnected"] is True
+
+    @patch("firm.live.engine.build_orchestrator")
     def test_recovery_emits_reconnected_alert_and_resets_counter(self, mock_build, engine_components):
         """Once a cycle's broker calls actually succeed again, the engine
         must announce recovery and reset the failure counter — otherwise a

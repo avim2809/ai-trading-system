@@ -1996,31 +1996,49 @@ class LiveTradingEngine:
         not-yet-sustained failure is the exact "single dropped socket/blip —
         including IB Gateway's routine daily restart — shouldn't need a
         human" case ``_try_broker_reconnect``'s own docstring describes, so
-        it stays "warning". Only the genuinely sustained case (crossed
-        ``broker_disconnect_alert_threshold`` with reconnect still failing)
-        is "critical".
+        it stays "warning". The genuinely sustained case — crossed
+        ``broker_disconnect_alert_threshold`` — is "critical" regardless of
+        ``reconnected``: a successful reconnect only proves the socket/API
+        session is alive, not that the cycle's actual data/order path is
+        working. Confirmed live 2026-09-21 — IBKR's ``ushmds`` historical
+        data farm broke while the connection layer itself kept "reconnecting
+        successfully" every cycle, so under the old reconnected-first check
+        this never escalated past "warning" despite 14 consecutive
+        zero-trade cycles.
         """
-        severity = "warning"
-        message = detail
-        if reconnected:
-            message += (
-                " — reconnected successfully; the next cycle should "
-                "resume normally."
-            )
-            alert_kind = "broker_unavailable"
-        elif self._consecutive_broker_failures >= self._broker_disconnect_alert_threshold:
+        sustained = self._consecutive_broker_failures >= self._broker_disconnect_alert_threshold
+        if sustained:
             alert_kind = "broker_disconnected_sustained"
             severity = "critical"
-            message = (
-                f"Broker has failed {self._consecutive_broker_failures} "
-                f"consecutive cycle(s) and automatic reconnect did not "
-                f"succeed: {detail}. Likely needs manual intervention "
-                "(check IB Gateway is running/logged in, or restart "
-                "ai-trading.service) — see docs/PROJECT_CONTEXT.md "
-                "'Broker & host failover'."
-            )
+            if reconnected:
+                message = (
+                    f"Broker has failed {self._consecutive_broker_failures} "
+                    f"consecutive cycle(s) even though each reconnect "
+                    f"attempt itself succeeded — the connection is alive but "
+                    f"whatever the cycle actually needs keeps failing: "
+                    f"{detail}. Likely needs manual investigation (e.g. "
+                    "check the broker's own data-farm/market-data status, "
+                    "not just the connection) — see docs/PROJECT_CONTEXT.md "
+                    "'Broker & host failover'."
+                )
+            else:
+                message = (
+                    f"Broker has failed {self._consecutive_broker_failures} "
+                    f"consecutive cycle(s) and automatic reconnect did not "
+                    f"succeed: {detail}. Likely needs manual intervention "
+                    "(check IB Gateway is running/logged in, or restart "
+                    "ai-trading.service) — see docs/PROJECT_CONTEXT.md "
+                    "'Broker & host failover'."
+                )
         else:
+            severity = "warning"
             alert_kind = "broker_unavailable"
+            message = detail
+            if reconnected:
+                message += (
+                    " — reconnected successfully; the next cycle should "
+                    "resume normally."
+                )
         result.alerts.append(self._emit_alert(
             alert_kind, severity, message,
             consecutive_failures=self._consecutive_broker_failures,
