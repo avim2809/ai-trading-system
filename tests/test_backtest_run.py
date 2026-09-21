@@ -31,6 +31,35 @@ def _full_history_df() -> pd.DataFrame:
     })
 
 
+def _mock_settings(tmp_path) -> MagicMock:
+    """A get_settings() stand-in safe to hand to firm.runtime's *real*
+    cache loaders (load_fundamentals/load_sentiment/load_macro/etc. are
+    only selectively mocked per test below, so the ones left unmocked run
+    for real against this).
+
+    Regression coverage for a real incident: leaving this a bare, fully
+    unconfigured MagicMock() meant `settings.data.cache_dir` was itself an
+    unconfigured MagicMock -- and MagicMock implements `__fspath__`, so
+    `Path(settings.data.cache_dir)` silently succeeded and
+    `ParquetCache.__init__`'s `.mkdir(parents=True, exist_ok=True)` created
+    a real, literal `MagicMock/get_settings().data.cache_dir/<id>/`
+    directory tree in the repo root on every test run (hundreds of stray
+    dirs accumulated before this was caught) instead of raising/failing
+    loudly. Pointing `.data.cache_dir` at a real pytest tmp_path -- the
+    same pattern already used in test_sentiment_cache.py,
+    test_fundamentals_refresh.py, etc. -- makes ParquetCache write
+    somewhere throwaway and pytest-managed instead.
+    """
+    settings = MagicMock()
+    settings.data.cache_dir = str(tmp_path)
+    # Falsy, not a truthy MagicMock -- otherwise the no-cached-macro-data
+    # fallback path (execute_backtest's `if fred_api_key:` branch) treats an
+    # unconfigured `settings.fred_api_key` attribute as a present API key
+    # and attempts a real, live FRED network call.
+    settings.fred_api_key = ""
+    return settings
+
+
 class _FakeBareReport:
     """Minimal stand-in shaped enough for execute_backtest's post-hoc
     returns-trimming step (empty series -> a no-op, same as a real report
@@ -61,7 +90,7 @@ class _FakeEngine:
 
 
 class TestExecuteBacktestFiltersRealDataByDateRange:
-    def test_prices_passed_to_engine_are_restricted_to_requested_range(self):
+    def test_prices_passed_to_engine_are_restricted_to_requested_range(self, tmp_path):
         config = {
             "data_source": "cache",
             "start_date": "2024-01-01",
@@ -72,7 +101,7 @@ class TestExecuteBacktestFiltersRealDataByDateRange:
         }
 
         with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
-             patch("firm.config.get_settings"), \
+             patch("firm.config.get_settings", return_value=_mock_settings(tmp_path)), \
              patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
              patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
             result = execute_backtest(config)
@@ -84,7 +113,7 @@ class TestExecuteBacktestFiltersRealDataByDateRange:
         # Far less than the ~1650 rows in the full cached history.
         assert len(prices_df) < 100
 
-    def test_different_folds_of_the_same_cache_get_different_data(self):
+    def test_different_folds_of_the_same_cache_get_different_data(self, tmp_path):
         """The actual production symptom: two folds over the same cached
         dataset must not end up looking at identical price windows."""
         base_config = {
@@ -96,7 +125,7 @@ class TestExecuteBacktestFiltersRealDataByDateRange:
         seen = []
         for start, end in [("2020-06-01", "2020-09-01"), ("2025-01-01", "2025-04-01")]:
             with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
-                 patch("firm.config.get_settings"), \
+                 patch("firm.config.get_settings", return_value=_mock_settings(tmp_path)), \
                  patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
                  patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
                 execute_backtest({**base_config, "start_date": start, "end_date": end})
@@ -117,7 +146,7 @@ class TestWarmupBuffer:
     into reported performance.
     """
 
-    def test_loaded_prices_extend_before_start_date_by_default(self):
+    def test_loaded_prices_extend_before_start_date_by_default(self, tmp_path):
         config = {
             "data_source": "cache",
             "start_date": "2024-01-01",
@@ -127,7 +156,7 @@ class TestWarmupBuffer:
         }
 
         with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
-             patch("firm.config.get_settings"), \
+             patch("firm.config.get_settings", return_value=_mock_settings(tmp_path)), \
              patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
              patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
             execute_backtest(config)
@@ -138,7 +167,7 @@ class TestWarmupBuffer:
         # But still never past end_date.
         assert prices_df["date"].max() <= pd.Timestamp("2024-03-01")
 
-    def test_warmup_days_is_configurable(self):
+    def test_warmup_days_is_configurable(self, tmp_path):
         config = {
             "data_source": "cache",
             "start_date": "2024-01-01",
@@ -149,7 +178,7 @@ class TestWarmupBuffer:
         }
 
         with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
-             patch("firm.config.get_settings"), \
+             patch("firm.config.get_settings", return_value=_mock_settings(tmp_path)), \
              patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
              patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
             execute_backtest(config)
@@ -157,7 +186,7 @@ class TestWarmupBuffer:
         prices_df = _FakeEngine.captured["prices_df"]
         assert prices_df["date"].min() >= pd.Timestamp("2024-01-01") - pd.Timedelta(days=14)
 
-    def test_start_date_reaches_bt_config_for_the_firm_strategy_gate(self):
+    def test_start_date_reaches_bt_config_for_the_firm_strategy_gate(self, tmp_path):
         config = {
             "data_source": "cache",
             "start_date": "2024-01-01",
@@ -166,7 +195,7 @@ class TestWarmupBuffer:
             "strategies": ["momentum"],
         }
         with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
-             patch("firm.config.get_settings"), \
+             patch("firm.config.get_settings", return_value=_mock_settings(tmp_path)), \
              patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
              patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
             execute_backtest(config)
@@ -218,7 +247,7 @@ class TestReturnsTrimmedToEvaluationWindow:
     over a stretch of flat, no-trade warmup days that were never meant to
     count."""
 
-    def test_returns_start_at_start_date_not_the_warmup_buffer(self):
+    def test_returns_start_at_start_date_not_the_warmup_buffer(self, tmp_path):
         config = {
             "data_source": "cache",
             "start_date": "2024-01-01",
@@ -227,7 +256,7 @@ class TestReturnsTrimmedToEvaluationWindow:
             "strategies": ["momentum"],
         }
         with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
-             patch("firm.config.get_settings"), \
+             patch("firm.config.get_settings", return_value=_mock_settings(tmp_path)), \
              patch("firm.backtest.run.BacktestEngine", _FakeEngineWithReturns), \
              patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
             report = execute_backtest(config)
@@ -241,7 +270,7 @@ class TestFirmStrategyNeverTradesDuringWarmup:
     warmup-buffer data extending before start_date is visible to
     strategies via pit_view.prices() but genuinely never traded on."""
 
-    def test_no_trades_or_snapshots_before_start_date(self):
+    def test_no_trades_or_snapshots_before_start_date(self, tmp_path):
         from firm.data.synthetic import make_synthetic_prices
 
         # Real, varied multi-symbol data spanning well before and after
@@ -260,7 +289,7 @@ class TestFirmStrategyNeverTradesDuringWarmup:
         }
 
         with patch("firm.runtime.load_prices", return_value=full_df), \
-             patch("firm.config.get_settings"):
+             patch("firm.config.get_settings", return_value=_mock_settings(tmp_path)):
             report = execute_backtest(config)
 
         start_ts = pd.Timestamp("2024-01-01")
@@ -275,7 +304,7 @@ class TestFirmStrategyNeverTradesDuringWarmup:
 
 
 class TestExecuteBacktestLoadsFundamentals:
-    def test_cache_backtest_loads_fundamentals_into_pit_store(self):
+    def test_cache_backtest_loads_fundamentals_into_pit_store(self, tmp_path):
         fund_df = pd.DataFrame({
             "date": ["2024-01-01"],
             "symbol": ["AAPL"],
@@ -305,7 +334,7 @@ class TestExecuteBacktestLoadsFundamentals:
 
         with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
              patch("firm.runtime.load_fundamentals", return_value=fund_df), \
-             patch("firm.config.get_settings"), \
+             patch("firm.config.get_settings", return_value=_mock_settings(tmp_path)), \
              patch("firm.backtest.run.PointInTimeDataStore", FakePitStore), \
              patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
              patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
@@ -350,7 +379,7 @@ class TestExecuteBacktestLoadsFundamentals:
 
 
 class TestExecuteBacktestLoadsSentiment:
-    def test_cache_backtest_loads_sentiment_into_pit_store(self):
+    def test_cache_backtest_loads_sentiment_into_pit_store(self, tmp_path):
         sentiment_df = pd.DataFrame({
             "date": ["2024-01-01"], "symbol": ["AAPL"],
             "sentiment_score": [0.5], "news_volume": [5],
@@ -379,7 +408,7 @@ class TestExecuteBacktestLoadsSentiment:
         with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
              patch("firm.runtime.load_fundamentals", return_value=None), \
              patch("firm.runtime.load_sentiment", return_value=sentiment_df), \
-             patch("firm.config.get_settings"), \
+             patch("firm.config.get_settings", return_value=_mock_settings(tmp_path)), \
              patch("firm.backtest.run.PointInTimeDataStore", FakePitStore), \
              patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
              patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
@@ -428,7 +457,7 @@ class TestExecuteBacktestWiresUniverseResolver:
     configured.
     """
 
-    def test_resolver_installed_for_cache_backtests(self):
+    def test_resolver_installed_for_cache_backtests(self, tmp_path):
         installed: list = []
 
         class FakePitStore:
@@ -450,7 +479,7 @@ class TestExecuteBacktestWiresUniverseResolver:
             "warmup_days": 0,
         }
         with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
-             patch("firm.config.get_settings"), \
+             patch("firm.config.get_settings", return_value=_mock_settings(tmp_path)), \
              patch("firm.backtest.run.PointInTimeDataStore", FakePitStore), \
              patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
              patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
@@ -458,7 +487,7 @@ class TestExecuteBacktestWiresUniverseResolver:
 
         assert len(installed) == 1
 
-    def test_resolver_is_consulted_when_no_explicit_universe_symbols(self):
+    def test_resolver_is_consulted_when_no_explicit_universe_symbols(self, tmp_path):
         """Without an explicit universe_symbols override, execute_backtest
         must ask the (resolver-backed) pit_store for the union of universe
         membership across the whole backtest window rather than silently
@@ -487,7 +516,7 @@ class TestExecuteBacktestWiresUniverseResolver:
             "warmup_days": 0,
         }
         with patch("firm.runtime.load_prices", return_value=_full_history_df()), \
-             patch("firm.config.get_settings"), \
+             patch("firm.config.get_settings", return_value=_mock_settings(tmp_path)), \
              patch("firm.backtest.run.PointInTimeDataStore", FakePitStore), \
              patch("firm.backtest.run.BacktestEngine", _FakeEngine), \
              patch("firm.backtest.run.build_orchestrator", return_value=MagicMock()):
