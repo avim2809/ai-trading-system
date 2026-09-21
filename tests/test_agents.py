@@ -2399,6 +2399,37 @@ class TestProtectiveOrders:
         assert call.order_type == "stop"
         assert call.stop_price == pytest.approx(150.0 * (1 + 0.07))
 
+    def test_stop_price_rounds_to_whole_cents_for_broker_submission(self):
+        """Confirmed live 2026-09-21: an arbitrary market price (e.g.
+        966.87) times an arbitrary stop_loss_pct (e.g. 0.07) produces a
+        stop_price like 899.1890999999999 -- Alpaca rejects this with
+        "sub-penny increment does not fulfill minimum pricing criteria" for
+        any stock trading above $1. Every protective order submitted since
+        this feature was enabled failed for exactly this reason. Must round
+        to whole cents ($0.01 tick) above $1, sub-penny ($0.0001) below."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(
+            config={"protective_orders": {"mean_reversion": {"stop_loss_pct": 0.07}}}
+        )
+        portfolio = PortfolioState(initial_capital=500_000)
+        prices = {"GS": 966.87}
+        decision = RiskDecision(approved=True, adjusted_targets={"GS": 0.20})
+        broker = _FakeProtectiveBroker()
+
+        execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            per_strategy={"mean_reversion": {"GS": 0.5}}, broker=broker,
+        )
+
+        assert len(broker.calls) == 1
+        call = broker.calls[0]
+        raw = 966.87 * (1 - 0.07)
+        assert round(raw, 2) != raw  # sanity: the bug case actually has sub-penny noise
+        assert call.stop_price == round(raw, 2)
+        assert round(call.stop_price, 2) == call.stop_price
+
     def test_trailing_stop_pct_submits_trailing_stop_order(self):
         from firm.agents.execution import ExecutionAgent
         from firm.portfolio.state import PortfolioState

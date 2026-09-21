@@ -388,9 +388,17 @@ class ExecutionAgent(Agent):
             order_kwargs["trail_percent"] = float(trailing_stop_pct) * 100.0
         elif stop_loss_pct is not None:
             order_kwargs["order_type"] = "stop"
-            order_kwargs["stop_price"] = (
+            raw_stop_price = (
                 price * (1 - float(stop_loss_pct)) if is_long else price * (1 + float(stop_loss_pct))
             )
+            # Brokers reject sub-penny prices for stocks trading above $1
+            # (Alpaca: "sub-penny increment does not fulfill minimum pricing
+            # criteria") -- confirmed live, every protective stop submitted
+            # since this feature was enabled failed 100% of the time because
+            # price * (1 +/- pct) is an arbitrary float. Sub-$1 names allow
+            # sub-penny (tick = $0.0001); round accordingly.
+            decimals = 2 if raw_stop_price >= 1.0 else 4
+            order_kwargs["stop_price"] = round(raw_stop_price, decimals)
         else:
             log.debug(
                 "protective_orders configured for %s but neither stop_loss_pct "

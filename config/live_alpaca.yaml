@@ -332,6 +332,19 @@ risk:
       max_position_pct: 0.50
       max_gross_exposure: 2.0
       veto_threshold: 0.95
+    # REAL INCIDENT (found 2026-09-21, same root cause/pattern as stat_arb
+    # above): event_driven only signals on symbols with a recent earnings
+    # surprise (strategies/event_driven.py) -- on a typical day that's just
+    # 3-4 names out of the whole universe, so each legitimately needs
+    # 15-40%+ of the SLEEVE's own capital. Confirmed via journalctl: every
+    # logged event_driven sleeve decision back to at least 9/15 was a VETO
+    # (clipping severity 76-80%, e.g. PCG -42%/CRM +28%/AVGO +35%) -- the
+    # sleeve had been silently frozen, never once acting on a real earnings
+    # signal for 6+ days.
+    event_driven:
+      max_position_pct: 0.50
+      max_gross_exposure: 2.0
+      veto_threshold: 0.95
 
   # GICS-style sector tags for the 25-name universe (enables max_sector_pct).
   sector_map:

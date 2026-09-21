@@ -767,6 +767,19 @@ design/history: `docs/capital_sleeves_plan.md`.
     records everything else already goes through, and queryable directly via
     `GET /api/live/sleeves/decisions?strategy=<name>&limit=N` (most recent first) instead
     of grepping logs to notice a sleeve has stopped trading.
+- **Same pattern recurred, found live (2026-09-21)**: `event_driven` only signals on
+  symbols with a recent earnings surprise (`strategies/event_driven.py`) — typically 3-4
+  names out of the whole universe, so each legitimately needs 15-40%+ of the sleeve's own
+  capital. Confirmed via journalctl: every logged `event_driven` sleeve decision back to
+  at least 9/15 was a veto (clipping severity 76-80%) — frozen for 6+ days, never once
+  acting on a real earnings signal. Same fix: `sleeve_risk_overrides.event_driven` added
+  to `config/live_alpaca.yaml` with the identical envelope as `stat_arb` above. Also fixed
+  the same day: `ExecutionAgent._maybe_submit_protective_order`'s `stop_price` was an
+  unrounded float (`price * (1 ± stop_loss_pct)`) — Alpaca rejects any sub-penny price for
+  stocks above $1 ("sub-penny increment does not fulfill minimum pricing criteria"), so
+  every protective stop submitted since that feature was enabled the previous night failed
+  100% of the time (3/3, zero successes ever). Now rounds to whole cents ($0.01 tick) above
+  $1, sub-penny ($0.0001) below.
 - **Deliberately not done yet**: a per-sleeve NAV/position/PnL frontend view (still one
   shared-portfolio UI); cross-sleeve LLM-enhancement budget coordination (only matters if
   `bull_researcher`/`bear_researcher`/`debate` are ever switched to `llm_enhanced` — the
