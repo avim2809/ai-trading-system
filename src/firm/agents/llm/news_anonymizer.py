@@ -67,6 +67,18 @@ SYMBOL_COMPANY_NAMES: dict[str, tuple[str, ...]] = {
     "SPY": ("SPDR S&P 500 ETF Trust", "SPDR S&P 500"),
     "QQQ": ("Invesco QQQ Trust", "Invesco QQQ"),
     "IWM": ("iShares Russell 2000 ETF",),
+    # Dynamic-universe additions (sp500_dynamic_universe, Alpaca) -- not
+    # part of the original static list above, but need the same coverage.
+    "CAT": ("Caterpillar Inc.", "Caterpillar Inc", "Caterpillar"),
+    "CEG": ("Constellation Energy Corporation", "Constellation Energy"),
+    "EQIX": ("Equinix, Inc.", "Equinix Inc", "Equinix"),
+    "FCX": ("Freeport-McMoRan Inc.", "Freeport-McMoRan"),
+    "GEV": ("GE Vernova Inc.", "GE Vernova"),
+    "KO": ("The Coca-Cola Company", "Coca-Cola Company", "Coca-Cola"),
+    "LIN": ("Linde plc", "Linde"),
+    "NEE": ("NextEra Energy, Inc.", "NextEra Energy"),
+    "WELL": ("Welltower Inc.", "Welltower"),
+    "WMT": ("Walmart Inc.", "Walmart"),
 }
 
 _TICKER_RE_CACHE: dict[str, re.Pattern[str]] = {}
@@ -90,6 +102,28 @@ def _name_pattern(name: str) -> re.Pattern[str]:
         pat = re.compile(r"\b" + re.escape(name) + r"\b", re.IGNORECASE)
         _NAME_RE_CACHE[name] = pat
     return pat
+
+
+def mentions_symbol(text: str, symbol: str) -> bool:
+    """True if *text* actually contains *symbol*'s ticker or a known
+    company-name alias.
+
+    A ticker-search API can return an article that doesn't actually
+    discuss the queried company (broad keyword/related-ticker matching on
+    the provider's side) — this lets an ingestor drop those before they
+    reach the RAG collection tagged with the wrong symbol. An unmapped
+    symbol only checks the raw ticker (same partial-coverage tradeoff as
+    :func:`anonymize_news_text`).
+    """
+    if not text or not symbol:
+        return False
+    symbol = symbol.strip().upper()
+    if _ticker_pattern(symbol).search(text):
+        return True
+    return any(
+        _name_pattern(name).search(text)
+        for name in SYMBOL_COMPANY_NAMES.get(symbol, ())
+    )
 
 
 def anonymize_news_text(text: str, symbol: str) -> str:

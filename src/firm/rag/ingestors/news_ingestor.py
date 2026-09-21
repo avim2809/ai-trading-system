@@ -6,11 +6,12 @@ import logging
 import os
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import requests
 
+from firm.agents.llm.news_anonymizer import mentions_symbol
 from firm.rag.chunker import DocumentChunker
 from firm.rag.dates import normalize_date
 from firm.rag.ingestors.base_ingestor import BaseIngestor
@@ -25,6 +26,7 @@ _YAHOO_RSS = "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region
 _TIINGO_NEWS = "https://api.tiingo.com/tiingo/news"
 _AV_NEWS = "https://www.alphavantage.co/query"
 _MASSIVE_NEWS = "https://api.massive.com/v2/reference/news"
+_FINNHUB_NEWS = "https://finnhub.io/api/v1/company-news"
 # Massive's free tier is 5 requests/minute with (as far as documented) no
 # separate daily cap — unlike AlphaVantage's hard 25/day, so it's the primary
 # source now. Paced conservatively (13s > 60/5s) to stay clear of the limit
@@ -40,6 +42,7 @@ class NewsIngestor(BaseIngestor):
         self._tiingo_key = os.environ.get("TIINGO_API_KEY", "")
         self._av_key = os.environ.get("ALPHAVANTAGE_API_KEY", "")
         self._massive_key = os.environ.get("MASSIVE_API_KEY", "")
+        self._finnhub_key = os.environ.get("FINNHUB_API_KEY", "")
 
     def ingest(
         self,
@@ -78,6 +81,9 @@ class NewsIngestor(BaseIngestor):
             if self._av_key and not massive_docs:
                 docs.extend(self._fetch_alphavantage_news(symbol))
 
+            if self._finnhub_key:
+                docs.extend(self._fetch_finnhub_news(symbol, days))
+
             if docs:
                 added = self.store.add_documents(COLLECTION, docs)
                 total += added
@@ -85,10 +91,21 @@ class NewsIngestor(BaseIngestor):
         return total
 
     def _fetch_yahoo_rss(self, symbol: str) -> list[Document]:
-        """Parse Yahoo Finance RSS feed for a symbol."""
+        """Parse Yahoo Finance RSS feed for a symbol.
+
+        Yahoo's edge blocks requests with no User-Agent, or with the
+        default `requests`/`curl` UA strings (empty/no UA -> 429; curl's
+        default UA -> 404 "sad panda" HTML page instead of the feed) —
+        this is generic bot-signature filtering, not a sign the endpoint
+        itself is gone. Any honestly-identifying custom UA (no browser
+        impersonation needed) gets a normal 200 with real RSS content, so
+        we send one purely to avoid being lumped in with the default
+        library signatures.
+        """
         try:
             url = _YAHOO_RSS.format(symbol=symbol)
-            resp = requests.get(url, timeout=15)
+            headers = {"User-Agent": "ai-trading-system-news-ingestor/1.0"}
+            resp = requests.get(url, timeout=15, headers=headers)
             if resp.status_code != 200:
                 log.warning(
                     "yahoo_rss_failed symbol=%s status=%d", symbol, resp.status_code
@@ -112,6 +129,12 @@ class NewsIngestor(BaseIngestor):
 
                 text = f"{title}. {description}".strip()
                 if len(text) < 20:
+                    continue
+                if not mentions_symbol(text, symbol):
+                    # A ticker-search endpoint can return an article that
+                    # never actually mentions the queried company (broad
+                    # keyword/related-ticker matching on the provider's
+                    # side) -- don't store it tagged with the wrong symbol.
                     continue
 
                 metadata = {
@@ -150,6 +173,12 @@ class NewsIngestor(BaseIngestor):
                 desc = article.get("description", "")
                 text = f"{title}. {desc}".strip()
                 if len(text) < 20:
+                    continue
+                if not mentions_symbol(text, symbol):
+                    # A ticker-search endpoint can return an article that
+                    # never actually mentions the queried company (broad
+                    # keyword/related-ticker matching on the provider's
+                    # side) -- don't store it tagged with the wrong symbol.
                     continue
 
                 metadata = {
@@ -200,6 +229,12 @@ class NewsIngestor(BaseIngestor):
                 text = f"{title}. {summary}".strip()
                 if len(text) < 20:
                     continue
+                if not mentions_symbol(text, symbol):
+                    # A ticker-search endpoint can return an article that
+                    # never actually mentions the queried company (broad
+                    # keyword/related-ticker matching on the provider's
+                    # side) -- don't store it tagged with the wrong symbol.
+                    continue
 
                 metadata = {
                     "source": "alphavantage",
@@ -242,6 +277,12 @@ class NewsIngestor(BaseIngestor):
                 text = f"{title}. {desc}".strip()
                 if len(text) < 20:
                     continue
+                if not mentions_symbol(text, symbol):
+                    # A ticker-search endpoint can return an article that
+                    # never actually mentions the queried company (broad
+                    # keyword/related-ticker matching on the provider's
+                    # side) -- don't store it tagged with the wrong symbol.
+                    continue
 
                 metadata = {
                     "source": "massive",
@@ -255,4 +296,51 @@ class NewsIngestor(BaseIngestor):
             return docs
         except Exception:
             log.warning("massive_news_error symbol=%s", symbol, exc_info=True)
+            return []
+
+    def _fetch_finnhub_news(self, symbol: str, days: int) -> list[Document]:
+        """Fetch news from Finnhub (free tier: 60 req/min, company-news
+        endpoint)."""
+        try:
+            end_date = datetime.now().strftime("%Y-%m-%d")
+            start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            params = {"symbol": symbol, "from": start_date, "to": end_date}
+            resp = requests.get(
+                _FINNHUB_NEWS, params=params, timeout=15,
+                headers={"X-Finnhub-Token": self._finnhub_key},
+            )
+            if resp.status_code != 200:
+                log.warning(
+                    "finnhub_news_failed symbol=%s status=%d body=%.200s",
+                    symbol, resp.status_code, resp.text,
+                )
+                return []
+
+            docs: list[Document] = []
+            for article in resp.json()[:50]:
+                headline = article.get("headline", "")
+                summary = article.get("summary", "")
+                text = f"{headline}. {summary}".strip()
+                if len(text) < 20:
+                    continue
+                if not mentions_symbol(text, symbol):
+                    continue
+
+                # Finnhub's "datetime" is Unix seconds (UTC), not an
+                # ISO/RFC-822 string like the other providers -- normalize_date
+                # doesn't parse raw epoch ints, so convert explicitly.
+                epoch = article.get("datetime")
+                pub_dt = datetime.fromtimestamp(epoch, tz=timezone.utc) if epoch else None
+                metadata = {
+                    "source": "finnhub",
+                    "symbol": symbol,
+                    "doc_type": "news",
+                    "date": normalize_date(pub_dt),
+                    "url": article.get("url", ""),
+                }
+                chunks = self.chunker.chunk(text, metadata)
+                docs.extend(chunks)
+            return docs
+        except Exception:
+            log.warning("finnhub_news_error symbol=%s", symbol, exc_info=True)
             return []

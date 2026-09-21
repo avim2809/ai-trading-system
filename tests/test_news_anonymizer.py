@@ -17,8 +17,31 @@ from firm.agents.llm.news_anonymizer import (
     COMPANY_PLACEHOLDER,
     TICKER_PLACEHOLDER,
     anonymize_news_text,
+    mentions_symbol,
 )
 from firm.rag.models import RetrievedDoc
+
+
+class TestMentionsSymbol:
+    def test_true_when_ticker_present(self):
+        assert mentions_symbol("Traders are watching $AAPL closely.", "AAPL")
+
+    def test_true_when_company_name_present_but_not_ticker(self):
+        assert mentions_symbol("Apple unveiled a new product today.", "AAPL")
+
+    def test_false_when_article_is_about_something_else(self):
+        # Confirmed live: a ticker-search endpoint returned an unrelated
+        # article (about a threat-intelligence vendor) tagged symbol=MA.
+        text = "Recorded Future named a leader in threat intelligence."
+        assert not mentions_symbol(text, "MA")
+
+    def test_unmapped_symbol_only_checks_raw_ticker(self):
+        assert mentions_symbol("XYZQ posted quarterly results.", "XYZQ")
+        assert not mentions_symbol("The market rallied broadly today.", "XYZQ")
+
+    def test_empty_text_or_symbol_is_false(self):
+        assert not mentions_symbol("", "AAPL")
+        assert not mentions_symbol("Apple news", "")
 
 
 class TestAnonymizeNewsText:
