@@ -134,6 +134,36 @@ class ExecutionAgent(Agent):
         # also supplied to run() (see _maybe_submit_protective_orders).
         self.protective_orders_cfg: dict[str, dict[str, Any]] = cfg.get("protective_orders", {}) or {}
 
+        # Extended-hours limit-price tolerance. Both IBKR and Alpaca only
+        # actually honor an "outside regular trading hours" flag on a LIMIT
+        # order -- a market order with the flag set is queued until the next
+        # regular session instead of filling now (see
+        # IBKRBroker._submit_order_once_unlocked's Warning-2109 log and
+        # AlpacaBroker._extended_hours_kwarg). This agent otherwise only
+        # emits market orders, so without this substitution
+        # config/live.yaml's extended_hours_trading feature would run on
+        # schedule but produce no real early-execution benefit. When
+        # Orchestrator threads
+        # ``extended_hours=True`` into run() below (only for a cycle
+        # gate-verified premarket/afterhours -- see Orchestrator.step's
+        # cycle_type handling), this switches that cycle's orders to
+        # marketable limit orders instead: buy up to
+        # ``price * (1 + tolerance)``, sell down to
+        # ``price * (1 - tolerance)``. Wide enough to have a real chance of
+        # filling against thin extended-hours liquidity (a limit pegged
+        # exactly at the last regular-session price would rarely execute at
+        # all once the market gaps), narrow enough to still cap slippage --
+        # a limit order with no meaningful bound defeats the point of using
+        # one. 0.5% default is a starting, not empirically-tuned, buffer;
+        # tune per-symbol volatility if live fills show it's mis-sized.
+        # 0.0 tolerance would peg the limit at the last price exactly (valid
+        # but likely to go unfilled). Regular-hours cycles never read this
+        # -- ``extended_hours`` defaults False and this knob has zero effect
+        # on today's market-order behavior.
+        self.extended_hours_limit_tolerance_pct: float = float(
+            cfg.get("extended_hours_limit_tolerance_pct", 0.005)
+        )
+
     def run(self, ctx: AgentContext, **inputs: Any) -> ExecutionReport:
         decision: RiskDecision = inputs["decision"]
         portfolio = inputs.get("portfolio")
@@ -147,6 +177,14 @@ class ExecutionAgent(Agent):
         # one only sees protective orders fire if protective_orders_cfg is
         # also non-empty.
         broker = inputs.get("broker")
+        # Set by Orchestrator only for a cycle gate-verified to genuinely be
+        # running inside a configured premarket/afterhours window (see
+        # Orchestrator.step / _step_impl) -- never a blanket config toggle
+        # applied regardless of when this cycle actually runs. False (the
+        # default, and every existing caller/test that hasn't been updated
+        # to pass it) reproduces prior behavior byte-for-byte: plain market
+        # orders, no limit_price.
+        extended_hours: bool = bool(inputs.get("extended_hours", False))
 
         target_weights = decision.adjusted_targets
         symbol_strategy = self._dominant_strategy_by_symbol(per_strategy)
@@ -266,25 +304,42 @@ class ExecutionAgent(Agent):
             est_spread = notional * self.spread_pct
             est_impact = self._estimate_impact_cost(ctx, sym, notional)
 
-            orders.append(
-                {
-                    "symbol": sym,
-                    "side": side,
-                    # Signed share count: the canonical field consumed by
-                    # PortfolioState.update and PerformanceAttribution.
-                    # ``quantity`` stays absolute for broker order requests.
-                    "shares": quantity if side == "buy" else -quantity,
-                    "quantity": quantity,
-                    "notional": notional,
-                    "price": price,
-                    "strategy": symbol_strategy.get(sym, "composite"),
-                    "est_commission": est_commission,
-                    "est_slippage": est_slippage,
-                    "est_spread": est_spread,
-                    "est_impact": est_impact,
-                    "est_cost": est_commission + est_slippage + est_spread + est_impact,
-                }
-            )
+            order: dict[str, Any] = {
+                "symbol": sym,
+                "side": side,
+                # Signed share count: the canonical field consumed by
+                # PortfolioState.update and PerformanceAttribution.
+                # ``quantity`` stays absolute for broker order requests.
+                "shares": quantity if side == "buy" else -quantity,
+                "quantity": quantity,
+                "notional": notional,
+                "price": price,
+                "strategy": symbol_strategy.get(sym, "composite"),
+                "est_commission": est_commission,
+                "est_slippage": est_slippage,
+                "est_spread": est_spread,
+                "est_impact": est_impact,
+                "est_cost": est_commission + est_slippage + est_spread + est_impact,
+            }
+            if extended_hours:
+                # See extended_hours_limit_tolerance_pct's __init__ docstring
+                # -- both live brokers only honor outside-RTH on a limit
+                # order, so this is the one substitution that makes
+                # config/live.yaml's extended_hours_trading feature do
+                # anything real. LiveTradingEngine._execute_orders reads
+                # these two keys straight off the fill dict (falling back to
+                # "market"/None for every order that doesn't set them), so
+                # no other plumbing needs to change.
+                order["order_type"] = "limit"
+                order["limit_price"] = self._extended_hours_limit_price(price, side)
+                log.info(
+                    "Extended-hours cycle: %s %s as LIMIT @ %.4f (last price %.4f, "
+                    "tolerance %.3f%%)",
+                    side, sym, order["limit_price"], price,
+                    self.extended_hours_limit_tolerance_pct * 100.0,
+                )
+
+            orders.append(order)
             turnover += abs(diff_w)
 
             if self.protective_orders_cfg and broker is not None:
@@ -418,6 +473,22 @@ class ExecutionAgent(Agent):
                 "Protective %s order submission failed for %s (%s, qty=%d)",
                 req.order_type, symbol, strategy, protective_qty, exc_info=True,
             )
+
+    def _extended_hours_limit_price(self, price: float, side: str) -> float:
+        """Marketable limit price for an extended-hours order: buy up to
+        ``price * (1 + tolerance)``, sell down to ``price * (1 - tolerance)``.
+
+        See ``extended_hours_limit_tolerance_pct``'s ``__init__`` docstring
+        for the "not too tight, not too loose" rationale. Rounded to cents
+        (or 4dp under $1, same threshold IBKR/Alpaca enforce for stocks --
+        see the sub-penny rounding precedent in
+        ``_maybe_submit_protective_order``) since brokers reject sub-penny
+        limit prices above $1.
+        """
+        tolerance = self.extended_hours_limit_tolerance_pct
+        raw = price * (1 + tolerance) if side == "buy" else price * (1 - tolerance)
+        decimals = 2 if raw >= 1.0 else 4
+        return round(raw, decimals)
 
     def _estimate_impact_cost(self, ctx: AgentContext, symbol: str, notional: float) -> float:
         """Size/volume-aware market-impact cost estimate for one order.

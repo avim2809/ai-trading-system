@@ -280,6 +280,16 @@ class Orchestrator(Agent):
     # Sentinel distinguishing "no policy key was set" from "policy was
     # explicitly set to None" when restoring after a cycle.
     _NO_POLICY = object()
+    # Mirrors firm.live.scheduler.EXTENDED_HOURS_CYCLE_TYPES. Not imported
+    # from there directly -- this agents/ pipeline module is also used by
+    # the backtester and deliberately has no dependency on the live/
+    # scheduling layer. LiveTradingEngine.run_cycle only ever passes
+    # "premarket"/"afterhours" through to step() after
+    # within_extended_hours_window has already gate-verified the cycle (see
+    # its own cycle_type docstring), so seeing either value here already
+    # means "this cycle is genuinely running inside a configured
+    # extended-hours window" -- nothing further to re-validate.
+    _EXTENDED_HOURS_CYCLE_TYPES = frozenset({"premarket", "afterhours"})
 
     def step(
         self, context: dict[str, Any], cycle_type: str | None = None,
@@ -310,8 +320,9 @@ class Orchestrator(Agent):
             execution engine.
         """
         restore = self._apply_cycle_llm_mode(cycle_type)
+        extended_hours = cycle_type in self._EXTENDED_HOURS_CYCLE_TYPES
         try:
-            return self._step_impl(context)
+            return self._step_impl(context, extended_hours=extended_hours)
         finally:
             self._restore_cycle_llm_mode(restore)
 
@@ -374,10 +385,20 @@ class Orchestrator(Agent):
             else:
                 enhancement_cfg["policy"] = previous_policy
 
-    def _step_impl(self, context: dict[str, Any]) -> tuple[list[dict], Blackboard]:
-        """Body of :meth:`step`, run with the cycle's LLM mode already applied."""
+    def _step_impl(
+        self, context: dict[str, Any], extended_hours: bool = False,
+    ) -> tuple[list[dict], Blackboard]:
+        """Body of :meth:`step`, run with the cycle's LLM mode already applied.
+
+        ``extended_hours`` is ``step()``'s gate-verified premarket/afterhours
+        determination (see ``_EXTENDED_HOURS_CYCLE_TYPES``); threaded through
+        to whichever ``ExecutionAgent.run`` call actually reaches the real
+        broker so it can emit limit instead of market orders (see
+        ``ExecutionAgent.__init__``'s ``extended_hours_limit_tolerance_pct``
+        docstring). ``False`` by default, matching every pre-existing caller.
+        """
         if self.capital_allocation_mode == "sleeved":
-            return self._step_sleeved(context)
+            return self._step_sleeved(context, extended_hours=extended_hours)
 
         pit_view = context["pit_view"]
         portfolio = context.get("portfolio")
@@ -536,6 +557,7 @@ class Orchestrator(Agent):
                 per_strategy=proposal.per_strategy,
                 attribution=attribution,
                 broker=broker,
+                extended_hours=extended_hours,
             )
         except StageTimeoutError as exc:
             early = self._record_stage_failure(bb, self.execution, exc)
@@ -740,12 +762,22 @@ class Orchestrator(Agent):
             result[strategy] = compute_all_metrics(returns)
         return result
 
-    def _step_sleeved(self, context: dict[str, Any]) -> tuple[list[dict], Blackboard]:
+    def _step_sleeved(
+        self, context: dict[str, Any], extended_hours: bool = False,
+    ) -> tuple[list[dict], Blackboard]:
         """Sleeved-mode pipeline: one independent bull/bear/debate/trader/risk/
         execution pass per strategy against its own ``PortfolioState``, then
         one final netted ``ExecutionAgent`` pass against the real shared
         book for actual broker submission. See the module-level design note
         this was built from for the full rationale.
+
+        ``extended_hours`` (see ``_step_impl``) is deliberately only passed
+        to the final real (netted) execution pass below, not to each
+        sleeve's own per-strategy pass a few lines up: a sleeve's pass is
+        purely virtual bookkeeping against its own in-memory
+        ``PortfolioState`` and never reaches a broker, so market-vs-limit
+        order_type has no real effect there -- only the pass that actually
+        talks to ``broker`` needs it.
         """
         pit_view = context["pit_view"]
         real_portfolio = context.get("portfolio")
@@ -950,6 +982,7 @@ class Orchestrator(Agent):
                 # position that may not even survive netting. Deliberately
                 # not passed to the per-sleeve call.
                 broker=broker,
+                extended_hours=extended_hours,
             )
         except Exception as exc:
             log.error("Real (netted) execution pass failed in sleeved mode", exc_info=True)

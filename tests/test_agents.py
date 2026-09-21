@@ -1918,6 +1918,115 @@ class TestExecution:
         assert len(aapl_orders) == 1
         assert aapl_orders[0]["side"] == "sell"
 
+    def test_regular_hours_cycle_emits_plain_market_orders(self):
+        """Baseline/regression guard: without extended_hours=True (every
+        pre-existing caller, and every regular-hours live cycle), fills must
+        carry no order_type/limit_price at all -- LiveTradingEngine
+        defaults an absent order_type to "market" -- so today's
+        regular-hours behavior is byte-for-byte unaffected by the new
+        extended-hours limit-order capability."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent()
+        portfolio = PortfolioState(initial_capital=1_000_000)
+        prices = {"AAPL": 150.0}
+
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.5})
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+        )
+        assert len(report.fills) == 1
+        fill = report.fills[0]
+        assert "order_type" not in fill
+        assert "limit_price" not in fill
+
+    def test_extended_hours_cycle_emits_marketable_limit_orders(self):
+        """The actual fix: when the caller (Orchestrator, only for a
+        gate-verified premarket/afterhours cycle) passes extended_hours=True,
+        ExecutionAgent must emit LIMIT orders with a sensible limit_price --
+        both IBKR and Alpaca only honor "outside regular trading hours" on a
+        limit order, so a market order here is a silent no-op (confirmed
+        live). Buys get a limit at/above the last price (room to fill in
+        thin liquidity), sells get a limit at/below it."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent(config={"extended_hours_limit_tolerance_pct": 0.01})
+        portfolio = PortfolioState(initial_capital=1_000_000)
+        portfolio.holdings = {"MSFT": 1000}  # existing long, target 0 -> sell
+        prices = {"AAPL": 150.0, "MSFT": 300.0}
+
+        decision = RiskDecision(
+            approved=True, adjusted_targets={"AAPL": 0.5},  # MSFT -> 0 (sell), AAPL -> buy
+        )
+        report = execution.run(
+            AgentContext(now=NOW), decision=decision, portfolio=portfolio, prices=prices,
+            extended_hours=True,
+        )
+        by_sym = {o["symbol"]: o for o in report.fills}
+        assert by_sym["AAPL"]["side"] == "buy"
+        assert by_sym["AAPL"]["order_type"] == "limit"
+        assert by_sym["AAPL"]["limit_price"] == pytest.approx(150.0 * 1.01, rel=1e-6)
+        assert by_sym["AAPL"]["limit_price"] > 150.0
+
+        assert by_sym["MSFT"]["side"] == "sell"
+        assert by_sym["MSFT"]["order_type"] == "limit"
+        assert by_sym["MSFT"]["limit_price"] == pytest.approx(300.0 * 0.99, rel=1e-6)
+        assert by_sym["MSFT"]["limit_price"] < 300.0
+
+    def test_extended_hours_limit_tolerance_is_configurable(self):
+        """extended_hours_limit_tolerance_pct must actually change the limit
+        price -- a wider tolerance widens the buffer around the last price
+        in both directions."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        tight = ExecutionAgent(config={"extended_hours_limit_tolerance_pct": 0.001})
+        loose = ExecutionAgent(config={"extended_hours_limit_tolerance_pct": 0.02})
+        prices = {"AAPL": 150.0}
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.5})
+
+        tight_report = tight.run(
+            AgentContext(now=NOW), decision=decision,
+            portfolio=PortfolioState(initial_capital=1_000_000), prices=prices,
+            extended_hours=True,
+        )
+        loose_report = loose.run(
+            AgentContext(now=NOW), decision=decision,
+            portfolio=PortfolioState(initial_capital=1_000_000), prices=prices,
+            extended_hours=True,
+        )
+        tight_limit = tight_report.fills[0]["limit_price"]
+        loose_limit = loose_report.fills[0]["limit_price"]
+        # Both are buys (target 0.5 from flat) -- a wider tolerance means a
+        # higher ceiling limit price.
+        assert loose_limit > tight_limit
+        assert tight_limit == pytest.approx(150.0 * 1.001, rel=1e-6)
+        assert loose_limit == pytest.approx(150.0 * 1.02, rel=1e-6)
+
+    def test_extended_hours_false_by_default_matches_prior_behavior(self):
+        """Sanity check that omitting extended_hours entirely (every test
+        above this change, and every caller that hasn't been updated) is
+        indistinguishable from passing it explicitly False."""
+        from firm.agents.execution import ExecutionAgent
+        from firm.portfolio.state import PortfolioState
+
+        execution = ExecutionAgent()
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.5})
+        prices = {"AAPL": 150.0}
+
+        omitted = execution.run(
+            AgentContext(now=NOW), decision=decision,
+            portfolio=PortfolioState(initial_capital=1_000_000), prices=prices,
+        )
+        explicit_false = execution.run(
+            AgentContext(now=NOW), decision=decision,
+            portfolio=PortfolioState(initial_capital=1_000_000), prices=prices,
+            extended_hours=False,
+        )
+        assert omitted.fills == explicit_false.fills
+
     def test_rebalance_band_skips_noise_level_drift(self):
         """A deviation smaller than rebalance_band_pct must not generate an
         order at all -- the highest-leverage turnover fix identified from
@@ -2715,6 +2824,35 @@ class TestOrchestrator:
 
         _, kwargs = orch.execution.run.call_args
         assert kwargs["broker"] is None
+
+    @pytest.mark.parametrize("cycle_type", ["premarket", "afterhours"])
+    def test_extended_hours_cycle_type_threads_extended_hours_true(self, cycle_type):
+        """A gate-verified premarket/afterhours cycle_type (only ever passed
+        by LiveTradingEngine.run_cycle after within_extended_hours_window
+        has already validated it) must reach ExecutionAgent.run as
+        extended_hours=True, so it can switch to limit orders -- the real
+        fix for extended_hours_trading being a silent no-op."""
+        orch, pit_view = self._build_orchestrator()
+        orch.step(
+            {"pit_view": pit_view, "portfolio": None, "prices": {"AAPL": 150, "GOOG": 100}},
+            cycle_type=cycle_type,
+        )
+        _, kwargs = orch.execution.run.call_args
+        assert kwargs["extended_hours"] is True
+
+    @pytest.mark.parametrize("cycle_type", [None, "open", "close", "intraday"])
+    def test_non_extended_hours_cycle_type_threads_extended_hours_false(self, cycle_type):
+        """Every other cycle_type (including plain manual triggers, where
+        cycle_type is None) must NOT flip ExecutionAgent into limit-order
+        mode -- regular-hours cycles are completely unaffected by this
+        feature."""
+        orch, pit_view = self._build_orchestrator()
+        orch.step(
+            {"pit_view": pit_view, "portfolio": None, "prices": {"AAPL": 150, "GOOG": 100}},
+            cycle_type=cycle_type,
+        )
+        _, kwargs = orch.execution.run.call_args
+        assert kwargs["extended_hours"] is False
 
     def test_orchestrator_via_run(self):
         orch, pit_view = self._build_orchestrator()
