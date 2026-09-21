@@ -133,6 +133,87 @@ class TestResponseCacheConcurrency:
             cache.close()
 
 
+class TestResponseCacheDurableCounters:
+    """Regression: hits/misses must be durable DB counters, not per-instance.
+
+    ``GET /api/llm/cache/stats`` used to construct a brand-new
+    ``ResponseCache()`` per HTTP request, whose ``_hits``/``_misses`` were
+    plain Python instance attributes starting at zero — so the endpoint
+    always reported ``0/0`` no matter how much real cache activity had
+    happened. The fix persists hits/misses in the cache's own SQLite DB
+    (``llm_cache_counters``) so any instance pointed at the same DB file
+    reports the real, shared totals.
+    """
+
+    def test_hits_and_misses_persist_across_instances(self, tmp_path):
+        from firm.llm.cache import ResponseCache
+
+        db_path = str(tmp_path / "shared.db")
+
+        # Simulate one long-running process (e.g. an LLM-enhanced agent)
+        # writing to and reading from the cache.
+        writer = ResponseCache(db_path)
+        writer.put("k1", "resp-1", "model-a")
+        try:
+            assert writer.get("k1") == "resp-1"  # hit
+            assert writer.get("missing-key") is None  # miss
+            assert writer.get("missing-key-2") is None  # miss
+        finally:
+            writer.close()
+
+        # A *different* instance against the same DB file (e.g. a fresh
+        # ResponseCache() constructed per HTTP request, as the cache/stats
+        # endpoint does) must see the real totals, not 0/0.
+        reader = ResponseCache(db_path)
+        try:
+            stats = reader.stats()
+            assert stats["hits"] == 1
+            assert stats["misses"] == 2
+        finally:
+            reader.close()
+
+    def test_stats_reflects_real_activity_not_just_zero(self, tmp_path):
+        """A brand-new instance with no activity of its own must still
+        report nonzero hits/misses if the underlying DB has real activity —
+        proving the counters aren't reset by merely opening a connection."""
+        from firm.llm.cache import ResponseCache
+
+        db_path = str(tmp_path / "activity.db")
+
+        seed = ResponseCache(db_path)
+        seed.put("k", "v", "model")
+        seed.get("k")
+        seed.get("k")
+        seed.get("nope")
+        seed.close()
+
+        fresh = ResponseCache(db_path)
+        try:
+            stats = fresh.stats()
+            assert stats["hits"] == 2
+            assert stats["misses"] == 1
+            assert stats["entries"] == 1
+        finally:
+            fresh.close()
+
+    def test_clear_resets_counters(self, tmp_path):
+        from firm.llm.cache import ResponseCache
+
+        cache = ResponseCache(str(tmp_path / "c.db"))
+        try:
+            cache.put("k", "v", "model")
+            cache.get("k")
+            cache.get("missing")
+            assert cache.stats()["hits"] == 1
+            cache.clear()
+            stats = cache.stats()
+            assert stats["hits"] == 0
+            assert stats["misses"] == 0
+            assert stats["entries"] == 0
+        finally:
+            cache.close()
+
+
 class TestResponseCacheKey:
     """Regression: the LLM cache key must include every output-affecting param."""
 

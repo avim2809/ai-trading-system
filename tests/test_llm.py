@@ -1133,6 +1133,50 @@ class TestLLMRouter:
         resp = client.delete("/api/llm/cache")
         assert resp.status_code == 200
 
+    def test_cache_stats_reflects_real_activity(self, client, tmp_path, monkeypatch):
+        """Regression: the endpoint used to construct a throwaway
+        ``ResponseCache()`` per request and always report 0/0 regardless of
+        real usage. It must now report the real, durable hits/misses from
+        whatever populated the cache DB it points at — even when that
+        activity came from a completely different ``ResponseCache``
+        instance (standing in for a live agent's own ``LLMService``)."""
+        import firm.api.routers.llm as llm_mod
+        from firm.llm.cache import ResponseCache
+
+        db_path = str(tmp_path / "endpoint_cache.db")
+        monkeypatch.setattr(llm_mod, "_cache_db_path", lambda: db_path)
+
+        # Before any activity: real zeros (not hardcoded — a genuinely
+        # empty DB).
+        resp = client.get("/api/llm/cache/stats")
+        assert resp.status_code == 200
+        assert resp.json()["hits"] == 0
+        assert resp.json()["misses"] == 0
+
+        # A separate instance (standing in for a live agent's own
+        # LLMService/ResponseCache) does real cache work against the same
+        # DB file.
+        agent_cache = ResponseCache(db_path)
+        agent_cache.put("k1", "resp-1", "model-a")
+        agent_cache.get("k1")  # hit
+        agent_cache.get("k1")  # hit
+        agent_cache.get("nope")  # miss
+        agent_cache.close()
+
+        resp = client.get("/api/llm/cache/stats")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["hits"] == 2
+        assert data["misses"] == 1
+        assert data["entries"] == 1
+
+        # Clearing via the endpoint must reset the durable counters too.
+        resp = client.delete("/api/llm/cache")
+        assert resp.status_code == 200
+        resp = client.get("/api/llm/cache/stats")
+        assert resp.json()["hits"] == 0
+        assert resp.json()["misses"] == 0
+
     def test_rag_stats_without_rag_installed(self, client):
         resp = client.get("/api/llm/rag/stats")
         assert resp.status_code == 200

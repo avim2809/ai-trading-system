@@ -126,12 +126,40 @@ def update_config(body: LLMConfigUpdate):
     return {"status": "updated", "config": cfg}
 
 
+def _cache_db_path() -> str:
+    """Resolve the cache DB path the live ``LLMService`` instances actually use.
+
+    ``optimization.cache_db`` in ``config/llm.yaml`` (or ``FIRM_LLM_CONFIG``)
+    is what every live ``LLMService``/``ResponseCache`` construction site
+    (``LLMAgentMixin._get_llm``, ``LiveTradingEngine._get_llm_service``,
+    ``TradingAssistant``, ...) resolves via
+    ``firm.llm.config.llm_service_config``/``optimization_config`` — defaults
+    to ``data/llm_cache.db`` when unset, matching ``ResponseCache``'s own
+    default. Using the same resolution here (instead of always constructing
+    against the hardcoded default) means this endpoint reads the same
+    on-disk DB the running engine's agents are actually writing to, even if
+    an operator has pointed ``cache_db`` elsewhere.
+    """
+    from firm.llm.config import optimization_config
+
+    return optimization_config().get("cache_db", "data/llm_cache.db")
+
+
 @router.get("/cache/stats")
 def cache_stats():
-    """Cache hit/miss/savings statistics."""
+    """Cache hit/miss/savings statistics.
+
+    ``hits``/``misses`` come from ``llm_cache_counters`` in the cache's own
+    SQLite DB (see ``ResponseCache``) — durable counters shared by every
+    ``ResponseCache`` instance pointed at that DB file (every LLM-enhanced
+    agent constructs its own instance; there is no single live singleton to
+    reach), and persisted across process restarts. A fresh ``ResponseCache``
+    here only opens a connection to that shared file; it does not reset or
+    duplicate the counters.
+    """
     try:
         from firm.llm.cache import ResponseCache
-        cache = ResponseCache()
+        cache = ResponseCache(_cache_db_path())
         return cache.stats()
     except Exception:
         return {"hits": 0, "misses": 0, "total_cost_saved": 0.0, "db_size": 0, "available": False}
@@ -139,10 +167,10 @@ def cache_stats():
 
 @router.delete("/cache")
 def clear_cache():
-    """Clear the LLM response cache."""
+    """Clear the LLM response cache (entries and hit/miss counters)."""
     try:
         from firm.llm.cache import ResponseCache
-        cache = ResponseCache()
+        cache = ResponseCache(_cache_db_path())
         cache.clear()
         return {"status": "cleared"}
     except Exception:
