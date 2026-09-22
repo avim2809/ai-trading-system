@@ -27,7 +27,7 @@ import pandas as pd
 from firm.brokers.base import Broker, BrokerError, OrderRequest, OrderStatus
 from firm.live.approval import ApprovalQueue
 from firm.live.data_feed import LiveDataFeed
-from firm.live.portfolio_sync import sync_portfolio_from_broker
+from firm.live.portfolio_sync import CONTINGENT_ORDER_TYPES, sync_portfolio_from_broker
 from firm.live.scheduler import (
     DEFAULT_MARKET_TIMEZONE,
     EXTENDED_HOURS_CYCLE_TYPES,
@@ -513,6 +513,8 @@ class LiveTradingEngine:
             for o in self._broker.get_open_orders():
                 remaining = max(0.0, o.quantity - o.filled_quantity)
                 if remaining <= 0:
+                    continue
+                if getattr(o, "order_type", "market") in CONTINGENT_ORDER_TYPES:
                     continue
                 sign = 1.0 if o.side == "buy" else -1.0
                 pending[o.symbol] = pending.get(o.symbol, 0.0) + sign * remaining

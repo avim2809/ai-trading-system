@@ -69,6 +69,13 @@ class OrderStatus:
     avg_fill_price: float = 0.0
     status: Literal["pending", "filled", "partial", "cancelled", "rejected"] = "pending"
     timestamp: datetime = field(default_factory=utcnow)
+    # "market" | "limit" | "stop" | "stop_limit" | "trailing_stop" — lets a
+    # reconciler (firm.live.portfolio_sync) tell a resting protective stop
+    # (may sit open indefinitely, doesn't mean the position is about to
+    # change) apart from an order genuinely in flight toward settling.
+    # Defaults to "market" so a broker/order that doesn't report a type is
+    # treated as before (netted as in-flight).
+    order_type: str = "market"
 
 
 @dataclass

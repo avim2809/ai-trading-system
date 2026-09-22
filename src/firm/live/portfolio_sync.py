@@ -16,6 +16,17 @@ from firm.time_utils import utcnow
 
 log = logging.getLogger(__name__)
 
+# Order types that sit open at the broker without implying the position is
+# about to change -- a resting protective stop/trailing-stop is sized to the
+# whole position and may never fill, so netting it into "expected quantity
+# once settled" makes a fully-held position look already-flat and the real
+# broker quantity never gets written into portfolio.holdings. Only orders
+# genuinely in flight toward a fill (market/limit) should be netted. Public
+# (no leading underscore): also used by engine.check_reconciliation, which
+# duplicates this same in-flight-quantity computation for its own read-only
+# broker-vs-internal comparison.
+CONTINGENT_ORDER_TYPES = {"stop", "stop_limit", "trailing_stop"}
+
 
 def sync_portfolio_from_broker(
     broker: Broker,
@@ -147,6 +158,8 @@ def _pending_quantities(broker: Broker) -> tuple[dict[str, float], bool]:
     for o in open_orders:
         remaining = max(0.0, o.quantity - o.filled_quantity)
         if remaining <= 0:
+            continue
+        if getattr(o, "order_type", "market") in CONTINGENT_ORDER_TYPES:
             continue
         sign = 1.0 if o.side == "buy" else -1.0
         pending[o.symbol] = pending.get(o.symbol, 0.0) + sign * remaining

@@ -68,6 +68,18 @@ def _require_ib() -> None:
         )
 
 
+# IBKR's Order.orderType strings -> OrderStatus.order_type's canonical set.
+# Unrecognized values fall back to "market" (see OrderStatus.order_type).
+_IBKR_ORDER_TYPE_MAP = {
+    "MKT": "market",
+    "LMT": "limit",
+    "STP": "stop",
+    "STP LMT": "stop_limit",
+    "TRAIL": "trailing_stop",
+    "TRAIL LIMIT": "trailing_stop",
+}
+
+
 class IBKRBroker(Broker):
     """Interactive Brokers adapter (TWS / IB Gateway)."""
 
@@ -751,4 +763,5 @@ class IBKRBroker(Broker):
             avg_fill_price=avg_price,
             status=mapped,
             timestamp=utcnow(),
+            order_type=_IBKR_ORDER_TYPE_MAP.get(order.orderType, "market"),
         )

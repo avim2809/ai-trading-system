@@ -299,6 +299,29 @@ class TestPortfolioSync:
         assert len(infos) == 1
         assert "Initial portfolio reconciliation" in infos[0].message
 
+    def test_resting_stop_order_does_not_mask_real_broker_position(self):
+        """A GTC protective stop sized to the whole position sits open at
+        the broker indefinitely -- unlike an in-flight rebalance order, it
+        does NOT mean the position is about to settle toward flat, so it
+        must not be netted into the "expected once settled" quantity. Before
+        the fix, this made sync treat a fresh (empty) internal book as
+        already matching a fully-held real position and never write it into
+        portfolio.holdings at all."""
+        broker = MockBroker()
+        broker.connect()
+        broker._positions["AAPL"] = BrokerPosition(
+            symbol="AAPL", quantity=100, avg_cost=150.0, market_value=15_000,
+        )
+        broker._orders["stop1"] = OrderStatus(
+            order_id="stop1", symbol="AAPL", side="sell", quantity=100,
+            filled_quantity=0.0, status="pending", order_type="stop",
+        )
+        portfolio = PortfolioState(initial_capital=100_000)
+
+        sync_portfolio_from_broker(broker, portfolio)
+
+        assert portfolio.holdings.get("AAPL") == 100
+
     def test_later_drift_on_nonempty_portfolio_still_warns(self, caplog):
         """Once the internal book is non-empty (i.e. past the initial
         post-restart sync), a genuine mismatch is real drift and must keep
@@ -421,6 +444,31 @@ class TestPositionReconciliation:
         result = engine.check_reconciliation()
 
         assert result["status"] == "ok"
+
+    def test_resting_stop_order_still_flags_as_drift(self, tmp_path):
+        """Same bug as TestPortfolioSync's resting-stop test, but through
+        check_reconciliation's own (duplicated) pending-order netting: a
+        resting protective stop sized to the whole position must not make
+        an empty internal book look already correct."""
+        broker = MockBroker(initial_cash=100_000)
+        broker.connect()
+        broker._positions["AAPL"] = BrokerPosition(
+            symbol="AAPL", quantity=100, avg_cost=150.0, market_value=15_000,
+        )
+        broker._orders["stop1"] = OrderStatus(
+            order_id="stop1", symbol="AAPL", side="sell", quantity=100,
+            filled_quantity=0.0, status="pending", order_type="stop",
+        )
+        engine = _make_reconciliation_engine(broker, tmp_path)
+        # Internal book never saw this position (e.g. fresh post-restart).
+
+        result = engine.check_reconciliation()
+
+        assert result["status"] == "mismatch"
+        assert any(
+            d["type"] == "position_mismatch" and d["symbol"] == "AAPL"
+            for d in result["discrepancies"]
+        )
 
     def test_sleeved_mode_nets_across_sleeves_before_comparing(self, tmp_path):
         """The wrong behavior would compare a single sleeve's virtual slice
