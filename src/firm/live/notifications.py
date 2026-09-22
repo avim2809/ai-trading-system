@@ -77,6 +77,7 @@ _ALERT_TITLES = {
     "broker_submission_circuit_open": "Order Submission Circuit Open",
     "reconciliation_degraded": "Reconciliation Degraded",
     "portfolio_reconciliation_mismatch": "Broker/Internal Position Mismatch",
+    "portfolio_reconciliation_recovered": "Broker/Internal Reconciliation Recovered",
     "order_risk_cap_blocked": "Order Blocked — Risk Cap",
     "live_trading_locked": "Live Trading Locked",
     "host_disk_low": "Host Disk Space Low",

@@ -467,14 +467,18 @@ class LiveTradingEngine:
         """Compare the broker's real account state, queried right now,
         against this engine's internally tracked net position/cash.
 
-        Read-only and side-effect-free on trading/portfolio state: this
-        never corrects ``self._portfolio`` or any sleeve book, it only
-        reports and (when a discrepancy exceeds tolerance) raises an alert
-        via the existing ``_emit_alert``/webhook path for a human to
-        investigate. A broker query failure (network blip, outage) reports
-        ``status="unknown"`` rather than treating "couldn't check" as "found
-        a mismatch" -- an unreachable broker says nothing about whether
-        internal state actually matches it.
+        Read-only and side-effect-free: this never corrects
+        ``self._portfolio``/any sleeve book, never alerts, and is safe to
+        call as often as a caller likes (including directly via
+        ``GET /api/live/reconciliation``) without pushing a notification --
+        alerting on a sustained mismatch is the scheduled job's job (see
+        ``firm.live.scheduler.run_position_reconciliation``), which dedupes
+        on state transitions the same way ``run_resource_health_check``
+        does, rather than this method firing one on every call. A broker
+        query failure (network blip, outage) reports ``status="unknown"``
+        rather than treating "couldn't check" as "found a mismatch" -- an
+        unreachable broker says nothing about whether internal state
+        actually matches it.
 
         Open (unfilled) orders are netted out of the position comparison
         the same way ``portfolio_sync.sync_portfolio_from_broker`` does, so
@@ -561,20 +565,6 @@ class LiveTradingEngine:
             "discrepancies": discrepancies,
         }
         self._last_reconciliation = result
-
-        if discrepancies:
-            detail = "; ".join(
-                f"{d['type']}"
-                f"{' ' + d['symbol'] if 'symbol' in d else ''}"
-                f": internal={d['internal']} broker={d['broker']}"
-                for d in discrepancies
-            )
-            self._emit_alert(
-                "portfolio_reconciliation_mismatch", "warning",
-                f"Broker/internal reconciliation found {len(discrepancies)} "
-                f"discrepancy(ies) beyond tolerance: {detail}",
-                discrepancies=discrepancies,
-            )
         return result
 
     def clear_cycle_history(self) -> int:

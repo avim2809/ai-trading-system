@@ -515,6 +515,77 @@ class TestRunPositionReconciliation:
         engine.check_reconciliation.side_effect = RuntimeError("boom")
         run_position_reconciliation(engine)  # must not raise
 
+    def test_first_mismatch_alerts(self):
+        """Regression: check_reconciliation itself no longer alerts (moved
+        here so a plain GET /api/live/reconciliation doesn't push a
+        notification) -- the job must alert on the first observed mismatch."""
+        engine = _mock_engine()
+        engine.check_reconciliation.return_value = {
+            "status": "mismatch",
+            "discrepancies": [{"type": "cash_mismatch", "internal": 100.0, "broker": 90.0}],
+        }
+        state: dict[str, str] = {}
+        run_position_reconciliation(engine, state)
+        engine._emit_alert.assert_called_once()
+        args = engine._emit_alert.call_args
+        assert args[0][0] == "portfolio_reconciliation_mismatch"
+        assert args[0][1] == "warning"
+        assert state["position_reconciliation"] == "mismatch"
+
+    def test_repeated_mismatch_does_not_realert(self):
+        """The bug this fixes: a sustained mismatch (e.g. a multi-hour
+        broker-data outage blocking the sync that would resolve it) was
+        re-alerting the full discrepancy list on every 30-minute tick."""
+        engine = _mock_engine()
+        engine.check_reconciliation.return_value = {
+            "status": "mismatch",
+            "discrepancies": [{"type": "cash_mismatch", "internal": 100.0, "broker": 90.0}],
+        }
+        state: dict[str, str] = {}
+        run_position_reconciliation(engine, state)
+        run_position_reconciliation(engine, state)
+        run_position_reconciliation(engine, state)
+        engine._emit_alert.assert_called_once()
+
+    def test_recovery_alerts_once_then_stays_quiet(self):
+        engine = _mock_engine()
+        engine.check_reconciliation.return_value = {"status": "mismatch", "discrepancies": []}
+        state: dict[str, str] = {}
+        run_position_reconciliation(engine, state)
+        engine._emit_alert.reset_mock()
+
+        engine.check_reconciliation.return_value = {"status": "ok", "discrepancies": []}
+        run_position_reconciliation(engine, state)
+        engine._emit_alert.assert_called_once_with(
+            "portfolio_reconciliation_recovered", "info",
+            "Broker/internal reconciliation is back in sync.",
+        )
+
+        engine._emit_alert.reset_mock()
+        run_position_reconciliation(engine, state)  # still "ok" -- no repeat
+        engine._emit_alert.assert_not_called()
+
+    def test_ok_from_the_start_never_alerts(self):
+        engine = _mock_engine()
+        engine.check_reconciliation.return_value = {"status": "ok", "discrepancies": []}
+        run_position_reconciliation(engine, {})
+        engine._emit_alert.assert_not_called()
+
+    def test_unknown_status_does_not_alert_or_change_state(self):
+        """A broker-query failure ("unknown") must never be treated as
+        either a mismatch or a recovery -- it says nothing about whether
+        internal state actually matches the broker."""
+        engine = _mock_engine()
+        engine.check_reconciliation.return_value = {"status": "mismatch", "discrepancies": []}
+        state: dict[str, str] = {}
+        run_position_reconciliation(engine, state)
+        engine._emit_alert.reset_mock()
+
+        engine.check_reconciliation.return_value = {"status": "unknown", "discrepancies": []}
+        run_position_reconciliation(engine, state)
+        engine._emit_alert.assert_not_called()
+        assert state["position_reconciliation"] == "unknown"
+
 
 # ---------------------------------------------------------------------------
 # Resource health check (disk / memory / CPU)

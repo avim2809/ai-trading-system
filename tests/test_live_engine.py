@@ -353,7 +353,11 @@ class TestPositionReconciliation:
     """LiveTradingEngine.check_reconciliation: the periodic/on-demand
     broker-vs-internal net position/cash check (see the method's own
     docstring) -- distinct from sync_portfolio_from_broker in that it never
-    corrects state, only reports and alerts."""
+    corrects state. Pure and never alerts itself (alert-on-transition is
+    the scheduled job's responsibility -- see TestRunPositionReconciliation
+    in test_scheduler.py), so it's safe to call as often as a caller likes,
+    including directly via GET /api/live/reconciliation, without pushing a
+    notification every time."""
 
     def test_detects_genuine_mismatch(self, tmp_path):
         broker = MockBroker(initial_cash=100_000)
@@ -368,7 +372,7 @@ class TestPositionReconciliation:
 
         assert result["status"] == "mismatch"
         assert any(d["type"] == "position_mismatch" and d["symbol"] == "AAPL" for d in result["discrepancies"])
-        assert any(a["kind"] == "portfolio_reconciliation_mismatch" for a in engine.alerts)
+        assert not any(a["kind"] == "portfolio_reconciliation_mismatch" for a in engine.alerts)
 
     def test_tiny_float_noise_is_not_a_mismatch(self, tmp_path):
         broker = MockBroker(initial_cash=100_000)

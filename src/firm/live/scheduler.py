@@ -364,23 +364,64 @@ def run_order_reconciliation(engine: LiveTradingEngine) -> None:
         log.error("Order-history reconciliation job failed", exc_info=True)
 
 
-def run_position_reconciliation(engine: LiveTradingEngine) -> None:
+def run_position_reconciliation(
+    engine: LiveTradingEngine, state: dict[str, str] | None = None,
+) -> None:
     """Diff the broker's real account against the engine's internally
     tracked net position/cash, independent of the trading-cycle schedule.
 
-    Pure observability (see ``LiveTradingEngine.check_reconciliation``):
-    never corrects portfolio state or affects order routing, only raises an
-    alert through the existing alert path when a real discrepancy is found.
-    Runs on its own interval rather than only at cycle start, so a
-    once-daily cycle schedule doesn't leave drift unnoticed for a full
-    trading day.
+    Pure observability (see ``LiveTradingEngine.check_reconciliation``,
+    which this calls and which never alerts itself): never corrects
+    portfolio state or affects order routing, only raises an alert through
+    the existing alert path. Runs on its own interval rather than only at
+    cycle start, so a once-daily cycle schedule doesn't leave drift
+    unnoticed for a full trading day.
+
+    *state* is a small dict the caller owns across ticks, mapping this
+    job's name to the last-alerted status, so a sustained mismatch pages
+    once on the transition into it -- and once more on recovery -- instead
+    of on every tick it remains, the same convention
+    ``run_resource_health_check`` uses. A single ongoing broker-data outage
+    (or any other sustained cause) would otherwise re-alert the full
+    discrepancy list every tick for as long as it persists.
     """
+    if state is None:
+        state = {}
     if not engine.is_running or getattr(engine, "_shutting_down", False):
         return
     try:
-        engine.check_reconciliation()
+        result = engine.check_reconciliation()
     except Exception:
         log.error("Position reconciliation job failed", exc_info=True)
+        return
+
+    status = result.get("status", "unknown")
+    previous = state.get("position_reconciliation", "ok")
+    if status == previous:
+        return
+    state["position_reconciliation"] = status
+    if status == "ok":
+        if previous == "mismatch":
+            engine._emit_alert(
+                "portfolio_reconciliation_recovered", "info",
+                "Broker/internal reconciliation is back in sync.",
+            )
+        return
+    if status != "mismatch":
+        return
+    discrepancies = result.get("discrepancies", [])
+    detail = "; ".join(
+        f"{d['type']}"
+        f"{' ' + d['symbol'] if 'symbol' in d else ''}"
+        f": internal={d['internal']} broker={d['broker']}"
+        for d in discrepancies
+    )
+    engine._emit_alert(
+        "portfolio_reconciliation_mismatch", "warning",
+        f"Broker/internal reconciliation found {len(discrepancies)} "
+        f"discrepancy(ies) beyond tolerance: {detail}",
+        discrepancies=discrepancies,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -704,9 +745,11 @@ class TradingScheduler:
         self._position_reconciliation_job_id = "position_reconciliation"
         self._resource_health_job_id = "resource_health_check"
         # Owned by this scheduler instance (one per engine/live instance) so
-        # run_resource_health_check's alert-on-transition logic persists
-        # across ticks rather than resetting every call.
+        # run_resource_health_check's/run_position_reconciliation's
+        # alert-on-transition logic persists across ticks rather than
+        # resetting every call.
         self._resource_health_state: dict[str, str] = {}
+        self._reconciliation_state: dict[str, str] = {}
         # Extended-hours legs (see _start_extended_hours_jobs) — only
         # registered when self._extended_hours_cfg["enabled"] is true.
         self._premarket_job_id = "live_cycle_premarket"
@@ -861,7 +904,7 @@ class TradingScheduler:
         # drift is a slower-moving signal (it only changes on a fill), so
         # there's no benefit to polling it as tightly as order status.
         self._scheduler.add_job(
-            lambda: run_position_reconciliation(self._engine),
+            lambda: run_position_reconciliation(self._engine, self._reconciliation_state),
             trigger=IntervalTrigger(minutes=30),
             id=self._position_reconciliation_job_id,
             replace_existing=True,
