@@ -25,7 +25,10 @@ def reconcile_order_statuses(
     trade_history: TradeHistoryStore,
     broker: Broker,
     *,
-    max_orders: int = 200,
+    # Must cover the full accumulated history, not just a recent window --
+    # a lower cap here permanently orphans older non-terminal orders (found
+    # 2026-09-23: 200 left ~179 of 379 Alpaca orders unreachable forever).
+    max_orders: int = 2000,
 ) -> int:
     """Poll the broker for every locally non-terminal order and correct it.
 

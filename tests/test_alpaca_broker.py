@@ -327,3 +327,56 @@ class TestNativeOrderTypes:
                 OrderRequest(symbol="AAPL", side="buy", quantity=10, order_type="market")
             )
         assert not any("extended_hours" in r.message for r in caplog.records)
+
+
+class _FakeAlpacaEnum:
+    """Mimics alpaca-py's real enum str() shape: str(OrderStatus.FILLED) ->
+    "OrderStatus.FILLED", not the bare "FILLED" a naive fake would return.
+    Regression coverage for the 2026-09-23 incident: _map_order lowercased
+    the raw enum repr without stripping this prefix, so every order's
+    mapped status silently defaulted to "pending" forever (confirmed live:
+    a real filled order still read back as "pending" from this codebase)."""
+
+    def __init__(self, cls_name: str, member: str):
+        self._repr = f"{cls_name}.{member}"
+
+    def __str__(self) -> str:
+        return self._repr
+
+
+class TestMapOrderEnumHandling:
+    """_map_order must correctly parse alpaca-py's real enum-repr shape for
+    status/side, the same way it already handles order.type."""
+
+    def _order(self, status="FILLED", side="SELL", order_type="MARKET"):
+        return SimpleNamespace(
+            id="o1",
+            symbol="AAPL",
+            side=_FakeAlpacaEnum("OrderSide", side),
+            qty=10.0,
+            filled_qty=10.0,
+            filled_avg_price=150.0,
+            status=_FakeAlpacaEnum("OrderStatus", status),
+            submitted_at=None,
+            type=_FakeAlpacaEnum("OrderType", order_type),
+        )
+
+    def test_filled_status_maps_correctly_not_pending(self):
+        result = AlpacaBroker._map_order(self._order(status="FILLED"))
+        assert result.status == "filled"
+
+    def test_partially_filled_status_maps_correctly(self):
+        result = AlpacaBroker._map_order(self._order(status="PARTIALLY_FILLED"))
+        assert result.status == "partial"
+
+    def test_canceled_status_maps_correctly(self):
+        result = AlpacaBroker._map_order(self._order(status="CANCELED"))
+        assert result.status == "cancelled"
+
+    def test_side_strips_enum_prefix_not_literal_typo_string(self):
+        result = AlpacaBroker._map_order(self._order(side="SELL"))
+        assert result.side == "sell"
+
+    def test_buy_side_strips_enum_prefix(self):
+        result = AlpacaBroker._map_order(self._order(side="BUY"))
+        assert result.side == "buy"

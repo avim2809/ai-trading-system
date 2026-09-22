@@ -485,15 +485,21 @@ class AlpacaBroker(Broker):
             "pending_cancel": "pending",
             "pending_replace": "pending",
         }
-        raw_status = str(getattr(order, "status", "pending")).lower()
+        # order.status/order.side/order.type are alpaca-py enums; str() on
+        # one yields "OrderStatus.FILLED"/"OrderSide.SELL"/"OrderType.STOP",
+        # so take the part after the last "." for all three -- same
+        # canonical set as IBKRBroker._map_trade's order_type.
+        raw_status = str(getattr(order, "status", "pending")).lower().rsplit(".", 1)[-1]
         mapped = status_map.get(raw_status, "pending")
+        raw_type = str(getattr(order, "type", "market")).lower()
         return OrderStatus(
             order_id=str(order.id),
             symbol=order.symbol,
-            side=str(order.side).lower().replace("ordersidé.", ""),
+            side=str(order.side).lower().rsplit(".", 1)[-1],
             quantity=float(order.qty) if order.qty else 0.0,
             filled_quantity=float(order.filled_qty) if order.filled_qty else 0.0,
             avg_fill_price=float(order.filled_avg_price) if order.filled_avg_price else 0.0,
             status=mapped,
             timestamp=order.submitted_at or utcnow(),
+            order_type=raw_type.rsplit(".", 1)[-1],
         )
