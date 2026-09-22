@@ -187,7 +187,12 @@ if [ "$SKIP_SYSTEM" = false ] && command -v apt-get &>/dev/null; then
         liblzma-dev \
         pkg-config \
         unzip \
-        xvfb                  # virtual display — required for headless IB Gateway
+        xvfb \
+        libxtst6 \
+        libxrender1 \
+        libxi6
+    # libxtst6/libxrender1/libxi6: IB Gateway's Java AWT needs these even in
+    # headless/xvfb mode; --no-install-recommends above skips them otherwise.
     ok "Build dependencies installed"
 
     # Java 17 — required by IB Gateway
