@@ -81,14 +81,30 @@ class MockBroker(Broker):
             existing = self._positions.get(order.symbol)
             if existing:
                 total_qty = existing.quantity + order.quantity
-                total_cost = existing.avg_cost * existing.quantity + cost
-                self._positions[order.symbol] = BrokerPosition(
-                    symbol=order.symbol,
-                    quantity=total_qty,
-                    avg_cost=total_cost / total_qty,
-                    market_value=total_qty * price,
-                    unrealized_pnl=0.0,
-                )
+                if total_qty == 0:
+                    # Buy exactly closes an existing short back to flat --
+                    # no shares left to have a cost basis for.
+                    del self._positions[order.symbol]
+                elif existing.quantity < 0 < total_qty:
+                    # Covers the short and flips long -- the new avg_cost is
+                    # this fill's price for the newly-opened long shares,
+                    # not a blend with the short leg that just closed.
+                    self._positions[order.symbol] = BrokerPosition(
+                        symbol=order.symbol,
+                        quantity=total_qty,
+                        avg_cost=price,
+                        market_value=total_qty * price,
+                        unrealized_pnl=0.0,
+                    )
+                else:
+                    total_cost = existing.avg_cost * existing.quantity + cost
+                    self._positions[order.symbol] = BrokerPosition(
+                        symbol=order.symbol,
+                        quantity=total_qty,
+                        avg_cost=total_cost / total_qty,
+                        market_value=total_qty * price,
+                        unrealized_pnl=0.0,
+                    )
             else:
                 self._positions[order.symbol] = BrokerPosition(
                     symbol=order.symbol,

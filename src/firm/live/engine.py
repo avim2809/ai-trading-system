@@ -1567,7 +1567,22 @@ class LiveTradingEngine:
     def _flatten_symbol_on_worker(self, symbol: str) -> dict[str, Any]:
         shares = self._portfolio.holdings.get(symbol, 0.0)
         if shares == 0.0:
-            return {"symbol": symbol, "flattened": False, "reason": "no position held"}
+            # Internal tracking can lose a position entirely (e.g. a symbol
+            # dropped from active tracking without ever being closed at the
+            # broker) -- fall back to the broker's real position rather than
+            # concluding there's nothing to flatten just because this
+            # engine's own ledger forgot about it. Seed the internal ledger
+            # with that real quantity before applying the closing fill below,
+            # so PortfolioState.update's delta math (prev_shares + fill) lands
+            # on the correct post-trade value instead of drifting further.
+            try:
+                broker_position = self._broker.get_position(symbol)
+            except Exception:
+                broker_position = None
+            shares = broker_position.quantity if broker_position else 0.0
+            if shares == 0.0:
+                return {"symbol": symbol, "flattened": False, "reason": "no position held"}
+            self._portfolio.holdings[symbol] = shares
 
         prices = self._broker.get_current_prices([symbol])
         price = prices.get(symbol, 0.0)

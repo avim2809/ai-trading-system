@@ -3823,6 +3823,24 @@ class TestFlattenSymbol:
         assert result["order_statuses"][0]["quantity"] == pytest.approx(50.0)
         assert engine._portfolio.holdings.get("AAPL", 0.0) == 0.0
 
+    def test_flatten_falls_back_to_broker_position_when_internal_tracking_is_blank(self, tmp_path):
+        """Regression: a symbol dropped from internal tracking without ever
+        being closed at the broker (e.g. removed from the dynamic universe
+        before flatten-on-removal existed) left flatten_symbol unable to
+        close it -- internal holdings read 0, so it reported "no position
+        held" even though the broker genuinely still held a real position.
+        Must fall back to the broker's real quantity and end up flat."""
+        engine = self._engine(tmp_path=tmp_path)
+        assert engine._portfolio.holdings.get("AAPL", 0.0) == 0.0
+        engine._broker._positions["AAPL"] = BrokerPosition(symbol="AAPL", quantity=-65.0)
+
+        result = engine.flatten_symbol("AAPL")
+
+        assert result["flattened"] is True
+        assert result["order_statuses"][0]["side"] == "buy"
+        assert result["order_statuses"][0]["quantity"] == pytest.approx(65.0)
+        assert engine._portfolio.holdings.get("AAPL", 0.0) == 0.0
+
     def test_flatten_refuses_while_cycle_in_progress(self, tmp_path):
         engine = self._engine(tmp_path=tmp_path)
         engine._portfolio.holdings = {"AAPL": 100.0}
