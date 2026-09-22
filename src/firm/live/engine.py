@@ -373,8 +373,16 @@ class LiveTradingEngine:
                     ts = datetime.fromisoformat(raw_ts)
                 except ValueError:
                     continue
-                if _is_today(ts):
-                    by_cycle_id[summary.get("cycle_id", -1)] = dict(summary)
+                if not _is_today(ts):
+                    continue
+                cycle_id = summary.get("cycle_id")
+                if cycle_id is None:
+                    # Manual operator actions (flatten_symbol, etc.) are recorded
+                    # in the same store with cycle_id=None -- they aren't numbered
+                    # trading cycles, so they don't count toward "did a cycle run
+                    # today" and must not collide as a dict key with real ints.
+                    continue
+                by_cycle_id[cycle_id] = dict(summary)
 
         for result in self._cycle_history:
             if _is_today(result.timestamp):

@@ -2074,6 +2074,27 @@ class TestCyclesTodaySurvivesRestart:
         engine, _ = self._engine(engine_components, tmp_path, trade_history=False)
         assert engine.had_cycle_today() is False
 
+    def test_cycles_today_ignores_manual_action_entries_with_no_cycle_id(self, engine_components, tmp_path):
+        """A manual flatten_symbol/flatten_strategy action persists a cycle_id=None
+        entry to the same store (see _record_manual_action). cycles_today() must
+        not choke sorting None against real int cycle_ids, and must not count the
+        manual action itself as a scheduled trading cycle having run today."""
+        engine, history = self._engine(engine_components, tmp_path)
+        now = utcnow()
+        history.record_cycle({
+            "cycle_id": None, "timestamp": now.isoformat(),
+            "manual_action": "flatten_symbol", "details": {"symbol": "PCG"},
+        })
+        history.record_cycle({
+            "cycle_id": 1, "timestamp": now.isoformat(),
+            "orders_generated": 3, "orders_submitted": 3,
+            "orders_queued": 0, "orders_failed": 0,
+            "skipped": False, "error": None,
+        })
+        cycles = engine.cycles_today()
+        assert len(cycles) == 1
+        assert cycles[0]["cycle_id"] == 1
+
 
 class TestReconcileOrderHistory:
     """order_history.json is written once at submission time and never
