@@ -244,37 +244,25 @@ Press Ctrl-C when satisfied; systemd will manage it going forward.
 
 ### 6c. systemd services
 
-Create the two service files:
+Production runs **two independent live instances** side by side — IBKR on
+`:8000` and Alpaca on `:8001` (see the pipeline overview in `CLAUDE.md`/
+`AGENTS.md` for why: blended vs. sleeved capital, broker-comparison control).
+Each is its own `firm-api` process, same checkout and venv, distinguished
+only by `FIRM_API_PORT`/`FIRM_DATA_DIR`/`FIRM_LIVE_CONFIG`. All unit files
+below live in `deploy/` — copy them rather than retyping, so a fresh box
+can't drift from what's actually deployed the way this doc once did.
 
-**`/etc/systemd/system/ibgateway.service`** (name matters — must match
-`deploy/ai-trading.service`'s `After=`/`Wants=ibgateway.service` below, or
-systemd silently won't order/wait for IB Gateway before starting the API)
+**IB Gateway** — name matters: it must match `ai-trading.service`'s
+`After=`/`Wants=ibgateway.service` (no hyphen), or systemd silently won't
+order/wait for it before starting the API:
+
 ```bash
-sudo tee /etc/systemd/system/ibgateway.service > /dev/null << EOF
-[Unit]
-Description=IB Gateway (headless via IBC)
-After=network.target
-StartLimitIntervalSec=300
-StartLimitBurst=5
-
-[Service]
-Type=simple
-User=$USER
-Environment=DISPLAY=:99
-ExecStartPre=/usr/bin/Xvfb :99 -screen 0 1024x768x24 -ac
-ExecStart=/opt/ibc/scripts/ibgateway.sh /opt/ibgateway /home/$USER/.ibc/config.ini /opt/ibc
-Restart=always
-RestartSec=30
-TimeoutStartSec=90
-
-[Install]
-WantedBy=multi-user.target
-EOF
+sudo cp deploy/ibgateway.service /etc/systemd/system/ibgateway.service
+# Edit paths/user if this checkout isn't at /local/store/git/ai-trading-system
+# run as root — see the WorkingDirectory/ExecStart/User lines.
 ```
 
-**API service — use the repo unit (recommended)**
-
-The production host uses [`deploy/ai-trading.service`](deploy/ai-trading.service) (not `firm-api.service`):
+**IBKR instance** (`deploy/ai-trading.service`, port 8000):
 
 ```bash
 sudo cp deploy/ai-trading.service /etc/systemd/system/ai-trading.service
@@ -285,8 +273,8 @@ sudo systemctl enable ai-trading
 
 Key settings in that unit:
 
-- `ExecStart=$(pwd)/.venv/bin/firm-api` — single process for API + web UI + live engine
-- `EnvironmentFile=$(pwd)/.env` — API keys and broker credentials
+- `ExecStart=.../.venv/bin/firm-api` — single process for API + web UI + live engine
+- `EnvironmentFile=.../.env` — API keys and broker credentials
 - `Environment=FIRM_AUTO_START_LIVE=1` — boots live from `config/live.yaml` on startup
 - `After=ibgateway.service` — waits for the IB Gateway *process* to fork
 - `ExecStartPre=scripts/wait_for_ibgateway.sh` — waits (up to 90s, configurable via
@@ -294,40 +282,33 @@ Key settings in that unit:
   since `After=`/`Wants=` alone don't — closes a real boot race that has silently
   stopped the live engine before (see `docs/PROJECT_CONTEXT.md` "Broker & host
   failover"). Always exits 0; never blocks `firm-api` from starting indefinitely.
+- `RestartSteps=4`/`RestartMaxDelaySec=160` — geometric restart backoff (10s →
+  160s) so a persistent failure doesn't hammer whatever it's failing against
+  forever, while a single transient crash still recovers in 10s.
 
-Add to `.env`:
+`POST /api/live/start` merges missing fields (universe, strategies, risk, `strategy_params`) from `config/live.yaml`. See [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md).
+
+**Alpaca instance** (`deploy/ai-trading-alpaca.service`, port 8001) — a second,
+independent paper-trading instance; only set it up if you actually want both
+running:
+
+```bash
+sudo cp deploy/ai-trading-alpaca.service /etc/systemd/system/ai-trading-alpaca.service
+sudo systemctl daemon-reload
+sudo systemctl enable ai-trading-alpaca
+```
+
+It shares the checkout/venv/`.env` with the IBKR instance but sets its own
+`FIRM_API_PORT=8001`, `FIRM_DATA_DIR=data_alpaca`, and
+`FIRM_LIVE_CONFIG=config/live_alpaca.yaml`, and has no IB Gateway dependency
+(Alpaca's REST API needs no local gateway process). Add `ALPACA_API_KEY`/
+`ALPACA_SECRET_KEY` to `.env` before starting it.
+
+Add to `.env` (applies to both instances):
 
 ```env
 FIRM_AUTO_START_LIVE=1    # set to 0 to start live manually from the dashboard
 ```
-
-`POST /api/live/start` merges missing fields (universe, strategies, risk, `strategy_params`) from `config/live.yaml`. See [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md).
-
-**Alternative: generic `firm-api.service` (manual live start)**
-
-```bash
-sudo tee /etc/systemd/system/firm-api.service > /dev/null << EOF
-[Unit]
-Description=AI Trading System API
-After=network.target ibgateway.service
-Wants=ibgateway.service
-
-[Service]
-Type=simple
-User=$USER
-WorkingDirectory=$(pwd)
-EnvironmentFile=$(pwd)/.env
-ExecStartPre=$(pwd)/scripts/wait_for_ibgateway.sh
-ExecStart=$(pwd)/.venv/bin/uvicorn firm.api.app:app --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-```
-
-This variant does not set `FIRM_AUTO_START_LIVE` — you must start live via the dashboard or `POST /api/live/start`.
 
 Xvfb (virtual framebuffer) is needed by IB Gateway's Java UI even in headless mode.
 Install it if not present: `sudo apt-get install -y xvfb`.
@@ -336,32 +317,49 @@ Enable and start:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable ib-gateway ai-trading   # or: ib-gateway firm-api
-sudo systemctl start ib-gateway
+sudo systemctl enable ibgateway ai-trading ai-trading-alpaca
+sudo systemctl start ibgateway
 
 # Wait ~60s for Gateway to complete login, then:
 sudo systemctl start ai-trading
+sudo systemctl start ai-trading-alpaca   # only if running both
 sudo systemctl status ai-trading      # should show "active (running)"
 ```
 
-### 6d. Firewall
+To start live manually instead of on boot, comment out the
+`Environment=FIRM_AUTO_START_LIVE=1` line in your copy of the unit and use
+the dashboard or `POST /api/live/start`.
+
+### 6d. Quick firewall (direct access, no nginx yet)
 
 ```bash
-sudo ufw allow 22/tcp               # SSH
-sudo ufw allow 8000/tcp             # API + frontend (or 80 if behind nginx)
+sudo ufw limit 22/tcp               # SSH, rate-limited against brute-force
+sudo ufw allow 8000/tcp             # IBKR instance, direct
+sudo ufw allow 8001/tcp             # Alpaca instance, direct (skip if not running it)
 sudo ufw enable
 ```
 
-The frontend is now at **`http://YOUR_VPS_IP:8000`**.
+The frontend is now at **`http://YOUR_VPS_IP:8000`** (and `:8001` for Alpaca).
+This is fine for initial testing; before leaving either instance running
+unattended on the internet, go to §6e and put nginx + TLS + basic auth in
+front, then close these two ports.
 
-### 6e. Optional: nginx on port 80 / 443
+### 6e. nginx + TLS + basic auth (production — do this before going live unattended)
 
-`firm-api` binds `127.0.0.1:8000` only (see `run()` in `src/firm/api/app.py`)
+`firm-api` binds `127.0.0.1:<port>` only (see `run()` in `src/firm/api/app.py`)
 — it controls live trading (start/stop, order approval, account data) and
 must only ever be reached through a reverse proxy that adds TLS + auth, not
 directly. **Basic auth is not optional for a bare-metal box exposed to the
 internet** — this endpoint was briefly open with no auth in an earlier
 deployment; don't repeat that.
+
+Production fronts both instances with one nginx config: `:443` serves the
+IBKR instance's frontend and proxies `/api/alpaca/` to the Alpaca instance
+(so one page reaches both — see `frontend/src/api/client.ts`), and a second
+server block on `:8443` serves the Alpaca instance directly. The template is
+[`deploy/nginx-ai-trading.conf`](deploy/nginx-ai-trading.conf); if you're
+only running the IBKR instance, delete the `location /api/alpaca/` block and
+the `:8443` server block.
 
 ```bash
 sudo apt-get install -y nginx apache2-utils
@@ -371,57 +369,23 @@ sudo apt-get install -y nginx apache2-utils
 sudo htpasswd -c /etc/nginx/.htpasswd youroperatorname
 sudo chgrp www-data /etc/nginx/.htpasswd && sudo chmod 640 /etc/nginx/.htpasswd
 
-# Rate-limit zone — basic_auth has no throttling of its own, so without this
-# a brute-force password-guessing script could hit the login as fast as the
-# network allows. 10r/s steady-state is generous for normal dashboard
-# polling (the frontend's fastest poll interval is ~5s per endpoint).
-sudo tee /etc/nginx/conf.d/rate-limit.conf << 'EOF'
-limit_req_zone $binary_remote_addr zone=ai_trading_limit:10m rate=10r/s;
-EOF
+# Rate-limit zone and site config — copied from deploy/, not retyped (see
+# §6c rationale). TLS cert/key and the htpasswd file above are generated
+# per-deployment, never committed — deploy/nginx-ai-trading.conf only
+# references their paths.
+sudo cp deploy/nginx-rate-limit.conf /etc/nginx/conf.d/rate-limit.conf
+sudo cp deploy/nginx-ai-trading.conf /etc/nginx/sites-available/ai-trading
+# If using a real domain instead of IP-only access, replace `server_name _;`
+# in both server blocks with your domain first.
 
-sudo tee /etc/nginx/sites-available/firm << 'EOF'
-server {
-    listen 80;
-    server_name trading.yourdomain.com;
-    return 301 https://$host$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    server_name trading.yourdomain.com;
-
-    # See "TLS cert" below for either certbot (real domain) or a self-signed
-    # cert (no public domain / IP-only access).
-    ssl_certificate     /etc/nginx/ssl/ai-trading.crt;
-    ssl_certificate_key /etc/nginx/ssl/ai-trading.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-
-    auth_basic "AI Trading System";
-    auth_basic_user_file /etc/nginx/.htpasswd;
-
-    limit_req zone=ai_trading_limit burst=20 nodelay;
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # SSE/streaming-friendly settings (harmless for regular requests).
-        proxy_buffering off;
-        proxy_read_timeout 3600s;
-    }
-}
-EOF
-
-sudo ln -sf /etc/nginx/sites-available/firm /etc/nginx/sites-enabled/
+sudo ln -sf /etc/nginx/sites-available/ai-trading /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
-sudo ufw allow 443/tcp && sudo ufw delete allow 8000/tcp   # only nginx should be internet-reachable
+
+# Only nginx should be internet-reachable now — close the direct ports
+# opened in §6d and open the two nginx ports instead.
+sudo ufw allow 443/tcp && sudo ufw allow 8443/tcp
+sudo ufw delete allow 8000/tcp
+sudo ufw delete allow 8001/tcp   # skip if you never opened it
 ```
 
 **TLS cert — pick one:**
@@ -439,12 +403,43 @@ sudo openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
     -subj "/CN=ai-trading-system"
 ```
 
-### 6f. Useful maintenance commands
+**fail2ban** — install with defaults; no app-specific jail config is needed
+beyond what ships with the package:
+
+```bash
+sudo apt-get install -y fail2ban
+sudo systemctl enable --now fail2ban
+```
+
+The bundled `sshd`, `nginx-http-auth`, and `nginx-limit-req` jails already
+cover SSH brute-forcing and repeated failed logins/rate-limit hits against
+the nginx site set up above, once nginx's logs exist for them to read.
+
+### 6f. Backup timer
+
+Daily backup of live-trading state (kill-switch, `live_state.db`, decision
+memory, pending approvals, execution audit trail) to a second on-disk
+location — protects against an accidental deletion or bad edit inside
+`data/`/`data_alpaca/`, not against losing the disk itself (see
+`scripts/backup_live_state.sh` for what it excludes and why).
+
+```bash
+sudo cp deploy/backup-live-state.service deploy/backup-live-state.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now backup-live-state.timer
+```
+
+Backs up to `/local/store/backups/ai-trading-live-state` by default,
+retaining 14 days; override with `LIVE_STATE_BACKUP_DIR`/
+`LIVE_STATE_BACKUP_RETAIN` env vars on the service if needed.
+
+### 6g. Useful maintenance commands
 
 ```bash
 # Logs
-sudo journalctl -u ai-trading -f    # or: firm-api
-sudo journalctl -u ib-gateway -f
+sudo journalctl -u ai-trading -f
+sudo journalctl -u ai-trading-alpaca -f
+sudo journalctl -u ibgateway -f
 
 # Restart after config change
 sudo systemctl restart ai-trading

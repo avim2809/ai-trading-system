@@ -1,0 +1,16 @@
+[Unit]
+Description=IB Gateway (headless, via IBC auto-login)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/local/store/git/ai-trading-system
+# scripts/start_ibgateway.sh owns Xvfb + IBC invocation (see that script) —
+# this unit only supervises the process and restarts it on crash/exit.
+ExecStart=/local/store/git/ai-trading-system/scripts/start_ibgateway.sh paper
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

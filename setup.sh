@@ -84,19 +84,22 @@ echo ""
 if [ "$UNINSTALL" = true ]; then
     step "Uninstalling AI Trading System"
 
-    # Stop and disable systemd services
-    for svc in firm-api ibgateway; do
-        if systemctl is-active --quiet "$svc" 2>/dev/null; then
-            sudo systemctl stop "$svc"
-            ok "Stopped $svc"
+    # Stop and disable systemd units. backup-live-state.timer is the one
+    # that's actually enabled; its .service is a oneshot the timer triggers
+    # and is never itself enabled, but still gets removed below.
+    for unit in ai-trading.service ai-trading-alpaca.service ibgateway.service \
+                backup-live-state.timer backup-live-state.service; do
+        if systemctl is-active --quiet "$unit" 2>/dev/null; then
+            sudo systemctl stop "$unit"
+            ok "Stopped $unit"
         fi
-        if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
-            sudo systemctl disable "$svc"
-            ok "Disabled $svc"
+        if systemctl is-enabled --quiet "$unit" 2>/dev/null; then
+            sudo systemctl disable "$unit"
+            ok "Disabled $unit"
         fi
-        if [ -f "/etc/systemd/system/${svc}.service" ]; then
-            sudo rm -f "/etc/systemd/system/${svc}.service"
-            ok "Removed /etc/systemd/system/${svc}.service"
+        if [ -f "/etc/systemd/system/${unit}" ]; then
+            sudo rm -f "/etc/systemd/system/${unit}"
+            ok "Removed /etc/systemd/system/${unit}"
         fi
     done
     command -v systemctl &>/dev/null && sudo systemctl daemon-reload
@@ -474,71 +477,90 @@ fi
 if [ "$INSTALL_SERVICES" = true ] && command -v systemctl &>/dev/null; then
     step "Installing systemd services"
 
-    VENV_UVICORN="$PROJECT_ROOT/.venv/bin/uvicorn"
+    # deploy/*.service|.timer are the source of truth for what actually runs
+    # in production (working dir, FIRM_API_PORT/FIRM_DATA_DIR/FIRM_LIVE_CONFIG
+    # env vars, restart backoff, ExecStartPre ordering, etc.) — copied here
+    # rather than regenerated, so this can't drift from what's deployed. They
+    # hardcode one host's checkout path and root user; substitute this
+    # install's before installing.
+    install_unit() {
+        local name="$1"
+        sed -e "s#/local/store/git/ai-trading-system#$PROJECT_ROOT#g" \
+            -e "s/^User=root$/User=$USER/" \
+            "$PROJECT_ROOT/deploy/$name" | sudo tee "/etc/systemd/system/$name" > /dev/null
+        ok "Installed /etc/systemd/system/$name (from deploy/$name)"
+    }
 
-    # ibgateway.service — name must match deploy/ai-trading.service's
-    # After=/Wants= (no hyphen); a mismatch here means systemd silently
-    # never orders/waits for IB Gateway before starting the API (see
-    # docs/PROJECT_CONTEXT.md "Broker & host failover").
-    sudo tee /etc/systemd/system/ibgateway.service > /dev/null <<SERVICE
-[Unit]
-Description=IB Gateway (headless via IBC)
-After=network.target
-StartLimitIntervalSec=300
-StartLimitBurst=5
+    IBKR_UNITS_INSTALLED=false
+    if [[ "$COMPONENTS" == *"live"* || "$COMPONENTS" == "all" ]] && [ "$SKIP_IBKR" = false ]; then
+        install_unit "ibgateway.service"
+        IBKR_UNITS_INSTALLED=true
+    fi
 
-[Service]
-Type=simple
-User=$USER
-Environment=DISPLAY=:99
-ExecStartPre=/usr/bin/Xvfb :99 -screen 0 1024x768x24 -ac
-ExecStart=$IBC_INSTALL_DIR/scripts/ibgateway.sh $IBKR_INSTALL_DIR $HOME/.ibc/config.ini $IBC_INSTALL_DIR
-Restart=always
-RestartSec=30
-TimeoutStartSec=90
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-    ok "Created /etc/systemd/system/ibgateway.service"
-
-    # firm-api.service
-    sudo tee /etc/systemd/system/firm-api.service > /dev/null <<SERVICE
-[Unit]
-Description=AI Trading System API
-After=network.target ibgateway.service
-Wants=ibgateway.service
-
-[Service]
-Type=simple
-User=$USER
-WorkingDirectory=$PROJECT_ROOT
-EnvironmentFile=$PROJECT_ROOT/.env
-# After=/Wants=ibgateway.service above only waits for the process to fork,
-# not for IBC's headless login to actually open the API port (30-60s+) — this
-# closes that race so auto-start doesn't lose to it on boot. Always exits 0
-# (a readiness delay, not a hard gate); see the script for the full rationale.
-ExecStartPre=$PROJECT_ROOT/scripts/wait_for_ibgateway.sh
-ExecStart=$VENV_UVICORN firm.api.app:app --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-SERVICE
-    ok "Created /etc/systemd/system/firm-api.service"
+    # ai-trading.service (IBKR instance, :8000) and ai-trading-alpaca.service
+    # (Alpaca instance, :8001) are the two units the production host runs
+    # side by side — see docs/PROJECT_CONTEXT.md "Capital sleeves" / .cursor/
+    # rules for why both exist. Both are installed; only ai-trading is
+    # enabled by default since Alpaca needs its own credentials first.
+    install_unit "ai-trading.service"
+    install_unit "ai-trading-alpaca.service"
+    install_unit "backup-live-state.service"
+    install_unit "backup-live-state.timer"
 
     sudo systemctl daemon-reload
-    sudo systemctl enable ibgateway firm-api
-    ok "Services enabled (will start on next boot)"
+
+    if [ "$IBKR_UNITS_INSTALLED" = true ]; then
+        sudo systemctl enable ibgateway ai-trading
+        ok "Enabled ibgateway + ai-trading (will start on next boot)"
+    else
+        sudo systemctl enable ai-trading
+        ok "Enabled ai-trading (will start on next boot)"
+    fi
+    sudo systemctl enable --now backup-live-state.timer
+    ok "Enabled backup-live-state.timer (daily live-state backup)"
+
+    warn "ai-trading-alpaca.service was installed but NOT enabled — it's a"
+    warn "second, independent paper-trading instance (Alpaca broker, :8001,"
+    warn "config/live_alpaca.yaml). Only enable it if you want both running:"
+    warn "  sudo systemctl enable --now ai-trading-alpaca"
 
     warn "Before starting, complete these steps:"
-    warn "  1. Edit ~/.ibc/config.ini — set IbLoginId and IbPassword"
-    warn "  2. sudo systemctl start ibgateway"
-    warn "  3. Wait ~60s for Gateway login, then: sudo systemctl start firm-api"
-    warn "  Monitor: sudo journalctl -u firm-api -f"
+    if [ "$IBKR_UNITS_INSTALLED" = true ]; then
+        warn "  1. Edit ~/.ibc/config.ini — set IbLoginId and IbPassword"
+        warn "  2. Edit .env — add broker/data-provider API keys"
+        warn "  3. sudo systemctl start ibgateway"
+        warn "  4. Wait ~60s for Gateway login, then: sudo systemctl start ai-trading"
+    else
+        warn "  1. Edit .env — add broker/data-provider API keys"
+        warn "  2. sudo systemctl start ai-trading"
+    fi
+    warn "  Monitor: sudo journalctl -u ai-trading -f"
 elif [ "$INSTALL_SERVICES" = true ]; then
     warn "systemd not found — skipping service installation"
+fi
+
+# ---------------------------------------------------------------
+# 11b. Firewall (bare-metal VPS — only with --install-services)
+# ---------------------------------------------------------------
+if [ "$INSTALL_SERVICES" = true ] && command -v ufw &>/dev/null; then
+    step "Configuring firewall (ufw)"
+
+    # Rate-limited, not just allowed — an un-throttled 22/tcp is an open
+    # invitation to password-guessing bots on any internet-facing VPS.
+    sudo ufw limit 22/tcp
+    ok "22/tcp rate-limited (SSH)"
+
+    # Direct access for initial testing. Once nginx + TLS + basic auth are
+    # in front (DEPLOY.md §6e), close these and open 443/8443 instead —
+    # a bare API port with no auth in front must never stay reachable.
+    sudo ufw allow 8000/tcp
+    sudo ufw allow 8001/tcp
+    ok "8000/tcp + 8001/tcp allowed (direct API access — close once nginx is in front)"
+
+    sudo ufw --force enable
+    ok "ufw enabled"
+elif [ "$INSTALL_SERVICES" = true ]; then
+    warn "ufw not found — skipping firewall configuration"
 fi
 
 # ---------------------------------------------------------------
@@ -599,8 +621,9 @@ if [[ "$COMPONENTS" == *"live"* || "$COMPONENTS" == "all" ]] && \
     echo "    2. Edit ~/.ibc/config.ini with your IBKR credentials"
     if [ "$INSTALL_SERVICES" = true ]; then
         echo "    3. sudo systemctl start ibgateway    # starts headless Gateway"
-        echo "    4. sudo systemctl start firm-api     # starts API + frontend"
+        echo "    4. sudo systemctl start ai-trading   # starts API + frontend"
         echo "    5. Open http://localhost:8000"
+        echo "    (ai-trading-alpaca was installed but not enabled — see the warnings above)"
     else
         echo "    3. Start IB Gateway:  sudo systemctl start ibgateway  (if --install-services was used)"
         echo "       or manually:       ./scripts/start_ibgateway.sh paper"
