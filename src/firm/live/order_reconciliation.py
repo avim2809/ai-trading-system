@@ -12,6 +12,7 @@ locally non-terminal order and correcting the persisted record in place.
 from __future__ import annotations
 
 import logging
+from typing import Any, Callable
 
 from firm.brokers.base import Broker, BrokerError
 from firm.live.trade_history import TradeHistoryStore
@@ -29,6 +30,7 @@ def reconcile_order_statuses(
     # a lower cap here permanently orphans older non-terminal orders (found
     # 2026-09-23: 200 left ~179 of 379 Alpaca orders unreachable forever).
     max_orders: int = 2000,
+    on_terminal: Callable[[dict[str, Any]], None] | None = None,
 ) -> int:
     """Poll the broker for every locally non-terminal order and correct it.
 
@@ -37,6 +39,16 @@ def reconcile_order_statuses(
     an order the broker no longer knows about (e.g. from before a process
     restart wiped its in-session trade cache) is left as-is rather than
     guessed at.
+
+    ``on_terminal``, if given, is called once for every order that just
+    transitioned INTO a terminal status this pass (not for one that was
+    already terminal, and not for a non-terminal update like a partial
+    fill's quantity changing) -- with the corrected record dict (including
+    ``cycle_id``, ``symbol``, ``filled_quantity``, ``avg_fill_price``). This
+    module knows nothing about sleeves; the caller (see
+    ``LiveTradingEngine.reconcile_order_history``) uses it to apply
+    ``sleeve_reconciliation.apply_realized_fill`` for sleeved-mode engines
+    only, keeping that coupling out of this broker-facing module.
     """
     pending = [
         o
@@ -67,6 +79,10 @@ def reconcile_order_statuses(
         ):
             continue
 
+        prev_status = order.get("status")
+        # update_order_status mutates the same dict `order` already
+        # references (list_orders returns the live objects, not copies) --
+        # `order` reflects the corrected fields immediately after this call.
         if trade_history.update_order_status(
             order_id,
             status=live_status.status,
@@ -76,7 +92,12 @@ def reconcile_order_statuses(
             updated += 1
             log.info(
                 "Reconciled order %s (%s): %s -> %s (filled=%.4f @ %.4f)",
-                order_id, order.get("symbol"), order.get("status"),
+                order_id, order.get("symbol"), prev_status,
                 live_status.status, live_status.filled_quantity, live_status.avg_fill_price,
             )
+            if on_terminal and prev_status not in _TERMINAL_STATUSES and live_status.status in _TERMINAL_STATUSES:
+                try:
+                    on_terminal(order)
+                except Exception:
+                    log.warning("on_terminal callback failed for order %s", order_id, exc_info=True)
     return updated

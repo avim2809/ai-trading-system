@@ -419,10 +419,54 @@ class LiveTradingEngine:
         from firm.live.order_reconciliation import reconcile_order_statuses
 
         try:
-            return reconcile_order_statuses(self._trade_history, self._broker)
+            return reconcile_order_statuses(
+                self._trade_history, self._broker, on_terminal=self._on_order_terminal,
+            )
         except Exception:
             log.warning("Order-history reconciliation failed", exc_info=True)
             return 0
+
+    def _on_order_terminal(self, order: dict[str, Any]) -> None:
+        """Sleeved-mode only: once a symbol's real broker fill for a cycle
+        is known, apportion it pro-rata across whichever sleeves decided a
+        quantity for that symbol that cycle -- see
+        ``firm.live.sleeve_reconciliation`` for why this can't just correct
+        each sleeve to broker truth directly (the broker position is a sum
+        across every sleeve). No-op for blended mode, which already
+        self-heals every cycle via ``sync_portfolio_from_broker``.
+        """
+        if self._orchestrator.capital_allocation_mode != "sleeved":
+            return
+        cycle_id, symbol = order.get("cycle_id"), order.get("symbol")
+        if cycle_id is None or symbol is None or self._trade_history is None:
+            return
+
+        from firm.live.sleeve_reconciliation import apply_realized_fill, correction_key
+
+        key = correction_key(cycle_id, symbol)
+        corrected = self._state_store.load_corrected_fills() if self._state_store else []
+        if key in corrected:
+            return
+
+        sleeve_decisions = None
+        for c in self._trade_history.list_cycles(limit=100_000):
+            if c.get("cycle_id") == cycle_id:
+                sleeve_decisions = c.get("sleeve_decisions")
+                break
+        if not sleeve_decisions:
+            return
+
+        sleeves = getattr(self._orchestrator, "_sleeve_portfolios", None) or {}
+        applied = apply_realized_fill(
+            sleeves, sleeve_decisions, symbol,
+            real_filled_qty=float(order.get("filled_quantity", 0.0) or 0.0),
+            avg_fill_price=float(order.get("avg_fill_price", 0.0) or 0.0),
+        )
+        if not applied:
+            return
+        if self._state_store:
+            self._state_store.save_corrected_fills(corrected + [key])
+            self._state_store.save_sleeve_portfolios(self._orchestrator.export_sleeve_portfolios())
 
     # ------------------------------------------------------------------
     # Broker-vs-internal position/cash reconciliation.

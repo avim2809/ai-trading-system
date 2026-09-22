@@ -2230,6 +2230,62 @@ class TestReconcileOrderHistory:
         engine, _ = self._engine(engine_components, tmp_path, trade_history=False)
         assert engine.reconcile_order_history() == 0
 
+    def test_sleeved_mode_applies_realized_fill_on_terminal_transition(self, engine_components, tmp_path):
+        broker, feed, queue, config = engine_components
+        engine, history = self._engine(engine_components, tmp_path)
+        engine._orchestrator.capital_allocation_mode = "sleeved"
+        sleeve = PortfolioState(initial_capital=100_000)
+        sleeve.holdings["AAPL"] = 10.0
+        sleeve.cash -= 10.0 * 150.0
+        engine._orchestrator._sleeve_portfolios = {"momentum": sleeve}
+        history.record_cycle({
+            "cycle_id": 9, "timestamp": utcnow().isoformat(),
+            "sleeve_decisions": {
+                "momentum": {"status": "approved", "fills": [{"symbol": "AAPL", "shares": 10.0, "price": 150.0}]},
+            },
+        })
+        history.record_orders([{
+            "order_id": "1", "symbol": "AAPL", "side": "buy", "quantity": 10.0,
+            "filled_quantity": 0.0, "avg_fill_price": 0.0, "status": "pending",
+            "timestamp": utcnow().isoformat(), "strategy": "momentum", "cycle_id": 9,
+        }])
+        broker._orders["1"] = OrderStatus(
+            order_id="1", symbol="AAPL", side="buy", quantity=10.0,
+            filled_quantity=4.0, avg_fill_price=148.0, status="cancelled",
+            timestamp=utcnow(),
+        )
+
+        engine.reconcile_order_history()
+
+        assert sleeve.holdings["AAPL"] == 4.0
+        assert sleeve.cash == 100_000 - 4.0 * 148.0
+
+    def test_blended_mode_never_touches_sleeve_correction(self, engine_components, tmp_path):
+        broker, feed, queue, config = engine_components
+        engine, history = self._engine(engine_components, tmp_path)
+        engine._orchestrator.capital_allocation_mode = "blended"
+        engine._orchestrator._sleeve_portfolios = {}
+        history.record_cycle({
+            "cycle_id": 9, "timestamp": utcnow().isoformat(),
+            "sleeve_decisions": {
+                "momentum": {"status": "approved", "fills": [{"symbol": "AAPL", "shares": 10.0, "price": 150.0}]},
+            },
+        })
+        history.record_orders([{
+            "order_id": "1", "symbol": "AAPL", "side": "buy", "quantity": 10.0,
+            "filled_quantity": 0.0, "avg_fill_price": 0.0, "status": "pending",
+            "timestamp": utcnow().isoformat(), "strategy": "momentum", "cycle_id": 9,
+        }])
+        broker._orders["1"] = OrderStatus(
+            order_id="1", symbol="AAPL", side="buy", quantity=10.0,
+            filled_quantity=4.0, avg_fill_price=148.0, status="cancelled",
+            timestamp=utcnow(),
+        )
+
+        # Must not raise even though _sleeve_portfolios is empty -- blended
+        # mode should short-circuit before ever looking at it.
+        assert engine.reconcile_order_history() == 1
+
 
 class TestCycleHardTimeout:
     @patch("firm.live.engine.build_orchestrator")

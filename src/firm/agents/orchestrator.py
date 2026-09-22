@@ -984,6 +984,17 @@ class Orchestrator(Agent):
                 "status": "approved",
                 "violations": list(decision.violations),
                 "actions": list(decision.actions),
+                # Decision-time (hypothetical, pre-broker-truth) fills this
+                # sleeve believes it got this cycle -- persisted so a later
+                # pass can apportion the REAL broker fill for a symbol back
+                # across whichever sleeves contributed to that cycle's net
+                # order, once it's known (see sleeve_reconciliation.py).
+                # Never itself corrected here -- this is what was decided,
+                # not what happened.
+                "fills": [
+                    {"symbol": f["symbol"], "shares": f["shares"], "price": f["price"]}
+                    for f in sleeve_report.fills
+                ],
             }
 
             # Apply this sleeve's own fills to its own book -- exactly the

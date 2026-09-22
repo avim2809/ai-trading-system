@@ -42,6 +42,7 @@ DAILY_LIMITS_KEY = "daily_limits"
 TRADER_STATE_KEY = "trader_state"
 CYCLE_COUNTER_KEY = "cycle_counter"
 SLEEVE_PORTFOLIOS_KEY = "sleeve_portfolios"
+CORRECTED_FILLS_KEY = "sleeve_corrected_fills"
 
 
 class LiveStateStore:
@@ -254,6 +255,21 @@ class LiveStateStore:
 
     def load_sleeve_portfolios(self) -> dict[str, dict[str, Any]] | None:
         return self._load_blob(SLEEVE_PORTFOLIOS_KEY)
+
+    # ------------------------------------------------------------------
+    # (cycle_id, symbol) pairs already apportioned by
+    # sleeve_reconciliation.apply_realized_fill -- a correction must apply
+    # exactly once even if the order-reconciliation job re-scans the same
+    # now-terminal order on a later tick. Persisted (not just in-memory) so
+    # a restart between the fill settling and its correction doesn't
+    # double-apply or silently drop it.
+    # ------------------------------------------------------------------
+
+    def save_corrected_fills(self, keys: list[str]) -> None:
+        self._save_blob(CORRECTED_FILLS_KEY, keys)
+
+    def load_corrected_fills(self) -> list[str]:
+        return self._load_blob(CORRECTED_FILLS_KEY) or []
 
     # ------------------------------------------------------------------
     # Cycle counter (see LiveTradingEngine._cycle_count). Unlike daily_limits
