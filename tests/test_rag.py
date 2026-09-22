@@ -187,3 +187,66 @@ class TestStoreDateFilter:
         assert ALWAYS_AVAILABLE_DATE <= "2020-01-01"
         # Unknown docs use a far-future date so a $lte asof always excludes them.
         assert UNKNOWN_DATE > "2099-01-01"
+
+
+class _FakeMetadataCollection:
+    """Mimics just the ``get``/``update`` subset of Chroma's Collection API
+    that ``VectorStore.update_metadata`` uses."""
+
+    def __init__(self, ids, metadatas):
+        self._ids = ids
+        self._metadatas = metadatas
+        self.update_calls: list[dict] = []
+
+    def get(self, ids, include=None):
+        found = [(i, m) for i, m in zip(self._ids, self._metadatas) if i in ids]
+        return {
+            "ids": [i for i, _ in found],
+            "metadatas": [m for _, m in found],
+        }
+
+    def update(self, ids, metadatas):
+        self.update_calls.append({"ids": ids, "metadatas": metadatas})
+
+
+class TestVectorStoreUpdateMetadata:
+    """update_metadata's job: patch an existing doc's metadata in place,
+    merged onto what's already stored, without touching embeddings/text.
+
+    Distinct from add_documents' dedup-by-id, which would silently no-op a
+    metadata-only change to an id that's already in the collection (see
+    firm.agents.memory's recommendation-applied loop, the caller this
+    method was added for)."""
+
+    def test_merges_new_metadata_onto_existing_and_updates_in_place(self):
+        from firm.rag.store import VectorStore
+
+        collection = _FakeMetadataCollection(
+            ids=["recommendation:2026-01-01"],
+            metadatas=[{"date": "2026-01-01", "action": "flag_strategy_for_review", "applied": False}],
+        )
+        store = _FakeChromaStore(collection)
+
+        result = VectorStore.update_metadata(
+            store, "recommendations", "recommendation:2026-01-01", {"applied": True},
+        )
+
+        assert result is True
+        assert len(collection.update_calls) == 1
+        call = collection.update_calls[0]
+        assert call["ids"] == ["recommendation:2026-01-01"]
+        # Unrelated existing fields survive; only "applied" changed.
+        assert call["metadatas"] == [
+            {"date": "2026-01-01", "action": "flag_strategy_for_review", "applied": True},
+        ]
+
+    def test_returns_false_and_does_not_update_when_doc_id_missing(self):
+        from firm.rag.store import VectorStore
+
+        collection = _FakeMetadataCollection(ids=[], metadatas=[])
+        store = _FakeChromaStore(collection)
+
+        result = VectorStore.update_metadata(store, "recommendations", "missing-id", {"applied": True})
+
+        assert result is False
+        assert collection.update_calls == []

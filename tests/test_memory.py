@@ -9,9 +9,10 @@ summarize_lessons() instead of buried inside per-decision prose blobs.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from firm.agents.memory import TradingMemoryLog
+from firm.rag.models import RetrievedDoc
 
 
 def _log(tmp_path) -> TradingMemoryLog:
@@ -125,11 +126,11 @@ class TestReflect:
         assert "reflection unavailable" in reflection
         assert log.list_decisions()[0]["verdict"] == "unknown"
 
-    def test_retries_once_before_falling_back_to_unknown(self, tmp_path):
-        """Confirmed live: garbled/degenerate LLM output fails schema
-        validation often enough (~1/3 of reflected decisions) that a
+    def test_retries_before_falling_back_to_unknown(self, tmp_path):
+        """Garbled/degenerate LLM output fails schema validation often
+        enough (historically ~1/3 of reflected decisions) that a
         single-shot call was silently losing real self-assessment data.
-        Both attempts must be exhausted before giving up."""
+        All attempts must be exhausted before giving up."""
         log = _log(tmp_path)
         log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1})
         llm = MagicMock()
@@ -139,9 +140,32 @@ class TestReflect:
             date="2026-01-01", raw_return=0.02, benchmark_return=0.01, llm_service=llm,
         )
 
-        assert llm.chat_json.call_count == 2
+        assert llm.chat_json.call_count == 3
         assert "reflection unavailable" in reflection
         assert log.list_decisions()[0]["verdict"] == "unknown"
+
+    def test_retry_forces_default_model_instead_of_reusing_the_same_pick(self, tmp_path):
+        """Regression: LLMService's load-balance routing is a deterministic
+        hash of the message content, so a same-message retry with no model
+        override reliably re-picks the exact same (possibly unreliable
+        free-tier) model that just failed -- defeating the retry's whole
+        purpose. Reflection is low-volume enough that it doesn't need
+        load-balancing; retries must force the service's own default_model
+        instead of re-rolling the same dice."""
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1})
+        llm = MagicMock()
+        llm.default_model = "groq/openai/gpt-oss-120b"
+        llm.chat_json.return_value = "not a dict"
+
+        log.reflect(
+            date="2026-01-01", raw_return=0.02, benchmark_return=0.01, llm_service=llm,
+        )
+
+        calls = llm.chat_json.call_args_list
+        assert calls[0].kwargs.get("model") is None  # first attempt: normal load-balanced pick
+        assert calls[1].kwargs.get("model") == "groq/openai/gpt-oss-120b"
+        assert calls[2].kwargs.get("model") == "groq/openai/gpt-oss-120b"
 
     def test_recovers_on_second_attempt_after_a_bad_first_sample(self, tmp_path):
         """The whole point of the retry: a bad first sample must not
@@ -440,3 +464,249 @@ class TestReflectDay:
     def test_mark_recommendation_applied_returns_false_when_nothing_to_apply(self, tmp_path):
         log = _log(tmp_path)
         assert log.mark_recommendation_applied("2026-01-01") is False
+
+
+class TestRecommendationRAGLoop:
+    """The self-improvement loop: reflect_day() writes its recommendation
+    into the RAG "recommendations" collection (even a no_action one) and
+    retrieves relevant past recommendations before building its prompt;
+    mark_recommendation_applied() mirrors the applied flag into that same
+    stored doc. RAG is mocked directly onto the instance (_rag_store /
+    _rag_retriever) rather than exercising real Chroma/embeddings — matches
+    how reflect()/reflect_day() already mock llm_service in this file."""
+
+    def _llm(self, **overrides):
+        llm = MagicMock()
+        payload = {
+            "verdict": "correct", "what_worked": "w", "what_failed": "", "lesson": "l",
+            "recommendation": {"action": "no_action"},
+        }
+        payload.update(overrides)
+        llm.chat_json.return_value = payload
+        return llm
+
+    def _wire_rag(self, log, retrieved=None):
+        mock_store = MagicMock()
+        mock_retriever = MagicMock()
+        mock_retriever.retrieve.return_value = retrieved or []
+        log._rag_store = mock_store
+        log._rag_retriever = mock_retriever
+        return mock_store, mock_retriever
+
+    def test_recommendation_written_to_rag_with_correct_metadata(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(
+            date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1,
+            per_strategy={"momentum": {"AAPL": 0.1}}, nav_at_decision=100_000,
+        )
+        mock_store, _ = self._wire_rag(log)
+        llm = self._llm(recommendation={
+            "action": "reduce_position_limit", "strategy": "momentum",
+            "reduce_by_pct": 0.3, "rationale": "repeated veto pattern",
+        })
+
+        log.reflect_day(date="2026-01-01", raw_return=-0.05, benchmark_return=0.0, llm_service=llm)
+
+        mock_store.add_documents.assert_called_once()
+        collection_name, docs = mock_store.add_documents.call_args[0]
+        assert collection_name == "recommendations"
+        assert len(docs) == 1
+        doc = docs[0]
+        assert doc.doc_id == "recommendation:2026-01-01"
+        assert doc.metadata == {
+            "date": "2026-01-01",
+            "doc_type": "recommendation",
+            "action": "reduce_position_limit",
+            "strategy": "momentum",
+            "reduce_by_pct": 0.3,
+            "rationale": "repeated veto pattern",
+            "applied": False,
+        }
+        assert "momentum" in doc.text
+        assert "repeated veto pattern" in doc.text
+
+    def test_no_action_recommendation_is_still_written(self, tmp_path):
+        """The *absence* of an actionable recommendation for a situation is
+        itself useful history -- it must not be skipped just because
+        action == "no_action"."""
+        log = _log(tmp_path)
+        log.store_decision(
+            date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000,
+        )
+        mock_store, _ = self._wire_rag(log)
+
+        log.reflect_day(date="2026-01-01", raw_return=0.01, benchmark_return=0.01, llm_service=self._llm())
+
+        mock_store.add_documents.assert_called_once()
+        _, docs = mock_store.add_documents.call_args[0]
+        assert docs[0].metadata["action"] == "no_action"
+        assert docs[0].metadata["applied"] is False
+
+    def test_no_llm_recommendation_at_all_is_not_written(self, tmp_path):
+        """A total LLM failure (parsed is None) yields recommendation=None,
+        distinct from a real "no_action" verdict -- there's no rationale to
+        store, so this must not write a hollow RAG doc."""
+        log = _log(tmp_path)
+        log.store_decision(
+            date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000,
+        )
+        mock_store, _ = self._wire_rag(log)
+        llm = MagicMock()
+        llm.chat_json.side_effect = RuntimeError("down")
+
+        log.reflect_day(date="2026-01-01", raw_return=0.01, benchmark_return=0.01, llm_service=llm)
+
+        mock_store.add_documents.assert_not_called()
+
+    def test_past_recommendations_are_retrieved_and_injected_into_prompt(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(
+            date="2026-01-02", proposal_weights={"AAPL": 0.1}, cycle_id=1,
+            per_strategy={"momentum": {"AAPL": 0.1}}, nav_at_decision=100_000,
+        )
+        _, mock_retriever = self._wire_rag(log, retrieved=[
+            RetrievedDoc(
+                doc_id="recommendation:2026-01-01",
+                text="...",
+                metadata={
+                    "date": "2026-01-01",
+                    "action": "flag_strategy_for_review",
+                    "strategy": "momentum",
+                    "applied": True,
+                    "rationale": "repeated losing days",
+                },
+                score=0.9,
+            ),
+        ])
+        llm = self._llm()
+
+        log.reflect_day(date="2026-01-02", raw_return=0.02, benchmark_return=0.0, llm_service=llm)
+
+        _, kwargs = mock_retriever.retrieve.call_args
+        assert kwargs["collection"] == "recommendations"
+        assert kwargs["n_results"] == 3  # bounded, matches memory_rag_n_results default
+
+        prompt = llm.chat_json.call_args[0][0][1]["content"]
+        assert "Past recommendations for similar situations" in prompt
+        assert "flag_strategy_for_review" in prompt
+        assert "momentum" in prompt
+        assert "applied: yes" in prompt
+        assert "repeated losing days" in prompt
+
+    def test_no_past_recommendations_omits_the_block_cleanly(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        llm = self._llm()
+        self._wire_rag(log, retrieved=[])
+
+        log.reflect_day(date="2026-01-01", raw_return=0.01, benchmark_return=0.01, llm_service=llm)
+
+        prompt = llm.chat_json.call_args[0][0][1]["content"]
+        assert "Past recommendations" not in prompt
+
+    def test_mark_recommendation_applied_updates_rag_doc_in_place(self, tmp_path):
+        """The update-vs-dedup subtlety: applying a recommendation must
+        patch the existing RAG doc's metadata via update_metadata (in
+        place), not re-add it through add_documents -- add_documents skips
+        any id already present in the collection before ever calling
+        upsert(), so a same-id/changed-metadata re-add would silently do
+        nothing and leave the stale applied=False behind."""
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        mock_store, _ = self._wire_rag(log)
+        mock_store.update_metadata.return_value = True
+        llm = self._llm(recommendation={
+            "action": "reduce_position_limit", "strategy": "momentum",
+            "reduce_by_pct": 0.3, "rationale": "x",
+        })
+        log.reflect_day(date="2026-01-01", raw_return=-0.05, benchmark_return=0.0, llm_service=llm)
+        assert mock_store.add_documents.call_count == 1  # the original write, from reflect_day
+
+        applied = log.mark_recommendation_applied("2026-01-01")
+
+        assert applied is True
+        mock_store.update_metadata.assert_called_once_with(
+            "recommendations", "recommendation:2026-01-01", {"applied": True},
+        )
+        # Applying never re-invokes add_documents -- that path is a dedup
+        # no-op for an unchanged doc_id and would leave applied=False stale.
+        assert mock_store.add_documents.call_count == 1
+
+    def test_mark_recommendation_applied_still_true_when_rag_doc_missing(self, tmp_path):
+        """The JSONL log (the source of truth) must still record "applied"
+        even if the RAG mirror has nothing to update for this date."""
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        mock_store, _ = self._wire_rag(log)
+        mock_store.update_metadata.return_value = False
+        log.reflect_day(date="2026-01-01", raw_return=-0.05, benchmark_return=0.0, llm_service=self._llm(
+            recommendation={"action": "flag_strategy_for_review", "strategy": "momentum", "rationale": "x"},
+        ))
+
+        applied = log.mark_recommendation_applied("2026-01-01")
+
+        assert applied is True
+        assert log.list_recommendations(pending_only=False)[0]["applied"] is True
+
+
+class TestRecommendationRAGFailsSoft:
+    """reflect_day()/mark_recommendation_applied() must work exactly as
+    they do today when RAG is unavailable (extras not installed, vector
+    store down, etc.) -- the recommendation loop only enriches the prompt,
+    it must never be a new way for reflection to break."""
+
+    def _llm(self, **overrides):
+        llm = MagicMock()
+        payload = {
+            "verdict": "correct", "what_worked": "w", "what_failed": "", "lesson": "l",
+            "recommendation": {"action": "no_action"},
+        }
+        payload.update(overrides)
+        llm.chat_json.return_value = payload
+        return llm
+
+    def test_reflect_day_completes_when_rag_store_construction_fails(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+
+        with patch.object(TradingMemoryLog, "_get_rag_store", side_effect=ImportError("rag extra not installed")):
+            reflection = log.reflect_day(
+                date="2026-01-01", raw_return=0.01, benchmark_return=0.0, llm_service=self._llm(),
+            )
+
+        assert reflection is not None
+        assert "CORRECT" in reflection
+        rollup = next(e for e in log.list_decisions() if e.get("cycle_id") == "rollup")
+        assert rollup["status"] == "reflected"
+
+    def test_reflect_day_completes_when_retriever_query_raises(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        mock_retriever = MagicMock()
+        mock_retriever.retrieve.side_effect = RuntimeError("chroma query failed")
+        log._rag_retriever = mock_retriever
+        log._rag_store = MagicMock()
+        log._rag_store.add_documents.side_effect = RuntimeError("chroma write failed")
+
+        reflection = log.reflect_day(
+            date="2026-01-01", raw_return=0.01, benchmark_return=0.0, llm_service=self._llm(),
+        )
+
+        assert reflection is not None
+        assert "CORRECT" in reflection
+
+    def test_mark_recommendation_applied_still_succeeds_when_rag_unavailable(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+
+        with patch.object(TradingMemoryLog, "_get_rag_store", side_effect=RuntimeError("chroma down")):
+            log.reflect_day(date="2026-01-01", raw_return=-0.05, benchmark_return=0.0, llm_service=self._llm(
+                recommendation={
+                    "action": "reduce_position_limit", "strategy": "momentum",
+                    "reduce_by_pct": 0.2, "rationale": "x",
+                },
+            ))
+            applied = log.mark_recommendation_applied("2026-01-01")
+
+        assert applied is True  # JSONL log updated correctly regardless of RAG mirror failure
+        assert log.list_recommendations(pending_only=False)[0]["applied"] is True

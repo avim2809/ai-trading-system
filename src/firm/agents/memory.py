@@ -21,6 +21,32 @@ The file is append-only; Phase B updates are written as new lines with the
 same ``date`` key — ``get_context`` always uses the latest entry per date so
 the original pending record is superseded without in-place mutation (safe for
 concurrent readers).
+
+Recommendation self-improvement loop (RAG):
+    ``reflect_day()``'s ``DailyReflectionRecommendation`` (including a
+    ``no_action`` one — the absence of a recommendation for a given
+    situation is itself a useful precedent) is additionally written as a
+    ``Document`` into the ``"recommendations"`` RAG collection, and
+    ``reflect_day()`` retrieves the most relevant few past recommendations
+    from that same collection before building its prompt — so each day's
+    LLM call sees "here's what was recommended (and whether it was applied)
+    for similar past situations" instead of reasoning from scratch every
+    time. ``mark_recommendation_applied()`` updates that stored document's
+    ``applied`` metadata in place once a human actually applies it (see
+    ``firm.rag.store.VectorStore.update_metadata``), so future retrieval
+    reflects reality instead of a stale ``False``.
+
+    This is pure context enrichment for an LLM prompt: it can only ever
+    change what a future recommendation-generating call *reads*, never what
+    it does — applying a recommendation remains the separate, human-gated
+    ``POST /api/live/recommendations/{date}/apply`` path (see
+    ``firm.llm.schemas.DailyReflectionRecommendation``'s docstring). All of
+    the RAG read/write calls in this module are lazily constructed and
+    wrapped in defensive try/except, exactly like
+    ``LLMAgentMixin._get_retriever`` — this class has no hard dependency on
+    the ``llm``/``rag`` extras and must keep working (just without the
+    historical-context enrichment) when they aren't installed, or when the
+    vector store is otherwise unavailable.
 """
 
 from __future__ import annotations
@@ -29,9 +55,12 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from firm.llm.schemas import DecisionReflection, parse_llm_response
+
+if TYPE_CHECKING:
+    from firm.llm.schemas import DailyReflectionRecommendation
 
 log = logging.getLogger("firm.agents.memory")
 
@@ -43,6 +72,20 @@ _DEFAULT_PATH = Path("data/memory/decisions.jsonl")
 # from config, since `_DEFAULT_PATH` itself supplies the fallback. This
 # constant never changes, so it's what the pytest-context guard below checks.
 _REAL_PROD_PATH = Path("data/memory/decisions.jsonl")
+
+# The default `rag.persist_dir` from config/llm.yaml — the one vector store
+# every collection (news/sec_filings/research/system_docs, and now
+# "recommendations") shares in production. Same rationale as
+# `_REAL_PROD_PATH` above: a test that exercises reflect_day()/
+# mark_recommendation_applied() end-to-end (e.g. via a real live engine)
+# without mocking `_get_rag_store`/`_get_rag_retriever` must not silently
+# write real embeddings into this shared production store. Unlike the JSONL
+# guard, this fails *soft* (treated as "RAG unavailable," same as a missing
+# extra) rather than raising past reflect_day's own fail-soft try/except —
+# raising loudly here would defeat the whole point of this feature being
+# fail-soft, so under-isolated tests just don't get RAG coverage instead of
+# corrupting shared production data.
+_REAL_PROD_VECTORDB = Path("data/vectordb")
 
 _REFLECTION_SYSTEM = (
     "You are a portfolio manager reviewing your own past trading decision "
@@ -68,7 +111,11 @@ _REFLECTION_SYSTEM = (
 # output) are common enough that ~1/3 of reflected decisions were losing
 # their self-assessment permanently to a single bad sample. See reflect()'s
 # retry loop.
-_REFLECTION_MAX_ATTEMPTS = 2
+_REFLECTION_MAX_ATTEMPTS = 3
+
+# RAG collection recommendations are written to/read from — see the module
+# docstring's "Recommendation self-improvement loop" section.
+_RECOMMENDATIONS_COLLECTION = "recommendations"
 
 
 class TradingMemoryLog:
@@ -78,6 +125,8 @@ class TradingMemoryLog:
         config: Dict that may contain:
             ``memory_log_path``      — path to the JSONL file (str/Path).
             ``memory_max_context``   — max entries returned by get_context (int, default 5).
+            ``memory_rag_n_results`` — max past recommendations injected into
+                                       reflect_day()'s prompt (int, default 3).
     """
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
@@ -102,6 +151,12 @@ class TradingMemoryLog:
             )
         self._path = resolved
         self._max_context: int = int(cfg.get("memory_max_context", 5))
+        self._rag_n_results: int = int(cfg.get("memory_rag_n_results", 3))
+        # Lazily constructed on first use (see _get_rag_store/_get_rag_retriever)
+        # so a bare-backtest context with the llm/rag extras uninstalled never
+        # pays an import cost it doesn't need.
+        self._rag_store: Any = None
+        self._rag_retriever: Any = None
 
     # ── Phase A ─────────────────────────────────────────────────────────────
 
@@ -302,6 +357,9 @@ class TradingMemoryLog:
             if combined_per_strategy
             else ""
         )
+        history_block = self._retrieve_recommendation_history(
+            strategies=list(combined_per_strategy), alpha=alpha,
+        )
         user_prompt = (
             f"Decision date: {date} ({len(day_entries)} decision cycle(s) that day)\n"
             f"Portfolio return: {raw_return:+.2%}\n"
@@ -309,7 +367,8 @@ class TradingMemoryLog:
             f"Alpha: {alpha:+.2%}\n\n"
             f"Notes across the day's cycles: {notes or 'none'}\n"
             f"Final target weights at day's last cycle: {json.dumps(final_weights, indent=2)}"
-            f"{per_strategy_block}\n\n"
+            f"{per_strategy_block}"
+            f"{history_block}\n\n"
             "If, and only if, this day's outcome clearly points to one specific "
             "strategy that should be sized down or flagged for review, you may "
             'set "recommendation" to {"action": "reduce_position_limit"|'
@@ -355,6 +414,11 @@ class TradingMemoryLog:
             "alpha %+.2f%%, verdict=%s",
             date, len(day_entries), raw_return * 100, alpha * 100, verdict,
         )
+        self._store_recommendation_doc(
+            date=date, recommendation=recommendation, raw_return=raw_return,
+            benchmark_return=benchmark_return, alpha=alpha,
+            strategies=list(combined_per_strategy),
+        )
         return reflection
 
     def _call_reflection_llm(
@@ -382,18 +446,30 @@ class TradingMemoryLog:
         # useful. One retry costs nothing this deferred/off-critical-path
         # call isn't latency-sensitive, and a bad sample is often a one-off
         # sampling hiccup rather than a systematic prompt problem.
+        #
+        # The retry only helps if it can actually reach a different model:
+        # LLMService's load-balance routing is a deterministic hash of the
+        # message content, so an identical retry with no override reliably
+        # re-picks the exact same model that just failed. Reflection is only
+        # called a couple of times a day per instance -- far too low-volume
+        # to need spreading across the free-tier pool the way high-frequency
+        # per-signal enhancement calls do -- so the retry explicitly forces
+        # the service's own default_model rather than re-rolling the same
+        # dice.
         parsed: DecisionReflection | None = None
         for attempt in range(1, _REFLECTION_MAX_ATTEMPTS + 1):
+            model_override = llm_service.default_model if attempt > 1 else None
             try:
-                raw = llm_service.chat_json(messages)
+                raw = llm_service.chat_json(messages, model=model_override)
                 parsed = parse_llm_response(
                     DecisionReflection, raw,
                     context=f"memory/{label} (attempt {attempt}/{_REFLECTION_MAX_ATTEMPTS})",
                 )
             except Exception as exc:
                 log.warning(
-                    "Memory: LLM reflection call failed for %s (attempt %d/%d): %s",
-                    label, attempt, _REFLECTION_MAX_ATTEMPTS, exc, exc_info=True,
+                    "Memory: LLM reflection call failed for %s (attempt %d/%d, model=%s): %s",
+                    label, attempt, _REFLECTION_MAX_ATTEMPTS,
+                    model_override or "load-balanced", exc, exc_info=True,
                 )
                 parsed = None
             if parsed is not None:
@@ -421,6 +497,182 @@ class TradingMemoryLog:
                 "(reflection unavailable)"
             )
         return verdict, what_worked, what_failed, lesson, reflection, recommendation
+
+    # ── Recommendation RAG loop ──────────────────────────────────────────────
+    # See the module docstring's "Recommendation self-improvement loop"
+    # section. Every method below is best-effort: a failure here must never
+    # break reflect_day() or mark_recommendation_applied(), it only means
+    # today's call doesn't get the historical-context enrichment.
+
+    def _get_rag_store(self) -> Any:
+        """Lazily construct the shared vector store, or raise.
+
+        Same lazy-construct-and-cache pattern as
+        ``LLMAgentMixin._get_retriever`` — this class has no hard dependency
+        on the ``rag``/``llm`` extras, so the import only happens on first
+        real use.
+
+        Refuses to construct a real store pointed at the shared production
+        ``data/vectordb`` while running under pytest (see
+        ``_REAL_PROD_VECTORDB``) — every caller of this method already
+        treats any exception here as "RAG unavailable this call" and
+        degrades gracefully, so this is a safety net, not a new failure
+        mode: a test that wants real RAG coverage should mock
+        ``_rag_store``/``_rag_retriever`` (see tests/test_memory.py) or
+        point ``config/llm.yaml``'s ``rag.persist_dir`` elsewhere.
+        """
+        if self._rag_store is None:
+            from firm.llm.config import rag_config
+            from firm.rag.store import VectorStore
+
+            persist_dir = Path(rag_config().get("persist_dir", "data/vectordb")).expanduser()
+            if persist_dir == _REAL_PROD_VECTORDB.expanduser() and os.environ.get("PYTEST_CURRENT_TEST"):
+                raise RuntimeError(
+                    f"Refusing to write to the real production vector store "
+                    f"{_REAL_PROD_VECTORDB} while running under pytest; mock "
+                    "TradingMemoryLog._get_rag_store or set a different "
+                    "rag.persist_dir for this test."
+                )
+            self._rag_store = VectorStore()
+        return self._rag_store
+
+    def _get_rag_retriever(self) -> Any:
+        """Lazily construct the shared retriever over ``_get_rag_store()``."""
+        if self._rag_retriever is None:
+            from firm.llm.config import rag_config
+            from firm.rag.retriever import RAGRetriever
+
+            rag = rag_config()
+            self._rag_retriever = RAGRetriever(
+                self._get_rag_store(),
+                reranker=bool(rag.get("reranking", True)),
+                hybrid=bool(rag.get("hybrid", False)),
+                reranker_provider=rag.get("reranker_provider"),
+                reranker_model=rag.get("reranker_model"),
+            )
+        return self._rag_retriever
+
+    @staticmethod
+    def _recommendation_doc_id(date: str) -> str:
+        """Stable id for *date*'s rollup recommendation doc.
+
+        Deliberately NOT a content hash (contrast
+        ``firm.rag.chunker.DocumentChunker``'s chunk ids): this id must stay
+        identical across the initial write and the later
+        ``mark_recommendation_applied()`` metadata update, and there's
+        exactly one recommendation doc per date (``reflect_day`` is
+        idempotent per date), so a plain date-keyed id is sufficient and
+        lets ``VectorStore.update_metadata`` find the same row later.
+        """
+        return f"recommendation:{date}"
+
+    def _store_recommendation_doc(
+        self,
+        *,
+        date: str,
+        recommendation: "DailyReflectionRecommendation | None",
+        raw_return: float,
+        benchmark_return: float,
+        alpha: float,
+        strategies: list[str],
+    ) -> None:
+        """Write *date*'s daily-rollup recommendation into the RAG
+        ``"recommendations"`` collection (even a ``no_action`` one — the
+        absence of a recommendation for a given situation is itself a
+        useful precedent for a future retrieval). Skipped when
+        *recommendation* is ``None``, i.e. the LLM call itself failed and
+        there is no actual recommendation content to store.
+
+        Never raises: a RAG write failure only costs this one day's
+        historical-context contribution, not the reflection itself (which
+        is already persisted to the JSONL log by the time this runs).
+        """
+        if recommendation is None:
+            return
+        try:
+            from firm.rag.models import Document
+
+            strategy_line = f" Strategies involved that day: {', '.join(strategies)}." if strategies else ""
+            reduce_line = (
+                f" (reduce by {recommendation.reduce_by_pct:.0%})"
+                if recommendation.action == "reduce_position_limit"
+                else ""
+            )
+            text = (
+                f"Daily reflection recommendation for {date}. "
+                f"Portfolio return {raw_return:+.2%}, benchmark {benchmark_return:+.2%}, "
+                f"alpha {alpha:+.2%}.{strategy_line}\n"
+                f"Recommended action: {recommendation.action}"
+                + (f" for strategy \"{recommendation.strategy}\"" if recommendation.strategy else "")
+                + f"{reduce_line}.\n"
+                f"Rationale: {recommendation.rationale or '(none given)'}"
+            )
+            doc = Document(
+                doc_id=self._recommendation_doc_id(date),
+                text=text,
+                metadata={
+                    "date": date,
+                    "doc_type": "recommendation",
+                    "action": recommendation.action,
+                    "strategy": recommendation.strategy,
+                    "reduce_by_pct": recommendation.reduce_by_pct,
+                    "rationale": recommendation.rationale,
+                    "applied": False,
+                },
+            )
+            self._get_rag_store().add_documents(_RECOMMENDATIONS_COLLECTION, [doc])
+        except Exception:
+            log.warning(
+                "Memory: RAG write failed for %s's recommendation — proceeding "
+                "without storing it for future self-improvement context",
+                date, exc_info=True,
+            )
+
+    def _retrieve_recommendation_history(
+        self, *, strategies: list[str], alpha: float,
+    ) -> str:
+        """Retrieve a bounded set of relevant past recommendations from RAG
+        for injection into ``reflect_day()``'s prompt — the actual
+        self-improvement mechanism: today's reflection gets to see what was
+        recommended (and whether it was applied) for semantically similar
+        past situations, instead of reasoning from scratch every day.
+
+        Returns "" (never raises) when RAG is unavailable, the collection is
+        empty, or nothing relevant is found — reflect_day() must work
+        identically either way, just without this enrichment.
+        """
+        query = (
+            "Daily trading reflection"
+            + (f" for strategies: {', '.join(strategies)}" if strategies else "")
+            + f". Portfolio alpha {alpha:+.2%}. Should any strategy have its "
+            "position limit reduced or be flagged for review?"
+        )
+        try:
+            docs = self._get_rag_retriever().retrieve(
+                query, collection=_RECOMMENDATIONS_COLLECTION, n_results=self._rag_n_results,
+            )
+        except ImportError:
+            return ""  # already logged by _get_rag_store/_get_rag_retriever
+        except Exception:
+            log.warning(
+                "Memory: RAG retrieval of past recommendations failed — "
+                "proceeding without historical context this reflection",
+                exc_info=True,
+            )
+            return ""
+        if not docs:
+            return ""
+
+        lines = ["\n\nPast recommendations for similar situations:"]
+        for d in docs:
+            meta = d.metadata
+            applied = "yes" if meta.get("applied") else "no"
+            lines.append(
+                f"- [{meta.get('date', '?')}] {meta.get('action', '?')} for "
+                f"{meta.get('strategy') or 'the portfolio'} (applied: {applied}) — "
+                f"{meta.get('rationale', '')}"
+            )
+        return "\n".join(lines)
 
     def list_recommendations(self, pending_only: bool = True) -> list[dict[str, Any]]:
         """Every daily-rollup recommendation on record, most recent first.
@@ -469,7 +721,33 @@ class TradingMemoryLog:
         entry = dict(entry)
         entry["recommendation"] = {**entry["recommendation"], "applied": True}
         self._append(entry)
+        self._mark_recommendation_doc_applied(date)
         return True
+
+    def _mark_recommendation_doc_applied(self, date: str) -> None:
+        """Flip the RAG-stored recommendation doc's ``applied`` metadata to
+        ``True`` in place (see ``VectorStore.update_metadata``), so a future
+        retrieval sees the accurate outcome instead of the stale ``False``
+        it was written with. The JSONL log above is the source of truth —
+        this is a best-effort mirror for RAG retrieval only, so any failure
+        here is logged and swallowed rather than propagated.
+        """
+        try:
+            updated = self._get_rag_store().update_metadata(
+                _RECOMMENDATIONS_COLLECTION,
+                self._recommendation_doc_id(date),
+                {"applied": True},
+            )
+            if not updated:
+                log.warning(
+                    "Memory: no RAG recommendation doc found for %s to mark applied "
+                    "(JSONL log was still updated correctly)", date,
+                )
+        except Exception:
+            log.warning(
+                "Memory: RAG update failed marking %s's recommendation applied "
+                "(JSONL log was still updated correctly)", date, exc_info=True,
+            )
 
     # ── Context injection ────────────────────────────────────────────────────
 

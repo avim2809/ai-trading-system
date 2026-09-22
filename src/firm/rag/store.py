@@ -152,6 +152,28 @@ class VectorStore:
         )
         return len(new_docs)
 
+    def update_metadata(self, collection_name: str, doc_id: str, metadata: dict[str, Any]) -> bool:
+        """Merge *metadata* into an already-stored document's metadata, in place.
+
+        Distinct from :meth:`add_documents`'s dedup: that method skips any
+        id already present in the collection before it ever calls
+        ``upsert()``, so re-adding an existing id with only its metadata
+        changed (text unchanged) is a silent no-op there, not an update.
+        This method is for exactly that case — flipping a status field on a
+        row whose text never changes. It fetches the existing metadata and
+        merges *metadata* on top (rather than trusting Chroma's own
+        merge-vs-replace semantics) so a caller only has to name the fields
+        it's changing. ``embeddings``/``documents`` are left untouched, so no
+        re-embedding call is made. Returns False if *doc_id* doesn't exist.
+        """
+        collection = self.get_or_create_collection(collection_name)
+        existing = collection.get(ids=[doc_id], include=["metadatas"])
+        if not existing["ids"]:
+            return False
+        merged = {**(existing["metadatas"][0] or {}), **metadata}
+        collection.update(ids=[doc_id], metadatas=[merged])
+        return True
+
     def query(
         self,
         collection_name: str,
