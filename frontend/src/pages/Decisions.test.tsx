@@ -121,6 +121,73 @@ describe('Decisions', () => {
     expect(screen.queryByText('Apply this recommendation?')).not.toBeInTheDocument()
   })
 
+  it('shows an actionable recommendation inline on its own decision entry, with a working Apply button', async () => {
+    let applyCalled = false
+    server.use(
+      http.get('http://localhost/api/memory/decisions', () => HttpResponse.json([
+        {
+          date: '2026-07-21', status: 'reflected',
+          proposal_weights: { AAPL: 0.05 }, notes: 'cycle=1',
+          nav_at_decision: 1000000, raw_return: 0.012, benchmark_return: 0.008,
+          reflection: 'The directional call was correct.',
+          recommendation: {
+            action: 'reduce_position_limit', strategy: 'stat_arb', reduce_by_pct: 0.2,
+            rationale: 'stat_arb has a negative rolling Sharpe over the last 5 sessions.',
+          },
+        },
+      ])),
+      http.post('http://localhost/api/live/recommendations/:date/apply', ({ params }) => {
+        applyCalled = true
+        return HttpResponse.json({ date: params.date, action: 'reduce_position_limit', applied: true, strategy: 'stat_arb', new_max_position_pct: 0.04 })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<Decisions />)
+    await waitFor(() => expect(screen.getByText('2026-07-21')).toBeInTheDocument())
+    expect(screen.getByText(/stat_arb has a negative rolling Sharpe/)).toBeInTheDocument()
+
+    await user.click(screen.getByText('Apply'))
+    await user.click(screen.getByText('Yes, Apply'))
+
+    await waitFor(() => expect(applyCalled).toBe(true))
+    expect(await screen.findByText(/Applied "Reduce position limit" for 2026-07-21/)).toBeInTheDocument()
+  })
+
+  it('shows an "Applied" badge instead of an Apply button once a recommendation is already applied', async () => {
+    server.use(http.get('http://localhost/api/memory/decisions', () => HttpResponse.json([
+      {
+        date: '2026-07-21', status: 'reflected',
+        proposal_weights: { AAPL: 0.05 }, notes: 'cycle=1',
+        nav_at_decision: 1000000, raw_return: 0.012, benchmark_return: 0.008,
+        reflection: 'The directional call was correct.',
+        recommendation: {
+          action: 'reduce_position_limit', strategy: 'stat_arb', reduce_by_pct: 0.2,
+          rationale: 'Already acted on.', applied: true,
+        },
+      },
+    ])))
+    renderWithProviders(<Decisions />)
+    await waitFor(() => expect(screen.getByText('2026-07-21')).toBeInTheDocument())
+    expect(screen.getByText('Applied')).toBeInTheDocument()
+    expect(screen.queryByText('Apply')).not.toBeInTheDocument()
+  })
+
+  it('does not render a recommendation card for a no_action entry', async () => {
+    server.use(http.get('http://localhost/api/memory/decisions', () => HttpResponse.json([
+      {
+        date: '2026-07-21', status: 'reflected',
+        proposal_weights: { AAPL: 0.05 }, notes: 'cycle=1',
+        nav_at_decision: 1000000, raw_return: 0.012, benchmark_return: 0.008,
+        reflection: 'The directional call was correct.',
+        recommendation: { action: 'no_action', strategy: '', reduce_by_pct: 0, rationale: '' },
+      },
+    ])))
+    renderWithProviders(<Decisions />)
+    await waitFor(() => expect(screen.getByText('2026-07-21')).toBeInTheDocument())
+    expect(screen.queryByText('No action')).not.toBeInTheDocument()
+    expect(screen.queryByText('Apply')).not.toBeInTheDocument()
+  })
+
   it('splits a structured reflection into what-worked / what-failed columns', async () => {
     server.use(http.get('http://localhost/api/memory/decisions', () => HttpResponse.json([
       {

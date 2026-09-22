@@ -324,6 +324,17 @@ export interface DecisionEntry {
   what_worked?: string | null
   what_failed?: string | null
   lesson?: string | null
+  /** Same bounded recommendation surfaced (while still pending) via
+   * GET /api/memory/recommendations — present here too, and stays visible
+   * after it's no longer pending (applied, or action == "no_action"),
+   * unlike the pending-only queue. */
+  recommendation?: {
+    action: 'reduce_position_limit' | 'flag_strategy_for_review' | 'no_action'
+    strategy: string
+    reduce_by_pct: number
+    rationale: string
+    applied?: boolean
+  } | null
 }
 
 export interface LessonsDigest {

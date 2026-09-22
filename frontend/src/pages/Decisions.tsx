@@ -61,32 +61,117 @@ const ACTION_LABEL: Record<string, string> = {
   no_action: 'No action',
 }
 
-// Human-gated queue of daily-reflection recommendations (2026-09-20) — a
-// reflection's conclusion never touches live risk config on its own (see
+type RecommendationLike = {
+  date: string
+  action: 'reduce_position_limit' | 'flag_strategy_for_review' | 'no_action'
+  strategy: string
+  reduce_by_pct: number
+  rationale: string
+  applied?: boolean
+  rollup_reflection?: string | null
+}
+
+// Human-gated queue of daily-reflection recommendations — a reflection's
+// conclusion never touches live risk config on its own (see
 // firm.llm.schemas.DailyReflectionRecommendation); applying one here is the
-// one explicit, human-triggered path that does. GET .../recommendations
-// (pending_only, the default) already excludes "no_action" and
-// already-applied entries, so anything rendered here is genuinely
-// actionable.
-function RecommendationsPanel() {
+// one explicit, human-triggered path that does. Shared between the "still
+// pending" panel below and each decision-log entry's own (possibly already
+// applied, or no longer pending) recommendation, so there's exactly one
+// Apply code path regardless of where it's triggered from.
+function useApplyRecommendation() {
   const qc = useQueryClient()
   const [confirmDate, setConfirmDate] = useState<string | null>(null)
   const [applyMsg, setApplyMsg] = useState<{ text: string; error: boolean } | null>(null)
-
-  const { data: recommendations } = useQuery<Recommendation[]>({
-    queryKey: ['recommendations'],
-    queryFn: () => api.getRecommendations(true),
-    refetchInterval: 30000,
-  })
 
   const applyMut = useMutation({
     mutationFn: (date: string) => api.applyRecommendation(date),
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['recommendations'] })
+      qc.invalidateQueries({ queryKey: ['decisions'] })
       setConfirmDate(null)
       setApplyMsg({ text: `Applied "${ACTION_LABEL[data.action] ?? data.action}" for ${data.date}.`, error: false })
     },
     onError: (err) => setApplyMsg({ text: (err as Error).message, error: true }),
+  })
+
+  return { confirmDate, setConfirmDate, applyMsg, setApplyMsg, applyMut }
+}
+
+function RecommendationCard({
+  r, confirmDate, setConfirmDate, applyMut, onApplyClick, showDate = true,
+}: {
+  r: RecommendationLike
+  confirmDate: string | null
+  setConfirmDate: (d: string | null) => void
+  applyMut: ReturnType<typeof useApplyRecommendation>['applyMut']
+  onApplyClick: () => void
+  /** false when this card is already nested inside something that shows
+   * the same date (a decision-log entry's own header) -- showing it twice
+   * is redundant clutter, not just visually but for anyone scripting
+   * against the rendered date text. */
+  showDate?: boolean
+}) {
+  return (
+    <div className="bg-slate-900/50 border border-slate-700/50 rounded-lg p-4">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
+        <div className="flex items-center gap-3 flex-wrap min-w-0">
+          {showDate && <span className="font-mono text-sm text-slate-200">{r.date}</span>}
+          <span className="px-2 py-0.5 rounded text-xs font-mono border bg-blue-900/20 border-blue-700/40 text-blue-300">
+            {ACTION_LABEL[r.action] ?? r.action}
+          </span>
+          {r.strategy && <span className="text-xs text-slate-400">{r.strategy}</span>}
+        </div>
+        {r.applied ? (
+          <span className="flex-shrink-0 px-2 py-0.5 rounded text-xs font-medium bg-emerald-900/20 border border-emerald-700/40 text-emerald-300">
+            Applied
+          </span>
+        ) : confirmDate === r.date ? (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <span className="text-xs text-amber-400">Apply this recommendation?</span>
+            <button
+              onClick={() => applyMut.mutate(r.date)}
+              disabled={applyMut.isPending}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors flex items-center gap-2"
+            >
+              {applyMut.isPending && <Spinner className="h-3 w-3" />}
+              Yes, Apply
+            </button>
+            <button
+              onClick={() => setConfirmDate(null)}
+              className="px-2 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={onApplyClick}
+            className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg border border-emerald-700 text-emerald-400 hover:bg-emerald-900/20 transition-colors"
+          >
+            Apply
+          </button>
+        )}
+      </div>
+      {r.action === 'reduce_position_limit' && (
+        <p className="text-xs text-slate-500 mb-1">
+          Cut {r.strategy}'s max position size by {(r.reduce_by_pct * 100).toFixed(0)}%.
+        </p>
+      )}
+      <p className="text-sm text-slate-300">{r.rationale}</p>
+      {r.rollup_reflection && (
+        <p className="text-xs text-slate-500 mt-2 italic">{r.rollup_reflection}</p>
+      )}
+    </div>
+  )
+}
+
+function RecommendationsPanel() {
+  const { confirmDate, setConfirmDate, applyMsg, setApplyMsg, applyMut } = useApplyRecommendation()
+
+  const { data: recommendations } = useQuery<Recommendation[]>({
+    queryKey: ['recommendations'],
+    queryFn: () => api.getRecommendations(true),
+    refetchInterval: 30000,
   })
 
   if (!recommendations || recommendations.length === 0) return null
@@ -104,52 +189,14 @@ function RecommendationsPanel() {
       )}
       <div className="space-y-3">
         {recommendations.map((r) => (
-          <div key={r.date} className="bg-slate-900/50 border border-slate-700/50 rounded-lg p-4">
-            <div className="flex items-center justify-between flex-wrap gap-2 mb-2">
-              <div className="flex items-center gap-3 flex-wrap min-w-0">
-                <span className="font-mono text-sm text-slate-200">{r.date}</span>
-                <span className="px-2 py-0.5 rounded text-xs font-mono border bg-blue-900/20 border-blue-700/40 text-blue-300">
-                  {ACTION_LABEL[r.action] ?? r.action}
-                </span>
-                {r.strategy && <span className="text-xs text-slate-400">{r.strategy}</span>}
-              </div>
-              {confirmDate === r.date ? (
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-xs text-amber-400">Apply this recommendation?</span>
-                  <button
-                    onClick={() => applyMut.mutate(r.date)}
-                    disabled={applyMut.isPending}
-                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 disabled:opacity-40 transition-colors flex items-center gap-2"
-                  >
-                    {applyMut.isPending && <Spinner className="h-3 w-3" />}
-                    Yes, Apply
-                  </button>
-                  <button
-                    onClick={() => setConfirmDate(null)}
-                    className="px-2 py-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => { setApplyMsg(null); setConfirmDate(r.date) }}
-                  className="flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg border border-emerald-700 text-emerald-400 hover:bg-emerald-900/20 transition-colors"
-                >
-                  Apply
-                </button>
-              )}
-            </div>
-            {r.action === 'reduce_position_limit' && (
-              <p className="text-xs text-slate-500 mb-1">
-                Cut {r.strategy}'s max position size by {(r.reduce_by_pct * 100).toFixed(0)}%.
-              </p>
-            )}
-            <p className="text-sm text-slate-300">{r.rationale}</p>
-            {r.rollup_reflection && (
-              <p className="text-xs text-slate-500 mt-2 italic">{r.rollup_reflection}</p>
-            )}
-          </div>
+          <RecommendationCard
+            key={r.date}
+            r={r}
+            confirmDate={confirmDate}
+            setConfirmDate={setConfirmDate}
+            applyMut={applyMut}
+            onApplyClick={() => { setApplyMsg(null); setConfirmDate(r.date) }}
+          />
         ))}
       </div>
     </div>
@@ -162,6 +209,7 @@ export default function Decisions() {
     queryFn: () => api.getDecisions(100),
     refetchInterval: 15000,
   })
+  const { confirmDate, setConfirmDate, applyMsg, setApplyMsg, applyMut } = useApplyRecommendation()
 
   if (isLoading) {
     return (
@@ -192,6 +240,12 @@ export default function Decisions() {
 
       <LessonsDigestPanel />
       <RecommendationsPanel />
+
+      {applyMsg && (
+        <div className={`mb-4 rounded-lg border p-3 text-sm ${applyMsg.error ? 'bg-red-900/20 border-red-700/50 text-red-400' : 'bg-emerald-900/10 border-emerald-700/40 text-emerald-300'}`}>
+          {applyMsg.text}
+        </div>
+      )}
 
       {!decisions || decisions.length === 0 ? (
         <div className="bg-slate-800 rounded-xl border border-slate-700 p-12 text-center">
@@ -301,6 +355,19 @@ export default function Decisions() {
                 </div>
               ) : (
                 <p className="text-xs text-slate-600 italic">Awaiting outcome — not yet reflected on.</p>
+              )}
+
+              {d.recommendation && d.recommendation.action !== 'no_action' && (
+                <div className="mt-3">
+                  <RecommendationCard
+                    r={{ date: d.date, ...d.recommendation }}
+                    confirmDate={confirmDate}
+                    setConfirmDate={setConfirmDate}
+                    applyMut={applyMut}
+                    onApplyClick={() => { setApplyMsg(null); setConfirmDate(d.date) }}
+                    showDate={false}
+                  />
+                </div>
               )}
             </div>
           ))}
