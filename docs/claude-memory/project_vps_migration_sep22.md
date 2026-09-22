@@ -4,7 +4,7 @@ description: "2026-09-22 production cutover to new VPS (157.173.96.157) — migr
 metadata:
   node_type: memory
   type: project
-  modified: 2026-09-22T22:23:27.307Z
+  modified: 2026-09-22T23:14:20.897Z
   originSessionId: 403dab55-8f5b-43a3-afa3-7533df0c5692
 ---
 
@@ -136,15 +136,78 @@ live `active_strategies` API, BestStocksLedger dormancy) — user removed
 decommission. `docs/danelfin_best_stocks_arm.md`/[[project_danelfin_integration]]
 already documented the 8/16 decommission; this closes the loop on it.
 
-**Still genuinely open**: IB Gateway's API port bound to all interfaces
-(firewall-only protection today, deliberately not touched — interrupts the
-live IBKR connection), `execution_audit.jsonl` commingling both instances
-into one file owned by the IBKR side, sleeved-mode (:8001) having no
-broker-truth self-heal the way blended mode does (confirmed live — a forced
-test cycle added 7 more real pending orders on top of an already-$10k+ cash
-mismatch that only grew), and whether to leave or cancel those 7 orders.
+**Overnight follow-up completed 2026-09-23** (user went to bed, explicit
+"complete the plan" grant — see [[feedback_autonomous_scope_calls]] pattern;
+full plan at `/root/.claude/plans/compressed-mapping-frost.md`):
+
+- The 7 pending Alpaca orders from the earlier forced test cycle were
+  cancelled directly via `AlpacaBroker.cancel_order()` (no REST endpoint
+  exists for this — used a one-off script with real `.env` credentials).
+- **Root-caused the sleeved-mode reconciliation break, for real this time**:
+  `AlpacaBroker._map_order` (`src/firm/brokers/alpaca.py`) never correctly
+  mapped order status — Alpaca SDK's `order.status` is an enum, `str()` on
+  it yields `"OrderStatus.FILLED"`, but the code lowercased that directly
+  without stripping the enum prefix the way `order.type` already did two
+  lines below, so `status_map.get(...)` never matched and silently
+  defaulted to `"pending"` for every order, always. Verified live against a
+  real August order: broker truth was `filled_quantity=19.0` (genuinely
+  filled) but mapped status still read `"pending"`. Confirmed all 379
+  records in `data_alpaca/order_history.json` showed `status: "pending"`.
+  `side` had the same shape of bug (a typo'd literal-string strip that
+  happened to work by luck). Also bumped `reconcile_order_statuses`'s
+  `max_orders` from 200 to 2000 — with 200, the oldest ~179 of 379 orders
+  could never be reconciled again regardless of the mapping bug. IBKR's
+  equivalent doesn't have this bug (plain strings, not enum reprs, and
+  already fails toward `"rejected"` not `"pending"` on an unknown status).
+- Built `scripts/diagnose_sleeve_drift.py` — tried cross-referencing
+  `execution_audit.jsonl` for a rounding/guard-rejection breakdown first,
+  discovered that log's gate-check fires more than once per real decision
+  (23 AAPL records in one day when at most ~7 cycles could run), producing
+  a nonsense "-600.55 shares of rounding" number — dropped that approach
+  rather than ship false precision. The simplified version (order_history
+  submitted-vs-filled only) verified clean: every symbol shows zero
+  residual except the 7 just-cancelled orders, exactly as expected.
+- Added real per-sleeve fill correction (`src/firm/live/
+  sleeve_reconciliation.py`): pro-rata apportions each cycle's real broker
+  fill across contributing sleeves by the realized-vs-decided ratio —
+  exact in the single-sleeve case, a deliberate safe compromise for the
+  multi-sleeve case (never guesses which sleeve was "right"). Caught a real
+  cash-math bug in my own first draft before it ever ran live: a cancelled
+  order reports `avg_fill_price=0.0`, and naively multiplying the
+  correction by that silently loses the entire cash reversal — fixed to use
+  each sleeve's own decision-time price for reversing its original debit.
+  Wired into `order_reconciliation.py` via a new `on_terminal` callback
+  (keeps that module sleeve-unaware) and `engine.py` (sleeved-mode only,
+  idempotent via a new persisted corrected-fills set). Does not
+  retroactively fix historical drift, only stops it from growing further.
+- Re-investigated the IB Gateway "bound to all interfaces" finding:
+  `/root/Jts/jts.ini` already has `TrustedIPs=127.0.0.1` + `ApiOnly=true`
+  set, confirmed loaded by IBC at startup. IBKR Gateway doesn't support
+  binding its API socket to a specific interface at all — `TrustedIPs` is
+  the real, native, application-layer access control. This is genuinely two
+  independent defense layers (ufw + TrustedIPs), not the single
+  firewall-only layer originally assumed — downgraded, no restart needed.
+- All 4 commits from tonight were made under `root@vmi3602834...` identity
+  before the user asked to fix it — rewrote via `git filter-branch`
+  (scoped to `HEAD~4..HEAD`, not yet pushed) to the correct `Avi Milner
+  <avim2809@gmail.com>` identity, and set repo-local (not global)
+  `user.name`/`user.email` going forward, per explicit user request —
+  global git config is otherwise a hard "never touch" boundary.
+
+`execution_audit.jsonl`'s per-instance commingling was also fixed
+(`audit_path()` now respects `FIRM_DATA_DIR` like every other data path) —
+it landed bundled into the "Fix two None-leak bugs" commit by accident
+(both touched `execution_safety.py`, staged together without checking the
+diff was single-purpose) rather than its own commit; the fix itself is
+fine, just a commit-hygiene slip worth avoiding next time — `git add`
+whole files defensively, but still eyeball the diff before committing when
+a file has more than one unrelated change queued up.
+
+**Still genuinely open**: `BestStocksLedger` broker reconciliation
+(dormant/unwired, deliberately deprioritized).
 
 Related: [[feedback_production_incident_priority]],
-[[feedback_autonomous_scope_calls]], [[project_live_pause_not_persistent]]
-(relevant if either service needs restarting again — a restart un-pauses live
-trading regardless of intent, though both are supposed to be running here).
+[[feedback_autonomous_scope_calls]], [[feedback_ssh_hardening_preference]],
+[[project_live_pause_not_persistent]] (relevant if either service needs
+restarting again — a restart un-pauses live trading regardless of intent,
+though both are supposed to be running here).
