@@ -143,7 +143,8 @@ class ApprovalQueue:
 
         results: list[tuple[OrderStatus, str]] = []
         for order_dict in approval.orders:
-            raw_qty = float(order_dict.get("quantity", abs(order_dict.get("shares", 0))))
+            qty = order_dict.get("quantity")
+            raw_qty = float(qty if qty is not None else abs(order_dict.get("shares", 0)))
             share_qty = int(round(abs(raw_qty)))
             if share_qty <= 0:
                 log.debug(

@@ -43,11 +43,11 @@ ALLOW_TRADING_ENV = "FIRM_ALLOW_TRADING"
 LIVE_BROKERS = frozenset({"ibkr", "ibkr_live", "alpaca_live"})
 
 # Immutable decision log. Override with FIRM_EXECUTION_AUDIT.
-_DEFAULT_AUDIT = Path("data") / "execution_audit.jsonl"
 
 
 def audit_path() -> Path:
-    return Path(os.environ.get("FIRM_EXECUTION_AUDIT", str(_DEFAULT_AUDIT)))
+    default = Path(os.environ.get("FIRM_DATA_DIR", "data")) / "execution_audit.jsonl"
+    return Path(os.environ.get("FIRM_EXECUTION_AUDIT", str(default)))
 
 
 def trading_armed() -> bool:
@@ -294,7 +294,7 @@ def guard_live_submission(
         "broker_type": broker_type,
         "symbol": order.get("symbol"),
         "side": order.get("side"),
-        "quantity": order.get("quantity", order.get("shares")),
+        "quantity": order.get("quantity") if order.get("quantity") is not None else order.get("shares"),
         "strategy": order.get("strategy"),
         "cycle_id": cycle_id,
         "live_broker": live,
