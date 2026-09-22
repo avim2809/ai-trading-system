@@ -213,6 +213,12 @@ def sync_once(
     else:
         log.debug("danelfin_universe_sync: no universe changes (%d dynamic symbols held)", len(new_state))
 
+    # Must run every call, not just when additions/removals happen -- a
+    # promotion-only or no-op cycle still needs the incubation lock current
+    # (see sp500_universe_sync.sync_once's equivalent, unconditional call).
+    incubating = {sym for sym, entry in new_state.items() if entry.get("status") == "candidate"}
+    engine.update_incubating_symbols(incubating)
+
     return {
         "universe": new_universe,
         "additions": additions,
