@@ -757,6 +757,60 @@ same shape read by both pieces below):
   `POST /api/live/start` path — added there in the same change as this feature.
   `config/live.yaml`/`config/live_alpaca.yaml` do **not** set it (feature off on both
   instances) — enabling it live is a separate decision.
+
+### Pre-open "planning" cycle (2026-09-23, opt-in and off by default)
+
+Runs the full analysis pipeline before market open, with no clock pressure, so a plan
+is ready by `09:30` instead of decided fresh under whatever time pressure that cycle
+has. Config key `planning_cycle` (`{"enabled": false, "schedule": "cron:09:15",
+"price_tolerance_pct": 0.5, "expire_minutes": 600, "self_consistency_samples": 1}`),
+same allowlist/config-plumbing pattern as `extended_hours_trading` above (must be in
+`provider_utils.py`'s allowlist; not set in either shipped `config/live*.yaml`).
+
+- **Schedule**: `TradingScheduler._start_planning_job` registers one additional cron
+  job (default `cron:09:15`, 15 min before the `09:30` `open` leg) with
+  `cycle_type="planning"`. Deliberately a single run, not several — an earlier design
+  considered an additional early "digest" run and separately considered many
+  undifferentiated overnight runs for "stronger signals"; both rejected, since this
+  pipeline doesn't ensemble across independent runs at different wall-clock times (each
+  is a fresh decision, not a sample toward a combined estimate) and an early run's
+  decision would be thrown away every night once staleness rules it out anyway.
+- **Engine gate**: `"planning"` bypasses `_respect_market_hours` entirely (it's
+  supposed to run precisely because the market is closed) — gated only by the
+  scheduler's own trigger time and `planning_cycle.enabled`.
+- **dry_run**: `Orchestrator.step(dry_run=True)` for `cycle_type="planning"` runs the
+  whole analysis (signals/theses/debate/risk/proposed orders) normally, but in sleeved
+  mode skips committing each sleeve's hypothetical fills into its persisted
+  `PortfolioState` (`_step_sleeved`) — without this, a planning cycle on a sleeved
+  instance would silently corrupt sleeve NAV with phantom fills, the same class of bug
+  fixed in `sleeve_reconciliation.py` the same day. Blended mode has no equivalent
+  hazard (`self._portfolio` only ever written from real broker truth).
+- **Never executes**: a planning cycle's orders are forced to the approval queue
+  (`ApprovalQueue`, tagged `PendingApproval.source_cycle_type="planning"`) regardless of
+  the instance's real `approval_mode` — same mechanism `force_manual` already uses for
+  daily-limit breaches. `_execute_orders` is never reached for these orders.
+- **Applying it at open**: `firm.live.planning_cycle.maybe_apply_overnight_plan`, called
+  at the very start of the `"open"` leg's `_run_cycle_work`, looks up the pending
+  planning approval (there's at most one live at a time — a new planning cycle rejects
+  any still-pending prior one first) and checks every order's decision-time price
+  against the current price. All-or-nothing: every symbol within
+  `price_tolerance_pct` → `ApprovalQueue.approve()` submits the real orders now, and
+  the normal fresh pipeline is skipped this tick (`CycleResult.applied_overnight_plan`);
+  any symbol past tolerance → the whole plan is rejected and the normal fresh `"open"`
+  cycle runs exactly as if `planning_cycle` were disabled.
+- **Self-consistency sampling** (`self_consistency_samples`, default `1` = off):
+  `LLMAgentMixin._call_llm` samples the LLM `N` times against the identical input and
+  aggregates (numeric fields average, string fields majority-vote,
+  `_aggregate_llm_samples` in `base_llm_agent.py`) instead of the usual single call —
+  only active for `cycle_type="planning"` (`Orchestrator._apply_cycle_llm_mode` sets
+  the override; every other cycle type is unaffected). Distinct from, and not provided
+  by, the schedule above: repeating the pipeline at a later wall-clock time buys newer
+  information, not more confidence — this is the mechanism for the latter, and only
+  helps the LLM-enhanced agents (the 11 purely quantitative strategies are
+  deterministic, so sampling them repeats identical work for no benefit).
+- `POST /api/live/trigger` gained an optional `cycle_type` query param (2026-09-23) so
+  this can be exercised on demand (`?force=true&sync=true&cycle_type=planning`) instead
+  of only via its real schedule.
 - Both `risk.stop_loss_overlay` and `protective_orders` must be present in
   `provider_utils.py`'s allowlist tuple to actually reach the engine via the systemd
   auto-start / `POST /api/live/start` path (see "What `resolve_live_startup()` merges"

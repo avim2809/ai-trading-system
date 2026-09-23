@@ -282,6 +282,38 @@ class TestSleeveDecisionsLog:
         )
         assert result.sleeve_decisions == {"stat_arb": {"status": "rejected", "violations": ["VETO: x"]}}
 
+    def test_dry_run_computes_full_analysis_without_committing_sleeve_state(self):
+        """A "planning" cycle (Orchestrator.step(dry_run=True)) must still
+        run the whole pipeline -- signals, risk decision, proposed orders,
+        sleeve_decisions -- but must NOT commit any sleeve's hypothetical
+        fills into its persisted PortfolioState. Without this, a planning
+        cycle on a sleeved instance would silently corrupt sleeve NAV with
+        phantom fills, the same class of bug fixed in
+        sleeve_reconciliation.py (2026-09-23)."""
+        signals = [_sig("AAPL", "momentum", 1.0), _sig("MSFT", "momentum", -0.5)]
+        orch = _make_orchestrator(
+            analysts=[_analyst_with_signals(*signals)],
+            sleeve_traders={"momentum": TraderAgent(config={"allocation_method": "conviction_weighted"})},
+        )
+
+        orders, bb = orch.step(
+            {
+                "pit_view": _pit_view(),
+                "portfolio": PortfolioState(initial_capital=1_000_000.0),
+                "prices": {"AAPL": 150.0, "MSFT": 300.0},
+            },
+            dry_run=True,
+        )
+
+        # Full analysis still ran.
+        assert bb.sleeve_decisions["momentum"]["status"] == "approved"
+        assert bb.sleeve_decisions["momentum"]["fills"]
+        # But nothing was committed to the sleeve's real book -- freshly
+        # created this call (lazy), still at its untouched initial state.
+        sleeve = orch._sleeve_portfolios["momentum"]
+        assert sleeve.holdings == {}
+        assert sleeve.history == []
+
 
 class TestSleevedModeBrokerThreading:
     """context['broker'] must reach only the final netted real-execution

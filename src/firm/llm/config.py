@@ -66,6 +66,15 @@ _ENHANCEMENT_DEFAULTS: dict[str, Any] = {
     "max_debate_symbols": 5,
     # RAG chunks per retrieval (Voyage query-embed cost is 1/call regardless).
     "rag_n_results": 2,
+    # Self-consistency sampling (see firm.live.planning_cycle and
+    # LLMAgentMixin._call_llm): >1 calls the LLM N times against the
+    # identical input and aggregates before returning, instead of the
+    # usual single call. 1 (default) is a no-op -- every _call_llm site
+    # behaves exactly as before this existed. Only ever set above 1 by
+    # Orchestrator._apply_cycle_llm_mode for a "planning" cycle specifically
+    # (config/live*.yaml's planning_cycle.self_consistency_samples); never
+    # configured directly here.
+    "self_consistency_samples": 1,
     # Per-call sampling temperature override for enhancement/scoring calls
     # (None = use LLMService's global provider.temperature default,
     # unchanged prior behavior). Enhancement calls feed straight into the

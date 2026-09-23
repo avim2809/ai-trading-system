@@ -2581,6 +2581,100 @@ class TestExtendedHoursGate:
         mock_orch.step.assert_not_called()
 
 
+class TestPlanningCycle:
+    """Regression tests for the opt-in pre-open "planning" cycle (see
+    firm.live.planning_cycle and firm.live.scheduler's planning-cycle job,
+    added 2026-09-23). A planning cycle must run regardless of market
+    hours, pass dry_run=True into Orchestrator.step, and never let its
+    orders reach the broker -- everything routes to the approval queue."""
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_planning_cycle_ignores_market_hours(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+        broker.connect()
+        broker._market_open = False  # must be irrelevant to this cycle_type
+
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle(cycle_type="planning")
+        assert result.skipped is False
+        mock_orch.step.assert_called_once()
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_planning_cycle_passes_dry_run_true(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = ([], _make_blackboard())
+        mock_build.return_value = mock_orch
+        broker.connect()
+
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+        engine.run_cycle(cycle_type="planning")
+
+        _, kwargs = mock_orch.step.call_args
+        assert kwargs["dry_run"] is True
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_planning_cycle_orders_all_route_to_approval_queue(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+        broker.connect()
+        cash_before = broker._cash
+
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+
+        result = engine.run_cycle(cycle_type="planning")
+
+        assert result.orders_submitted == 0
+        assert result.orders_queued == len(_make_orders())
+        pending = queue.get_pending()
+        assert len(pending) >= 1
+        assert all(a.source_cycle_type == "planning" for a in pending)
+        # Nothing reached the broker -- cash never moved.
+        assert broker._cash == cash_before
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_planning_cycle_never_calls_attribution_record_trades(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+        broker.connect()
+
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine._attribution.record_trades = MagicMock()
+        engine.start()
+        engine.run_cycle(cycle_type="planning")
+
+        engine._attribution.record_trades.assert_not_called()
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_planning_approval_uses_configured_expiry(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (_make_orders(), _make_blackboard())
+        mock_build.return_value = mock_orch
+        broker.connect()
+
+        config = {**config, "planning_cycle": {"expire_minutes": 900}}
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        engine.start()
+        engine.run_cycle(cycle_type="planning")
+
+        pending = queue.get_pending()
+        assert pending
+        delta = pending[0].expires_at - pending[0].created_at
+        assert 899 <= delta.total_seconds() / 60 <= 901
+
+
 class TestExtendedHoursOrderFlag:
     """Only a cycle explicitly gate-verified to be running inside a
     configured extended-hours window should have its orders carry

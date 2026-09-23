@@ -3,12 +3,54 @@
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from typing import Any
 
 from firm.agents.llm.news_anonymizer import anonymize_news_text
 from firm.contracts.models import Signal
 
 log = logging.getLogger(__name__)
+
+
+def _aggregate_llm_samples(samples: list[str | dict]) -> str | dict:
+    """Aggregate N self-consistency samples from the same call into one.
+
+    Generic on purpose -- this is the one call site shared by every
+    LLM-enhanced agent (analysts, bull/bear, debate, trader, risk), each
+    with its own downstream parsing, so this can't know which field is
+    "the conviction score" the way a role-specific aggregator could.
+
+    Dict samples (``json_mode=True``): numeric fields average; everything
+    else majority-votes (deterministic tie-break: first-occurrence order,
+    not "toward higher conviction" -- this layer has no schema to know
+    which field that would even be).
+
+    Plain-text samples: self-consistency doesn't cleanly apply without a
+    downstream label-extraction step that doesn't exist here -- returns
+    the first sample rather than fabricate an aggregation over free text.
+    """
+    if not samples:
+        raise ValueError("no samples to aggregate")
+    if len(samples) == 1 or not isinstance(samples[0], dict):
+        return samples[0]
+
+    keys: set[str] = set()
+    for s in samples:
+        if isinstance(s, dict):
+            keys.update(s.keys())
+
+    aggregated: dict[str, Any] = {}
+    for key in keys:
+        values = [s[key] for s in samples if isinstance(s, dict) and key in s]
+        if not values:
+            continue
+        if all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
+            aggregated[key] = sum(values) / len(values)
+            continue
+        counts = Counter(str(v) for v in values)
+        winner_repr = counts.most_common(1)[0][0]
+        aggregated[key] = next(v for v in values if str(v) == winner_repr)
+    return aggregated
 
 
 class LLMAgentMixin:
@@ -343,11 +385,35 @@ class LLMAgentMixin:
                 return parse_json_object(cached)
             return cached
 
-        if json_mode:
-            result = llm.chat_json(messages, **call_kwargs)
-        else:
-            result = llm.chat(messages, **call_kwargs)
-        tokens = getattr(llm, "usage_stats", {}).get("last_tokens", 0)
-        self._llm_log.append({"system_preview": system[:100], "tokens": tokens})
-        log.info("LLM enhancement call succeeded (policy=live_calls, tokens=%s)", tokens)
+        samples_n = int(cfg.get("self_consistency_samples", 1))
+        if samples_n <= 1:
+            if json_mode:
+                result = llm.chat_json(messages, **call_kwargs)
+            else:
+                result = llm.chat(messages, **call_kwargs)
+            tokens = getattr(llm, "usage_stats", {}).get("last_tokens", 0)
+            self._llm_log.append({"system_preview": system[:100], "tokens": tokens})
+            log.info("LLM enhancement call succeeded (policy=live_calls, tokens=%s)", tokens)
+            return result
+
+        # Self-consistency sampling (see _aggregate_llm_samples) -- only
+        # ever active when Orchestrator._apply_cycle_llm_mode set this
+        # above 1 for a "planning" cycle. N identical calls, aggregated,
+        # instead of the usual one.
+        samples: list[str | dict] = []
+        total_tokens = 0
+        for _ in range(samples_n):
+            sample = llm.chat_json(messages, **call_kwargs) if json_mode else llm.chat(messages, **call_kwargs)
+            samples.append(sample)
+            total_tokens += getattr(llm, "usage_stats", {}).get("last_tokens", 0)
+        result = _aggregate_llm_samples(samples)
+        self._llm_log.append({
+            "system_preview": system[:100], "tokens": total_tokens,
+            "self_consistency_samples": samples_n,
+        })
+        log.info(
+            "LLM enhancement call succeeded (policy=live_calls, "
+            "self_consistency_samples=%d, total_tokens=%s)",
+            samples_n, total_tokens,
+        )
         return result

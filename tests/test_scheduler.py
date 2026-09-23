@@ -1601,3 +1601,98 @@ class TestExtendedHoursSchedule:
             assert sched._scheduler.get_job(sched._afterhours_job_id) is not None
         finally:
             sched.stop()
+
+
+class TestPlanningJobSchedule:
+    """TradingScheduler's opt-in pre-open "planning" job registration (see
+    TradingScheduler._start_planning_job and firm.live.planning_cycle).
+    Single job, off unless planning_cycle["enabled"] is explicitly true --
+    mirrors TestExtendedHoursSchedule's pattern above."""
+
+    def test_no_job_registered_by_default(self):
+        engine = MagicMock()
+        sched = TradingScheduler(engine=engine, schedule="market_open")
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._planning_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_no_job_registered_when_disabled(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            planning_cycle={"enabled": False},
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._planning_job_id) is None
+        finally:
+            sched.stop()
+
+    def test_job_registered_when_enabled(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            planning_cycle={"enabled": True},
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._planning_job_id) is not None
+        finally:
+            sched.stop()
+
+    def test_honours_custom_schedule_cron(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            planning_cycle={"enabled": True, "schedule": "cron:02:30"},
+        )
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._planning_job_id)
+            assert str(job.trigger.fields[job.trigger.FIELD_NAMES.index("hour")]) == "2"
+            assert str(job.trigger.fields[job.trigger.FIELD_NAMES.index("minute")]) == "30"
+        finally:
+            sched.stop()
+
+    def test_defaults_to_nine_fifteen_am(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            planning_cycle={"enabled": True},
+        )
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._planning_job_id)
+            assert str(job.trigger.fields[job.trigger.FIELD_NAMES.index("hour")]) == "9"
+            assert str(job.trigger.fields[job.trigger.FIELD_NAMES.index("minute")]) == "15"
+        finally:
+            sched.stop()
+
+    def test_job_fires_with_planning_cycle_type(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule="market_open",
+            planning_cycle={"enabled": True},
+        )
+        try:
+            sched.start()
+            job = sched._scheduler.get_job(sched._planning_job_id)
+            job.func()
+        finally:
+            sched.stop()
+        engine.run_cycle.assert_called_once_with(cycle_type="planning")
+
+    def test_additive_to_hourly_market_hours_composite_schedule(self):
+        engine = MagicMock()
+        sched = TradingScheduler(
+            engine=engine, schedule=HOURLY_MARKET_HOURS,
+            planning_cycle={"enabled": True},
+        )
+        try:
+            sched.start()
+            assert sched._scheduler.get_job(sched._job_id) is not None
+            assert sched._scheduler.get_job(sched._planning_job_id) is not None
+        finally:
+            sched.stop()

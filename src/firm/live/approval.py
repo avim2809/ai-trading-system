@@ -36,6 +36,11 @@ class PendingApproval:
     status: Literal["pending", "approved", "rejected", "expired"] = "pending"
     reject_reason: str = ""
     strategy: str = ""
+    # Set only when this approval was created by a "planning" cycle (see
+    # firm.live.scheduler's planning-cycle job) -- lets
+    # firm.live.planning_cycle.maybe_apply_overnight_plan find it without
+    # guessing from `strategy`/order shape.
+    source_cycle_type: str | None = None
 
     def is_expired(self) -> bool:
         return self.status == "pending" and utcnow() > self.expires_at
@@ -65,16 +70,26 @@ class ApprovalQueue:
         orders: list[dict[str, Any]],
         blackboard: Any,
         strategy: str = "",
+        expiry_minutes: int | None = None,
+        source_cycle_type: str | None = None,
     ) -> str:
-        """Enqueue orders for approval.  Returns the approval_id."""
+        """Enqueue orders for approval.  Returns the approval_id.
+
+        ``expiry_minutes`` overrides the queue's generic default for this
+        one approval -- a planning cycle's approval needs to survive an
+        overnight gap, not just an intraday one. ``source_cycle_type``
+        tags where this approval came from (see
+        ``PendingApproval.source_cycle_type``).
+        """
         now = utcnow()
         approval = PendingApproval(
             approval_id=uuid.uuid4().hex[:12],
             created_at=now,
-            expires_at=now + timedelta(minutes=self._expiry_minutes),
+            expires_at=now + timedelta(minutes=expiry_minutes if expiry_minutes is not None else self._expiry_minutes),
             orders=orders,
             blackboard_snapshot=serialize_blackboard(blackboard) if hasattr(blackboard, "asof") else {},
             strategy=strategy,
+            source_cycle_type=source_cycle_type,
         )
         self._queue.append(approval)
         self._save()
@@ -210,6 +225,7 @@ class ApprovalQueue:
                 "status": a.status,
                 "reject_reason": a.reject_reason,
                 "strategy": a.strategy,
+                "source_cycle_type": a.source_cycle_type,
             }
             data.append(d)
         self._persist_path.write_text(json.dumps(data, indent=2, default=str))
@@ -230,6 +246,7 @@ class ApprovalQueue:
                         status=d.get("status", "pending"),
                         reject_reason=d.get("reject_reason", ""),
                         strategy=d.get("strategy", ""),
+                        source_cycle_type=d.get("source_cycle_type"),
                     )
                 )
             log.info("Loaded %d approvals from %s", len(self._queue), self._persist_path)

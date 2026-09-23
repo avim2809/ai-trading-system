@@ -78,6 +78,14 @@ class Orchestrator(Agent):
         # cycle to plain agent_modes behavior regardless of cycle_type,
         # without having to revert the schedule itself.
         self._llm_open_close_only: bool = bool(cfg.get("llm_open_close_only", True))
+        # Self-consistency sampling for the "planning" cycle only (see
+        # firm.live.planning_cycle and LLMAgentMixin._call_llm) -- N LLM-
+        # enhanced calls against the identical input, aggregated, instead
+        # of the usual single call. 1 (default) is a no-op: today's exact
+        # behavior, unchanged, for every cycle_type including "planning".
+        self._planning_self_consistency_samples: int = int(
+            (cfg.get("planning_cycle") or {}).get("self_consistency_samples", 1)
+        )
 
         # ------------------------------------------------------------------
         # Per-strategy capital sleeves (capital_allocation_mode: "sleeved").
@@ -276,7 +284,7 @@ class Orchestrator(Agent):
     # make live LLM calls this cycle. Any other ``cycle_type`` (in practice
     # just "intraday") forces every LLM-enhanced agent to "cache_only" for
     # the duration of the call -- see ``_apply_cycle_llm_mode``.
-    _LLM_LIVE_CYCLE_TYPES = frozenset({"open", "close"})
+    _LLM_LIVE_CYCLE_TYPES = frozenset({"open", "close", "planning"})
     # Sentinel distinguishing "no policy key was set" from "policy was
     # explicitly set to None" when restoring after a cycle.
     _NO_POLICY = object()
@@ -293,6 +301,7 @@ class Orchestrator(Agent):
 
     def step(
         self, context: dict[str, Any], cycle_type: str | None = None,
+        dry_run: bool = False,
     ) -> tuple[list[dict], Blackboard]:
         """Run the full agent pipeline for one timestep.
 
@@ -302,18 +311,30 @@ class Orchestrator(Agent):
                 (``dict[str, float]``).  Optional ``memory``
                 (:class:`firm.agents.memory.TradingMemoryLog`) is forwarded
                 to LLM-enhanced trader and risk agents for past-context injection.
-            cycle_type: ``"open" | "close" | "intraday" | None``, threaded
-                down from ``LiveTradingEngine.run_cycle`` (see
+            cycle_type: ``"open" | "close" | "intraday" | "planning" | None``,
+                threaded down from ``LiveTradingEngine.run_cycle`` (see
                 ``firm.live.scheduler``'s ``hourly_market_hours`` composite
-                schedule, added 2026-09-18). Only "open"/"close" cycles may
-                use each role's agent_modes-configured LLM enhancement;
-                every other value (in practice "intraday") forces
-                cache_only (no live LLM calls) for this call only, so that
-                running the full pipeline hourly during market hours
+                schedule, added 2026-09-18). Only "open"/"close"/"planning"
+                cycles may use each role's agent_modes-configured LLM
+                enhancement; every other value (in practice "intraday")
+                forces cache_only (no live LLM calls) for this call only, so
+                that running the full pipeline hourly during market hours
                 doesn't multiply LLM API cost ~7x/day. ``None`` (a manual
                 trigger, or a single-cycle-per-day schedule like
                 ``market_open``) makes no change at all -- pre-2026-09-18
                 behavior, unchanged.
+            dry_run: ``True`` for a "planning" cycle (see
+                ``firm.live.scheduler``'s planning-cycle job, added
+                2026-09-23) -- runs the full analysis (signals, theses,
+                debate, risk decision, proposed orders) exactly as normal,
+                but in sleeved mode skips committing each sleeve's
+                hypothetical fills into its persisted ``PortfolioState``
+                (see ``_step_sleeved``). Without this, a planning cycle run
+                on a sleeved instance would silently corrupt sleeve
+                NAV/holdings with phantom fills -- the same class of bug
+                fixed in ``sleeve_reconciliation.py``. Blended mode has no
+                equivalent hazard (``self._portfolio`` is only ever written
+                from real broker truth), so this is a no-op there.
 
         Returns:
             ``(orders_list, blackboard)`` where *orders_list* feeds the
@@ -322,7 +343,7 @@ class Orchestrator(Agent):
         restore = self._apply_cycle_llm_mode(cycle_type)
         extended_hours = cycle_type in self._EXTENDED_HOURS_CYCLE_TYPES
         try:
-            return self._step_impl(context, extended_hours=extended_hours)
+            return self._step_impl(context, extended_hours=extended_hours, dry_run=dry_run)
         finally:
             self._restore_cycle_llm_mode(restore)
 
@@ -359,14 +380,31 @@ class Orchestrator(Agent):
         to trust. Returns the list of ``(agent, previous_policy)`` pairs
         ``_restore_cycle_llm_mode`` needs to undo this after the cycle.
         """
+        restore: list[tuple[Any, Any, Any]] = []
+        # Self-consistency sampling: "planning" cycle only, and only when
+        # actually configured above 1 (the default) -- every other
+        # cycle_type is completely unaffected by this block.
+        if cycle_type == "planning" and self._planning_self_consistency_samples > 1:
+            for agent in self._llm_enhanced_agents():
+                enhancement_cfg = agent._llm_config.setdefault("enhancement", {})
+                restore.append((
+                    agent, "self_consistency_samples",
+                    enhancement_cfg.get("self_consistency_samples", self._NO_POLICY),
+                ))
+                enhancement_cfg["self_consistency_samples"] = self._planning_self_consistency_samples
+            log.info(
+                "cycle_type=planning: sampling %d LLM-enhanced agent(s) "
+                "%dx each (self_consistency_samples), aggregating before use",
+                len(self._llm_enhanced_agents()), self._planning_self_consistency_samples,
+            )
+
         if not self._llm_open_close_only:
-            return []
+            return restore
         if cycle_type is None or cycle_type in self._LLM_LIVE_CYCLE_TYPES:
-            return []
-        restore: list[tuple[Any, Any]] = []
+            return restore
         for agent in self._llm_enhanced_agents():
             enhancement_cfg = agent._llm_config.setdefault("enhancement", {})
-            restore.append((agent, enhancement_cfg.get("policy", self._NO_POLICY)))
+            restore.append((agent, "policy", enhancement_cfg.get("policy", self._NO_POLICY)))
             enhancement_cfg["policy"] = "cache_only"
         if restore:
             log.info(
@@ -376,17 +414,18 @@ class Orchestrator(Agent):
             )
         return restore
 
-    def _restore_cycle_llm_mode(self, restore: list[tuple[Any, Any]]) -> None:
+    def _restore_cycle_llm_mode(self, restore: list[tuple[Any, Any, Any]]) -> None:
         """Undo :meth:`_apply_cycle_llm_mode` after the cycle completes."""
-        for agent, previous_policy in restore:
+        for agent, key, previous_value in restore:
             enhancement_cfg = agent._llm_config.setdefault("enhancement", {})
-            if previous_policy is self._NO_POLICY:
-                enhancement_cfg.pop("policy", None)
+            if previous_value is self._NO_POLICY:
+                enhancement_cfg.pop(key, None)
             else:
-                enhancement_cfg["policy"] = previous_policy
+                enhancement_cfg[key] = previous_value
 
     def _step_impl(
         self, context: dict[str, Any], extended_hours: bool = False,
+        dry_run: bool = False,
     ) -> tuple[list[dict], Blackboard]:
         """Body of :meth:`step`, run with the cycle's LLM mode already applied.
 
@@ -396,9 +435,13 @@ class Orchestrator(Agent):
         broker so it can emit limit instead of market orders (see
         ``ExecutionAgent.__init__``'s ``extended_hours_limit_tolerance_pct``
         docstring). ``False`` by default, matching every pre-existing caller.
+
+        ``dry_run`` (see :meth:`step`) only affects the sleeved path --
+        blended mode has no hypothetical in-step commit to skip, so it's
+        accepted here for signature symmetry and otherwise ignored.
         """
         if self.capital_allocation_mode == "sleeved":
-            return self._step_sleeved(context, extended_hours=extended_hours)
+            return self._step_sleeved(context, extended_hours=extended_hours, dry_run=dry_run)
 
         pit_view = context["pit_view"]
         portfolio = context.get("portfolio")
@@ -833,12 +876,19 @@ class Orchestrator(Agent):
 
     def _step_sleeved(
         self, context: dict[str, Any], extended_hours: bool = False,
+        dry_run: bool = False,
     ) -> tuple[list[dict], Blackboard]:
         """Sleeved-mode pipeline: one independent bull/bear/debate/trader/risk/
         execution pass per strategy against its own ``PortfolioState``, then
         one final netted ``ExecutionAgent`` pass against the real shared
         book for actual broker submission. See the module-level design note
         this was built from for the full rationale.
+
+        ``dry_run`` (see :meth:`step`): still runs every sleeve's own
+        pass (signals/theses/debate/risk/proposed fills) exactly as
+        normal, but skips committing the result into that sleeve's
+        persisted ``PortfolioState`` -- a planning cycle must not leave
+        phantom fills behind in sleeve NAV/holdings.
 
         ``extended_hours`` (see ``_step_impl``) is deliberately only passed
         to the final real (netted) execution pass below, not to each
@@ -1008,9 +1058,14 @@ class Orchestrator(Agent):
             # only on no-fill cycles) so a sleeve that trades every cycle
             # still accumulates NAV/return history instead of being
             # permanently invisible in attribution.
-            if sleeve_report.fills:
-                sleeve_portfolio.update(sleeve_report.fills, prices, cost=sleeve_report.costs)
-            sleeve_portfolio.record_snapshot(pit_view.asof, prices)
+            #
+            # dry_run (a planning cycle, see step()'s docstring) skips both:
+            # the whole point is to compute what this sleeve WOULD decide
+            # without committing a phantom fill into its real book.
+            if not dry_run:
+                if sleeve_report.fills:
+                    sleeve_portfolio.update(sleeve_report.fills, prices, cost=sleeve_report.costs)
+                sleeve_portfolio.record_snapshot(pit_view.asof, prices)
 
             sleeve_nav = sleeve_portfolio.nav
             for sym, w in decision.adjusted_targets.items():

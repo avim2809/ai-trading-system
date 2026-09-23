@@ -301,6 +301,15 @@ def resolve_live_startup(
         # *same* resolved dict, which is exactly what this allowlist copy
         # into engine_config gives them.
         "extended_hours_trading",
+        # Opt-in pre-open "planning" cycle (see firm.live.planning_cycle /
+        # firm.live.scheduler.TradingScheduler._start_planning_job,
+        # 2026-09-23) — off by default ({"enabled": false}), same
+        # silent-drop bug class as every other key in this tuple. Read by
+        # both LiveTradingEngine (the "open" leg's apply-if-fresh check)
+        # and, via _start_live_scheduler's own copy off engine_config,
+        # TradingScheduler (when to fire the planning job) — both need the
+        # same resolved dict, same rationale as extended_hours_trading above.
+        "planning_cycle",
         # Opt-in daily RAG "news" collection ingestion (see
         # firm.live.news_ingestion_job / firm.live.scheduler.TradingScheduler
         # and firm.agents.llm.news_anonymizer, 2026-09-20) — off by default

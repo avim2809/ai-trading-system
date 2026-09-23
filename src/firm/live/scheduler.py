@@ -674,6 +674,15 @@ class TradingScheduler:
         # legs are registered alongside whatever ``schedule`` above already
         # sets up, not a replacement for it.
         extended_hours_trading: dict[str, Any] | None = None,
+        # Opt-in pre-open "planning" cycle (off by default -- see
+        # firm.live.planning_cycle and the ``planning_cycle`` config block:
+        # {"enabled": false, "schedule": "cron:09:15", "price_tolerance_pct":
+        # 0.5, "expire_minutes": 600, "self_consistency_samples": 1}). Runs
+        # the full analysis pipeline (dry_run=True -- see Orchestrator.step)
+        # with no clock pressure, parking its orders in the approval queue;
+        # the "open" leg above decides at market-open whether that plan is
+        # still fresh enough to apply instead of deciding fresh again.
+        planning_cycle: dict[str, Any] | None = None,
         # Opt-in daily RAG "news" collection ingestion (off by default —
         # see firm.live.news_ingestion_job and the ``news_ingestion``
         # config block: {"enabled": false, "hour": 7, "days": 3}).
@@ -724,6 +733,7 @@ class TradingScheduler:
         self._sp500_sector_cache_refresh_day = sp500_sector_cache_refresh_day
         self._sp500_static_sector_map = dict(sp500_static_sector_map or {})
         self._extended_hours_cfg: dict[str, Any] = dict(extended_hours_trading or {})
+        self._planning_cfg: dict[str, Any] = dict(planning_cycle or {})
         self._news_ingestion_cfg: dict[str, Any] = dict(news_ingestion or {})
         self._capital_reallocation_cfg: dict[str, Any] = dict(capital_reallocation or {})
         self._scheduler: BackgroundScheduler | None = None
@@ -754,6 +764,9 @@ class TradingScheduler:
         # registered when self._extended_hours_cfg["enabled"] is true.
         self._premarket_job_id = "live_cycle_premarket"
         self._afterhours_job_id = "live_cycle_afterhours"
+        # Planning-cycle job (see _start_planning_job) -- only registered
+        # when self._planning_cfg["enabled"] is true.
+        self._planning_job_id = "live_cycle_planning"
 
     def start(self) -> None:
         """Start the background scheduler."""
@@ -928,6 +941,8 @@ class TradingScheduler:
         )
         if self._extended_hours_cfg.get("enabled"):
             self._start_extended_hours_jobs()
+        if self._planning_cfg.get("enabled"):
+            self._start_planning_job()
         if self._schedule_spec in _SESSION_SCHEDULES or self._schedule_spec == HOURLY_MARKET_HOURS:
             # Meaningful for a single-cycle-per-day schedule (market_open/
             # market_close) since nothing else would run again for the rest
@@ -1149,6 +1164,32 @@ class TradingScheduler:
                 max_instances=1,
                 coalesce=True,
             )
+
+    def _start_planning_job(self) -> None:
+        """Register the opt-in pre-open "planning" cycle (see the
+        ``planning_cycle`` config block and ``firm.live.planning_cycle``
+        module docstring).
+
+        Single job, deliberately -- an earlier design considered a second,
+        earlier "digest" run too, and separately considered many
+        undifferentiated overnight runs for "stronger signals". Both
+        rejected: this pipeline doesn't ensemble across independent runs at
+        different wall-clock times (each is a fresh decision, not a sample
+        toward a combined estimate), and an early run's decision would be
+        thrown away every night once staleness rules it out anyway --
+        insurance against this one job failing to fire, not a source of a
+        better plan. Default ``cron:09:15`` sits 15 minutes before the
+        ``09:30`` ``open`` leg, so ``maybe_apply_overnight_plan``'s
+        price-tolerance check usually has very little drift to absorb.
+        """
+        self._scheduler.add_job(
+            lambda: self._run_cycle_safe(cycle_type="planning"),
+            trigger=self._build_trigger(self._planning_cfg.get("schedule", "cron:09:15")),
+            id=self._planning_job_id,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
 
     def _run_cycle_safe(self, cycle_type: str | None = None) -> None:
         """Wrapper that catches exceptions to avoid killing the scheduler."""

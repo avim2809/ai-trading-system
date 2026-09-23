@@ -86,6 +86,8 @@ _ALERT_TITLES = {
     "host_memory_low_recovered": "Host Memory Recovered",
     "host_cpu_high": "Host CPU Load High",
     "host_cpu_high_recovered": "Host CPU Load Recovered",
+    "overnight_plan_applied": "Overnight Plan Applied",
+    "overnight_plan_discarded": "Overnight Plan Discarded",
 }
 
 # Friendly labels for context kwargs engine.py attaches to specific alerts

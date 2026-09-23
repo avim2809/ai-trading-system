@@ -76,6 +76,21 @@ extended_hours_trading:
   afterhours:
     enabled: true
 
+# Opt-in pre-open "planning" cycle -- runs the full analysis pipeline
+# (dry_run, no broker submission) 15 min before the 09:30 `open` leg, with
+# no clock pressure. Its orders park in the approval queue; if still fresh
+# (every symbol's price within price_tolerance_pct of the plan) when the
+# real `open` cycle runs, they're applied instead of deciding fresh again
+# -- otherwise discarded and `open` runs normally. Ships off by default,
+# same convention as danelfin_dynamic_universe/sp500_dynamic_universe. See
+# firm.live.planning_cycle and docs/claude-memory/project_vps_migration_sep22.md.
+planning_cycle:
+  enabled: false
+  schedule: "cron:09:15"        # US/Eastern, same shorthand as extended_hours_trading
+  price_tolerance_pct: 0.5      # max per-symbol price drift vs plan before discarding
+  expire_minutes: 600           # ~10h -- generous, but this run sits close to open anyway
+  self_consistency_samples: 1   # >1 = N LLM-enhanced samples averaged/voted; 1 = today's behavior
+
 # Live cycles read ``data/cache/combined/fundamentals`` only (no per-cycle API).
 # firm-api refreshes that cache daily at fundamentals_refresh_hour and at boot
 # when older than FIRM_FUNDAMENTALS_REFRESH_MAX_AGE_HOURS (default 24).

@@ -27,6 +27,7 @@ import pandas as pd
 from firm.brokers.base import Broker, BrokerError, OrderRequest, OrderStatus
 from firm.live.approval import ApprovalQueue
 from firm.live.data_feed import LiveDataFeed
+from firm.live.planning_cycle import maybe_apply_overnight_plan
 from firm.live.portfolio_sync import CONTINGENT_ORDER_TYPES, sync_portfolio_from_broker
 from firm.live.scheduler import (
     DEFAULT_MARKET_TIMEZONE,
@@ -111,6 +112,12 @@ class CycleResult:
     # returns. None in blended mode (no sleeves to report on). See
     # Blackboard.sleeve_decisions's field docstring for why this exists.
     sleeve_decisions: dict[str, dict[str, Any]] | None = None
+    # True only for an "open" cycle that found a still-fresh (within
+    # planning_cycle.price_tolerance_pct) pending approval from an earlier
+    # "planning" cycle and applied it instead of running the normal fresh
+    # pipeline this tick -- see firm.live.planning_cycle.
+    # maybe_apply_overnight_plan.
+    applied_overnight_plan: bool = False
 
 
 class LiveTradingEngine:
@@ -191,6 +198,10 @@ class LiveTradingEngine:
         self._extended_hours_cfg: dict[str, Any] = dict(
             config.get("extended_hours_trading") or {}
         )
+        # Planning cycle (opt-in, off by default) -- see
+        # firm.live.scheduler's planning-cycle job and
+        # firm.live.planning_cycle.maybe_apply_overnight_plan.
+        self._planning_cfg: dict[str, Any] = dict(config.get("planning_cycle") or {})
         # Macro-event blackout gate (news-guard). Default OFF — when enabled it
         # holds orders whose instrument sits inside a high-impact economic-event
         # window (FOMC/NFP/CPI...). ``offline`` uses only the bundled calendar.
@@ -1924,7 +1935,12 @@ class LiveTradingEngine:
             self._watchdog_timer.daemon = True
             self._watchdog_timer.start()
 
-            if self._respect_market_hours and not force:
+            if self._respect_market_hours and not force and cycle_type != "planning":
+                # "planning" (firm.live.scheduler's planning-cycle job,
+                # added 2026-09-23) is meant to run precisely BECAUSE the
+                # market is closed -- gated only by the scheduler's own
+                # trigger time and planning_cycle.enabled, never by
+                # is_market_open()/extended-hours windows.
                 if cycle_type in EXTENDED_HOURS_CYCLE_TYPES:
                     # An explicit "premarket"/"afterhours" cycle (see
                     # firm.live.scheduler's opt-in extended-hours jobs) is
@@ -2060,6 +2076,41 @@ class LiveTradingEngine:
                     "Open orders unavailable; reconciliation may be incomplete.",
                 ))
 
+            if result.cycle_type == "open" and self._planning_cfg.get("enabled"):
+                outcome = maybe_apply_overnight_plan(
+                    self._approval_queue, prices,
+                    float(self._planning_cfg.get("price_tolerance_pct", 0.5)),
+                )
+                if outcome.applied:
+                    result.applied_overnight_plan = True
+                    result.approval_ids.append(outcome.approval_id)
+                    orders_by_symbol = {o.get("symbol"): o for o in
+                                         self._approval_queue.get_by_id(outcome.approval_id).orders}
+                    result.order_statuses = [
+                        self._status_to_dict(s, strategy, order=orders_by_symbol.get(s.symbol))
+                        for s, strategy in outcome.statuses
+                    ]
+                    result.orders_generated = result.orders_submitted = len(outcome.statuses)
+                    result.alerts.append(self._emit_alert(
+                        "overnight_plan_applied", "warning",
+                        f"Applied overnight plan {outcome.approval_id} "
+                        f"({len(outcome.statuses)} order(s), "
+                        f"max deviation {outcome.max_deviation_pct:.2f}%).",
+                        approval_id=outcome.approval_id,
+                    ))
+                    self._cycle_history.append(result)
+                    self._persist_cycle_result(result)
+                    return
+                elif outcome.approval_id:
+                    result.alerts.append(self._emit_alert(
+                        "overnight_plan_discarded", "warning",
+                        f"Discarded overnight plan {outcome.approval_id}: {outcome.reason}.",
+                        approval_id=outcome.approval_id,
+                    ))
+                # No pending plan at all (outcome.approval_id is None) is
+                # today's normal case whenever no planning cycle produced
+                # one -- falls through to the regular pipeline silently.
+
             self._check_drawdown(result)
             if self._halted:
                 result.halted = True
@@ -2113,7 +2164,10 @@ class LiveTradingEngine:
                     "attribution daily update failed", exc_info=True,
                 )
 
-            orders, blackboard = self._orchestrator.step(context, cycle_type=result.cycle_type)
+            orders, blackboard = self._orchestrator.step(
+                context, cycle_type=result.cycle_type,
+                dry_run=(result.cycle_type == "planning"),
+            )
             result.orders_generated = len(orders)
             sleeve_decisions = getattr(blackboard, "sleeve_decisions", None)
             if sleeve_decisions:
@@ -2160,7 +2214,11 @@ class LiveTradingEngine:
             force_manual, orders = self._check_daily_limits(now, orders, prices)
             if len(self._alerts) > alerts_before:
                 result.alerts.append(self._alerts[-1])
-            if force_manual:
+            if force_manual or result.cycle_type == "planning":
+                # A planning cycle must never reach _execute_orders below,
+                # regardless of the instance's real approval_mode -- every
+                # order goes to the approval queue, same mechanism
+                # force_manual already uses for daily-limit breaches.
                 auto_orders, manual_orders = [], orders
             else:
                 auto_orders, manual_orders = self._split_by_approval(orders)
@@ -2224,14 +2282,39 @@ class LiveTradingEngine:
                     )
 
             if manual_orders:
+                is_planning = result.cycle_type == "planning"
+                if is_planning:
+                    # Hygiene: a manual force=true re-trigger, or a prior
+                    # day's approval never consumed because the market
+                    # closed unexpectedly, must not leave two pending
+                    # planning approvals for maybe_apply_overnight_plan to
+                    # choose between -- reject any leftover before adding
+                    # this cycle's.
+                    for stale in self._approval_queue.get_pending():
+                        if stale.source_cycle_type == "planning":
+                            self._approval_queue.reject(
+                                stale.approval_id, reason="superseded by a newer planning cycle",
+                            )
                 for strategy, group in self._group_by_strategy(manual_orders).items():
                     aid = self._approval_queue.add(
                         orders=group,
                         blackboard=blackboard,
                         strategy=strategy,
+                        expiry_minutes=(
+                            int(self._planning_cfg.get("expire_minutes", 600))
+                            if is_planning else None
+                        ),
+                        source_cycle_type=("planning" if is_planning else None),
                     )
                     result.orders_queued += len(group)
                     result.approval_ids.append(aid)
+                if is_planning:
+                    result.alerts.append(self._emit_alert(
+                        "planning_cycle_complete", "warning",
+                        f"Planning cycle produced {result.orders_queued} order(s) "
+                        f"across {len(result.approval_ids)} approval(s).",
+                        approval_ids=result.approval_ids,
+                    ))
 
             log.info(
                 "Cycle %d: %d generated, %d submitted, %d queued, %d failed",

@@ -61,6 +61,7 @@ def _start_live_scheduler(
     dynamic_universe_cfg = engine_config.get("danelfin_dynamic_universe") or {}
     sp500_dynamic_universe_cfg = engine_config.get("sp500_dynamic_universe") or {}
     extended_hours_cfg = engine_config.get("extended_hours_trading") or {}
+    planning_cfg = engine_config.get("planning_cycle") or {}
     news_ingestion_cfg = engine_config.get("news_ingestion") or {}
     capital_reallocation_cfg = engine_config.get("capital_reallocation") or {}
     try:
@@ -130,6 +131,7 @@ def _start_live_scheduler(
                     ),
                     sp500_static_sector_map=engine_config.get("sector_map") or {},
                     extended_hours_trading=extended_hours_cfg,
+                    planning_cycle=planning_cfg,
                     news_ingestion=news_ingestion_cfg,
                     capital_reallocation=capital_reallocation_cfg,
                 )
@@ -688,16 +690,23 @@ def shutdown_live_engine(app) -> None:
 
 
 @router.post("/trigger")
-def live_trigger(request: Request, force: bool = False, sync: bool = False):
+def live_trigger(
+    request: Request, force: bool = False, sync: bool = False,
+    cycle_type: str | None = None,
+):
     """Queue one cycle immediately (default) or run synchronously (``sync=true``).
 
     ``force=true`` bypasses the market-hours check — for deliberate off-hours
-    testing; scheduled cycles never do.
+    testing; scheduled cycles never do. ``cycle_type`` lets a manual trigger
+    exercise a specific leg (e.g. ``"planning"``) the same way the scheduler
+    would, instead of always defaulting to the plain/no-type path — added
+    2026-09-23 for testing the planning-cycle feature without waiting for
+    its real schedule.
     """
     engine = _get_engine(request)
 
     if sync:
-        result = engine.run_cycle(force=force)
+        result = engine.run_cycle(force=force, cycle_type=cycle_type)
         return {
             "status": "completed",
             "cycle_id": result.cycle_id,
@@ -708,11 +717,12 @@ def live_trigger(request: Request, force: bool = False, sync: bool = False):
             "orders_failed": result.orders_failed,
             "skipped": result.skipped,
             "error": result.error,
+            "applied_overnight_plan": result.applied_overnight_plan,
         }
 
     def _run() -> None:
         try:
-            engine.run_cycle(force=force)
+            engine.run_cycle(force=force, cycle_type=cycle_type)
         except Exception:
             log.error("Triggered cycle failed", exc_info=True)
 

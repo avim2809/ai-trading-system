@@ -34,6 +34,25 @@ schedule_timezone: "US/Eastern"
 # (e.g. plain "auto") silently falls through to "everything needs approval".
 approval_mode: "full_auto"
 
+# Opt-in pre-open "planning" cycle -- runs the full analysis pipeline
+# (dry_run, no broker submission) 15 min before the 09:30 `open` leg, with
+# no clock pressure. Its orders park in the approval queue; if still fresh
+# (every symbol's price within price_tolerance_pct of the plan) when the
+# real `open` cycle runs, they're applied instead of deciding fresh again
+# -- otherwise discarded and `open` runs normally. Ships off by default,
+# same convention as danelfin_dynamic_universe/sp500_dynamic_universe.
+# Sleeved mode (capital_allocation_mode below) is explicitly handled --
+# Orchestrator.step's dry_run param skips committing hypothetical fills
+# into any sleeve's book, so this doesn't corrupt sleeve NAV the way an
+# earlier bug did (see docs/claude-memory/project_vps_migration_sep22.md).
+# See firm.live.planning_cycle.
+planning_cycle:
+  enabled: false
+  schedule: "cron:09:15"
+  price_tolerance_pct: 0.5
+  expire_minutes: 600
+  self_consistency_samples: 1
+
 # LLM-enhanced reasoning (config/llm.yaml's agent_modes) is restricted to
 # the day's open/close cycles only; every intraday/hourly cycle forces
 # cache_only (no live LLM calls) regardless of agent_modes — see
