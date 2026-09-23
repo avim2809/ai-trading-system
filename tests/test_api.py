@@ -1032,6 +1032,18 @@ class TestLiveSleevedModeStart:
         assert resp2.status_code == 400
         assert "already have state" in resp2.json()["detail"]
 
+        # force=true bypasses the refusal for a deliberate drift write-off.
+        engine._broker.submit_order(OrderRequest(symbol="MSFT", side="buy", quantity=3))
+        engine._attribution.record_trades(
+            [{"symbol": "MSFT", "shares": 3, "price": 1.0, "strategy": "momentum"}],
+            {"MSFT": 1.0},
+        )
+        resp3 = client.post("/api/live/sleeves/seed?force=true")
+        assert resp3.status_code == 200, resp3.text
+        assert resp3.json()["forced"] is True
+        momentum = engine._orchestrator._sleeve_portfolios["momentum"]
+        assert momentum.holdings == {"AAPL": 5.0, "MSFT": 3.0}
+
         client.post("/api/live/stop")
 
     def test_sleeve_decisions_endpoint_reads_persisted_cycle_history(self, client):

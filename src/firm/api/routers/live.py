@@ -1143,7 +1143,7 @@ def reset_kill_switch(request: Request) -> dict[str, Any]:
 
 
 @router.post("/sleeves/seed")
-def seed_sleeves(request: Request) -> dict[str, Any]:
+def seed_sleeves(request: Request, force: bool = False) -> dict[str, Any]:
     """One-time, deliberate operator action for the moment of switching a
     running engine to ``capital_allocation_mode: "sleeved"``: seeds every
     sleeve's virtual book from this engine's existing (heuristic) per-
@@ -1155,15 +1155,23 @@ def seed_sleeves(request: Request) -> dict[str, Any]:
     mode, or if any sleeve already has state (calling this twice would
     silently overwrite real accumulated sleeve history with a stale
     re-approximation). See ``docs/capital_sleeves_plan.md``.
+
+    ``force=true`` bypasses the "already has state" refusal for the
+    distinct case of a deliberate drift write-off (see
+    ``LiveTradingEngine.seed_sleeves_from_attribution``'s docstring) --
+    logs each sleeve's pre-seed state before overwriting it. Use only when
+    the ongoing per-fill correction (``apply_realized_fill``) has a
+    confirmed, structural coverage gap (e.g. fills predating
+    ``sleeve_decisions`` tracking) that it cannot close on its own.
     """
     engine = getattr(request.app.state, "live_engine", None)
     if engine is None:
         raise HTTPException(status_code=400, detail="Live engine is not running")
     try:
-        summary = engine.seed_sleeves_from_attribution()
+        summary = engine.seed_sleeves_from_attribution(force=force)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"seeded": True, "sleeves": summary}
+    return {"seeded": True, "forced": force, "sleeves": summary}
 
 
 @router.get("/sleeves/decisions")

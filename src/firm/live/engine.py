@@ -1505,7 +1505,7 @@ class LiveTradingEngine:
             except Exception:
                 log.warning("Failed to persist sleeve portfolios", exc_info=True)
 
-    def seed_sleeves_from_attribution(self) -> dict[str, dict[str, Any]]:
+    def seed_sleeves_from_attribution(self, force: bool = False) -> dict[str, dict[str, Any]]:
         """One-time, deliberate operator action for the moment of switching
         a running engine from ``capital_allocation_mode: "blended"`` to
         ``"sleeved"``: seeds every sleeve's virtual ``PortfolioState`` from
@@ -1517,18 +1517,54 @@ class LiveTradingEngine:
         for the exact math and caveats (an approximation, not an exact
         split -- blended mode never tracked exact per-strategy positions).
 
-        Refuses (raises ``ValueError``) if this engine isn't in sleeved mode,
-        or if any sleeve already has virtual state -- calling this twice
-        would silently overwrite a sleeve's real, exact accumulated trading
-        history with a stale re-approximation. Call once, immediately after
-        starting the new sleeved engine and before its first cycle runs.
+        Without ``force``, refuses (raises ``ValueError``) if this engine
+        isn't in sleeved mode, or if any sleeve already has virtual state --
+        calling this twice would silently overwrite a sleeve's real, exact
+        accumulated trading history with a stale re-approximation. Call once,
+        immediately after starting the new sleeved engine and before its
+        first cycle runs.
+
+        ``force=True`` is a second, distinct use case: a deliberate
+        drift write-off when ``apply_realized_fill``'s ongoing per-fill
+        correction (``firm.live.sleeve_reconciliation``, wired via
+        ``_on_order_terminal``) has a *structural* coverage gap it cannot
+        close on its own -- it only corrects a fill whose originating
+        decision cycle recorded ``sleeve_decisions``, a field that does not
+        exist for any cycle before it was added, so fills from before that
+        point (or from before ``PerformanceAttribution`` itself was
+        recording trades) can never be individually reconstructed. Confirmed
+        live 2026-09-23: only 68 of 394 historical filled orders on the
+        Alpaca sleeved instance had a traceable ``sleeve_decisions`` record;
+        the other 326 (82%) predate it entirely, leaving every sleeve's book
+        drifted from broker truth by an amount that only grows over time.
+        ``force=True`` re-runs the exact same attribution-based seed used at
+        cutover against *current* broker truth and *current* (cumulative,
+        persisted-across-restarts) attribution state, snapping every
+        sleeve's holdings/cash back to something broker-consistent right
+        now. This is an explicit write-off, not a precise reconstruction --
+        ``PerformanceAttribution``'s running-net-share-count heuristic is
+        itself an approximation (see its own docstring) -- but it is the
+        best available basis, and it is what the original cutover seed
+        already relied on. Logs each sleeve's pre-seed state at WARNING
+        before overwriting it, for audit/rollback reference.
         """
         if self._orchestrator.capital_allocation_mode != "sleeved":
             raise ValueError("seed_sleeves_from_attribution: engine is not in sleeved mode")
-        if self._orchestrator._sleeve_portfolios:
+        if self._orchestrator._sleeve_portfolios and not force:
             raise ValueError(
                 "seed_sleeves_from_attribution: sleeves already have state -- "
-                "refusing to overwrite real accumulated history with a stale seed"
+                "refusing to overwrite real accumulated history with a stale seed "
+                "(pass force=True for a deliberate drift write-off)"
+            )
+
+        if force and self._orchestrator._sleeve_portfolios:
+            before = {
+                strategy: {"cash": p.cash, "holdings": dict(p.holdings), "nav": p.nav}
+                for strategy, p in self._orchestrator._sleeve_portfolios.items()
+            }
+            log.warning(
+                "seed_sleeves_from_attribution(force=True): overwriting existing sleeve "
+                "state as a deliberate drift write-off. Pre-seed snapshot: %s", before,
             )
 
         positions = self._broker.get_positions()
@@ -2047,12 +2083,26 @@ class LiveTradingEngine:
 
             pit_view = self._data_feed.refresh(asof=now)
 
-            prices = self._resolve_cycle_prices(pit_view)
-
+            # Runs before price resolution, and unconditionally: this is
+            # blended mode's only self-heal for `self._portfolio` (never
+            # persisted across a restart, see sync_portfolio_from_broker's
+            # docstring), and `prices` is used there only for an optional
+            # NAV snapshot -- the cash/holdings correction itself needs
+            # none. Confirmed live 2026-09-23: with this gated behind
+            # `_resolve_cycle_prices` (which raises whenever IBKR's HMDS
+            # farm is down), a multi-day farm outage meant the sync never
+            # ran at all, leaving `self._portfolio` frozen empty since the
+            # last restart while the broker held real positions the whole
+            # time -- reconciliation looked catastrophically broken when
+            # the actual cause was just "never got a chance to sync".
             discrepancies = sync_portfolio_from_broker(
-                self._broker, self._portfolio, prices
+                self._broker, self._portfolio, prices=None
             )
             result.discrepancies = discrepancies
+
+            prices = self._resolve_cycle_prices(pit_view)
+            if prices:
+                self._portfolio.record_snapshot(now, prices)
 
             if self._consecutive_broker_failures:
                 # This is the first broker call in the cycle (reconciliation) —

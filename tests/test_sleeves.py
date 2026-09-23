@@ -761,6 +761,36 @@ class TestEngineSeedSleevesFromAttribution:
         with pytest.raises(ValueError, match="already have state"):
             engine.seed_sleeves_from_attribution()
 
+    def test_force_bypasses_the_already_has_state_refusal(self, engine_components):
+        """The drift-write-off use case (2026-09-23): apply_realized_fill's
+        per-fill correction can only reach a fill whose originating cycle
+        recorded sleeve_decisions -- fills from before that field existed
+        (confirmed live: 326 of 394 historical Alpaca orders) drift forever
+        otherwise. force=True re-seeds from current broker truth + current
+        attribution despite existing sleeve state, snapping the drift away."""
+        from firm.brokers.base import OrderRequest
+
+        broker, feed, queue, config = engine_components
+        broker.connect()
+        broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=10))
+        engine = self._sleeved_engine(broker, feed, queue, config)
+
+        # Pre-existing, drifted sleeve state -- what force=True must overwrite.
+        stale = engine._orchestrator._get_or_create_sleeve_portfolio("momentum", 0.5)
+        stale.holdings = {"MSFT": 999.0}
+        stale.cash = 1.0
+
+        engine._attribution.record_trades(
+            [{"symbol": "AAPL", "shares": 10, "price": 1.0, "strategy": "momentum"}],
+            {"AAPL": 1.0},
+        )
+
+        summary = engine.seed_sleeves_from_attribution(force=True)
+
+        momentum = engine._orchestrator._sleeve_portfolios["momentum"]
+        assert momentum.holdings == {"AAPL": 10.0}  # broker/attribution truth, not the stale MSFT
+        assert "momentum" in summary
+
     def test_seeds_from_real_broker_positions_and_persists(self, engine_components, tmp_path):
         from firm.brokers.base import OrderRequest
 
