@@ -1,10 +1,10 @@
 ---
 name: project-reconciliation-audit-sep23
-description: "2026-09-23 end-to-end live audit: IBKR HMDS-outage fail-fast + reconciliation-blackout fix, Alpaca wash-trade fix, sleeve drift write-off mechanism built but NOT yet executed (needs user to run one command)"
+description: "2026-09-23 end-to-end live audit: IBKR HMDS-outage fail-fast + reconciliation-blackout fix, Alpaca wash-trade fix; sleeve drift write-off attempt made things WORSE, rolled back successfully — legacy drift left as accepted debt, do not retry that approach"
 metadata:
   node_type: memory
   type: project
-  modified: 2026-09-23T17:28:53.638Z
+  modified: 2026-09-23T17:39:29.544Z
   originSessionId: 403dab55-8f5b-43a3-afa3-7533df0c5692
 ---
 
@@ -81,16 +81,47 @@ to conclude!!!") when each check kept surfacing a new issue — see
    (`tests/test_sleeves.py::test_force_bypasses_the_already_has_state_refusal`,
    `tests/test_api.py` force-seed case), deployed.
 
-   **NOT YET RUN**: the actual `POST .../sleeves/seed?force=true` call against
-   the live engine is blocked by the auto-mode permission classifier
-   ("Modify Shared Resources") — a real, mutating write to live account
-   state, correctly gated. Tried twice, both explicitly denied; did not
-   attempt to work around it. **This is the one open item** — the user needs
-   to either run `curl -s -X POST "http://127.0.0.1:8001/api/live/sleeves/seed?force=true"`
-   themselves, or add a permission rule allowing it. Until then, Alpaca's
-   `GET /api/live/reconciliation` will keep showing the same ~36-symbol
-   mismatch — that's expected, not a regression, not something to
-   re-investigate.
+   **Executed once, made things WORSE, then rolled back — do not repeat this
+   approach.** User granted permission and it ran successfully, but
+   `seed_sleeve_portfolios_from_attribution`'s math is only sound at the
+   *original* blended-to-sleeved cutover moment, when attribution's
+   per-strategy heuristic and the broker's real position necessarily
+   agreed (attribution was cutting one already-correct book into slices).
+   Re-running it later trusts attribution's own independently-drifted
+   holdings — `PerformanceAttribution.record_trades` records *decided*
+   quantities every cycle (both blended and sleeved mode, unconditionally),
+   not verified fills, so it has the exact same class of gap
+   `apply_realized_fill` exists to correct, just with no correction ever
+   applied to attribution itself — with **no constraint that the per-symbol
+   sum across sleeves matches the broker's real position**. Result:
+   reconciliation's cash gap grew from $12.8k to $15.8k and every per-symbol
+   diff got larger, not smaller. Caught immediately by re-checking
+   reconciliation right after, not left unverified.
+
+   **Rolled back successfully** using the pre-seed snapshot the seed
+   endpoint itself logs at WARNING before overwriting anything (this
+   logging was added specifically for this reason). Built a proper, minimal
+   rollback path — `LiveTradingEngine.restore_sleeve_snapshot` /
+   `POST /api/live/sleeves/restore` — that does a direct overwrite from an
+   explicit snapshot via the *already-existing, already-tested*
+   `Orchestrator.restore_sleeve_portfolios` (the normal startup-restore
+   path), not any new redistribution math. Commit `f44a95f`. Executed
+   against the live instance; reconciliation confirmed back to
+   essentially the original state (cash diff ~$13.1k, was $12.8k
+   pre-mistake — the small difference is one real cycle's trades that ran
+   in between, not residual damage).
+
+   **Conclusion: leave the legacy drift as accepted, documented debt.** Do
+   NOT attempt another one-shot redistribution against this account without
+   a fundamentally different, broker-anchored algorithm (one that actually
+   constrains each symbol's cross-sleeve sum to match the broker's real
+   position — attribution-adoption alone does not do this and must not be
+   trusted as sole ground truth again). The ongoing per-fill correction
+   (`apply_realized_fill`) is confirmed correct and sufficient for
+   everything going forward; only the pre-existing 82%-uncovered legacy
+   portion is permanently approximate. `POST /api/live/sleeves/restore` now
+   exists as a genuine safety net if this ever needs undoing again for any
+   reason.
 
 ## Multi-agent sweep (user explicitly said "use multiagents")
 
