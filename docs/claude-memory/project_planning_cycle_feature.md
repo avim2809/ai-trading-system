@@ -1,10 +1,10 @@
 ---
 name: project-planning-cycle-feature
-description: "Opt-in pre-open 'planning' cycle + self-consistency sampling — LIVE on IBKR since 2026-09-23, Alpaca still deliberately off — remind user to consider enabling Alpaca"
+description: "Opt-in pre-open 'planning' cycle + self-consistency sampling — LIVE on both IBKR and Alpaca since 2026-09-23; IBKR outage fail-fast fix also shipped same day"
 metadata:
   node_type: memory
   type: project
-  modified: 2026-09-23T13:20:29.836Z
+  modified: 2026-09-23T15:41:01.964Z
   originSessionId: 403dab55-8f5b-43a3-afa3-7533df0c5692
 ---
 
@@ -17,23 +17,39 @@ design + implementation in one plan-mode session — see git commit
 complete rationale (also mirrored into `docs/PROJECT_CONTEXT.md`'s new
 "Pre-open 'planning' cycle" section).
 
-**Status as of 2026-09-23: enabled on IBKR (`config/live.yaml`), still
-deliberately OFF on Alpaca (`config/live_alpaca.yaml`).** User explicitly
-asked to be reminded that this is still open — surface this at the start of
-a relevant future session (don't wait to be asked) rather than letting it
-go stale silently:
+**Status as of 2026-09-23: enabled on BOTH IBKR and Alpaca.**
 - IBKR: `planning_cycle.enabled: true`, restarted, force-tested live
   (cycle 57) — ran clean, bypassed market-hours gate correctly, no orders
   that time (legitimate, no rebalancing signal), nothing hit the broker.
   Real scheduled run now fires automatically every trading day at 09:15 ET.
-- Alpaca: left off on purpose — sleeved mode, more moving parts (the
-  dry_run sleeve-commit-skip hazard below), wanted IBKR validated over a
-  few real days first before touching the sleeved instance.
-- **When reminding**: check how IBKR's planning cycle has actually
-  performed over the intervening days (any `overnight_plan_applied`/
-  `overnight_plan_discarded` alerts, any errors) before just proposing
-  "enable Alpaca too" — the whole point of doing IBKR first was to have
-  real behavior to check, not to rubber-stamp it after a fixed time delay.
+- Alpaca: originally left off on purpose (sleeved mode, more moving parts —
+  the dry_run sleeve-commit-skip hazard below) pending a few days of IBKR
+  validation first. User explicitly said "also lets enable alpaca" later
+  the same session before that validation window elapsed — enabled anyway
+  per direct instruction, restarted, verified clean. The Alpaca-specific
+  sleeve hazard was already fixed in code before either instance went live,
+  so this wasn't riskier than planned, just earlier than the original
+  rollout intended.
+
+**Same-day follow-up, also 2026-09-23**: IBKR's first real planning-cycle
+run hit a `broker_unavailable` alert. Investigated rather than dismissed
+(user pushed back with "this would happen every time since ibkr always
+fails on the first attempt") — root cause was a genuine IBKR-side outage:
+`Warning 2105: HMDS data farm connection is broken:ushmds`, which made
+`IBKRProvider._get_prices`'s per-symbol retry loop burn ~8 minutes proving
+the same outage across all 25 symbols before giving up (also explained a
+prior ~30-hour failure streak, cycles 22-50, predating this session's other
+changes). Fixed: `IBKRBroker._on_ib_error` now tracks HMDS farm health from
+IBKR's own proactive errorEvent callbacks (2105 broken/2106 OK/2107
+inactive-but-available), exposed via `is_historical_data_farm_broken()`;
+`_get_prices` checks it before and during its per-symbol loop and bails
+immediately once a farm is known broken instead of rediscovering it 25
+times. Shipped, tested (`tests/test_ibkr_broker.py`,
+`tests/test_ibkr_provider.py`), full suite green (2204 passed, 9 pre-
+existing unrelated failures confirmed via stash-diff), committed, IBKR
+service restarted between cycles (not mid-cycle) to deploy. Not yet proven
+against a real live farm outage — will only be confirmed the next time
+`ushmds` (or another HMDS farm) actually goes down.
 
 **Two design pivots worth remembering the reasoning for, not just the
 outcome** (the user pushed back and asked for honesty rather than a
