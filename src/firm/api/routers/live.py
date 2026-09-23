@@ -1142,6 +1142,28 @@ def reset_kill_switch(request: Request) -> dict[str, Any]:
     return {"reset": True, **result}
 
 
+@router.get("/sleeves/rebalance_preview")
+def preview_sleeve_rebalance(request: Request) -> dict[str, Any]:
+    """Read-only: propose a broker-sum-constrained legacy-drift write-off
+    without changing anything -- see
+    ``LiveTradingEngine.preview_sleeve_broker_constrained_rebalance``'s
+    docstring for why this exists (the unconstrained ``sleeves/seed
+    ?force=true`` made real drift worse, not better, on this instance).
+
+    Does live broker I/O (positions/account) like ``GET
+    /reconciliation`` does, but never writes anything. Inspect
+    ``verification_mismatches`` (must be empty) before ever POSTing the
+    returned ``proposed`` value to ``/sleeves/restore``.
+    """
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        raise HTTPException(status_code=400, detail="Live engine is not running")
+    try:
+        return engine.preview_sleeve_broker_constrained_rebalance()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/sleeves/restore")
 def restore_sleeves(request: Request, snapshot: dict[str, dict[str, Any]]) -> dict[str, Any]:
     """Emergency rollback for a bad ``POST /sleeves/seed?force=true`` call.

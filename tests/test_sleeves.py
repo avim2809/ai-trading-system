@@ -740,6 +740,218 @@ class TestSeedSleevesFromAttribution:
         assert momentum.nav == pytest.approx(500_000.0)  # still exactly its target
 
 
+class TestBrokerConstrainedSleeveRebalance:
+    """Orchestrator.compute_broker_constrained_sleeve_holdings -- the
+    corrected version of the cutover seed, built 2026-09-23 after the
+    unconstrained seed_sleeve_portfolios_from_attribution(force=True) made
+    a real Alpaca instance's drift worse (its output didn't sum to broker
+    truth at all). This one is *forced* to sum to broker truth per symbol,
+    using attribution only for the relative split shape."""
+
+    @staticmethod
+    def _attribution_with_holdings(holdings: dict[str, dict[str, float]]):
+        from firm.portfolio.attribution import PerformanceAttribution
+
+        attribution = PerformanceAttribution()
+        for strategy, sym_shares in holdings.items():
+            fills = [
+                {"symbol": sym, "shares": shares, "price": 1.0, "strategy": strategy}
+                for sym, shares in sym_shares.items()
+            ]
+            attribution.record_trades(fills, {sym: 1.0 for sym in sym_shares})
+        return attribution
+
+    def test_rescales_estimates_to_sum_exactly_to_broker_truth(self):
+        orch = _make_orchestrator(
+            analysts=[],
+            sleeve_traders={
+                "momentum": TraderAgent(), "trend": TraderAgent(), "mean_reversion": TraderAgent(),
+            },
+        )
+        # Estimates [2, -1, 4] for AAPL, sum=5, but broker really holds 10 --
+        # each sleeve's share must double (10/5=2x) to preserve the ratio.
+        attribution = self._attribution_with_holdings({
+            "momentum": {"AAPL": 2.0}, "trend": {"AAPL": -1.0}, "mean_reversion": {"AAPL": 4.0},
+        })
+        result = orch.compute_broker_constrained_sleeve_holdings(
+            attribution, {"AAPL": 10.0}, {"AAPL": 100.0}, total_nav=3_000_000.0,
+        )
+        assert result["momentum"]["holdings"]["AAPL"] == pytest.approx(4.0)
+        assert result["trend"]["holdings"]["AAPL"] == pytest.approx(-2.0)
+        assert result["mean_reversion"]["holdings"]["AAPL"] == pytest.approx(8.0)
+        total = sum(r["holdings"].get("AAPL", 0.0) for r in result.values())
+        assert total == pytest.approx(10.0)  # the actual invariant that matters
+
+    def test_zero_broker_position_clears_every_sleeves_stale_holding(self):
+        orch = _make_orchestrator(
+            analysts=[], sleeve_traders={"momentum": TraderAgent(), "trend": TraderAgent()},
+        )
+        attribution = self._attribution_with_holdings({
+            "momentum": {"MSFT": 50.0}, "trend": {"MSFT": -20.0},
+        })
+        result = orch.compute_broker_constrained_sleeve_holdings(
+            attribution, {"MSFT": 0.0}, {"MSFT": 100.0}, total_nav=1_000_000.0,
+        )
+        assert "MSFT" not in result["momentum"]["holdings"]
+        assert "MSFT" not in result["trend"]["holdings"]
+
+    def test_estimation_blind_spot_falls_back_to_capital_weight_and_still_sums_correctly(self):
+        """No sleeve's attribution shows this symbol at all, but the broker
+        holds a real position -- must not divide by zero, must fall back
+        to the capital-weight split, and the fallback must still sum
+        exactly to broker truth."""
+        orch = _make_orchestrator(
+            analysts=[],
+            sleeve_traders={"momentum": TraderAgent(), "trend": TraderAgent()},
+        )
+        attribution = self._attribution_with_holdings({})  # no data on anyone
+        result = orch.compute_broker_constrained_sleeve_holdings(
+            attribution, {"SPY": 20.0}, {"SPY": 400.0}, total_nav=1_000_000.0,
+        )
+        total = sum(r["holdings"].get("SPY", 0.0) for r in result.values())
+        assert total == pytest.approx(20.0)
+        # Equal capital weights (no strategy_capital_weights configured) -> equal split.
+        assert result["momentum"]["holdings"]["SPY"] == pytest.approx(10.0)
+        assert result["trend"]["holdings"]["SPY"] == pytest.approx(10.0)
+
+    def test_cash_still_targets_each_sleeves_capital_weight(self):
+        orch = _make_orchestrator(
+            analysts=[], sleeve_traders={"momentum": TraderAgent(), "trend": TraderAgent()},
+        )
+        attribution = self._attribution_with_holdings({"momentum": {"AAPL": 10.0}})
+        result = orch.compute_broker_constrained_sleeve_holdings(
+            attribution, {"AAPL": 10.0}, {"AAPL": 100.0}, total_nav=1_000_000.0,
+        )
+        # momentum: target 500k, holds 10 AAPL @ $100 = $1k -> cash = 499k.
+        assert result["momentum"]["cash"] == pytest.approx(499_000.0)
+        # trend: target 500k, holds nothing -> full cash share.
+        assert result["trend"]["cash"] == pytest.approx(500_000.0)
+
+    def test_refuses_when_explicit_capital_weights_do_not_sum_to_one(self):
+        """Adversarial review, 2026-09-23: _sleeve_capital_weights() only
+        auto-normalizes when at least one sleeved strategy has no explicit
+        strategy_capital_weights entry. A config where every strategy has
+        an explicit entry summing to something other than 1.0 sailed
+        through with no correction otherwise -- every downstream sum
+        (fallback-split holdings, cash target_capital) would then be
+        silently wrong. Must refuse loudly instead."""
+        orch = _make_orchestrator(
+            analysts=[],
+            sleeve_traders={"momentum": TraderAgent(), "trend": TraderAgent()},
+            config={"strategy_capital_weights": {"momentum": 0.5, "trend": 0.3}},  # sums to 0.8
+        )
+        attribution = self._attribution_with_holdings({})
+        with pytest.raises(ValueError, match="sum to 0.8"):
+            orch.compute_broker_constrained_sleeve_holdings(
+                attribution, {"AAPL": 10.0}, {"AAPL": 100.0}, total_nav=1_000_000.0,
+            )
+
+    def test_no_sleeve_traders_returns_empty(self):
+        orch = _make_orchestrator(analysts=[], sleeve_traders={})
+        attribution = self._attribution_with_holdings({})
+        result = orch.compute_broker_constrained_sleeve_holdings(
+            attribution, {"AAPL": 10.0}, {"AAPL": 100.0}, total_nav=1_000_000.0,
+        )
+        assert result == {}
+
+    def test_never_mutates_sleeve_portfolios_itself(self):
+        orch = _make_orchestrator(
+            analysts=[], sleeve_traders={"momentum": TraderAgent(), "trend": TraderAgent()},
+        )
+        pre_existing = orch._get_or_create_sleeve_portfolio("momentum", 0.5)
+        pre_existing.holdings = {"AAPL": 999.0}
+        attribution = self._attribution_with_holdings({"momentum": {"AAPL": 10.0}})
+
+        orch.compute_broker_constrained_sleeve_holdings(
+            attribution, {"AAPL": 10.0}, {"AAPL": 100.0}, total_nav=1_000_000.0,
+        )
+
+        assert orch._sleeve_portfolios["momentum"].holdings == {"AAPL": 999.0}
+
+
+class TestEnginePreviewSleeveBrokerConstrainedRebalance:
+    """LiveTradingEngine.preview_sleeve_broker_constrained_rebalance --
+    read-only, self-verifying preview wired to GET
+    /api/live/sleeves/rebalance_preview."""
+
+    def _sleeved_engine(self, broker, feed, queue, config):
+        cfg = {**config, "capital_allocation_mode": "sleeved", "strategies": ["momentum", "trend"]}
+        return LiveTradingEngine(config=cfg, broker=broker, data_feed=feed, approval_queue=queue)
+
+    def test_refuses_when_not_sleeved(self, engine_components):
+        broker, feed, queue, config = engine_components
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        with pytest.raises(ValueError, match="not in sleeved mode"):
+            engine.preview_sleeve_broker_constrained_rebalance()
+
+    def test_proposal_has_no_verification_mismatches_against_real_broker_state(
+        self, engine_components,
+    ):
+        from firm.brokers.base import OrderRequest
+
+        broker, feed, queue, config = engine_components
+        broker.connect()
+        broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=10))
+        engine = self._sleeved_engine(broker, feed, queue, config)
+        engine._attribution.record_trades(
+            [{"symbol": "AAPL", "shares": 6, "price": 1.0, "strategy": "momentum"},
+             {"symbol": "AAPL", "shares": 4, "price": 1.0, "strategy": "trend"}],
+            {"AAPL": 1.0},
+        )
+
+        result = engine.preview_sleeve_broker_constrained_rebalance()
+
+        assert result["verification_mismatches"] == []
+        total = sum(
+            blob["holdings"].get("AAPL", 0.0) for blob in result["proposed"].values()
+        )
+        assert total == pytest.approx(10.0)
+
+    def test_does_not_mutate_live_sleeve_state(self, engine_components):
+        broker, feed, queue, config = engine_components
+        engine = self._sleeved_engine(broker, feed, queue, config)
+        stale = engine._orchestrator._get_or_create_sleeve_portfolio("momentum", 0.5)
+        stale.holdings = {"MSFT": 42.0}
+
+        engine.preview_sleeve_broker_constrained_rebalance()
+
+        assert engine._orchestrator._sleeve_portfolios["momentum"].holdings == {"MSFT": 42.0}
+
+    def test_nan_holding_is_flagged_as_a_mismatch_not_silently_passed(self, engine_components):
+        """Adversarial review, 2026-09-23: `nan > 0.01` is False in Python,
+        so a NaN produced by catastrophic cancellation in the rescale would
+        sail through a plain abs-diff check and be reported as verified
+        clean. Simulates that outcome directly (rather than trying to
+        engineer real catastrophic cancellation) by monkeypatching the
+        orchestrator's computation to return a NaN holding."""
+        broker, feed, queue, config = engine_components
+        engine = self._sleeved_engine(broker, feed, queue, config)
+        engine._orchestrator.compute_broker_constrained_sleeve_holdings = (
+            lambda *a, **k: {"momentum": {"cash": 0.0, "holdings": {"AAPL": float("nan")}}}
+        )
+
+        result = engine.preview_sleeve_broker_constrained_rebalance()
+
+        assert any(m["symbol"] == "AAPL" for m in result["verification_mismatches"])
+
+    def test_cash_side_mismatch_is_caught_even_when_holdings_side_is_clean(
+        self, engine_components,
+    ):
+        """A weights-normalization bug (or any other cash-side error) that
+        doesn't affect the holdings sum must still be caught -- the earlier
+        check only verified holdings, never cash/NAV."""
+        broker, feed, queue, config = engine_components
+        broker.connect()
+        engine = self._sleeved_engine(broker, feed, queue, config)
+        engine._orchestrator.compute_broker_constrained_sleeve_holdings = (
+            lambda *a, **k: {"momentum": {"cash": -999_999.0, "holdings": {}}}
+        )
+
+        result = engine.preview_sleeve_broker_constrained_rebalance()
+
+        assert any(m["symbol"] == "__total_nav__" for m in result["verification_mismatches"])
+
+
 class TestEngineRestoreSleeveSnapshot:
     """LiveTradingEngine.restore_sleeve_snapshot -- emergency rollback for a
     bad force=True seed, wired to POST /api/live/sleeves/restore. Built

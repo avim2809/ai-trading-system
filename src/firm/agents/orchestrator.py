@@ -762,6 +762,105 @@ class Orchestrator(Agent):
             }
         return summary
 
+    def compute_broker_constrained_sleeve_holdings(
+        self,
+        attribution: Any,
+        broker_holdings: dict[str, float],
+        prices: dict[str, float],
+        total_nav: float,
+    ) -> dict[str, dict[str, Any]]:
+        """Read-only: propose a per-sleeve holdings/cash split whose
+        per-symbol sum across every sleeve is *forced* to exactly equal
+        ``broker_holdings`` -- unlike
+        :meth:`seed_sleeve_portfolios_from_attribution`, which adopts
+        attribution's per-strategy estimate directly with no such
+        constraint (confirmed live 2026-09-23: doing that on a running
+        Alpaca sleeved instance made reconciliation's drift *worse*, not
+        better, since attribution's own estimates don't necessarily sum to
+        broker truth in the first place).
+
+        For each symbol, every sleeve's attribution-estimated quantity
+        (``attribution.get_strategy_holdings``) is rescaled by the same
+        factor so the sleeves' shares sum to ``broker_holdings[symbol]``
+        exactly, while preserving each sleeve's *relative* share from the
+        estimate -- attribution is trusted for the *shape* of the split,
+        never for the *total*. A symbol where broker truth is 0 zeroes out
+        every sleeve's holding for it (clears a phantom position). A
+        symbol broker truth holds but where *no* sleeve's attribution shows
+        anything at all (a complete estimation blind spot, sum of estimates
+        is 0) falls back to splitting by each sleeve's target-capital
+        weight (:meth:`_sleeve_capital_weights`) -- the same convention
+        already used for cash, not a new one invented here.
+
+        Cash is computed exactly as in the cutover seed: each sleeve's
+        target_capital (its weight * ``total_nav``) minus the market value
+        of its (now broker-consistent) holdings.
+
+        Returns ``{strategy: {"cash": ..., "holdings": {...}}}`` -- the
+        same shape :meth:`export_sleeve_portfolios`/
+        :meth:`restore_sleeve_portfolios` use, so a caller applies this via
+        the existing, already-tested ``POST /api/live/sleeves/restore``
+        rather than any new apply path. Never mutates ``_sleeve_portfolios``
+        itself -- purely a computation, so it's safe to call and inspect
+        before deciding whether to apply it.
+        """
+        weights = self._sleeve_capital_weights()
+        strategies = list(self.sleeve_traders)
+        if not strategies:
+            return {}
+
+        # Every branch below (the est_sum==0 fallback split, and the cash
+        # target_capital = weight * total_nav computation) is only
+        # guaranteed to sum correctly across sleeves when weights sums to
+        # 1.0. _sleeve_capital_weights() only auto-normalizes when at least
+        # one sleeved strategy has no explicit strategy_capital_weights
+        # entry -- a config where every strategy has an explicit entry
+        # summing to something other than 1.0 sails through with no
+        # correction otherwise (confirmed via adversarial review
+        # 2026-09-23; dormant today since neither live config sets
+        # strategy_capital_weights at all, but this must not be trusted
+        # silently once one does).
+        weight_total = sum(weights.values())
+        if abs(weight_total - 1.0) > 1e-6:
+            raise ValueError(
+                f"compute_broker_constrained_sleeve_holdings: sleeve capital "
+                f"weights sum to {weight_total:.6f}, not 1.0 -- refusing to "
+                f"compute a rebalance that would silently over/under-allocate "
+                f"broker truth or NAV. Fix strategy_capital_weights in config."
+            )
+
+        estimates: dict[str, dict[str, float]] = {
+            s: attribution.get_strategy_holdings(s) for s in strategies
+        }
+        all_symbols = {
+            sym for holdings in estimates.values() for sym in holdings
+        } | set(broker_holdings)
+
+        new_holdings: dict[str, dict[str, float]] = {s: {} for s in strategies}
+        for sym in all_symbols:
+            broker_qty = broker_holdings.get(sym, 0.0)
+            if broker_qty == 0.0:
+                continue  # leave every sleeve's holding for this symbol at 0
+            per_strategy_est = {s: estimates[s].get(sym, 0.0) for s in strategies}
+            est_sum = sum(per_strategy_est.values())
+            for s in strategies:
+                if est_sum != 0.0:
+                    share = per_strategy_est[s] / est_sum * broker_qty
+                else:
+                    share = weights.get(s, 0.0) * broker_qty
+                if share != 0.0:
+                    new_holdings[s][sym] = share
+
+        summary: dict[str, dict[str, Any]] = {}
+        for s in strategies:
+            target_capital = weights.get(s, 0.0) * total_nav
+            holdings = new_holdings[s]
+            holdings_value = sum(
+                qty * prices.get(sym, 0.0) for sym, qty in holdings.items()
+            )
+            summary[s] = {"cash": target_capital - holdings_value, "holdings": holdings}
+        return summary
+
     def get_sleeve_metrics(self) -> dict[str, dict[str, float]]:
         """Exact per-strategy performance metrics from each sleeve's own NAV
         history -- unlike ``PerformanceAttribution``'s heuristic (dominant-

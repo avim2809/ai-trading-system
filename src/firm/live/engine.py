@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import threading
 import weakref
 from collections import OrderedDict
@@ -1548,6 +1549,93 @@ class LiveTradingEngine:
             except Exception:
                 log.warning("Failed to persist restored sleeve portfolios", exc_info=True)
         return {"restored": list(snapshot.keys())}
+
+    def preview_sleeve_broker_constrained_rebalance(self) -> dict[str, Any]:
+        """Read-only: compute what a *correct* (broker-sum-constrained)
+        legacy-drift write-off would produce, without changing anything.
+
+        See ``Orchestrator.compute_broker_constrained_sleeve_holdings``'s
+        docstring for the algorithm, and its own docstring's opening
+        paragraph for why the *un*constrained version
+        (``seed_sleeves_from_attribution(force=True)``) made this
+        instance's real drift worse instead of better when it ran live.
+
+        Self-verifies its own arithmetic against real broker truth before
+        returning -- ``verification_mismatches`` should always be empty;
+        a nonempty list means the algorithm itself has a bug and the
+        ``proposed`` snapshot must NOT be applied via
+        ``POST /api/live/sleeves/restore`` until that's fixed. This check
+        exists specifically because the earlier mistake was never caught
+        by any such self-verification before it ran -- there's no excuse
+        for skipping it a second time.
+
+        Returns ``{"proposed": {...}, "verification_mismatches": [...]}``.
+        ``proposed`` is in the exact shape ``POST /api/live/sleeves/restore``
+        expects as its request body.
+        """
+        if self._orchestrator.capital_allocation_mode != "sleeved":
+            raise ValueError(
+                "preview_sleeve_broker_constrained_rebalance: engine is not in sleeved mode"
+            )
+
+        positions = self._broker.get_positions()
+        account = self._broker.get_account()
+        prices = {
+            p.symbol: (p.market_value / p.quantity if p.quantity else 0.0)
+            for p in positions
+        }
+        broker_holdings = {p.symbol: p.quantity for p in positions}
+        total_nav = account.get("cash", 0.0) + sum(p.market_value for p in positions)
+
+        proposed = self._orchestrator.compute_broker_constrained_sleeve_holdings(
+            self._attribution, broker_holdings, prices, total_nav,
+        )
+
+        # math.isfinite guards a real gap an adversarial review caught
+        # 2026-09-23: `nan > 0.01` is False in Python, so a NaN/inf produced
+        # by catastrophic cancellation in the rescale (astronomically large
+        # offsetting shares from a near-zero attribution sum) would sail
+        # through a plain `abs(diff) > tolerance` check and be reported as
+        # "verified clean" when it's actually corrupted.
+        proposed_net: dict[str, float] = {}
+        for blob in proposed.values():
+            for sym, qty in blob["holdings"].items():
+                proposed_net[sym] = proposed_net.get(sym, 0.0) + qty
+        mismatches: list[dict[str, Any]] = []
+        for sym in set(broker_holdings) | set(proposed_net):
+            broker_qty = broker_holdings.get(sym, 0.0)
+            proposed_qty = proposed_net.get(sym, 0.0)
+            if not math.isfinite(proposed_qty) or abs(broker_qty - proposed_qty) > 0.01:
+                mismatches.append({
+                    "symbol": sym, "broker": broker_qty,
+                    "proposed_sum": proposed_qty, "diff": proposed_qty - broker_qty,
+                })
+
+        # Belt-and-suspenders: independently re-derive each sleeve's target
+        # capital from account truth and confirm the *cash* side also sums
+        # to total_nav -- compute_broker_constrained_sleeve_holdings now
+        # refuses internally if sleeve weights don't sum to 1.0, but this
+        # re-checks the externally-observable result rather than trusting
+        # that internal guard alone (same "verify the output, don't just
+        # trust the algorithm" principle as the holdings check above).
+        cash_plus_holdings_value = sum(
+            blob["cash"] + sum(qty * prices.get(sym, 0.0) for sym, qty in blob["holdings"].items())
+            for blob in proposed.values()
+        )
+        if not math.isfinite(cash_plus_holdings_value) or abs(cash_plus_holdings_value - total_nav) > 1.0:
+            mismatches.append({
+                "symbol": "__total_nav__", "broker": total_nav,
+                "proposed_sum": cash_plus_holdings_value,
+                "diff": cash_plus_holdings_value - total_nav,
+            })
+
+        if mismatches:
+            log.error(
+                "preview_sleeve_broker_constrained_rebalance: self-verification "
+                "found %d symbol(s) where the proposed split doesn't sum to broker "
+                "truth -- DO NOT apply this proposal: %s", len(mismatches), mismatches,
+            )
+        return {"proposed": proposed, "verification_mismatches": mismatches}
 
     def seed_sleeves_from_attribution(self, force: bool = False) -> dict[str, dict[str, Any]]:
         """One-time, deliberate operator action for the moment of switching
