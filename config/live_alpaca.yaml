@@ -47,7 +47,7 @@ approval_mode: "full_auto"
 # earlier bug did (see docs/claude-memory/project_vps_migration_sep22.md).
 # See firm.live.planning_cycle.
 planning_cycle:
-  enabled: false
+  enabled: true
   schedule: "cron:09:15"
   price_tolerance_pct: 0.5
   expire_minutes: 600
