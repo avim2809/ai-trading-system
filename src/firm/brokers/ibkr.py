@@ -118,6 +118,53 @@ class IBKRBroker(Broker):
         # connection-state). See warm_universe() for proactively filling this
         # in one batched call instead of N per-order ones.
         self._qualified_contracts: dict[str, Any] = {}
+        # Names of HMDS (historical-data) farms IBKR has told us, via
+        # errorEvent, are currently broken (code 2105) rather than OK/idle
+        # (2106/2107). Populated by _on_ib_error, registered in connect().
+        # Confirmed live 2026-09-23: a broken `ushmds` farm made every
+        # reqHistoricalData call in IBKRProvider._get_prices's per-symbol
+        # loop hang out to its full timeout, burning ~8 minutes proving the
+        # same outage 25 times before giving up — IBKR already tells us this
+        # proactively, so callers can check is_historical_data_farm_broken()
+        # and bail on the very first symbol instead.
+        self._broken_hmds_farms: set[str] = set()
+        self._farm_status_lock = threading.Lock()
+
+    def _on_ib_error(
+        self, reqId: int, errorCode: int, errorString: str, advancedOrderRejectJson: str = ""
+    ) -> None:
+        """Track HMDS (historical-data) farm health from IBKR's own
+        connectivity-status callbacks — these fire proactively (independent
+        of any specific request) whenever a farm's state changes.
+
+        Only HMDS codes are tracked here: 2105 (broken), 2106 (OK), 2107
+        (inactive but available on demand — treated as usable, not broken).
+        Real-time market-data-farm codes (2103/2104/2108) are deliberately
+        NOT treated as equivalent — reqHistoricalData depends on the HMDS
+        backend specifically, not the streaming one.
+        """
+        farm = errorString.rsplit(":", 1)[-1].strip() if ":" in errorString else ""
+        if not farm:
+            return
+        if errorCode == 2105:
+            with self._farm_status_lock:
+                if farm not in self._broken_hmds_farms:
+                    log.warning("IBKR HMDS data farm '%s' reported broken (code 2105)", farm)
+                self._broken_hmds_farms.add(farm)
+        elif errorCode in (2106, 2107):
+            with self._farm_status_lock:
+                if farm in self._broken_hmds_farms:
+                    log.info("IBKR HMDS data farm '%s' reported recovered (code %d)", farm, errorCode)
+                self._broken_hmds_farms.discard(farm)
+
+    def is_historical_data_farm_broken(self) -> bool:
+        """True if IBKR has told us (via errorEvent) that at least one HMDS
+        farm is currently broken. Callers doing historical-data fetches
+        (``reqHistoricalData``) should treat this as "fail fast" — see
+        ``_on_ib_error``'s docstring for the incident this exists to avoid.
+        """
+        with self._farm_status_lock:
+            return bool(self._broken_hmds_farms)
 
     @contextmanager
     def _locked(self):
@@ -151,6 +198,7 @@ class IBKRBroker(Broker):
             self._ib = IB()
             self._ib.RequestTimeout = _IB_REQUEST_TIMEOUT_SECONDS
             try:
+                self._ib.errorEvent += self._on_ib_error
                 # fetchFields excludes SUB_ACCOUNT_UPDATES: ib_async's default
                 # startup sync (StartupFetch.ALL) calls
                 # reqAccountUpdatesMultiAsync(account, modelCode="") for every

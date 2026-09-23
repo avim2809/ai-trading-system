@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -20,6 +21,19 @@ pytest.importorskip("ib_async")
 
 from firm.brokers.base import BrokerError, OrderRequest, OrderStatus
 from firm.brokers.ibkr import IBKRBroker
+
+
+class _FakeIBEvent:
+    """Stand-in for ib_async's Event type, which supports `+=` to register a
+    handler. connect() registers _on_ib_error on self._ib.errorEvent, so any
+    fake IB() used in a connect() test needs one of these."""
+
+    def __init__(self):
+        self.handlers: list[Any] = []
+
+    def __iadd__(self, fn):
+        self.handlers.append(fn)
+        return self
 
 
 def _ticker(midpoint=float("nan"), last=float("nan"), close=float("nan")):
@@ -333,6 +347,7 @@ class TestConnectCachesMarketHoursDetails:
         broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=10)
         details = SimpleNamespace(liquidHours="20260720:0930-20260720:1600", timeZoneId="US/Eastern")
         fake_ib = SimpleNamespace(
+            errorEvent=_FakeIBEvent(),
             connect=lambda *a, **k: None,
             reqMarketDataType=lambda *a: None,
             reqAccountSummary=lambda: None,
@@ -346,6 +361,7 @@ class TestConnectCachesMarketHoursDetails:
     def test_connect_handles_empty_contract_details(self):
         broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=11)
         fake_ib = SimpleNamespace(
+            errorEvent=_FakeIBEvent(),
             connect=lambda *a, **k: None,
             reqMarketDataType=lambda *a: None,
             reqAccountSummary=lambda: None,
@@ -397,6 +413,7 @@ class TestGetAccountThreadSafety:
         broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=5)
         calls = {"req": 0}
         fake_ib = SimpleNamespace(
+            errorEvent=_FakeIBEvent(),
             connect=lambda *a, **k: None,
             reqMarketDataType=lambda *a: None,
             reqAccountSummary=lambda: calls.__setitem__("req", calls["req"] + 1),
@@ -1076,6 +1093,7 @@ class TestBoundedIBLockAndRequestTimeout:
     def test_connect_sets_request_timeout_on_the_ib_client(self):
         broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=20)
         fake_ib = SimpleNamespace(
+            errorEvent=_FakeIBEvent(),
             connect=lambda *a, **k: None,
             reqMarketDataType=lambda *a: None,
             reqAccountSummary=lambda: None,
@@ -1151,3 +1169,68 @@ class TestBoundedIBLockAndRequestTimeout:
 
         result = broker.get_account()
         assert result["equity"] == 42.0
+
+
+class TestHistoricalDataFarmStatus:
+    """Regression coverage for the 2026-09-23 IBKR outage: a broken `ushmds`
+    HMDS farm made every reqHistoricalData call in IBKRProvider._get_prices's
+    per-symbol loop run out its full timeout, burning ~8 minutes proving the
+    same outage 25 times. IBKR reports this proactively via errorEvent
+    (codes 2105/2106/2107) — _on_ib_error tracks it so callers can fail fast.
+    """
+
+    def _broker(self):
+        return IBKRBroker(host="127.0.0.1", port=4002, client_id=30)
+
+    def test_starts_with_no_farm_reported_broken(self):
+        broker = self._broker()
+        assert broker.is_historical_data_farm_broken() is False
+
+    def test_code_2105_marks_farm_broken(self):
+        broker = self._broker()
+        broker._on_ib_error(-1, 2105, "HMDS data farm connection is broken:ushmds")
+        assert broker.is_historical_data_farm_broken() is True
+
+    def test_code_2106_clears_a_previously_broken_farm(self):
+        broker = self._broker()
+        broker._on_ib_error(-1, 2105, "HMDS data farm connection is broken:ushmds")
+        broker._on_ib_error(-1, 2106, "HMDS data farm connection is OK:ushmds")
+        assert broker.is_historical_data_farm_broken() is False
+
+    def test_code_2107_inactive_but_available_is_not_treated_as_broken(self):
+        broker = self._broker()
+        broker._on_ib_error(
+            -1, 2107, "HMDS data farm connection is inactive but should be available upon demand:usfarm"
+        )
+        assert broker.is_historical_data_farm_broken() is False
+
+    def test_unrelated_error_codes_are_ignored(self):
+        broker = self._broker()
+        broker._on_ib_error(-1, 2104, "Market data farm connection is OK:usfarm")
+        broker._on_ib_error(-1, 399, "Some order-specific warning")
+        assert broker.is_historical_data_farm_broken() is False
+
+    def test_one_farm_recovering_does_not_clear_another_still_broken_farm(self):
+        broker = self._broker()
+        broker._on_ib_error(-1, 2105, "HMDS data farm connection is broken:ushmds")
+        broker._on_ib_error(-1, 2105, "HMDS data farm connection is broken:usfuture")
+        broker._on_ib_error(-1, 2106, "HMDS data farm connection is OK:ushmds")
+        assert broker.is_historical_data_farm_broken() is True
+
+    def test_error_event_is_registered_on_connect(self):
+        broker = self._broker()
+        fake_ib = SimpleNamespace(
+            errorEvent=_FakeIBEvent(),
+            RequestTimeout=0,
+            connect=lambda *a, **k: None,
+            reqMarketDataType=lambda *a, **k: None,
+            reqAccountSummary=lambda: None,
+            qualifyContracts=lambda *a, **k: None,
+            reqContractDetails=lambda *a, **k: [],
+        )
+        with (
+            patch("firm.brokers.ibkr.IB", return_value=fake_ib),
+            patch("firm.brokers.ibkr.Stock", return_value=SimpleNamespace()),
+        ):
+            broker.connect()
+        assert fake_ib.errorEvent.handlers == [broker._on_ib_error]

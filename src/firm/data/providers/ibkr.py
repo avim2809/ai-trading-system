@@ -116,6 +116,23 @@ class IBKRProvider(DataProvider):
     def _get_prices(self, ib: "IB", symbols: list[str], start: str, end: str) -> pd.DataFrame:
         ib.reqMarketDataType(self._market_data_type)
 
+        # Fail fast if IBKR has already told us (via IBKRBroker's errorEvent
+        # hook) that a historical-data (HMDS) farm is down. Confirmed live
+        # 2026-09-23: without this, a broken `ushmds` farm made every one of
+        # 25 symbols' reqHistoricalData calls run out its full timeout in
+        # turn — ~8 minutes proving the same outage 25 times — before this
+        # method gave up. IBKR reports the outage proactively; no need to
+        # rediscover it per symbol. Only checked when a shared_broker is set
+        # (a private IB() connection here has no equivalent tracking).
+        if self._shared_broker is not None and self._shared_broker.is_historical_data_farm_broken():
+            log.warning(
+                "Skipping IBKR historical price fetch for %d symbol(s): "
+                "an HMDS data farm is currently reported broken (IBKR-side "
+                "outage) — failing fast instead of timing out on each symbol",
+                len(symbols),
+            )
+            return pd.DataFrame(columns=PRICE_COLS)
+
         # IB durations are relative to an end datetime; derive a day span from
         # the requested [start, end] window and cap to what IB accepts.
         start_ts = pd.Timestamp(start)
@@ -160,6 +177,13 @@ class IBKRProvider(DataProvider):
                 frames.append(df[PRICE_COLS])
             except Exception:
                 log.exception("Failed to fetch IBKR history for %s", sym)
+                if self._shared_broker is not None and self._shared_broker.is_historical_data_farm_broken():
+                    log.warning(
+                        "HMDS data farm reported broken mid-fetch — abandoning "
+                        "remaining %d of %d symbol(s) instead of retrying each",
+                        len(symbols) - (symbols.index(sym) + 1), len(symbols),
+                    )
+                    break
 
         if not frames:
             return pd.DataFrame(columns=PRICE_COLS)

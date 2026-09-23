@@ -33,3 +33,17 @@ Full reference: `docs/PROJECT_CONTEXT.md`
 ## Auto-start
 
 - Never call `connect()` from FastAPI lifespan directly — use `asyncio.to_thread(bootstrap_live_from_yaml)`
+
+## Data farm outages (fail fast, don't retry blind)
+
+- IBKR's Gateway proactively reports HMDS (historical-data) farm health via
+  `errorEvent` codes 2105 (broken) / 2106 (OK) / 2107 (inactive but
+  available on demand — treat as fine). `IBKRBroker._on_ib_error` (wired in
+  `connect()`) tracks this; query it via `is_historical_data_farm_broken()`.
+- `IBKRProvider._get_prices` checks this before its per-symbol
+  `reqHistoricalData` loop (and again after the first failure) and bails
+  immediately instead of retrying every symbol out to its own timeout.
+  Confirmed live 2026-09-23: a broken `ushmds` farm cost ~8 minutes proving
+  the same outage 25 times before this fix.
+- Only applies when a `shared_broker` is set — a private `IBKRProvider`
+  connection has no equivalent tracking.
