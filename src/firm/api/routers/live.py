@@ -1142,6 +1142,29 @@ def reset_kill_switch(request: Request) -> dict[str, Any]:
     return {"reset": True, **result}
 
 
+@router.post("/sleeves/restore")
+def restore_sleeves(request: Request, snapshot: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Emergency rollback for a bad ``POST /sleeves/seed?force=true`` call.
+
+    Directly overwrites every sleeve's cash/holdings from an explicit
+    snapshot -- the same ``{strategy: {"cash": ..., "holdings": {...}}}``
+    shape the seed endpoint's own pre-seed WARNING log line prints right
+    before it overwrites anything. See
+    ``LiveTradingEngine.restore_sleeve_snapshot``'s docstring for why the
+    seed endpoint's attribution-based math can make drift worse instead of
+    better when re-run after the original cutover moment, and for the real
+    incident this method was built to undo.
+    """
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        raise HTTPException(status_code=400, detail="Live engine is not running")
+    try:
+        result = engine.restore_sleeve_snapshot(snapshot)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return result
+
+
 @router.post("/sleeves/seed")
 def seed_sleeves(request: Request, force: bool = False) -> dict[str, Any]:
     """One-time, deliberate operator action for the moment of switching a

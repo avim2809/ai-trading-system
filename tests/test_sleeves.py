@@ -740,6 +740,58 @@ class TestSeedSleevesFromAttribution:
         assert momentum.nav == pytest.approx(500_000.0)  # still exactly its target
 
 
+class TestEngineRestoreSleeveSnapshot:
+    """LiveTradingEngine.restore_sleeve_snapshot -- emergency rollback for a
+    bad force=True seed, wired to POST /api/live/sleeves/restore. Built
+    2026-09-23 after seed_sleeves_from_attribution(force=True) made a real
+    Alpaca instance's drift worse, not better, when re-run post-cutover."""
+
+    def _sleeved_engine(self, broker, feed, queue, config):
+        cfg = {**config, "capital_allocation_mode": "sleeved", "strategies": ["momentum", "trend"]}
+        return LiveTradingEngine(config=cfg, broker=broker, data_feed=feed, approval_queue=queue)
+
+    def test_refuses_when_not_sleeved(self, engine_components):
+        broker, feed, queue, config = engine_components
+        engine = LiveTradingEngine(config=config, broker=broker, data_feed=feed, approval_queue=queue)
+        with pytest.raises(ValueError, match="not in sleeved mode"):
+            engine.restore_sleeve_snapshot({})
+
+    def test_overwrites_sleeve_state_from_explicit_snapshot(self, engine_components):
+        broker, feed, queue, config = engine_components
+        engine = self._sleeved_engine(broker, feed, queue, config)
+        bad = engine._orchestrator._get_or_create_sleeve_portfolio("momentum", 0.5)
+        bad.holdings = {"XOM": 999.0}
+        bad.cash = 1.0
+
+        snapshot = {
+            "momentum": {"cash": 5000.0, "holdings": {"AAPL": 10.0}},
+            "trend": {"cash": 3000.0, "holdings": {}},
+        }
+        result = engine.restore_sleeve_snapshot(snapshot)
+
+        momentum = engine._orchestrator._sleeve_portfolios["momentum"]
+        assert momentum.holdings == {"AAPL": 10.0}
+        assert momentum.cash == 5000.0
+        trend = engine._orchestrator._sleeve_portfolios["trend"]
+        assert trend.holdings == {}
+        assert trend.cash == 3000.0
+        assert set(result["restored"]) == {"momentum", "trend"}
+
+    def test_ignores_extra_keys_like_nav_in_the_snapshot(self, engine_components):
+        """The pre-seed WARNING log line includes a computed 'nav' key
+        alongside cash/holdings -- restore must tolerate being handed that
+        same dict verbatim (copy-paste from the log) without erroring."""
+        broker, feed, queue, config = engine_components
+        engine = self._sleeved_engine(broker, feed, queue, config)
+
+        snapshot = {"momentum": {"cash": 100.0, "holdings": {"AAPL": 1.0}, "nav": 101.0}}
+        engine.restore_sleeve_snapshot(snapshot)
+
+        momentum = engine._orchestrator._sleeve_portfolios["momentum"]
+        assert momentum.cash == 100.0
+        assert momentum.holdings == {"AAPL": 1.0}
+
+
 class TestEngineSeedSleevesFromAttribution:
     """LiveTradingEngine.seed_sleeves_from_attribution -- the deliberate,
     one-time operator action wired to POST /api/live/sleeves/seed."""

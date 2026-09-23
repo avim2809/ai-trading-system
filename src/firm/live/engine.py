@@ -1505,6 +1505,50 @@ class LiveTradingEngine:
             except Exception:
                 log.warning("Failed to persist sleeve portfolios", exc_info=True)
 
+    def restore_sleeve_snapshot(self, snapshot: dict[str, dict[str, Any]]) -> dict[str, Any]:
+        """Emergency rollback for a bad ``seed_sleeves_from_attribution``
+        call: directly overwrite every sleeve's cash/holdings from an
+        explicit ``{strategy: {"cash": ..., "holdings": {...}}}`` snapshot
+        (the same shape ``export_sleeve_portfolios`` produces, and the same
+        one the pre-seed WARNING log line prints before a ``force=True``
+        seed overwrites anything -- copy that log line's dict verbatim as
+        ``snapshot`` to undo it).
+
+        Confirmed live 2026-09-23: ``force=True``'s attribution-based
+        redistribution is only correct at the original cutover moment, when
+        blended mode's attribution heuristic and the broker's real position
+        necessarily agreed (attribution was cutting one already-correct book
+        into slices). Re-running it later trusts attribution's own
+        independently-drifted per-strategy holdings (it records *decided*
+        quantities via ``record_trades``, not verified fills -- the same
+        class of gap ``apply_realized_fill`` exists to correct, just with no
+        such correction applied to attribution itself) with no constraint
+        that they sum to the broker's real position per symbol. Used once
+        against this instance's own Alpaca account: reconciliation's cash
+        gap grew from $12.8k to $15.8k and every per-symbol diff got larger,
+        not smaller. This method exists to undo exactly that kind of mistake
+        without waiting for a restart.
+        """
+        if self._orchestrator.capital_allocation_mode != "sleeved":
+            raise ValueError("restore_sleeve_snapshot: engine is not in sleeved mode")
+        before = {
+            strategy: {"cash": p.cash, "holdings": dict(p.holdings)}
+            for strategy, p in self._orchestrator._sleeve_portfolios.items()
+        }
+        log.warning(
+            "restore_sleeve_snapshot: overwriting sleeve state. Pre-restore snapshot: %s",
+            before,
+        )
+        self._orchestrator.restore_sleeve_portfolios(snapshot)
+        if self._state_store is not None:
+            try:
+                self._state_store.save_sleeve_portfolios(
+                    self._orchestrator.export_sleeve_portfolios()
+                )
+            except Exception:
+                log.warning("Failed to persist restored sleeve portfolios", exc_info=True)
+        return {"restored": list(snapshot.keys())}
+
     def seed_sleeves_from_attribution(self, force: bool = False) -> dict[str, dict[str, Any]]:
         """One-time, deliberate operator action for the moment of switching
         a running engine from ``capital_allocation_mode: "blended"`` to
