@@ -1,10 +1,10 @@
 ---
 name: project-planning-cycle-feature
-description: "2026-09-23 built an opt-in pre-open 'planning' cycle + self-consistency sampling — ships disabled on both instances, not yet enabled"
+description: "Opt-in pre-open 'planning' cycle + self-consistency sampling — LIVE on IBKR since 2026-09-23, Alpaca still deliberately off — remind user to consider enabling Alpaca"
 metadata:
   node_type: memory
   type: project
-  modified: 2026-09-23T09:44:58.086Z
+  modified: 2026-09-23T13:20:29.836Z
   originSessionId: 403dab55-8f5b-43a3-afa3-7533df0c5692
 ---
 
@@ -17,9 +17,23 @@ design + implementation in one plan-mode session — see git commit
 complete rationale (also mirrored into `docs/PROJECT_CONTEXT.md`'s new
 "Pre-open 'planning' cycle" section).
 
-**Ships disabled on both instances** (`planning_cycle.enabled: false` in
-both `config/live.yaml` and `config/live_alpaca.yaml`) — built and tested,
-not yet turned on. Turning it on is a separate future decision.
+**Status as of 2026-09-23: enabled on IBKR (`config/live.yaml`), still
+deliberately OFF on Alpaca (`config/live_alpaca.yaml`).** User explicitly
+asked to be reminded that this is still open — surface this at the start of
+a relevant future session (don't wait to be asked) rather than letting it
+go stale silently:
+- IBKR: `planning_cycle.enabled: true`, restarted, force-tested live
+  (cycle 57) — ran clean, bypassed market-hours gate correctly, no orders
+  that time (legitimate, no rebalancing signal), nothing hit the broker.
+  Real scheduled run now fires automatically every trading day at 09:15 ET.
+- Alpaca: left off on purpose — sleeved mode, more moving parts (the
+  dry_run sleeve-commit-skip hazard below), wanted IBKR validated over a
+  few real days first before touching the sleeved instance.
+- **When reminding**: check how IBKR's planning cycle has actually
+  performed over the intervening days (any `overnight_plan_applied`/
+  `overnight_plan_discarded` alerts, any errors) before just proposing
+  "enable Alpaca too" — the whole point of doing IBKR first was to have
+  real behavior to check, not to rubber-stamp it after a fixed time delay.
 
 **Two design pivots worth remembering the reasoning for, not just the
 outcome** (the user pushed back and asked for honesty rather than a

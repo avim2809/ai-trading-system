@@ -85,7 +85,7 @@ extended_hours_trading:
 # same convention as danelfin_dynamic_universe/sp500_dynamic_universe. See
 # firm.live.planning_cycle and docs/claude-memory/project_vps_migration_sep22.md.
 planning_cycle:
-  enabled: false
+  enabled: true
   schedule: "cron:09:15"        # US/Eastern, same shorthand as extended_hours_trading
   price_tolerance_pct: 0.5      # max per-symbol price drift vs plan before discarding
   expire_minutes: 600           # ~10h -- generous, but this run sits close to open anyway
