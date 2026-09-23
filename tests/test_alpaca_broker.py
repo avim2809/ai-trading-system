@@ -14,6 +14,8 @@ position, then open the new opposite side. IBKR has no such restriction
 
 from __future__ import annotations
 
+import json
+import logging
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -24,6 +26,7 @@ pytest.importorskip("alpaca")
 
 from firm.brokers.alpaca import AlpacaBroker
 from firm.brokers.base import BrokerError, OrderRequest
+from alpaca.common.exceptions import APIError
 from alpaca.trading.requests import (
     StopLimitOrderRequest,
     StopOrderRequest,
@@ -380,3 +383,140 @@ class TestMapOrderEnumHandling:
     def test_buy_side_strips_enum_prefix(self):
         result = AlpacaBroker._map_order(self._order(side="BUY"))
         assert result.side == "buy"
+
+
+class _WashTradeThenOKClient(_FakeTradingClient):
+    """Fake client whose first ``submit_order`` call raises Alpaca's
+    wash-trade rejection (error 40310000, an opposite-side order already
+    resting for the symbol) and whose second call succeeds -- the shape of
+    a real incident found live on 2026-09-23: a protective stop left
+    resting from an earlier cycle (no order-ID tracking to cancel it, see
+    ``ExecutionAgent._maybe_submit_protective_order``) blocked a later
+    cycle's opposite-side order for the same symbol with this exact error,
+    citing the stale order's id as ``existing_order_id``."""
+
+    def __init__(self, existing_order_id: str = "8b393f06-stale", *, code: int = 40310000, include_id: bool = True):
+        super().__init__(position_qty=None)
+        self._existing_order_id = existing_order_id
+        self._code = code
+        self._include_id = include_id
+        self._raised = False
+        self.cancelled_order_ids: list[str] = []
+
+    def submit_order(self, req):
+        if not self._raised:
+            self._raised = True
+            payload: dict[str, Any] = {
+                "code": self._code,
+                "message": "potential wash trade detected. use complex orders",
+                "reject_reason": "opposite side market/stop order exists",
+            }
+            if self._include_id:
+                payload["existing_order_id"] = self._existing_order_id
+            raise APIError(json.dumps(payload))
+        return super().submit_order(req)
+
+    def cancel_order_by_id(self, order_id: str):
+        self.cancelled_order_ids.append(order_id)
+
+
+class TestWashTradeCancelRetry:
+    """AlpacaBroker._submit_with_wash_trade_retry: root-cause fix for the
+    live BKNG incident where a stale resting order (a protective stop that
+    never got cancelled) blocked every later cycle's opposite-side order
+    for the same symbol, citing the same existing_order_id each time."""
+
+    def test_wash_trade_rejection_cancels_stale_order_and_retries(self):
+        broker = AlpacaBroker(api_key="k", secret_key="s", paper=True)
+        client = _WashTradeThenOKClient(existing_order_id="8b393f06-stale")
+        broker._trading = client
+
+        status = broker.submit_order(OrderRequest(symbol="BKNG", side="buy", quantity=7))
+
+        assert client.cancelled_order_ids == ["8b393f06-stale"]
+        assert len(client.submit_calls) == 1  # first (raising) call isn't recorded by super()
+        assert status.quantity == 7
+        assert status.status == "filled"
+
+    def test_non_wash_trade_conflict_error_is_not_retried(self):
+        """Same error code (40310000) but no existing_order_id -- e.g. the
+        unrelated "insufficient qty available" flip-through-zero rejection
+        that _plan_flip_split already handles separately -- must not be
+        treated as a wash trade and must not trigger a cancel/retry."""
+        broker = AlpacaBroker(api_key="k", secret_key="s", paper=True)
+        client = _WashTradeThenOKClient(include_id=False)
+        broker._trading = client
+
+        with pytest.raises(BrokerError):
+            broker.submit_order(OrderRequest(symbol="BKNG", side="buy", quantity=7))
+
+        assert client.cancelled_order_ids == []
+
+    def test_different_error_code_is_not_retried(self):
+        broker = AlpacaBroker(api_key="k", secret_key="s", paper=True)
+        client = _WashTradeThenOKClient(code=40410000)
+        broker._trading = client
+
+        with pytest.raises(BrokerError):
+            broker.submit_order(OrderRequest(symbol="BKNG", side="buy", quantity=7))
+
+        assert client.cancelled_order_ids == []
+
+    def test_retry_that_still_fails_surfaces_as_broker_error(self):
+        """If cancelling the stale order doesn't unblock the retry (e.g. the
+        cancel itself fails), the original failure must still surface as a
+        plain BrokerError -- no unbounded retry loop."""
+        broker = AlpacaBroker(api_key="k", secret_key="s", paper=True)
+        client = _WashTradeThenOKClient(existing_order_id="8b393f06-stale")
+
+        def _cancel_by_id(order_id):
+            raise Exception("cancel failed too")
+
+        client.cancel_order_by_id = _cancel_by_id
+        broker._trading = client
+
+        with pytest.raises(BrokerError):
+            broker.submit_order(OrderRequest(symbol="BKNG", side="buy", quantity=7))
+
+
+class TestGetPositionErrorHandling:
+    """AlpacaBroker.get_position must degrade the expected "no open
+    position" 404 to None quietly, while keeping a genuinely unexpected
+    failure loud -- see the live incident where get_position's own
+    exception handling logged a full traceback on the single most common
+    case (checking a symbol the broker doesn't yet hold), indistinguishable
+    from a real crash when scanning logs for "ERROR"/"Traceback"."""
+
+    class _NoPositionClient(_FakeTradingClient):
+        def get_open_position(self, symbol: str):
+            raise APIError(json.dumps({"code": 40410000, "message": "position does not exist"}))
+
+    class _AuthFailureClient(_FakeTradingClient):
+        def get_open_position(self, symbol: str):
+            raise APIError(json.dumps({"code": 40110000, "message": "request is not authorized"}))
+
+    def test_no_position_404_returns_none_without_traceback(self, caplog):
+        broker = AlpacaBroker(api_key="k", secret_key="s", paper=True)
+        broker._trading = self._NoPositionClient(position_qty=None)
+
+        with caplog.at_level(logging.INFO, logger="firm.brokers.alpaca"):
+            result = broker.get_position("BKNG")
+
+        assert result is None
+        records = [r for r in caplog.records if r.name == "firm.brokers.alpaca"]
+        assert len(records) == 1
+        assert records[0].levelno == logging.INFO
+        assert records[0].exc_info is None
+
+    def test_unexpected_failure_returns_none_but_logs_loudly(self, caplog):
+        broker = AlpacaBroker(api_key="k", secret_key="s", paper=True)
+        broker._trading = self._AuthFailureClient(position_qty=None)
+
+        with caplog.at_level(logging.INFO, logger="firm.brokers.alpaca"):
+            result = broker.get_position("BKNG")
+
+        assert result is None
+        records = [r for r in caplog.records if r.name == "firm.brokers.alpaca"]
+        assert len(records) == 1
+        assert records[0].levelno == logging.WARNING
+        assert records[0].exc_info is not None

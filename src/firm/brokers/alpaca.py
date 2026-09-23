@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -19,6 +20,7 @@ from firm.time_utils import utcnow
 log = logging.getLogger(__name__)
 
 try:
+    from alpaca.common.exceptions import APIError
     from alpaca.trading.client import TradingClient
     from alpaca.trading.requests import (
         GetOrdersRequest,
@@ -35,6 +37,17 @@ try:
     _HAS_ALPACA = True
 except ImportError:
     _HAS_ALPACA = False
+
+# Alpaca's generic "insufficient qty/wash trade" error code -- see both
+# _plan_flip_split's docstring (same code, "insufficient qty available",
+# handled by splitting) and _wash_trade_conflict_order_id below (same code,
+# "potential wash trade detected", handled by cancel-and-retry).
+_ERR_CODE_ORDER_CONFLICT = 40310000
+
+# Alpaca's 404-backed "position does not exist" error -- the expected,
+# common response from GET /v2/positions/{symbol} whenever the broker
+# doesn't currently hold that symbol (see get_position / _is_no_position_error).
+_ERR_CODE_NO_POSITION = 40410000
 
 _TIF_MAP = {
     "day": "day",
@@ -62,6 +75,59 @@ def _require_alpaca() -> None:
             "alpaca-py is not installed. Install the live extra: "
             "pip install 'firm[live]' or pip install alpaca-py"
         )
+
+
+def _wash_trade_conflict_order_id(exc: Exception) -> str | None:
+    """Return the blocking ``existing_order_id`` if *exc* is Alpaca's
+    wash-trade rejection (error 40310000, an opposite-side order already
+    resting for the same symbol), else ``None``.
+
+    Distinguishing on the message text (not just the code) matters: code
+    40310000 is also used for the unrelated "insufficient qty available"
+    rejection that :meth:`AlpacaBroker._plan_flip_split` already handles by
+    splitting the order -- that case has no ``existing_order_id`` to cancel
+    and must not be treated as a wash trade.
+    """
+    try:
+        if exc.code != _ERR_CODE_ORDER_CONFLICT:  # type: ignore[attr-defined]
+            return None
+        payload = json.loads(str(exc))
+    except Exception:
+        # exc.code itself re-parses the raw error text (see alpaca-py's
+        # APIError.code) and isn't guaranteed to exist on every exception
+        # this could see in principle -- degrade to "not a wash trade"
+        # rather than let a malformed/unexpected payload block the
+        # original error from propagating.
+        return None
+    if not isinstance(payload, dict):
+        return None
+    order_id = payload.get("existing_order_id")
+    return order_id if isinstance(order_id, str) and order_id else None
+
+
+def _is_no_position_error(exc: Exception) -> bool:
+    """True if *exc* is Alpaca's expected "no open position for this
+    symbol" 404 (error 40410000, ``GET /v2/positions/{symbol}``) -- the
+    normal, common response whenever a market order targets a symbol the
+    broker doesn't currently hold.
+
+    Confirmed live (2026-09-23, Alpaca paper instance): every one of that
+    day's ~16 occurrences (across BKNG/VLO/IWM/META/NEM/NKE/PCG/PLD/SPY/UNH)
+    came from :meth:`AlpacaBroker._plan_flip_split`, which calls
+    ``get_position`` on *every* market order specifically to check whether
+    the order would flip a position through zero -- a symbol the broker
+    doesn't hold yet trivially "isn't a flip", which is exactly what a 404
+    here means. Cross-checked against ``order_history.json``: the very
+    next order for each of those symbols filled normally that same cycle
+    -- none were stuck failed. Any *other* exception (auth, rate limit,
+    network, a malformed response, ...) is a genuine anomaly that looks
+    identical at the call site and should stay loud, not be folded into
+    this benign case.
+    """
+    try:
+        return exc.code == _ERR_CODE_NO_POSITION  # type: ignore[attr-defined]
+    except Exception:
+        return False
 
 
 class AlpacaBroker(Broker):
@@ -168,13 +234,23 @@ class AlpacaBroker(Broker):
                 market_value=float(p.market_value),
                 unrealized_pnl=float(p.unrealized_pl),
             )
-        except Exception:
-            # Alpaca raises a 404-backed exception for "no open position",
-            # which is the expected/benign case — but any other failure
-            # (auth, rate limit, network) looks identical here, so log it.
-            # Was previously log.debug, which the default INFO level filters
-            # out entirely — contradicting this comment's own "so log it".
-            log.info("get_position(%s) returned no result", symbol, exc_info=True)
+        except Exception as exc:
+            if _is_no_position_error(exc):
+                # Expected/benign (see _is_no_position_error) -- log
+                # briefly with no traceback so it doesn't read as a crash
+                # when scanning logs for "ERROR"/"Traceback" (this used to
+                # log.info(..., exc_info=True) unconditionally, which
+                # dumped a full stack trace for the single most common
+                # case: opening a brand-new position).
+                log.info("get_position(%s): no open position at Alpaca", symbol)
+            else:
+                # Genuinely unexpected (auth, rate limit, network, a
+                # malformed response, ...) -- this is the case the old
+                # blanket handling couldn't distinguish from the benign
+                # 404 above. Surface it loudly, with the full traceback.
+                log.warning(
+                    "get_position(%s) failed unexpectedly", symbol, exc_info=True,
+                )
             return None
 
     def submit_order(self, order: OrderRequest) -> OrderStatus:
@@ -392,13 +468,54 @@ class AlpacaBroker(Broker):
                     **extended_hours_kwarg,
                 )
 
-            result = client.submit_order(req)
+            result = self._submit_with_wash_trade_retry(client, req)
             return self._map_order(result)
 
         except BrokerError:
             raise
         except Exception as exc:
             raise BrokerError(f"Order submission failed: {exc}") from exc
+
+    def _submit_with_wash_trade_retry(self, client: "TradingClient", req: Any) -> Any:
+        """Submit *req*; if Alpaca rejects it as a wash trade against a
+        stale resting order for the same symbol, cancel that order and
+        retry once.
+
+        Confirmed live (2026-09-23, Alpaca paper instance): a protective
+        stop submitted via ``ExecutionAgent._maybe_submit_protective_order``
+        for a freshly-opened BKNG position was never cancelled when that
+        *same* cycle's own primary entry order for BKNG was itself rejected
+        as a wash trade against it (that method has no broker order-ID
+        tracking by design -- see its docstring -- so nothing ever cancels
+        a protective stop once placed). The primary order never got
+        submitted, but the protective stop stayed resting at the broker,
+        and then blocked every later cycle's opposite-side BKNG order too:
+        the same ``existing_order_id`` was cited in wash-trade rejections
+        at 01:13, 18:30, and 19:30 that day, each one silently dropping
+        that cycle's risk-approved rebalance for the symbol.
+        Alpaca's error 40310000 with message "potential wash trade
+        detected" / reject_reason "opposite side market/stop order exists"
+        includes the blocking order's id directly in the payload, so rather
+        than let a stale resting order (protective stop or otherwise) jam a
+        symbol indefinitely, cancel it and resubmit the current,
+        risk-approved order once. If the retry still fails for any reason,
+        that's surfaced exactly as before (as a plain BrokerError from the
+        caller's except block) -- no unbounded retry loop.
+        """
+        try:
+            return client.submit_order(req)
+        except APIError as exc:
+            existing_order_id = _wash_trade_conflict_order_id(exc)
+            if existing_order_id is None:
+                raise
+            log.warning(
+                "Order for %s rejected as a wash trade against stale "
+                "resting order %s -- cancelling it and retrying once",
+                req.symbol, existing_order_id,
+            )
+            if not self.cancel_order(existing_order_id):
+                raise
+            return client.submit_order(req)
 
     def cancel_order(self, order_id: str) -> bool:
         client = self._ensure_connected()
