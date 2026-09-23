@@ -1,10 +1,10 @@
 ---
 name: project-reconciliation-audit-sep23
-description: "2026-09-23 end-to-end live audit: IBKR HMDS-outage fail-fast + reconciliation-blackout fix, Alpaca wash-trade fix; sleeve drift write-off attempt made things WORSE, rolled back successfully — legacy drift left as accepted debt, do not retry that approach"
+description: "2026-09-23 end-to-end live audit + fix: IBKR HMDS-outage fail-fast + reconciliation-blackout fix, Alpaca wash-trade fix, Alpaca sleeve drift GENUINELY RESOLVED (first attempt made it worse+rolled back, corrected broker-constrained version fixed it for real) — all 4 issues closed, both instances reconciliation-clean"
 metadata:
   node_type: memory
   type: project
-  modified: 2026-09-23T17:39:29.544Z
+  modified: 2026-09-23T21:56:05.918Z
   originSessionId: 403dab55-8f5b-43a3-afa3-7533df0c5692
 ---
 
@@ -111,17 +111,40 @@ to conclude!!!") when each check kept surfacing a new issue — see
    pre-mistake — the small difference is one real cycle's trades that ran
    in between, not residual damage).
 
-   **Conclusion: leave the legacy drift as accepted, documented debt.** Do
-   NOT attempt another one-shot redistribution against this account without
-   a fundamentally different, broker-anchored algorithm (one that actually
-   constrains each symbol's cross-sleeve sum to match the broker's real
-   position — attribution-adoption alone does not do this and must not be
-   trusted as sole ground truth again). The ongoing per-fill correction
-   (`apply_realized_fill`) is confirmed correct and sufficient for
-   everything going forward; only the pre-existing 82%-uncovered legacy
-   portion is permanently approximate. `POST /api/live/sleeves/restore` now
-   exists as a genuine safety net if this ever needs undoing again for any
-   reason.
+   **Then actually fixed for real, correctly this time — reconciliation
+   is clean.** Built the fundamentally-different, broker-anchored version
+   the rollback's own conclusion called for:
+   `Orchestrator.compute_broker_constrained_sleeve_holdings` rescales each
+   sleeve's attribution estimate so the per-symbol sum across every sleeve
+   is *forced* to exactly equal the broker's real position — attribution
+   is trusted only for the relative split shape, never the total (unlike
+   the broken first attempt). Backed by
+   `LiveTradingEngine.preview_sleeve_broker_constrained_rebalance` /
+   `GET /api/live/sleeves/rebalance_preview` (read-only, self-verifies
+   both the holdings sum AND the cash/NAV sum against real broker truth
+   before ever being applied). Before running this against the live
+   account again, spawned an independent adversarial-review subagent
+   specifically because the first attempt "looked reasonable on a first
+   read too" — it caught two real gaps: (1) `_sleeve_capital_weights()`
+   has no enforced sum-to-1.0 invariant when every sleeve has an explicit
+   `strategy_capital_weights` entry (dormant today, fixed to raise loudly
+   instead of silently mis-allocating); (2) the self-verification's plain
+   `abs(diff) > tolerance` check is NaN-unsafe (`nan > 0.01` is `False` in
+   Python) and only checked holdings, never cash — fixed to use
+   `math.isfinite()` and check both sides. Commit `13c5fd9`.
+
+   Deployed, previewed (`verification_mismatches: []`), independently
+   spot-checked several symbols against known broker truth before
+   applying (not just trusting the endpoint's own check), then applied via
+   the existing `POST /api/live/sleeves/restore`. **Result: `GET
+   /api/live/reconciliation` reads `{"status":"ok","discrepancies":[]}` on
+   Alpaca** — cash and every position match the broker exactly. The
+   earlier "leave it as accepted debt" conclusion is superseded; this is
+   genuinely resolved, not worked around. Both `POST
+   /api/live/sleeves/restore` (rollback) and `GET
+   /api/live/sleeves/rebalance_preview` (safe, self-verifying resync)
+   remain available if sleeve drift ever needs correcting again — always
+   preview and check `verification_mismatches` is empty before applying.
 
 ## Multi-agent sweep (user explicitly said "use multiagents")
 

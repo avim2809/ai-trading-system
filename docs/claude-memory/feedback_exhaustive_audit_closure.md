@@ -4,7 +4,7 @@ description: "User got frustrated (2026-09-23) that repeated system checks kept 
 metadata:
   node_type: memory
   type: feedback
-  modified: 2026-09-23T17:29:09.104Z
+  modified: 2026-09-23T21:56:28.811Z
   originSessionId: 403dab55-8f5b-43a3-abc3-7533df0c5692
 ---
 
@@ -34,8 +34,10 @@ this session's *own* bugs get found and closed in one pass, and an external
 outage recurring later is clearly labeled as that, not reported as a new
 "finding" needing the same alarm treatment. See
 [[project_reconciliation_audit_sep23]] for the specific audit this lesson
-came from — 4 real issues, 3 fixed and deployed same session, 1 fix built
-and tested but blocked on a permission gate that correctly requires the
-user's own action for a live-state-mutating write.
+came from — all 4 real issues found were eventually genuinely closed
+(including one whose first fix attempt made things worse and had to be
+caught, rolled back, and corrected before it actually worked) — see
+[[feedback_verify_before_trusting_a_heuristic]] for that specific lesson.
 
-Related: [[feedback_autonomous_scope_calls]], [[feedback_production_incident_priority]].
+Related: [[feedback_autonomous_scope_calls]], [[feedback_production_incident_priority]],
+[[feedback_verify_before_trusting_a_heuristic]].
