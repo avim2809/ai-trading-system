@@ -13,7 +13,9 @@ import Spinner from '../components/Spinner'
 import EquityCurveChart from '../components/EquityCurveChart'
 import DrawdownChart from '../components/DrawdownChart'
 import AttributionBar from '../components/AttributionBar'
+import StrategyAttributionTable from '../components/StrategyAttributionTable'
 import { formatDateTime } from '../lib/time'
+import { formatMetric, signColor, MIN_OBSERVATIONS_FOR_RATIOS } from '../lib/metrics'
 
 const SCHEDULES = [
   { value: 'market_open', label: 'Market Open' },
@@ -24,11 +26,6 @@ const SCHEDULES = [
 
 const inputCls =
   'w-full px-3 py-2 bg-slate-700 border border-slate-600 rounded-lg text-slate-200 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500'
-
-// Below this many daily NAV observations, annualized ratios (Sharpe, CAGR)
-// are an extreme extrapolation from a handful of points, not a meaningful
-// estimate — shown as "n/a" rather than a wild, misleading number.
-const MIN_OBSERVATIONS_FOR_RATIOS = 10
 
 function formatUptime(seconds: number | null): string {
   if (seconds == null) return '—'
@@ -650,11 +647,32 @@ export default function LiveDashboard() {
             <EquityCurveChart dates={chartDates} values={portfolioHistory.values} />
             <DrawdownChart dates={chartDates} drawdown={portfolioHistory.drawdown} />
           </div>
-          {attribution && Object.keys(attribution).length > 0 && (
-            <div className="mt-4">
-              <AttributionBar strategies={attribution} />
+        </div>
+      )}
+
+      {/* Strategy Attribution — its own section, deliberately not gated
+          behind portfolioHistory like the Performance block above, so it
+          renders as soon as GET /live/attribution has data even before
+          enough daily NAV snapshots exist for the portfolio-level charts. */}
+      {isRunning && (
+        <div className="mb-6">
+          <h3 className="text-sm font-semibold text-slate-300 mb-3">Strategy Attribution</h3>
+          {attribution && Object.keys(attribution).length > 0 ? (
+            <>
+              <StrategyAttributionTable strategies={attribution} />
+              <div className="mt-4">
+                <AttributionBar strategies={attribution} />
+              </div>
+            </>
+          ) : (
+            <div className="bg-slate-800 rounded-xl border border-slate-700 p-8 text-center text-sm text-slate-500">
+              No attribution data yet — metrics appear once strategies have traded.
             </div>
           )}
+          <p className="text-xs text-slate-500 mt-3">
+            Blended capital mode reports a heuristic (dominant-strategy-wins-the-whole-order) attribution.
+            Sleeved mode reports exact per-strategy returns from each sleeve's own NAV history.
+          </p>
         </div>
       )}
 
@@ -744,7 +762,10 @@ export default function LiveDashboard() {
           running, in both blended and sleeved capital modes, unlike the
           attribution query above (which can lag/fail independently), so
           it's the reliable source for "what sleeves currently exist to
-          flatten." */}
+          flatten." Return/Sharpe columns are a headline lookup into that
+          same attribution query, sorted best-performer-first; full detail
+          (max drawdown, CAGR, sample size) lives in the Strategy
+          Attribution section above. */}
       {isRunning && status && status.active_strategies.length > 0 && (
         <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden mb-6">
           <div className="px-5 py-3 border-b border-slate-700">
@@ -755,24 +776,38 @@ export default function LiveDashboard() {
               <thead>
                 <tr className="border-b border-slate-700 text-left">
                   <th className="px-4 py-3 text-slate-400 font-medium">Strategy</th>
+                  <th className="px-4 py-3 text-slate-400 font-medium text-right">Return</th>
+                  <th className="px-4 py-3 text-slate-400 font-medium text-right">Sharpe</th>
                   <th className="px-4 py-3 text-slate-400 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {status.active_strategies.map((strat) => (
-                  <tr key={strat} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs text-blue-400">{strat}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={() => handleFlattenSleeve(strat)}
-                        disabled={flattenSleeveMut.isPending && flattenSleeveMut.variables === strat}
-                        className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-700 text-red-400 hover:bg-red-900/20 disabled:opacity-40 transition-colors"
-                      >
-                        Flatten
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {[...status.active_strategies]
+                  .sort((a, b) => (attribution?.[b]?.total_return ?? -Infinity) - (attribution?.[a]?.total_return ?? -Infinity))
+                  .map((strat) => {
+                    const m = attribution?.[strat]
+                    const hasEnoughHistory = m?.n_days == null || m.n_days >= MIN_OBSERVATIONS_FOR_RATIOS
+                    return (
+                      <tr key={strat} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
+                        <td className="px-4 py-3 font-mono text-xs text-blue-400">{strat}</td>
+                        <td className={`px-4 py-3 text-right font-mono text-xs ${signColor(m?.total_return)}`}>
+                          {m?.total_return != null ? formatMetric('total_return', m.total_return) : '—'}
+                        </td>
+                        <td className={`px-4 py-3 text-right font-mono text-xs ${hasEnoughHistory ? signColor(m?.sharpe_ratio) : 'text-slate-500'}`}>
+                          {hasEnoughHistory && m?.sharpe_ratio != null ? formatMetric('sharpe_ratio', m.sharpe_ratio) : 'n/a'}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => handleFlattenSleeve(strat)}
+                            disabled={flattenSleeveMut.isPending && flattenSleeveMut.variables === strat}
+                            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-700 text-red-400 hover:bg-red-900/20 disabled:opacity-40 transition-colors"
+                          >
+                            Flatten
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
               </tbody>
             </table>
           </div>

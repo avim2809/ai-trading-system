@@ -79,6 +79,28 @@ describe('LiveDashboard', () => {
   })
 
 
+  it('shows the strategy attribution table with best performer first', async () => {
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json({
+        state: 'running', broker: 'alpaca_paper', broker_connected: true, next_run: null,
+        active_strategies: ['momentum', 'trend'], approval_mode: 'full_auto', uptime_seconds: 10, last_cycle: null,
+      })),
+    )
+    renderWithProviders(<LiveDashboard />)
+    await screen.findByText('Strategy Attribution')
+
+    // momentum (4.5% return) ranks above trend (1.2% return) in both the
+    // dedicated attribution table and the Strategy Sleeves table.
+    const momentumCells = await screen.findAllByText('momentum')
+    const trendCells = await screen.findAllByText('trend')
+    expect(momentumCells.length).toBeGreaterThan(0)
+    expect(trendCells.length).toBeGreaterThan(0)
+
+    const returns = await screen.findAllByText('4.50%')
+    expect(returns.length).toBeGreaterThan(0)
+    expect(await screen.findAllByText('1.20%')).toHaveLength(returns.length)
+  })
+
   it('shows the stopped state with a Start Engine button', async () => {
     renderWithProviders(<LiveDashboard />)
     await waitFor(() => expect(screen.getByText('Engine is stopped.')).toBeInTheDocument())

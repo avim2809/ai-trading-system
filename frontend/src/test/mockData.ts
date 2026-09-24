@@ -9,6 +9,7 @@ import type {
   LessonsDigest, Recommendation, FlattenPositionResponse, FlattenSleeveResponse,
   LLMProvider, LLMConfig, LLMCacheStats, RAGStats, EmbeddingModelInfo, LogTailResponse,
   BlackboardView, OrderRecord, SystemResources, PatternMatchRecord, PatternSummary,
+  PositionsSummary, LivePortfolioHistory, LiveAttribution,
 } from '../api/types'
 
 export const mockStrategies: StrategyInfo[] = [
@@ -66,6 +67,28 @@ export const mockPositions: BrokerPosition[] = [
 
 export const mockAccount: AccountInfo = {
   cash: 999753.58, equity: 1001712.88, buying_power: 6677369.99, currency: 'USD',
+}
+
+export const mockPositionsSummary: PositionsSummary = {
+  long_value: 332.5, short_value: 0, n_long: 1, n_short: 0,
+}
+
+export const mockPortfolioHistory: LivePortfolioHistory = {
+  dates: ['2026-07-15T19:49:04.066971', '2026-07-16T19:49:04.066971'],
+  values: [1_000_000, 1_001_712.88],
+  drawdown: [0, 0],
+  metrics: { total_return: 0.0017, sharpe_ratio: 1.4, max_drawdown: 0.0, cagr: 0.18 },
+  n_observations: 2,
+}
+
+// Two strategies with meaningfully different total_return so the
+// StrategyAttributionTable's best-performer-first sort is observable in
+// tests — momentum ahead of trend. n_days present mirrors sleeved mode's
+// exact per-sleeve metrics (Orchestrator.get_sleeve_metrics()); blended
+// mode's heuristic PerformanceAttribution carries no such field.
+export const mockLiveAttribution: LiveAttribution = {
+  momentum: { total_return: 0.045, cagr: 0.32, annualized_volatility: 0.11, sharpe_ratio: 1.8, sortino_ratio: 2.1, max_drawdown: 0.02, calmar_ratio: 16.0, hit_rate: 0.6, cvar_95: 0.015, n_days: 14 },
+  trend: { total_return: 0.012, cagr: 0.09, annualized_volatility: 0.14, sharpe_ratio: 0.6, sortino_ratio: 0.7, max_drawdown: 0.05, calmar_ratio: 1.8, hit_rate: 0.52, cvar_95: 0.03, n_days: 14 },
 }
 
 export const mockCycles: CycleRecord[] = [

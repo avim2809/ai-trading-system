@@ -2,26 +2,7 @@ import { useSearchParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api/client'
 import Spinner from '../components/Spinner'
-
-function formatMetric(key: string, value: number): string {
-  if (value == null || isNaN(value)) return '—'
-  const pctKeys = ['total_return', 'cagr', 'max_drawdown', 'volatility', 'turnover']
-  if (pctKeys.some((k) => key.toLowerCase().includes(k))) {
-    return `${(value * 100).toFixed(2)}%`
-  }
-  return value.toFixed(4)
-}
-
-// Metrics where a *smaller* value is the better outcome (all reported as
-// positive magnitudes by firm.eval.metrics — see max_drawdown/annualized_
-// volatility/conditional_value_at_risk) — everything else defaults to
-// higher-is-better (Sharpe, CAGR, alpha, hit rate, ...).
-const LOWER_IS_BETTER = ['max_drawdown', 'annualized_volatility', 'volatility', 'cvar', 'turnover']
-
-function isLowerBetter(key: string): boolean {
-  const k = key.toLowerCase()
-  return LOWER_IS_BETTER.some((m) => k.includes(m))
-}
+import { formatMetric, isLowerBetter } from '../lib/metrics'
 
 export default function Compare() {
   const [searchParams] = useSearchParams()
