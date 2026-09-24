@@ -18,7 +18,9 @@ import pytest
 
 pytest.importorskip("ib_async")
 
-from firm.data.providers.ibkr import IBKRProvider
+import pandas as pd
+
+from firm.data.providers.ibkr import IBKRProvider, IBKRProviderWithFallback
 from firm.data.schemas import PRICE_COLS
 
 
@@ -105,4 +107,72 @@ class TestFailFastOnBrokenFarm:
                 fake_ib, ["AAPL", "MSFT", "SPY"], "2026-01-01", "2026-01-31"
             )
         assert attempted == ["AAPL"]  # bailed before trying MSFT/SPY
+        assert result.empty
+
+
+class _StubProvider:
+    """Minimal stand-in for IBKRProvider/FallbackProvider — only get_prices
+    is exercised by IBKRProviderWithFallback."""
+
+    def __init__(self, frame: pd.DataFrame):
+        self._frame = frame
+        self.calls: list[list[str]] = []
+
+    def get_prices(self, symbols, start, end):
+        self.calls.append(list(symbols))
+        return self._frame
+
+
+def _price_frame(symbols: list[str]) -> pd.DataFrame:
+    return pd.DataFrame({"symbol": symbols, "close": [1.0] * len(symbols)})
+
+
+class TestIBKRProviderWithFallback:
+    """Regression coverage for the 2026-09-23/24 incident: a broken IBKR
+    HMDS farm starved every live cycle of prices for 24+ hours since
+    IBKRProvider.get_prices() correctly returned nothing for every symbol
+    with no fallback source. IBKRProviderWithFallback fills in whatever
+    IBKR couldn't supply from the same REST chain used for fundamentals/
+    sentiment, without ever touching order routing."""
+
+    def test_fallback_not_consulted_when_ibkr_covers_everything(self):
+        ibkr = _StubProvider(_price_frame(["AAPL", "MSFT"]))
+        fallback = _StubProvider(_price_frame([]))
+        provider = IBKRProviderWithFallback(ibkr, fallback)
+
+        result = provider.get_prices(["AAPL", "MSFT"], "2026-01-01", "2026-01-31")
+
+        assert sorted(result["symbol"]) == ["AAPL", "MSFT"]
+        assert fallback.calls == []
+
+    def test_fallback_fills_in_only_the_missing_symbols(self):
+        ibkr = _StubProvider(_price_frame(["AAPL"]))
+        fallback = _StubProvider(_price_frame(["MSFT"]))
+        provider = IBKRProviderWithFallback(ibkr, fallback)
+
+        result = provider.get_prices(["AAPL", "MSFT"], "2026-01-01", "2026-01-31")
+
+        assert fallback.calls == [["MSFT"]]
+        assert sorted(result["symbol"]) == ["AAPL", "MSFT"]
+
+    def test_fallback_covers_everything_when_ibkr_returns_nothing(self):
+        """The exact failure mode of the real incident: IBKR's farm is
+        down, so get_prices() returns a completely empty frame for the
+        whole universe."""
+        ibkr = _StubProvider(pd.DataFrame(columns=PRICE_COLS))
+        fallback = _StubProvider(_price_frame(["AAPL", "MSFT", "SPY"]))
+        provider = IBKRProviderWithFallback(ibkr, fallback)
+
+        result = provider.get_prices(["AAPL", "MSFT", "SPY"], "2026-01-01", "2026-01-31")
+
+        assert fallback.calls == [["AAPL", "MSFT", "SPY"]]
+        assert sorted(result["symbol"]) == ["AAPL", "MSFT", "SPY"]
+
+    def test_primary_returned_unchanged_when_fallback_also_empty(self):
+        ibkr = _StubProvider(pd.DataFrame(columns=PRICE_COLS))
+        fallback = _StubProvider(pd.DataFrame(columns=PRICE_COLS))
+        provider = IBKRProviderWithFallback(ibkr, fallback)
+
+        result = provider.get_prices(["AAPL"], "2026-01-01", "2026-01-31")
+
         assert result.empty

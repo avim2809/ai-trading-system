@@ -280,3 +280,83 @@ class IBKRProvider(DataProvider):
 
     def get_best_stocks(self) -> pd.DataFrame:
         raise NotImplementedError("IBKRProvider does not provide best-stocks; use Danelfin.")
+
+
+class IBKRProviderWithFallback(DataProvider):
+    """Prices from IBKR, backed by a REST fallback chain for whatever
+    symbols IBKR's own historical-data farm can't supply.
+
+    Confirmed live 2026-09-23/24: IBKR's US historical-data farm (HMDS
+    ``ushmds``) went down IBKR-side for over 24 hours straight with no
+    client-side fix — reconnecting IB Gateway (or even restarting it) does
+    not reroute it; only IBKR clearing the farm itself does
+    (``IBKRBroker.is_historical_data_farm_broken()`` tracks this from
+    IBKR's own proactive errorEvent callbacks). During that window
+    ``IBKRProvider.get_prices()`` correctly fails fast and returns nothing
+    for every symbol (see its own fail-fast check), which then starved
+    ``LiveTradingEngine._resolve_cycle_prices`` entirely and raised
+    ``BrokerError`` every single cycle — an IBKR-side *data* outage
+    silently became a full *trading* outage, and the resulting per-cycle
+    critical alert flooded Discord for a day with no actual fix available
+    from restarting anything on our end.
+
+    Falling back to the same Massive/Tiingo/AlphaVantage/FMP chain already
+    used for fundamentals/sentiment (see ``FallbackProvider``) keeps the
+    cycle fed with independently-sourced daily bars whenever IBKR can't
+    supply its own. Order routing is untouched — this only ever affects the
+    "prices" feed, never ``IBKRBroker`` itself.
+    """
+
+    name = "ibkr_with_fallback"
+
+    def __init__(self, ibkr: IBKRProvider, fallback: DataProvider) -> None:
+        self.api_key = ""
+        self._ibkr = ibkr
+        self._fallback = fallback
+
+    def get_prices(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        primary = self._ibkr.get_prices(symbols, start, end)
+        covered = (
+            set(primary["symbol"].unique())
+            if not primary.empty and "symbol" in primary.columns
+            else set()
+        )
+        missing = [s for s in symbols if s not in covered]
+        if not missing:
+            return primary
+        log.warning(
+            "IBKR prices missing %d/%d symbol(s) (likely IBKR's own "
+            "historical-data farm is down) — falling back to REST "
+            "providers for: %s",
+            len(missing), len(symbols), missing[:10],
+        )
+        backup = self._fallback.get_prices(missing, start, end)
+        if backup.empty:
+            return primary
+        if primary.empty:
+            return backup
+        return pd.concat([primary, backup], ignore_index=True)
+
+    def get_fundamentals(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        return self._ibkr.get_fundamentals(symbols, start, end)
+
+    def get_news_sentiment(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        return self._ibkr.get_news_sentiment(symbols, start, end)
+
+    def get_corporate_actions(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        return self._ibkr.get_corporate_actions(symbols, start, end)
+
+    def get_universe_constituents(self, index: str, date: str) -> list[str]:
+        return self._ibkr.get_universe_constituents(index, date)
+
+    def get_analyst_ratings(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        return self._ibkr.get_analyst_ratings(symbols, start, end)
+
+    def get_ai_scores(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        return self._ibkr.get_ai_scores(symbols, start, end)
+
+    def get_live_signals(self, symbols: list[str]) -> pd.DataFrame:
+        return self._ibkr.get_live_signals(symbols)
+
+    def get_best_stocks(self) -> pd.DataFrame:
+        return self._ibkr.get_best_stocks()

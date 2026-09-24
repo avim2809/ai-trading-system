@@ -432,7 +432,8 @@ def build_live_providers(broker_type: str, broker_instance: Any = None) -> dict[
     """
     if broker_type.startswith("ibkr"):
         from firm.brokers.ibkr import IBKRBroker
-        from firm.data.providers.ibkr import IBKRProvider
+        from firm.data.providers.fallback import FallbackProvider
+        from firm.data.providers.ibkr import IBKRProvider, IBKRProviderWithFallback
 
         host = os.getenv("IBKR_HOST", "127.0.0.1")
         if broker_type in ("ibkr_paper", "ibkr"):
@@ -441,7 +442,15 @@ def build_live_providers(broker_type: str, broker_instance: Any = None) -> dict[
             port = int(os.getenv("IBKR_PORT", "7496"))
         shared_broker = broker_instance if isinstance(broker_instance, IBKRBroker) else None
         ibkr = IBKRProvider(host=host, port=port, client_id=2, shared_broker=shared_broker)
-        providers: dict[str, Any] = {"prices": ibkr}
+        # Wrapped with a REST fallback (Massive/Tiingo/AlphaVantage/FMP) for
+        # prices specifically: confirmed live 2026-09-23/24 that a broken
+        # IBKR-side historical-data farm (HMDS "ushmds") can starve every
+        # live cycle of prices for 24+ hours with no client-side fix,
+        # halting trading entirely — see IBKRProviderWithFallback's
+        # docstring. Order routing still goes through the real IBKRBroker.
+        providers: dict[str, Any] = {
+            "prices": IBKRProviderWithFallback(ibkr, FallbackProvider()),
+        }
         _attach_auxiliary_providers(providers, "IBKR")
         return providers
 
