@@ -641,6 +641,7 @@ class TestLiveAttributionEndpointSleeveMerge:
             "momentum": {"sharpe_ratio": 1.2},
         }
         engine._orchestrator.capital_allocation_mode = "blended"
+        engine.enabled_strategies = ["momentum"]
 
         result = live_attribution(self._fake_request(engine))
         assert result == {"momentum": {"sharpe_ratio": 1.2}}
@@ -652,16 +653,39 @@ class TestLiveAttributionEndpointSleeveMerge:
         engine = MagicMock()
         engine._attribution.get_strategy_metrics.return_value = {
             "momentum": {"sharpe_ratio": 1.2},  # stale heuristic value
-            "danelfin_ai_score": {"sharpe_ratio": 0.4},  # no sleeve for this one
+            "trend": {"sharpe_ratio": 0.4},  # enabled, but no sleeve yet
         }
         engine._orchestrator.capital_allocation_mode = "sleeved"
         engine._orchestrator.get_sleeve_metrics.return_value = {
             "momentum": {"sharpe_ratio": 2.5},  # exact value wins
         }
+        engine.enabled_strategies = ["momentum", "trend"]
 
         result = live_attribution(self._fake_request(engine))
         assert result["momentum"]["sharpe_ratio"] == 2.5
-        assert result["danelfin_ai_score"]["sharpe_ratio"] == 0.4
+        # No sleeve for trend yet, but it's still enabled -- falls back to
+        # the heuristic rather than being silently dropped.
+        assert result["trend"]["sharpe_ratio"] == 0.4
+
+    def test_decommissioned_strategy_dropped_from_attribution(self):
+        """A strategy removed from config (e.g. danelfin_ai_score, pulled
+        2026-08-16) must stop appearing even though PerformanceAttribution
+        never expires its stale pre-decommission history."""
+        from firm.api.routers.live import live_attribution
+
+        engine = MagicMock()
+        engine._attribution.get_strategy_metrics.return_value = {
+            "momentum": {"sharpe_ratio": 1.2},
+            "danelfin_ai_score": {"sharpe_ratio": 0.4},
+        }
+        engine._orchestrator.capital_allocation_mode = "sleeved"
+        engine._orchestrator.get_sleeve_metrics.return_value = {
+            "momentum": {"sharpe_ratio": 2.5},
+        }
+        engine.enabled_strategies = ["momentum"]  # danelfin no longer configured
+
+        result = live_attribution(self._fake_request(engine))
+        assert "danelfin_ai_score" not in result
 
     def test_no_engine_returns_empty(self):
         from firm.api.routers.live import live_attribution

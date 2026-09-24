@@ -355,7 +355,14 @@ def _start_live_engine(
 
     broker_instance = _create_broker(broker)
     live_providers = build_live_providers(broker, broker_instance)
-    data_feed = LiveDataFeed(providers=live_providers, universe=symbols)
+    # lookback_days=400 (not the class default of 252): trend
+    # (firm.strategies.trend.TrendStrategy) hard-requires >= slow_window
+    # (200) trading-day rows and returns no signals otherwise -- 252
+    # *calendar* days only yields ~175-181 trading days after weekends/
+    # holidays, so trend silently never fired on either live instance.
+    # 400 calendar days clears ~275-285 trading days, comfortably covering
+    # trend's full needed_days (slow_window + vol_lookback + 10 = 270).
+    data_feed = LiveDataFeed(providers=live_providers, universe=symbols, lookback_days=400)
 
     if strategies:
         strategies = filter_strategies_for_providers(strategies, live_providers, logger=log)
@@ -1028,6 +1035,15 @@ def live_attribution(request: Request) -> dict[str, dict[str, float]]:
     Any strategy without a sleeve (shouldn't happen once sleeving covers
     every registered strategy, but kept defensive) still falls back to the
     heuristic so it isn't silently dropped from the response.
+
+    ``PerformanceAttribution`` never expires an entry once a strategy has
+    traded, so a decommissioned strategy (e.g. danelfin_ai_score /
+    danelfin_live_signals, removed 2026-08-16 when the vendor account
+    closed) keeps reporting stale pre-decommission numbers forever. Results
+    are filtered down to ``engine.enabled_strategies`` -- the same
+    currently-configured set ``GET /live/status``'s ``active_strategies``
+    reports -- so a disabled strategy drops out of attribution the moment
+    it's removed from config, with no separate cleanup step required.
     """
     engine = getattr(request.app.state, "live_engine", None)
     if engine is None:
@@ -1036,7 +1052,8 @@ def live_attribution(request: Request) -> dict[str, dict[str, float]]:
     orchestrator = getattr(engine, "_orchestrator", None)
     if getattr(orchestrator, "capital_allocation_mode", "blended") == "sleeved":
         metrics.update(orchestrator.get_sleeve_metrics())
-    return metrics
+    enabled = set(engine.enabled_strategies)
+    return {name: m for name, m in metrics.items() if name in enabled}
 
 
 @router.get("/tca")
