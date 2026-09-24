@@ -369,6 +369,18 @@ export interface LivePortfolioHistory {
 
 export type LiveAttribution = Record<string, Record<string, number>>
 
+/** One strategy's raw daily return series, as returned by
+ * `GET /live/attribution/history` — `dates[i]` (ISO `YYYY-MM-DD`) pairs
+ * with `returns[i]` (fractional daily return). Client-side compounding of
+ * this series covers every period breakdown (day/week/month/year/WTD/MTD/
+ * custom range) from one fetch. */
+export interface StrategyReturnSeries {
+  dates: string[]
+  returns: number[]
+}
+
+export type LiveAttributionHistory = Record<string, StrategyReturnSeries>
+
 export interface CapitalGateCriterion {
   label: string
   threshold?: string

@@ -9,7 +9,7 @@ import type {
   LessonsDigest, Recommendation, FlattenPositionResponse, FlattenSleeveResponse,
   LLMProvider, LLMConfig, LLMCacheStats, RAGStats, EmbeddingModelInfo, LogTailResponse,
   BlackboardView, OrderRecord, SystemResources, PatternMatchRecord, PatternSummary,
-  PositionsSummary, LivePortfolioHistory, LiveAttribution,
+  PositionsSummary, LivePortfolioHistory, LiveAttribution, LiveAttributionHistory,
 } from '../api/types'
 
 export const mockStrategies: StrategyInfo[] = [
@@ -89,6 +89,26 @@ export const mockPortfolioHistory: LivePortfolioHistory = {
 export const mockLiveAttribution: LiveAttribution = {
   momentum: { total_return: 0.045, cagr: 0.32, annualized_volatility: 0.11, sharpe_ratio: 1.8, sortino_ratio: 2.1, max_drawdown: 0.02, calmar_ratio: 16.0, hit_rate: 0.6, cvar_95: 0.015, n_days: 14 },
   trend: { total_return: 0.012, cagr: 0.09, annualized_volatility: 0.14, sharpe_ratio: 0.6, sortino_ratio: 0.7, max_drawdown: 0.05, calmar_ratio: 1.8, hit_rate: 0.52, cvar_95: 0.03, n_days: 14 },
+}
+
+// Multi-week daily series for two strategies, deliberately misaligned
+// (trend starts a week after momentum) so AttributionHistory.test.tsx
+// exercises the union-of-bucket-keys logic in bucketPeriodReturns as well
+// as day/week/month tabs and the WTD/MTD headline. Both series' last date
+// is the same Wednesday (2024-01-17) so WTD/MTD boundaries line up.
+export const mockLiveAttributionHistory: LiveAttributionHistory = {
+  momentum: {
+    dates: [
+      '2024-01-02', '2024-01-03', '2024-01-04', '2024-01-05',
+      '2024-01-08', '2024-01-09', '2024-01-10', '2024-01-11', '2024-01-12',
+      '2024-01-15', '2024-01-16', '2024-01-17',
+    ],
+    returns: [0.004, -0.002, 0.006, 0.003, 0.002, -0.001, 0.005, 0.001, -0.003, 0.007, 0.002, 0.004],
+  },
+  trend: {
+    dates: ['2024-01-08', '2024-01-09', '2024-01-10', '2024-01-11', '2024-01-12', '2024-01-15', '2024-01-16', '2024-01-17'],
+    returns: [0.001, 0.002, -0.001, 0.003, 0.002, -0.002, 0.001, 0.0015],
+  },
 }
 
 export const mockCycles: CycleRecord[] = [

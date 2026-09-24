@@ -321,6 +321,33 @@ class TestPerformanceAttribution:
         assert "momentum" in m
         assert "total_return" in m["momentum"]
 
+    def test_get_all_daily_strategy_returns_returns_raw_series(self):
+        """get_strategy_metrics() was refactored to be a thin wrapper around
+        get_all_daily_strategy_returns() -- this pins that relationship for
+        the new GET /api/live/attribution/history endpoint, which needs the
+        raw per-day series rather than get_strategy_metrics()'s collapsed
+        ratios."""
+        attr = self._make_attribution()
+        series_map = attr.get_all_daily_strategy_returns()
+        assert set(series_map) == {"momentum", "value"}
+        assert isinstance(series_map["momentum"], pd.Series)
+        # 5 daily update_daily() calls in _make_attribution -> 5 distinct
+        # calendar-day observations.
+        assert len(series_map["momentum"]) == 5
+
+        expected = attr.get_strategy_metrics()
+        actual = metrics.compute_all_metrics(series_map["momentum"])
+        assert actual == expected["momentum"]
+
+    def test_get_all_daily_strategy_returns_omits_strategies_with_no_returns(self):
+        attr = PerformanceAttribution()
+        attr.record_trades(
+            [{"symbol": "AAPL", "shares": 10, "price": 100.0, "strategy": "momentum"}],
+            {"AAPL": 100.0},
+        )
+        # No update_daily() call yet -> no return observations for momentum.
+        assert attr.get_all_daily_strategy_returns() == {}
+
     def test_summary_dataframe(self):
         attr = self._make_attribution()
         df = attr.summary()

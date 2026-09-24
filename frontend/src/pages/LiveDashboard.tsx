@@ -656,7 +656,12 @@ export default function LiveDashboard() {
           enough daily NAV snapshots exist for the portfolio-level charts. */}
       {isRunning && (
         <div className="mb-6">
-          <h3 className="text-sm font-semibold text-slate-300 mb-3">Strategy Attribution</h3>
+          <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+            <h3 className="text-sm font-semibold text-slate-300">Strategy Attribution</h3>
+            <Link to="/live/attribution" className="text-xs text-blue-400 hover:text-blue-300">
+              View history →
+            </Link>
+          </div>
           {attribution && Object.keys(attribution).length > 0 ? (
             <>
               <StrategyAttributionTable strategies={attribution} />

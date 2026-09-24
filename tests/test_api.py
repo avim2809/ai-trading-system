@@ -993,6 +993,43 @@ class TestLiveSleevedModeStart:
 
         client.post("/api/live/stop")
 
+    def test_attribution_history_endpoint_uses_sleeve_series_once_running(self, client, monkeypatch):
+        """End-to-end through the real HTTP route, mirroring
+        test_attribution_endpoint_uses_sleeve_metrics_once_running above but
+        for GET /api/live/attribution/history's raw per-strategy return
+        series instead of collapsed metrics."""
+        import pandas as pd
+        from unittest.mock import MagicMock
+        import firm.data.providers.fallback as fallback_mod
+
+        mock_provider = MagicMock()
+        mock_provider.get_prices.return_value = pd.DataFrame()
+        mock_provider.get_fundamentals.return_value = pd.DataFrame()
+        mock_provider.get_news_sentiment.return_value = pd.DataFrame()
+        monkeypatch.setattr(fallback_mod, "FallbackProvider", lambda *a, **k: mock_provider)
+
+        resp = client.post("/api/live/start", json={
+            "broker": "alpaca_paper", "schedule": "hourly",
+            "strategies": ["momentum", "trend"],
+            "capital_allocation_mode": "sleeved",
+            "initial_capital": 100_000,
+        })
+        assert resp.status_code == 200, resp.text
+
+        engine = client.app.state.live_engine
+        result = engine.run_cycle(force=True)
+        assert result.error is None, result.error
+
+        history = client.get("/api/live/attribution/history")
+        assert history.status_code == 200
+        # No real market data -> no sleeve traded -> no series yet, but the
+        # endpoint must not error and must have actually asked the sleeved
+        # orchestrator for its (empty, in this case) exact series rather
+        # than silently falling back to the heuristic path.
+        assert history.json() == {}
+
+        client.post("/api/live/stop")
+
     def test_seed_sleeves_endpoint_refuses_when_not_sleeved(self, client):
         client.post("/api/live/start", json={"broker": "alpaca_paper", "schedule": "hourly"})
         resp = client.post("/api/live/sleeves/seed")

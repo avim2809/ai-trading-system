@@ -42,6 +42,7 @@ DAILY_LIMITS_KEY = "daily_limits"
 TRADER_STATE_KEY = "trader_state"
 CYCLE_COUNTER_KEY = "cycle_counter"
 SLEEVE_PORTFOLIOS_KEY = "sleeve_portfolios"
+SLEEVE_HISTORY_KEY = "sleeve_history"
 CORRECTED_FILLS_KEY = "sleeve_corrected_fills"
 
 
@@ -255,6 +256,58 @@ class LiveStateStore:
 
     def load_sleeve_portfolios(self) -> dict[str, dict[str, Any]] | None:
         return self._load_blob(SLEEVE_PORTFOLIOS_KEY)
+
+    # ------------------------------------------------------------------
+    # Per-sleeve NAV/equity-curve history (capital_allocation_mode:
+    # "sleeved"). Mirrors save_portfolio_history/load_portfolio_history
+    # above exactly, just keyed by strategy -- each sleeve's own
+    # PortfolioState.history is otherwise in-memory only (unlike the real
+    # book's history, which the two methods above already persist), so a
+    # restart would silently truncate every sleeve's equity curve back to
+    # empty, breaking week/month/year continuity in
+    # GET /live/attribution/history across every deploy. Trimmed per
+    # strategy to the same max_snapshots cap as the blended history.
+    # ------------------------------------------------------------------
+
+    def save_sleeve_history(self, state: dict[str, list[PortfolioSnapshot]]) -> None:
+        """Persist every sleeve's full NAV snapshot history (overwrites prior save)."""
+        payload = {
+            strategy: [
+                {**asdict(s), "asof": s.asof.isoformat()}
+                for s in snapshots[-self._max_snapshots:]
+            ]
+            for strategy, snapshots in state.items()
+        }
+        self._save_blob(SLEEVE_HISTORY_KEY, payload)
+
+    def load_sleeve_history(self) -> dict[str, list[PortfolioSnapshot]]:
+        """Restore per-sleeve NAV history saved by a previous process.
+
+        Returns an empty dict (never raises) when nothing was persisted yet
+        or the persisted blob is unreadable — same best-effort continuity
+        contract as :meth:`load_portfolio_history`.
+        """
+        from datetime import datetime as _dt
+
+        raw = self._load_blob(SLEEVE_HISTORY_KEY)
+        if not raw:
+            return {}
+        result: dict[str, list[PortfolioSnapshot]] = {}
+        for strategy, rows in raw.items():
+            snapshots: list[PortfolioSnapshot] = []
+            for row in rows:
+                try:
+                    row = dict(row)
+                    row["asof"] = _dt.fromisoformat(row["asof"])
+                    snapshots.append(PortfolioSnapshot(**row))
+                except (TypeError, ValueError, KeyError):
+                    log.warning(
+                        "Skipping malformed persisted sleeve snapshot for %s: %r",
+                        strategy, row,
+                    )
+            if snapshots:
+                result[strategy] = snapshots
+        return result
 
     # ------------------------------------------------------------------
     # (cycle_id, symbol) pairs already apportioned by

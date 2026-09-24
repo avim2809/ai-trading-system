@@ -38,6 +38,7 @@ export const handlers = [
   http.get(`${API}/live/account`, () => HttpResponse.json(m.mockAccount)),
   http.get(`${API}/live/portfolio-history`, () => HttpResponse.json(m.mockPortfolioHistory)),
   http.get(`${API}/live/attribution`, () => HttpResponse.json(m.mockLiveAttribution)),
+  http.get(`${API}/live/attribution/history`, () => HttpResponse.json(m.mockLiveAttributionHistory)),
   http.get(`${API}/live/orders`, () => HttpResponse.json(m.mockOrders)),
   http.get(`${API}/live/cycles`, () => HttpResponse.json(m.mockCycles)),
   http.delete(`${API}/live/cycles`, () => HttpResponse.json({ cleared: m.mockCycles.length })),

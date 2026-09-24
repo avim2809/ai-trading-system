@@ -10,9 +10,10 @@ order set, and the restart-persistence round trip.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock
 
+import pandas as pd
 import pytest
 
 from firm.agents.base import Agent
@@ -695,6 +696,74 @@ class TestLiveAttributionEndpointSleeveMerge:
         assert live_attribution(request) == {}
 
 
+class TestLiveAttributionHistoryEndpointSleeveMerge:
+    """firm.api.routers.live.live_attribution_history -- same blended-vs-
+    sleeved precedence as TestLiveAttributionEndpointSleeveMerge above, but
+    for the raw per-strategy return series instead of collapsed metrics."""
+
+    @staticmethod
+    def _fake_request(engine):
+        request = MagicMock()
+        request.app.state.live_engine = engine
+        return request
+
+    def test_blended_mode_returns_heuristic_series_unchanged(self):
+        from firm.api.routers.live import live_attribution_history
+
+        series = pd.Series([0.01, -0.005], index=[date(2024, 1, 1), date(2024, 1, 2)])
+        engine = MagicMock()
+        engine._attribution.get_all_daily_strategy_returns.return_value = {"momentum": series}
+        engine._orchestrator.capital_allocation_mode = "blended"
+        engine.enabled_strategies = ["momentum"]
+
+        result = live_attribution_history(self._fake_request(engine))
+        assert result == {
+            "momentum": {"dates": ["2024-01-01", "2024-01-02"], "returns": [0.01, -0.005]},
+        }
+        engine._orchestrator.get_sleeve_return_series.assert_not_called()
+
+    def test_sleeved_mode_prefers_exact_sleeve_series(self):
+        from firm.api.routers.live import live_attribution_history
+
+        heuristic = pd.Series([0.01], index=[date(2024, 1, 1)])
+        exact = pd.Series([0.02], index=[date(2024, 1, 1)])
+        engine = MagicMock()
+        engine._attribution.get_all_daily_strategy_returns.return_value = {
+            "momentum": heuristic,  # stale heuristic value
+            "trend": heuristic,  # enabled, but no sleeve yet
+        }
+        engine._orchestrator.capital_allocation_mode = "sleeved"
+        engine._orchestrator.get_sleeve_return_series.return_value = {"momentum": exact}
+        engine.enabled_strategies = ["momentum", "trend"]
+
+        result = live_attribution_history(self._fake_request(engine))
+        assert result["momentum"]["returns"] == [0.02]  # exact value wins
+        # No sleeve for trend yet, but it's still enabled -- falls back to
+        # the heuristic rather than being silently dropped.
+        assert result["trend"]["returns"] == [0.01]
+
+    def test_disabled_strategy_dropped(self):
+        from firm.api.routers.live import live_attribution_history
+
+        series = pd.Series([0.01], index=[date(2024, 1, 1)])
+        engine = MagicMock()
+        engine._attribution.get_all_daily_strategy_returns.return_value = {
+            "momentum": series, "danelfin_ai_score": series,
+        }
+        engine._orchestrator.capital_allocation_mode = "blended"
+        engine.enabled_strategies = ["momentum"]
+
+        result = live_attribution_history(self._fake_request(engine))
+        assert "danelfin_ai_score" not in result
+
+    def test_no_engine_returns_empty(self):
+        from firm.api.routers.live import live_attribution_history
+
+        request = MagicMock()
+        request.app.state.live_engine = None
+        assert live_attribution_history(request) == {}
+
+
 class TestSeedSleevesFromAttribution:
     """Best-effort seeding when switching a running engine from "blended"
     to "sleeved" mid-history (docs/capital_sleeves_plan.md §5's cutover
@@ -1153,6 +1222,88 @@ class TestSleeveMetrics:
         # 3 distinct-day snapshots -> pct_change().dropna() drops the first
         # (NaN) row, leaving 2 daily return observations.
         assert metrics["momentum"]["n_days"] == 2
+
+    def test_get_sleeve_return_series_needs_at_least_two_snapshots(self):
+        orch = _make_orchestrator(analysts=[], sleeve_traders={"momentum": TraderAgent()})
+        portfolio = orch._get_or_create_sleeve_portfolio("momentum", 1.0)
+        portfolio.record_snapshot(NOW, {})
+        assert orch.get_sleeve_return_series() == {}
+
+    def test_get_sleeve_return_series_is_the_raw_series_behind_get_sleeve_metrics(self):
+        """get_sleeve_metrics() was refactored to be a thin wrapper around
+        get_sleeve_return_series() -- this pins that relationship: the
+        metrics must be exactly compute_all_metrics() of the raw series
+        this method exposes, not some independently-computed duplicate."""
+        from firm.eval.metrics import compute_all_metrics
+
+        orch = _make_orchestrator(analysts=[], sleeve_traders={"momentum": TraderAgent()})
+        portfolio = orch._get_or_create_sleeve_portfolio("momentum", 1.0)
+        portfolio.holdings = {"AAPL": 100.0}
+        for i, price in enumerate((100.0, 105.0, 110.0)):
+            portfolio.record_snapshot(NOW + timedelta(days=i), {"AAPL": price})
+
+        series_map = orch.get_sleeve_return_series()
+        assert "momentum" in series_map
+        assert isinstance(series_map["momentum"], pd.Series)
+        assert len(series_map["momentum"]) == 2
+
+        expected = compute_all_metrics(series_map["momentum"])
+        metrics = orch.get_sleeve_metrics()
+        assert metrics["momentum"] == {**expected, "n_days": 2.0}
+
+
+class TestSleeveHistoryPersistence:
+    """Orchestrator.export_sleeve_history/restore_sleeve_history -- the NAV
+    history round trip alongside the cash/holdings round trip already
+    covered by TestSleevePersistenceRoundTrip above."""
+
+    def test_export_restore_round_trip(self):
+        orch = _make_orchestrator(analysts=[], sleeve_traders={"momentum": TraderAgent()})
+        portfolio = orch._get_or_create_sleeve_portfolio("momentum", 1.0)
+        portfolio.holdings = {"AAPL": 100.0}
+        for i, price in enumerate((100.0, 105.0, 110.0)):
+            portfolio.record_snapshot(NOW + timedelta(days=i), {"AAPL": price})
+
+        exported = orch.export_sleeve_history()
+        assert len(exported["momentum"]) == 3
+
+        restored = _make_orchestrator(analysts=[], sleeve_traders={"momentum": TraderAgent()})
+        # restore_sleeve_history only attaches history to a sleeve that
+        # already exists -- mirrors restore_sleeve_portfolios needing to run
+        # first at engine startup (see engine.py's _load_persisted_state).
+        restored._get_or_create_sleeve_portfolio("momentum", 1.0)
+        restored.restore_sleeve_history(exported)
+        assert len(restored._sleeve_portfolios["momentum"].history) == 3
+        assert restored._sleeve_portfolios["momentum"].history[-1].nav == pytest.approx(
+            portfolio.history[-1].nav
+        )
+
+    def test_restore_skips_strategies_with_no_matching_sleeve(self):
+        """A strategy present in the persisted history blob but not (yet)
+        in _sleeve_portfolios must not raise -- e.g. a strategy removed
+        from config between the export and the restart."""
+        orch = _make_orchestrator(analysts=[], sleeve_traders={"momentum": TraderAgent()})
+        orch.restore_sleeve_history({"decommissioned_strategy": []})
+        assert "decommissioned_strategy" not in orch._sleeve_portfolios
+
+    def test_get_sleeve_return_series_survives_a_restore(self):
+        """The whole point: a restarted process's get_sleeve_return_series()
+        must see the pre-restart history, not just history accumulated since
+        the restart."""
+        orch = _make_orchestrator(analysts=[], sleeve_traders={"momentum": TraderAgent()})
+        portfolio = orch._get_or_create_sleeve_portfolio("momentum", 1.0)
+        portfolio.holdings = {"AAPL": 100.0}
+        for i, price in enumerate((100.0, 105.0, 110.0)):
+            portfolio.record_snapshot(NOW + timedelta(days=i), {"AAPL": price})
+        exported = orch.export_sleeve_history()
+
+        restarted = _make_orchestrator(analysts=[], sleeve_traders={"momentum": TraderAgent()})
+        restarted._get_or_create_sleeve_portfolio("momentum", 1.0)
+        restarted.restore_sleeve_history(exported)
+
+        series_map = restarted.get_sleeve_return_series()
+        assert "momentum" in series_map
+        assert len(series_map["momentum"]) == 2
 
 
 class TestSleeveCapitalWeightsPublicAccessor:

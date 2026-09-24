@@ -11,6 +11,7 @@ const Compare = lazy(() => import('./pages/Compare'))
 const AgentInspector = lazy(() => import('./pages/AgentInspector'))
 const PatternScanner = lazy(() => import('./pages/PatternScanner'))
 const LiveDashboard = lazy(() => import('./pages/LiveDashboard'))
+const AttributionHistory = lazy(() => import('./pages/AttributionHistory'))
 const LiveConfig = lazy(() => import('./pages/LiveConfig'))
 const Approvals = lazy(() => import('./pages/Approvals'))
 const OrderHistory = lazy(() => import('./pages/OrderHistory'))
@@ -29,6 +30,7 @@ export default function App() {
         <Route path="inspector" element={<AgentInspector />} />
         <Route path="patterns" element={<PatternScanner />} />
         <Route path="live" element={<LiveDashboard />} />
+        <Route path="live/attribution" element={<AttributionHistory />} />
         <Route path="live/config" element={<LiveConfig />} />
         <Route path="live/approvals" element={<Approvals />} />
         <Route path="live/orders" element={<OrderHistory />} />

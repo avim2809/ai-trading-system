@@ -120,30 +120,44 @@ class PerformanceAttribution:
                 out[strategy] = series
         return out
 
-    def get_strategy_metrics(self) -> dict[str, dict[str, float]]:
-        """Compute metrics for each strategy using compute_all_metrics.
+    def get_all_daily_strategy_returns(self) -> dict[str, pd.Series]:
+        """Daily-compounded contribution-return series per strategy.
 
-        Strategies with no return history are skipped.
+        Extracted out of :meth:`get_strategy_metrics` (which now just calls
+        this and collapses the result to scalars) so
+        ``GET /live/attribution/history`` can expose the raw series itself
+        for client-side day/week/month/year/WTD/MTD/custom bucketing,
+        rather than only the aggregate stats.
 
         ``update_daily()`` is actually called every live cycle (multiple
         times per trading day), not once per day despite its name — but
-        ``compute_all_metrics``'s annualization (Sharpe/CAGR/vol/Calmar) is
-        documented to assume one *daily* return per period (252/year). Fed
-        raw, that mismatch inflates every annualized stat by roughly
-        sqrt(cycles_per_day). Compound same-day returns into a single daily
-        return here (order-independent, so total_return is unaffected) so
-        the annualized figures mean what they say.
+        downstream annualized-ratio consumers assume one *daily* return per
+        period (252/year). Fed raw, that mismatch inflates every annualized
+        stat by roughly sqrt(cycles_per_day). Compound same-day returns into
+        a single daily return here (order-independent, so total_return is
+        unaffected) so the annualized figures mean what they say.
+
+        Strategies with no return history are omitted.
         """
-        result: dict[str, dict[str, float]] = {}
+        result: dict[str, pd.Series] = {}
         for strategy in self._strategy_returns:
             series = self.get_strategy_returns(strategy)
             if series.empty:
                 continue
             daily = (1.0 + series).groupby(series.index.date).prod() - 1.0
-            if daily.empty:
-                continue
-            result[strategy] = compute_all_metrics(daily)
+            if not daily.empty:
+                result[strategy] = daily
         return result
+
+    def get_strategy_metrics(self) -> dict[str, dict[str, float]]:
+        """Compute metrics for each strategy, collapsed from
+        :meth:`get_all_daily_strategy_returns`'s daily return series via
+        ``compute_all_metrics``. See that method's docstring for why the
+        underlying series is daily-compounded rather than raw per-cycle."""
+        return {
+            strategy: compute_all_metrics(daily)
+            for strategy, daily in self.get_all_daily_strategy_returns().items()
+        }
 
     def dominant_strategy_by_symbol(self) -> dict[str, str]:
         """Map each symbol currently held to the strategy with the largest

@@ -1440,6 +1440,20 @@ class LiveTradingEngine:
                     )
             except Exception:
                 log.warning("Failed to restore persisted sleeve portfolios", exc_info=True)
+            # NAV history restore must happen after the cash/holdings
+            # restore above -- restore_sleeve_history looks up each
+            # strategy's PortfolioState in self._orchestrator._sleeve_portfolios,
+            # which restore_sleeve_portfolios is what creates.
+            try:
+                sleeve_history = self._state_store.load_sleeve_history()
+                if sleeve_history:
+                    self._orchestrator.restore_sleeve_history(sleeve_history)
+                    log.info(
+                        "Restored persisted sleeve NAV history for strategies: %s",
+                        list(sleeve_history.keys()),
+                    )
+            except Exception:
+                log.warning("Failed to restore persisted sleeve history", exc_info=True)
 
     def _persist_live_state(self) -> None:
         """Save portfolio history + attribution state after a cycle.
@@ -1505,6 +1519,12 @@ class LiveTradingEngine:
                 )
             except Exception:
                 log.warning("Failed to persist sleeve portfolios", exc_info=True)
+            try:
+                self._state_store.save_sleeve_history(
+                    self._orchestrator.export_sleeve_history()
+                )
+            except Exception:
+                log.warning("Failed to persist sleeve history", exc_info=True)
 
     def restore_sleeve_snapshot(self, snapshot: dict[str, dict[str, Any]]) -> dict[str, Any]:
         """Emergency rollback for a bad ``seed_sleeves_from_attribution``

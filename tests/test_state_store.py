@@ -5,6 +5,7 @@ restore_state.
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 
 from firm.contracts.models import PortfolioSnapshot
@@ -68,6 +69,68 @@ class TestLiveStateStorePortfolioHistory:
         # fine but PortfolioSnapshot(**row) must fail per-row rather than
         # raising out of load_portfolio_history().
         assert store.load_portfolio_history() == []
+        store.close()
+
+
+class TestLiveStateStoreSleeveHistory:
+    """save_sleeve_history/load_sleeve_history -- per-sleeve mirror of
+    TestLiveStateStorePortfolioHistory above, keyed by strategy."""
+
+    def test_round_trips_snapshots_per_strategy(self, tmp_path):
+        store = LiveStateStore(tmp_path / "state.db")
+        state = {
+            "momentum": [
+                PortfolioSnapshot(
+                    asof=datetime(2024, 1, 1, 15, 30),
+                    holdings={"AAPL": 10.0}, cash=50_000.0, nav=100_000.0,
+                ),
+                PortfolioSnapshot(
+                    asof=datetime(2024, 1, 2, 15, 30),
+                    holdings={"AAPL": 12.0}, cash=48_000.0, nav=101_000.0,
+                ),
+            ],
+            "trend": [
+                PortfolioSnapshot(asof=datetime(2024, 1, 1, 15, 30), cash=200_000.0, nav=200_000.0),
+            ],
+        }
+        store.save_sleeve_history(state)
+
+        restored = store.load_sleeve_history()
+        assert set(restored) == {"momentum", "trend"}
+        assert len(restored["momentum"]) == 2
+        assert restored["momentum"][1].nav == 101_000.0
+        assert restored["trend"][0].nav == 200_000.0
+        store.close()
+
+    def test_load_with_nothing_persisted_returns_empty_dict(self, tmp_path):
+        store = LiveStateStore(tmp_path / "state.db")
+        assert store.load_sleeve_history() == {}
+        store.close()
+
+    def test_save_trims_each_strategy_to_max_snapshots(self, tmp_path):
+        store = LiveStateStore(tmp_path / "state.db", max_snapshots=3)
+        state = {
+            "momentum": [
+                PortfolioSnapshot(asof=datetime(2024, 1, i + 1), cash=float(i), nav=float(i))
+                for i in range(5)
+            ],
+        }
+        store.save_sleeve_history(state)
+        restored = store.load_sleeve_history()
+        assert len(restored["momentum"]) == 3
+        # Oldest are dropped; the most recent three survive in order.
+        assert [s.nav for s in restored["momentum"]] == [2.0, 3.0, 4.0]
+        store.close()
+
+    def test_corrupt_row_for_one_strategy_does_not_drop_others(self, tmp_path):
+        store = LiveStateStore(tmp_path / "state.db")
+        store._save_blob("sleeve_history", {
+            "momentum": "not-a-list-of-snapshot-dicts",
+            "trend": [{**asdict(PortfolioSnapshot(asof=datetime(2024, 1, 1), nav=1.0)), "asof": "2024-01-01T00:00:00"}],
+        })
+        restored = store.load_sleeve_history()
+        assert "momentum" not in restored
+        assert restored["trend"][0].nav == 1.0
         store.close()
 
 

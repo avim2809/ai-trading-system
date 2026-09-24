@@ -12,6 +12,7 @@ const backtestLinks = [
 
 const liveLinks = [
   { to: '/live', label: 'Live Dashboard', icon: '⚡' },
+  { to: '/live/attribution', label: 'Strategy Performance', icon: '📈' },
   { to: '/live/approvals', label: 'Approvals', icon: '✓' },
   { to: '/live/orders', label: 'Orders', icon: '↹' },
   { to: '/live/config', label: 'Configuration', icon: '⚙' },

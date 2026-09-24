@@ -1056,6 +1056,51 @@ def live_attribution(request: Request) -> dict[str, dict[str, float]]:
     return {name: m for name, m in metrics.items() if name in enabled}
 
 
+@router.get("/attribution/history")
+def live_attribution_history(request: Request) -> dict[str, dict[str, list[Any]]]:
+    """Per-strategy *daily return series* -- the live-trading equivalent of
+    a backtest equity curve, but per-strategy instead of portfolio-level.
+
+    ``GET /attribution`` above only returns aggregate scalar metrics
+    (total_return, sharpe_ratio, ...) computed from a daily return series
+    that's built internally and then discarded. This endpoint exposes that
+    same series raw (dates + per-day returns) so a client can compound any
+    day/week/month/year/WTD/MTD/custom-date-range breakdown itself from one
+    fetch, rather than needing one endpoint per granularity. Powers the
+    Strategy Performance page (``frontend/src/pages/AttributionHistory.tsx``).
+
+    Same blended-vs-sleeved precedence as ``GET /attribution``: blended
+    mode's heuristic ``PerformanceAttribution`` series is the default for
+    every strategy, overridden by ``Orchestrator.get_sleeve_return_series()``'s
+    exact series wherever a sleeve has one (``capital_allocation_mode:
+    "sleeved"``). Results are filtered to ``engine.enabled_strategies``,
+    same as ``GET /attribution``.
+
+    Known limitation: history only starts accumulating from whenever this
+    was deployed (sleeved mode's NAV history is now durable across restarts
+    -- see ``LiveStateStore.save_sleeve_history`` -- but only from the first
+    cycle after that persistence shipped) or from whenever attribution
+    tracking began (blended mode) -- there is no way to reconstruct returns
+    from before either existed.
+    """
+    engine = getattr(request.app.state, "live_engine", None)
+    if engine is None:
+        return {}
+    series_map = engine._attribution.get_all_daily_strategy_returns()
+    orchestrator = getattr(engine, "_orchestrator", None)
+    if getattr(orchestrator, "capital_allocation_mode", "blended") == "sleeved":
+        series_map.update(orchestrator.get_sleeve_return_series())
+    enabled = set(engine.enabled_strategies)
+    return {
+        strategy: {
+            "dates": [d.isoformat() for d in series.index],
+            "returns": [round(float(v), 6) for v in series.to_numpy()],
+        }
+        for strategy, series in series_map.items()
+        if strategy in enabled
+    }
+
+
 @router.get("/tca")
 def live_tca(
     request: Request,

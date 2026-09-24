@@ -15,7 +15,7 @@ import pandas as pd
 
 from firm.agents.base import Agent, AgentContext
 from firm.agents.blackboard import Blackboard
-from firm.contracts.models import RiskDecision, SignalSet, TradeProposal
+from firm.contracts.models import PortfolioSnapshot, RiskDecision, SignalSet, TradeProposal
 from firm.portfolio.state import PortfolioState
 
 log = logging.getLogger(__name__)
@@ -861,20 +861,25 @@ class Orchestrator(Agent):
             summary[s] = {"cash": target_capital - holdings_value, "holdings": holdings}
         return summary
 
-    def get_sleeve_metrics(self) -> dict[str, dict[str, float]]:
-        """Exact per-strategy performance metrics from each sleeve's own NAV
-        history -- unlike ``PerformanceAttribution``'s heuristic (dominant-
-        strategy-wins-the-whole-order + running-net-share-count over one
-        shared book), this is a genuine standalone return series per
-        strategy, since each sleeve really does hold its own capital/positions.
+    def get_sleeve_return_series(self) -> dict[str, pd.Series]:
+        """Exact per-strategy *daily* return series from each sleeve's own
+        NAV history -- unlike ``PerformanceAttribution``'s heuristic
+        (dominant-strategy-wins-the-whole-order + running-net-share-count
+        over one shared book), this is a genuine standalone return series
+        per strategy, since each sleeve really does hold its own
+        capital/positions.
+
+        Extracted out of :meth:`get_sleeve_metrics` (which now just calls
+        this and collapses the result to scalars) so
+        ``GET /live/attribution/history`` can expose the raw series itself
+        for client-side day/week/month/year/WTD/MTD/custom bucketing,
+        rather than only the aggregate stats.
 
         ``record_snapshot`` is taken every live cycle (multiple times per
-        trading day), but ``compute_all_metrics``'s annualization assumes
-        one *daily* return per period (252/year) -- same mismatch as
-        ``PerformanceAttribution.get_strategy_metrics``. Compound same-day
-        per-cycle returns into one daily return before computing metrics, so
-        annualized Sharpe/CAGR/vol/Calmar aren't inflated by
-        sqrt(cycles_per_day).
+        trading day), but downstream annualized-ratio consumers assume one
+        *daily* return per period (252/year). Compound same-day per-cycle
+        returns into one daily return here, so annualized Sharpe/CAGR/vol/
+        Calmar aren't inflated by sqrt(cycles_per_day).
 
         Deliberately resamples *returns* (via compounding), not NAV levels
         via ``groupby(date).last()`` -- the latter was tried and reverted:
@@ -884,9 +889,7 @@ class Orchestrator(Agent):
         Compounding per-cycle returns has no such gap since every step is
         still included in the product, just regrouped.
         """
-        from firm.eval.metrics import compute_all_metrics
-
-        result: dict[str, dict[str, float]] = {}
+        result: dict[str, pd.Series] = {}
         for strategy, portfolio in self._sleeve_portfolios.items():
             history = portfolio.history
             if len(history) < 2:
@@ -899,8 +902,19 @@ class Orchestrator(Agent):
             if per_cycle_returns.empty:
                 continue
             returns = (1.0 + per_cycle_returns).groupby(per_cycle_returns.index.date).prod() - 1.0
-            if returns.empty:
-                continue
+            if not returns.empty:
+                result[strategy] = returns
+        return result
+
+    def get_sleeve_metrics(self) -> dict[str, dict[str, float]]:
+        """Exact per-strategy performance metrics, collapsed from
+        :meth:`get_sleeve_return_series`'s daily return series via
+        ``compute_all_metrics``. See that method's docstring for why the
+        underlying series is daily-compounded rather than raw per-cycle."""
+        from firm.eval.metrics import compute_all_metrics
+
+        result: dict[str, dict[str, float]] = {}
+        for strategy, returns in self.get_sleeve_return_series().items():
             result[strategy] = compute_all_metrics(returns)
             # Sample size, not one of compute_all_metrics' own fields --
             # consumers that tilt on these numbers (e.g.
@@ -909,6 +923,42 @@ class Orchestrator(Agent):
             # Sharpe is mostly noise.
             result[strategy]["n_days"] = float(len(returns))
         return result
+
+    def export_sleeve_history(self) -> dict[str, list[PortfolioSnapshot]]:
+        """Every sleeve's full NAV-snapshot history, for durable persistence
+        (see ``LiveStateStore.save_sleeve_history``).
+
+        Unlike :meth:`export_sleeve_portfolios` (cash/holdings only, needed
+        every restart so a sleeve doesn't silently reset to its initial
+        capital split), this is the NAV *history* -- lost today on every
+        restart since nothing persists it, which would otherwise leave
+        ``GET /live/attribution/history``'s week/month/year breakdowns
+        discontinuous across every deploy/restart.
+        """
+        return {
+            strategy: portfolio.history
+            for strategy, portfolio in self._sleeve_portfolios.items()
+        }
+
+    def restore_sleeve_history(self, state: dict[str, list[PortfolioSnapshot]]) -> None:
+        """Restore sleeve NAV history persisted via :meth:`export_sleeve_history`.
+
+        Called once at engine startup, alongside :meth:`restore_sleeve_portfolios`
+        (that call restores cash/holdings; this restores the NAV history
+        those cash/holdings compounded through). A sleeve with no cash/
+        holdings restored yet (a brand-new strategy) simply has no history
+        to restore either -- ``state`` will not contain it.
+        """
+        for strategy, snapshots in (state or {}).items():
+            portfolio = self._sleeve_portfolios.get(strategy)
+            if portfolio is None:
+                continue
+            try:
+                portfolio.restore_history(snapshots)
+            except Exception:
+                log.warning(
+                    "Failed to restore sleeve NAV history for %s", strategy, exc_info=True,
+                )
 
     def sleeve_capital_weights(self) -> dict[str, float]:
         """Public accessor for :meth:`_sleeve_capital_weights` -- each

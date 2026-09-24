@@ -17,6 +17,7 @@ import type {
   LivePortfolioHistory,
   CapitalGateStatus,
   LiveAttribution,
+  LiveAttributionHistory,
   OrderRecord,
   CycleRecord,
   PendingApproval,
@@ -163,6 +164,9 @@ export const api = {
     fetchJson<CapitalGateStatus>('/live/capital-gate'),
 
   getLiveAttribution: () => fetchJson<LiveAttribution>('/live/attribution'),
+
+  getLiveAttributionHistory: () =>
+    fetchJson<LiveAttributionHistory>('/live/attribution/history'),
 
   getOrders: (_limit = 50) =>
     fetchJson<OrderRecord[]>('/live/orders'),
