@@ -42,11 +42,77 @@ function ReturnCell({ value }: { value: number | undefined }) {
   )
 }
 
+// --- Sortable column headers -------------------------------------------
+// Shared by all three tables on this page. Clicking an unsorted (or
+// differently-sorted) column sorts it descending first; clicking the same
+// column again toggles ascending/descending. `undefined` values (missing
+// data for that row/column) always sort last regardless of direction, so a
+// strategy with no WTD/MTD figure yet doesn't jump to the top of an
+// ascending sort.
+type SortDirection = 'asc' | 'desc'
+interface SortState {
+  key: string
+  direction: SortDirection
+}
+
+function toggleSort(current: SortState | null, key: string): SortState {
+  if (current?.key === key) {
+    return { key, direction: current.direction === 'desc' ? 'asc' : 'desc' }
+  }
+  return { key, direction: 'desc' }
+}
+
+function compareValues(a: number | string | undefined, b: number | string | undefined, direction: SortDirection): number {
+  if (a == null && b == null) return 0
+  if (a == null) return 1
+  if (b == null) return -1
+  if (a < b) return direction === 'asc' ? -1 : 1
+  if (a > b) return direction === 'asc' ? 1 : -1
+  return 0
+}
+
+function SortableTh({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  align = 'right',
+}: {
+  label: string
+  sortKey: string
+  sort: SortState | null
+  onSort: (key: string) => void
+  align?: 'left' | 'right'
+}) {
+  const active = sort?.key === sortKey
+  return (
+    <th
+      className={`px-4 py-3 text-slate-400 font-medium cursor-pointer select-none hover:text-slate-200 transition-colors ${
+        align === 'right' ? 'text-right' : 'text-left'
+      }`}
+      onClick={() => onSort(sortKey)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        <span className={`text-[10px] ${active ? 'text-blue-400' : 'text-slate-600'}`}>
+          {active ? (sort.direction === 'desc' ? '▼' : '▲') : '▼'}
+        </span>
+      </span>
+    </th>
+  )
+}
+
 export default function AttributionHistory() {
   const [granularity, setGranularity] = useState<PeriodGranularity>('day')
   const [rangeStart, setRangeStart] = useState('')
   const [rangeEnd, setRangeEnd] = useState('')
   const [appliedRange, setAppliedRange] = useState<{ start: string; end: string } | null>(null)
+
+  // Independent sort state per table -- see SortableTh/toggleSort above.
+  // null = natural/default order (unchanged from before sorting existed).
+  const [headlineSort, setHeadlineSort] = useState<SortState | null>(null)
+  const [breakdownSort, setBreakdownSort] = useState<SortState | null>(null)
+  const [customSort, setCustomSort] = useState<SortState | null>(null)
 
   const { data: history, isLoading, error } = useQuery<LiveAttributionHistory>({
     queryKey: ['live-attribution-history'],
@@ -105,6 +171,27 @@ export default function AttributionHistory() {
     [history, strategies],
   )
 
+  const sortedHeadline = useMemo(() => {
+    if (!headlineSort) return headline
+    const { key, direction } = headlineSort
+    return [...headline].sort((a, b) =>
+      compareValues(key === 'strategy' ? a.strategy : key === 'wtd' ? a.wtd : a.mtd,
+        key === 'strategy' ? b.strategy : key === 'wtd' ? b.wtd : b.mtd, direction),
+    )
+  }, [headline, headlineSort])
+
+  const sortedRowKeys = useMemo(() => {
+    if (!breakdownSort) return rowKeys
+    const { key, direction } = breakdownSort
+    return [...rowKeys].sort((a, b) =>
+      compareValues(
+        key === 'period' ? a : bucketsByStrategy[key]?.get(a),
+        key === 'period' ? b : bucketsByStrategy[key]?.get(b),
+        direction,
+      ),
+    )
+  }, [rowKeys, breakdownSort, bucketsByStrategy])
+
   const customResult = useMemo(() => {
     if (!appliedRange) return null
     const { start, end } = appliedRange
@@ -115,6 +202,15 @@ export default function AttributionHistory() {
     })
     return { start, end, rows }
   }, [appliedRange, history, strategies])
+
+  const sortedCustomRows = useMemo(() => {
+    if (!customResult) return []
+    if (!customSort) return customResult.rows
+    const { key, direction } = customSort
+    return [...customResult.rows].sort((a, b) =>
+      compareValues(key === 'strategy' ? a.strategy : a.value, key === 'strategy' ? b.strategy : b.value, direction),
+    )
+  }, [customResult, customSort])
 
   if (isLoading) {
     return (
@@ -166,13 +262,13 @@ export default function AttributionHistory() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-700 text-left">
-                    <th className="px-4 py-3 text-slate-400 font-medium">Strategy</th>
-                    <th className="px-4 py-3 text-slate-400 font-medium text-right">WTD</th>
-                    <th className="px-4 py-3 text-slate-400 font-medium text-right">MTD</th>
+                    <SortableTh label="Strategy" sortKey="strategy" sort={headlineSort} onSort={(k) => setHeadlineSort(toggleSort(headlineSort, k))} align="left" />
+                    <SortableTh label="WTD" sortKey="wtd" sort={headlineSort} onSort={(k) => setHeadlineSort(toggleSort(headlineSort, k))} />
+                    <SortableTh label="MTD" sortKey="mtd" sort={headlineSort} onSort={(k) => setHeadlineSort(toggleSort(headlineSort, k))} />
                   </tr>
                 </thead>
                 <tbody>
-                  {headline.map((row) => (
+                  {sortedHeadline.map((row) => (
                     <tr
                       key={row.strategy}
                       className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors"
@@ -220,16 +316,14 @@ export default function AttributionHistory() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-700 text-left">
-                      <th className="px-4 py-3 text-slate-400 font-medium">Period</th>
+                      <SortableTh label="Period" sortKey="period" sort={breakdownSort} onSort={(k) => setBreakdownSort(toggleSort(breakdownSort, k))} align="left" />
                       {strategies.map((s) => (
-                        <th key={s} className="px-4 py-3 text-slate-400 font-medium text-right">
-                          {s}
-                        </th>
+                        <SortableTh key={s} label={s} sortKey={s} sort={breakdownSort} onSort={(k) => setBreakdownSort(toggleSort(breakdownSort, k))} />
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {rowKeys.map((key) => (
+                    {sortedRowKeys.map((key) => (
                       <tr key={key} className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors">
                         <td className="px-4 py-3 font-mono text-xs text-slate-300">
                           {bucketLabel(key, granularity)}
@@ -281,14 +375,17 @@ export default function AttributionHistory() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-slate-700 text-left">
-                      <th className="px-4 py-3 text-slate-400 font-medium">Strategy</th>
-                      <th className="px-4 py-3 text-slate-400 font-medium text-right">
-                        Return ({customResult.start} → {customResult.end})
-                      </th>
+                      <SortableTh label="Strategy" sortKey="strategy" sort={customSort} onSort={(k) => setCustomSort(toggleSort(customSort, k))} align="left" />
+                      <SortableTh
+                        label={`Return (${customResult.start} → ${customResult.end})`}
+                        sortKey="value"
+                        sort={customSort}
+                        onSort={(k) => setCustomSort(toggleSort(customSort, k))}
+                      />
                     </tr>
                   </thead>
                   <tbody>
-                    {customResult.rows.map((row) => (
+                    {sortedCustomRows.map((row) => (
                       <tr
                         key={row.strategy}
                         className="border-b border-slate-700/50 hover:bg-slate-700/30 transition-colors"

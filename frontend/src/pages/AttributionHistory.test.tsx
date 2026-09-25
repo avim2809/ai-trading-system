@@ -62,6 +62,74 @@ describe('AttributionHistory', () => {
     await screen.findByText('Week-to-Date / Month-to-Date')
     expect(screen.getByText('← Back to Live Dashboard').closest('a')).toHaveAttribute('href', '/live')
   })
+
+  it('sorts the headline table by WTD, defaulting to descending and toggling on a second click', async () => {
+    const user = userEvent.setup()
+    const { container } = renderWithProviders(<AttributionHistory />)
+    await screen.findByText('Week-to-Date / Month-to-Date')
+
+    const strategyCellsInOrder = () =>
+      Array.from(container.querySelectorAll('table')[0]!.querySelectorAll('tbody tr td:first-child')).map(
+        (td) => td.textContent,
+      )
+
+    // Natural (unsorted) order is alphabetical: momentum, trend -- and
+    // momentum's WTD (1.31%) already exceeds trend's WTD (~0.05%), so this
+    // first assertion alone wouldn't distinguish "sorted descending" from
+    // "just alphabetical". The second click (ascending) below is what
+    // actually proves the sort is wired up, since it must reverse the order.
+    await user.click(screen.getByText('WTD'))
+    expect(strategyCellsInOrder()).toEqual(['momentum', 'trend'])
+
+    await user.click(screen.getByText('WTD'))
+    expect(strategyCellsInOrder()).toEqual(['trend', 'momentum'])
+  })
+
+  it('sorts the headline table by strategy name independently of the WTD/MTD sort', async () => {
+    const user = userEvent.setup()
+    const { container } = renderWithProviders(<AttributionHistory />)
+    await screen.findByText('Week-to-Date / Month-to-Date')
+
+    const strategyCellsInOrder = () =>
+      Array.from(container.querySelectorAll('table')[0]!.querySelectorAll('tbody tr td:first-child')).map(
+        (td) => td.textContent,
+      )
+
+    // Descending by name: trend before momentum (reverse alphabetical).
+    await user.click(screen.getByText('Strategy'))
+    expect(strategyCellsInOrder()).toEqual(['trend', 'momentum'])
+
+    // Clicking a different column (MTD) starts that column fresh at
+    // descending rather than continuing the Strategy column's toggle state.
+    await user.click(screen.getByText('MTD'))
+    const afterMtdClick = strategyCellsInOrder()
+    await user.click(screen.getByText('MTD'))
+    const afterSecondMtdClick = strategyCellsInOrder()
+    expect(afterMtdClick).not.toEqual(afterSecondMtdClick)
+  })
+
+  it('sorts the period breakdown table by a strategy column', async () => {
+    const user = userEvent.setup()
+    const { container } = renderWithProviders(<AttributionHistory />)
+    await screen.findByText('Week-to-Date / Month-to-Date')
+    await user.click(screen.getByText('Weekly'))
+    await screen.findByText('Weekly Breakdown')
+
+    const breakdownTable = () =>
+      Array.from(container.querySelectorAll('table')).find((t) => t.textContent?.includes('Period'))!
+    const periodCellsInOrder = () =>
+      Array.from(breakdownTable().querySelectorAll('tbody tr td:first-child')).map((td) => td.textContent)
+
+    // rowKeys is already naturally ordered most-recent-first (descending by
+    // key), so the first click (descending) shouldn't visibly reorder it --
+    // the second click (ascending) is what proves the sort is wired up.
+    const naturalOrder = periodCellsInOrder()
+    await user.click(screen.getByText('Period'))
+    expect(periodCellsInOrder()).toEqual(naturalOrder)
+
+    await user.click(screen.getByText('Period'))
+    expect(periodCellsInOrder()).toEqual([...naturalOrder].reverse())
+  })
 })
 
 // Sanity check that the fixture used above is what this file's assertions
