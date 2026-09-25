@@ -104,7 +104,11 @@ _REFLECTION_SYSTEM = (
     "takeaway to apply to the next similar decision. Be specific and terse "
     "in every field — this will be re-read by future agents, and separately "
     "aggregated across many decisions to spot recurring patterns, so each "
-    "field must stand alone without the others for context."
+    "field must stand alone without the others for context. When both a "
+    "target-weight breakdown and a REALIZED RETURN breakdown are given for "
+    "the same strategies, the realized returns are the actual P&L ground "
+    "truth — a weight is a position size, never a return or a loss figure; "
+    "do not cite a weight number as if it were P&L."
 )
 
 # Confirmed live: schema-validation failures here (degenerate/garbled LLM
@@ -300,6 +304,7 @@ class TradingMemoryLog:
         raw_return: float,
         benchmark_return: float,
         llm_service: Any,
+        strategy_performance: dict[str, dict[str, float]] | None = None,
     ) -> str | None:
         """Aggregate every cycle's still-pending decision for *date* into
         ONE daily-rollup LLM reflection call (2026-09-20).
@@ -320,7 +325,27 @@ class TradingMemoryLog:
 
         May optionally include a bounded ``DailyReflectionRecommendation``
         (see its own docstring) — never applied automatically; surfaced via
-        ``list_recommendations()``/the live API for a human to act on.
+        ``list_recommendations()``/the live API for a human to act on. Any
+        actionable recommendation is additionally passed through
+        ``_sanity_check_recommendation`` against ``strategy_performance``
+        (see its own docstring) before being persisted — a second,
+        mechanical layer behind the prompt's own "one bad day is not
+        sufficient evidence" instruction, since that instruction alone was
+        confirmed live to not reliably stop the LLM acting on a strategy
+        that didn't actually have a bad (or even negative) day.
+
+        Args:
+            strategy_performance: ``{strategy: {"return": float,
+                "trailing_mean": float, "trailing_std": float,
+                "trailing_n": float}}`` — REAL realized per-strategy returns
+                for *date* (the trailing-stat keys are only present with
+                enough history for a meaningful baseline), built by
+                ``LiveTradingEngine._build_strategy_performance``. Distinct
+                from ``per_strategy`` (target *weights*) above — without
+                this, the LLM only ever saw weights, which a real incident
+                showed it can conflate with a return figure. ``None``
+                (the default) preserves the exact old prompt/behavior for
+                any caller that doesn't supply it (e.g. older tests).
         """
         key = self._storage_key(date, "rollup")
         if self._idempotency_check(key):
@@ -351,12 +376,15 @@ class TradingMemoryLog:
         notes = "; ".join(n for n in (e.get("notes") for e in day_entries) if n)
         final_weights = day_entries[-1].get("proposal_weights", {})
         per_strategy_block = (
-            f"\nCombined per-strategy attribution across the day's "
+            f"\nTarget weights only (NOT returns — see the realized-return "
+            f"section below for what each strategy actually made/lost) — "
+            f"combined per-strategy attribution across the day's "
             f"{len(day_entries)} decision cycle(s): "
             f"{json.dumps(combined_per_strategy, indent=2)}"
             if combined_per_strategy
             else ""
         )
+        performance_block = self._render_strategy_performance_block(strategy_performance)
         history_block = self._retrieve_recommendation_history(
             strategies=list(combined_per_strategy), alpha=alpha,
         )
@@ -368,15 +396,21 @@ class TradingMemoryLog:
             f"Notes across the day's cycles: {notes or 'none'}\n"
             f"Final target weights at day's last cycle: {json.dumps(final_weights, indent=2)}"
             f"{per_strategy_block}"
+            f"{performance_block}"
             f"{history_block}\n\n"
             "If, and only if, this day's outcome clearly points to one specific "
             "strategy that should be sized down or flagged for review, you may "
             'set "recommendation" to {"action": "reduce_position_limit"|'
             '"flag_strategy_for_review", "strategy": "<name>", "reduce_by_pct": '
             'float (0-1, only for reduce_position_limit), "rationale": "..."}. '
-            'Otherwise leave it {"action": "no_action"}. One bad day is not '
+            'Otherwise leave it {"action": "no_action"}. Base any such call ONLY '
+            "on the strategy's ACTUAL REALIZED RETURN and z-score above, never "
+            "on a target weight (a weight is a position size, not a P&L figure — "
+            "do not cite one as if it were a loss). One bad day is not "
             "sufficient evidence — only recommend an action for a clear, "
-            "specific, named strategy failure, not a vague market-wide move."
+            "specific, named strategy failure that is genuinely unusual for "
+            "that strategy (roughly z < -1), not a vague market-wide move or an "
+            "ordinary day within that strategy's normal range."
         )
         verdict, what_worked, what_failed, lesson, reflection, recommendation = (
             self._call_reflection_llm(
@@ -384,6 +418,7 @@ class TradingMemoryLog:
                 llm_service=llm_service,
             )
         )
+        recommendation = self._sanity_check_recommendation(recommendation, strategy_performance)
 
         entry = {
             "date": date,
@@ -420,6 +455,153 @@ class TradingMemoryLog:
             strategies=list(combined_per_strategy),
         )
         return reflection
+
+    @staticmethod
+    def _render_strategy_performance_block(
+        strategy_performance: dict[str, dict[str, float]] | None,
+    ) -> str:
+        """Render ``strategy_performance`` (see ``reflect_day``'s own
+        docstring) into a prompt block, sorted worst-return-first so the
+        LLM sees the full day's cross-section at a glance — including
+        whether the strategy it's about to name was actually the standout
+        loser or just one of several similarly-negative strategies (a real
+        incident this specifically catches: a large portfolio move blamed
+        on one strategy whose own return was an order of magnitude too
+        small to explain it, while several *other* strategies had a
+        similar-sized move the same day).
+
+        Returns "" when *strategy_performance* is empty/None — reflect_day()
+        must produce the exact same prompt as before this feature existed
+        for any caller that doesn't supply it.
+        """
+        if not strategy_performance:
+            return ""
+        lines = [
+            "\nACTUAL REALIZED per-strategy returns for this date (ground "
+            "truth for P&L — use these, not the target weights above, to "
+            "judge which strategy actually made or lost money; z-score is "
+            "how unusual that day's return was relative to that strategy's "
+            "own recent history, not the portfolio's):"
+        ]
+        ranked = sorted(strategy_performance.items(), key=lambda kv: kv[1].get("return", 0.0))
+        for strat, stats in ranked:
+            ret = stats.get("return", 0.0)
+            line = f"  - {strat}: {ret:+.3%}"
+            std = stats.get("trailing_std")
+            mean = stats.get("trailing_mean")
+            n = stats.get("trailing_n")
+            if std is not None and mean is not None and n:
+                line += f" (trailing {int(n)}-day mean {mean:+.3%}, std {std:.3%}"
+                if std > 1e-9:
+                    z = (ret - mean) / std
+                    line += f", z={z:+.2f}"
+                line += ")"
+            else:
+                line += " (insufficient history for a trailing baseline yet)"
+            lines.append(line)
+        return "\n".join(lines) + "\n"
+
+    # Mechanical floor for the sanity gate below -- a strategy's actual
+    # return must be at least this many trailing standard deviations below
+    # its own recent mean before an LLM-proposed action against it is
+    # honored, whenever enough history exists to compute one. Deliberately
+    # a named module constant (not buried in the method) so it's easy to
+    # find and re-tune from observed false-positive/false-negative rates
+    # once more days of real data accumulate.
+    _RECOMMENDATION_Z_SCORE_FLOOR = -1.0
+
+    @classmethod
+    def _sanity_check_recommendation(
+        cls,
+        recommendation: "DailyReflectionRecommendation | None",
+        strategy_performance: dict[str, dict[str, float]] | None,
+    ) -> "DailyReflectionRecommendation | None":
+        """Downgrade an LLM-proposed action to ``no_action`` when it isn't
+        actually backed by that strategy's own realized return (2026-09-25).
+
+        A second, mechanical/code-enforced layer behind the prompt's own
+        "one bad day is not sufficient evidence" instruction — added after
+        an independent audit of every pending recommendation this system
+        had ever produced found 3 of 4 were wrong, and specifically wrong
+        in ways this check catches directly:
+
+        - A strategy flagged for a "large loss" that actually had a
+          POSITIVE return that day (regime_hmm, +0.38%, flagged anyway) —
+          caught by the "return must be negative" check below.
+        - A strategy flagged over a real but tiny/immaterial loss well
+          within its own normal range (volatility_breakout, -0.016%,
+          lifetime Sharpe +0.36) — caught by the z-score check, which the
+          sign check alone would have missed (it *was* negative).
+
+        Never upgrades a ``no_action`` into an action, and never invents a
+        new one — only ever downgrades an action-taking recommendation it
+        can't independently verify, appending a note to ``rationale`` that
+        explains why rather than silently discarding the original text.
+        """
+        if recommendation is None or recommendation.action == "no_action":
+            return recommendation
+        if strategy_performance is None:
+            # No performance data was supplied at all -- the caller hasn't
+            # opted into this check (e.g. reflect()'s legacy per-decision
+            # path, which never builds strategy_performance, or an older
+            # test). Preserve the exact old behavior rather than blocking
+            # every caller that predates this feature; every real
+            # production call site (LiveTradingEngine._maybe_reflect)
+            # always supplies it, so this only matters for compatibility.
+            return recommendation
+        strat = recommendation.strategy
+        stats = strategy_performance.get(strat) if strat else None
+        if not stats:
+            log.warning(
+                "Memory: downgrading recommendation (%s for %r) to no_action "
+                "— no realized-return data available to verify it",
+                recommendation.action, strat,
+            )
+            return recommendation.model_copy(update={
+                "action": "no_action",
+                "rationale": (
+                    f"[auto-downgraded from {recommendation.action}: no "
+                    f"realized-return data for {strat!r} to verify against] "
+                    f"{recommendation.rationale}"
+                ),
+            })
+        ret = stats.get("return", 0.0)
+        if ret >= 0:
+            log.warning(
+                "Memory: downgrading recommendation (%s for %s) to no_action "
+                "— its actual realized return that day was %+.3f%% (not "
+                "negative), contradicting the stated rationale",
+                recommendation.action, strat, ret,
+            )
+            return recommendation.model_copy(update={
+                "action": "no_action",
+                "rationale": (
+                    f"[auto-downgraded from {recommendation.action}: {strat} "
+                    f"actually returned {ret:+.3%} that day, not a loss] "
+                    f"{recommendation.rationale}"
+                ),
+            })
+        std = stats.get("trailing_std")
+        mean = stats.get("trailing_mean")
+        if std is not None and mean is not None and std > 1e-9:
+            z = (ret - mean) / std
+            if z > cls._RECOMMENDATION_Z_SCORE_FLOOR:
+                log.warning(
+                    "Memory: downgrading recommendation (%s for %s) to "
+                    "no_action — z-score %.2f is not unusual enough for that "
+                    "strategy (floor %.2f)",
+                    recommendation.action, strat, z, cls._RECOMMENDATION_Z_SCORE_FLOOR,
+                )
+                return recommendation.model_copy(update={
+                    "action": "no_action",
+                    "rationale": (
+                        f"[auto-downgraded from {recommendation.action}: "
+                        f"{strat}'s return that day (z={z:+.2f}) is within its "
+                        f"own normal range, not a genuine anomaly] "
+                        f"{recommendation.rationale}"
+                    ),
+                })
+        return recommendation
 
     def _call_reflection_llm(
         self,

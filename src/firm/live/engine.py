@@ -2319,7 +2319,7 @@ class LiveTradingEngine:
                 result.error = "halted: drawdown kill switch tripped"
                 return
 
-            self._maybe_reflect(now, pit_view)
+            self._maybe_reflect(now, pit_view, prices)
 
             if not self._cycle_token_active(token):
                 log.warning(
@@ -2760,7 +2760,7 @@ class LiveTradingEngine:
 
         return self._broker.get_current_prices(universe)
 
-    def _maybe_reflect(self, now: datetime, pit_view: Any) -> None:
+    def _maybe_reflect(self, now: datetime, pit_view: Any, prices: dict[str, float] | None = None) -> None:
         """Trigger deferred LLM reflection on any decisions whose P&L is now known.
 
         Called at the start of each cycle — before this cycle's own decision
@@ -2772,7 +2772,37 @@ class LiveTradingEngine:
 
         ``pit_view`` is this cycle's already-loaded PIT price panel (from
         ``self._data_feed.refresh``) — reused for the benchmark lookup below
-        rather than issuing a separate fetch.
+        rather than issuing a separate fetch. ``prices`` is this cycle's
+        live current-quote dict (``_resolve_cycle_prices``) — passed through
+        to ``_lookup_benchmark_return`` so the benchmark side of the alpha
+        comparison uses the same "live, right now" price basis as
+        ``current_nav`` below, not a lagged completed-bar close (see that
+        method's own docstring).
+
+        **Real bug fixed 2026-09-25 (found while investigating why every
+        reflection recommendation reviewed turned out wrong):** this used to
+        reflect on a date the moment ANY pending entry existed for it,
+        regardless of whether that date was still today. Under the
+        "hourly_market_hours" schedule (~7+ cycles/trading day), the very
+        first pending entry for today is already sitting there by the time
+        the SECOND cycle starts — confirmed live, e.g. "daily rollup
+        reflection for 2026-09-23 (1 cycles)" logged at 17:31:33 on
+        2026-09-23 itself, 58 minutes after cycle 52 (that day's first
+        cycle) completed at 16:32:57, using ONLY that one cycle's
+        ``nav_at_decision``. Two compounding consequences: (a) "today's
+        reflection" was actually measuring an arbitrary ~1-hour window, not
+        a trading day, so ``raw_return`` was mostly noise and
+        ``benchmark_return`` was structurally always 0.0 (that day's own
+        benchmark bar hadn't closed yet); and (b) because ``reflect_day`` is
+        per-date-idempotent, every one of that day's OTHER 5-14 cycles'
+        pending decisions became permanently orphaned — never reflected on,
+        forever invisible to ``get_context()``/``summarize_lessons()``. Only
+        days with exactly one cycle (rare — e.g. a day cut short by a
+        restart) happened to reflect correctly, by accident. Fix: skip
+        (defer) any date that is not strictly before today in the exchange
+        trading-day timezone — the next real calendar day's first cycle
+        naturally has ALL of the deferred date's cycles accumulated, and
+        that date's own benchmark bar has actually closed.
         """
         pending = self._memory.find_all_pending()
         if not pending:
@@ -2786,6 +2816,8 @@ class LiveTradingEngine:
             )
             return
 
+        today_str = trading_day_key(now, self._trading_day_timezone)
+
         # Group by date (2026-09-20): under "hourly_market_hours",
         # find_all_pending() can return several entries per date (one per
         # cycle_id) — reflect ONCE per date via reflect_day's aggregate
@@ -2797,6 +2829,16 @@ class LiveTradingEngine:
         earliest_by_date: dict[str, dict] = {}
         for entry in pending:
             d = entry["date"]
+            if d >= today_str:
+                # Still today (see this method's own docstring for the real
+                # bug this closes) — wait for a later cycle on a subsequent
+                # calendar day so every one of today's cycles has a chance
+                # to land before rolling them all up together.
+                log.debug(
+                    "Deferring reflection for %s — still today (as of %s)",
+                    d, today_str,
+                )
+                continue
             if d not in earliest_by_date or (entry.get("cycle_id") or 0) < (
                 earliest_by_date[d].get("cycle_id") or 0
             ):
@@ -2812,44 +2854,111 @@ class LiveTradingEngine:
                 )
                 continue
             raw_return = (current_nav / prev_nav) - 1.0
-            benchmark_return = self._lookup_benchmark_return(pit_view, date, now)
+            benchmark_return = self._lookup_benchmark_return(pit_view, date, now, prices)
+            strategy_performance = self._build_strategy_performance(date)
             try:
                 self._memory.reflect_day(
                     date=date,
                     raw_return=raw_return,
                     benchmark_return=benchmark_return,
                     llm_service=llm,
+                    strategy_performance=strategy_performance,
                 )
             except Exception:
                 log.warning("Memory daily-rollup reflection failed for %s", date, exc_info=True)
 
+    def _build_strategy_performance(
+        self, date: str, lookback_days: int = 20,
+    ) -> dict[str, dict[str, float]]:
+        """Real realized per-strategy returns (+ a trailing volatility
+        baseline) for *date*, fed into ``reflect_day``'s prompt (2026-09-25).
+
+        Without this, the daily reflection LLM only ever saw *target
+        weights* (``per_strategy``), never actual realized P&L — confirmed
+        live to cause two distinct failure modes when independently
+        audited: (a) flagging a strategy that actually had a POSITIVE day
+        that date (the LLM had no return figure to check itself against),
+        and (b) citing a number that numerically matches one of that
+        strategy's target *weights*, not any return, i.e. the LLM
+        conflating the two fields it was given. Every strategy with
+        attribution history is included (not just the ones targeted that
+        date) so the LLM can see the full cross-section — e.g. "did any
+        OTHER strategy have an equally bad day" is exactly the check that
+        would have caught a real over-attribution incident (a large
+        portfolio move blamed on one strategy whose own return didn't
+        remotely explain it).
+
+        Returns ``{strategy: {"return": float, "trailing_mean": float,
+        "trailing_std": float, "trailing_n": int}}`` — the trailing-stat
+        keys are omitted when fewer than 5 prior observations exist (not
+        enough for a meaningful baseline).
+        """
+        out: dict[str, dict[str, float]] = {}
+        target_ts = pd.Timestamp(date)
+        try:
+            all_returns = self._attribution.get_all_daily_strategy_returns()
+        except Exception:
+            log.warning(
+                "Could not build per-strategy performance for %s's reflection "
+                "— attribution lookup failed", date, exc_info=True,
+            )
+            return out
+        for strategy, series in all_returns.items():
+            if series.empty:
+                continue
+            series = series.copy()
+            series.index = pd.DatetimeIndex(series.index).normalize()
+            if target_ts not in series.index:
+                continue
+            day_return = series.loc[target_ts]
+            if isinstance(day_return, pd.Series):  # duplicate index entries — take the last
+                day_return = day_return.iloc[-1]
+            entry: dict[str, float] = {"return": float(day_return)}
+            history = series[series.index < target_ts].tail(lookback_days)
+            if len(history) >= 5:
+                entry["trailing_mean"] = float(history.mean())
+                entry["trailing_std"] = float(history.std(ddof=1))
+                entry["trailing_n"] = float(len(history))
+            out[strategy] = entry
+        return out
+
     def _lookup_benchmark_return(
-        self, pit_view: Any, decision_date: str, now: datetime,
+        self,
+        pit_view: Any,
+        decision_date: str,
+        now: datetime,
+        prices: dict[str, float] | None = None,
     ) -> float:
         """Real benchmark (e.g. SPY) return over the same period as ``raw_return``.
 
         Looks up the benchmark's close on ``decision_date`` (when the
-        reflected-on decision was made) and its most recent close as-of
-        ``now``, both from this cycle's already-loaded PIT price panel — no
-        separate fetch. The benchmark symbol defaults to "SPY" (already a
-        universe member in both live configs, and the same default used
-        elsewhere in this codebase, e.g. regime_overlay/strategy_regime_
-        weights). Falls back to a flat 0.0 (no alpha decomposition, but the
-        reflection is still useful) on any lookup failure — same fail-open
-        posture this method always had.
+        reflected-on decision was made) from this cycle's already-loaded PIT
+        price panel — no separate fetch — and compares it against a "now"
+        price. The benchmark symbol defaults to "SPY" (already a universe
+        member in both live configs, and the same default used elsewhere in
+        this codebase, e.g. regime_overlay/strategy_regime_weights). Falls
+        back to a flat 0.0 (no alpha decomposition, but the reflection is
+        still useful) on any lookup failure — same fail-open posture this
+        method always had.
 
-        The PIT panel excludes today's still-forming bar (``exclude_forming_bar``
-        in ``LiveDataFeed`` — required for IBKR, whose quotes can't be pulled
-        off the worker thread; see ``_resolve_cycle_prices``), so its "most
-        recent" row is really the last *completed* session. Reflection
-        commonly fires the very next session after a decision, before that
-        session's own bar has closed — at that point the last completed bar
-        IS still the decision day's own bar, so a naive "most recent row"
-        lookup silently returns the decision-day price as both start and
-        end, producing an exact (and misleadingly precise-looking) 0.0 that
-        looks like real computed alpha rather than a data-availability gap.
-        Guarding for a row strictly after ``decision_date`` keeps the 0.0
-        fallback honest about which case it is.
+        **The "now" price prefers ``prices`` (this cycle's live current
+        quotes, e.g. ``_resolve_cycle_prices``) over the PIT panel (fixed
+        2026-09-25).** ``raw_return`` compares ``current_nav`` — which marks
+        every open position at LIVE current prices — against
+        ``nav_at_decision``; using the PIT panel's last *completed* bar for
+        the benchmark side instead was an apples-to-oranges comparison, and
+        the specific reason ``benchmark_return`` was confirmed always
+        exactly 0.0 in production even after fixing the day-boundary bug in
+        ``_maybe_reflect``: the PIT panel excludes today's still-forming bar
+        (``exclude_forming_bar`` in ``LiveDataFeed`` — required for IBKR,
+        whose quotes can't be pulled off the worker thread), so even once
+        reflection correctly waits for a later calendar day, that day's OWN
+        benchmark bar still isn't "completed" from the PIT panel's point of
+        view until the day AFTER it. Falls back to the old completed-bar-
+        only lookup when ``prices`` is omitted or doesn't have the benchmark
+        symbol (e.g. an older caller, tests, or the symbol isn't in the live
+        universe) — under-measures alpha on the day reflection runs rather
+        than raising.
         """
         benchmark_symbol = self._config.get("benchmark_symbol", "SPY")
         try:
@@ -2864,17 +2973,25 @@ class LiveTradingEngine:
             prior_rows = sym_rows[sym_rows["date"] <= decision_ts]
             if prior_rows.empty:
                 return 0.0
+            start_price = self._closing_price(prior_rows.iloc[-1])
+            if not start_price or start_price <= 0:
+                return 0.0
+
+            live_end_price = (prices or {}).get(benchmark_symbol)
+            if live_end_price and live_end_price > 0:
+                return (float(live_end_price) / start_price) - 1.0
+
             later_rows = sym_rows[sym_rows["date"] > decision_ts]
             if later_rows.empty:
                 log.debug(
                     "Benchmark return for %s: no completed session after the "
-                    "decision date yet — using flat 0.0 (not a lookup failure)",
-                    decision_date,
+                    "decision date yet, and no live price for %s was supplied "
+                    "— using flat 0.0 (not a lookup failure)",
+                    decision_date, benchmark_symbol,
                 )
                 return 0.0
-            start_price = self._closing_price(prior_rows.iloc[-1])
             end_price = self._closing_price(later_rows.iloc[-1])
-            if not start_price or not end_price or start_price <= 0:
+            if not end_price or end_price <= 0:
                 return 0.0
             return (end_price / start_price) - 1.0
         except Exception:

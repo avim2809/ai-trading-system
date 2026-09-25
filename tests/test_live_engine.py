@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
@@ -1436,6 +1437,17 @@ class TestReflectionPersistence:
         assert entries[0]["status"] == "pending"
         assert entries[0]["nav_at_decision"] == pytest.approx(engine1.portfolio.nav)
 
+        # Backdate the pending decision to "yesterday" -- _maybe_reflect
+        # (2026-09-25) now defers reflecting on a date until it's strictly
+        # before today, precisely so a same-day second cycle can't
+        # prematurely roll up a day that still has more cycles coming (see
+        # that method's own docstring for the real incident this fixed).
+        # This test is about surviving a *process restart*, which is
+        # orthogonal to that day-boundary gate, so backdate rather than
+        # drop the gate.
+        entries[0]["date"] = "2020-01-01"
+        memory_path.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+
         # "Process 2": a brand-new engine instance with no in-memory
         # knowledge of process 1's decision, pointed at the same log file.
         engine2 = LiveTradingEngine(
@@ -1610,6 +1622,221 @@ class TestBenchmarkReturnLookup:
         pit_view.prices.side_effect = RuntimeError("simulated PIT failure")
         result = engine._lookup_benchmark_return(pit_view, "2026-09-01", datetime(2026, 9, 5))
         assert result == 0.0
+
+    def test_uses_live_price_for_the_end_side_when_supplied(self, tmp_path):
+        """2026-09-25 fix: raw_return marks current_nav at LIVE prices, so
+        the benchmark side must use a live price too, not a lagged
+        completed-bar close -- otherwise the two sides of the alpha
+        comparison are measuring different points in time even once the
+        day-boundary bug (_maybe_reflect) is fixed, since the PIT panel
+        still excludes today's own still-forming bar."""
+        engine = self._make_engine(tmp_path)
+        price_df = pd.DataFrame([
+            {"symbol": "SPY", "date": pd.Timestamp("2026-08-28"), "close": 500.0},
+            {"symbol": "SPY", "date": pd.Timestamp("2026-09-04"), "close": 510.0},
+        ])
+        pit_view = MagicMock()
+        pit_view.prices.return_value = price_df
+        # Same fixture as test_falls_back_to_zero_when_no_completed_session_
+        # after_decision_date (no completed bar strictly after the decision
+        # date) -- but now a live SPY quote is supplied, so it must be used
+        # instead of falling back to 0.0.
+        result = engine._lookup_benchmark_return(
+            pit_view, "2026-09-04", datetime(2026, 9, 8), prices={"SPY": 525.0},
+        )
+        assert result == pytest.approx(525.0 / 510.0 - 1.0)
+
+    def test_ignores_live_price_dict_missing_the_benchmark_symbol(self, tmp_path):
+        """A prices dict that just doesn't happen to include the benchmark
+        symbol (e.g. it's not in the live universe) must fall back to the
+        old completed-bar lookup, not silently treat a missing key as 0."""
+        engine = self._make_engine(tmp_path)
+        price_df = pd.DataFrame([
+            {"symbol": "SPY", "date": pd.Timestamp("2026-08-28"), "close": 500.0},
+            {"symbol": "SPY", "date": pd.Timestamp("2026-09-05"), "close": 520.0},
+        ])
+        pit_view = MagicMock()
+        pit_view.prices.return_value = price_df
+        result = engine._lookup_benchmark_return(
+            pit_view, "2026-08-28", datetime(2026, 9, 5), prices={"AAPL": 200.0},
+        )
+        assert result == pytest.approx(520.0 / 500.0 - 1.0)
+
+    def test_ignores_non_positive_live_price(self, tmp_path):
+        """A zero/negative live quote (e.g. a bad tick) must not be trusted
+        over the completed-bar fallback."""
+        engine = self._make_engine(tmp_path)
+        price_df = pd.DataFrame([
+            {"symbol": "SPY", "date": pd.Timestamp("2026-08-28"), "close": 500.0},
+            {"symbol": "SPY", "date": pd.Timestamp("2026-09-05"), "close": 520.0},
+        ])
+        pit_view = MagicMock()
+        pit_view.prices.return_value = price_df
+        result = engine._lookup_benchmark_return(
+            pit_view, "2026-08-28", datetime(2026, 9, 5), prices={"SPY": 0.0},
+        )
+        assert result == pytest.approx(520.0 / 500.0 - 1.0)
+
+
+class TestMaybeReflectDayBoundary:
+    """_maybe_reflect must defer rolling up a date's decisions until that
+    date is strictly before today (2026-09-25 fix).
+
+    Real production bug this closes: under a multi-cycle-per-day schedule,
+    the first pending entry for TODAY is already sitting unreflected by the
+    time the second cycle starts -- reflecting it then used only that one
+    cycle's data, silently orphaning every later cycle that day forever,
+    and structurally guaranteed benchmark_return=0.0 (that day's own
+    benchmark bar can't have closed yet). Confirmed live via
+    ai-trading-alpaca.service's own logs: "daily rollup reflection for
+    2026-09-23 (1 cycles)" fired at 17:31:33 on 2026-09-23 itself, 58
+    minutes after that day's first (of 7) cycles completed.
+    """
+
+    @staticmethod
+    @patch("firm.live.engine.build_orchestrator")
+    def _make_engine(tmp_path, mock_build):
+        mock_build.return_value = MagicMock()
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {
+            "initial_capital": 100_000,
+            "memory_log_path": str(tmp_path / "decisions.jsonl"),
+        }
+        engine = LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+        engine._llm_service = MagicMock()
+        engine._llm_service.chat_json.return_value = {
+            "verdict": "correct", "what_worked": "", "what_failed": "", "lesson": "",
+        }
+        return engine
+
+    def test_pending_decision_from_today_is_not_reflected_yet(self, tmp_path):
+        engine = self._make_engine(tmp_path)
+        now = datetime.now(ZoneInfo(engine._trading_day_timezone))
+        today_str = now.strftime("%Y-%m-%d")
+        engine._memory.store_decision(
+            date=today_str, proposal_weights={"AAPL": 0.1}, cycle_id=1,
+            nav_at_decision=100_000,
+        )
+
+        pit_view = MagicMock()
+        pit_view.prices.return_value = pd.DataFrame()
+        engine._maybe_reflect(now, pit_view, {})
+
+        pending = engine._memory.find_all_pending()
+        assert len(pending) == 1  # still pending -- not prematurely rolled up
+        engine._llm_service.chat_json.assert_not_called()
+
+    def test_pending_decision_from_a_past_date_is_reflected(self, tmp_path):
+        engine = self._make_engine(tmp_path)
+        now = datetime.now(ZoneInfo(engine._trading_day_timezone))
+        engine._memory.store_decision(
+            date="2020-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1,
+            nav_at_decision=100_000,
+        )
+
+        pit_view = MagicMock()
+        pit_view.prices.return_value = pd.DataFrame()
+        engine._maybe_reflect(now, pit_view, {})
+
+        assert engine._memory.find_all_pending() == []
+        engine._llm_service.chat_json.assert_called_once()
+
+    def test_multiple_same_day_cycles_all_accumulate_before_the_next_days_rollup(self, tmp_path):
+        """The actual production incident, reproduced directly: several
+        same-day cycles' decisions must ALL be present in the rollup once a
+        later day finally triggers it -- not just the first one."""
+        engine = self._make_engine(tmp_path)
+        yesterday = datetime.now(ZoneInfo(engine._trading_day_timezone)) - timedelta(days=1)
+        yesterday_str = yesterday.strftime("%Y-%m-%d")
+        for cycle_id in range(1, 8):
+            engine._memory.store_decision(
+                date=yesterday_str, proposal_weights={"AAPL": 0.1 + cycle_id * 0.01},
+                cycle_id=cycle_id, nav_at_decision=100_000 + cycle_id,
+                per_strategy={"momentum": {"AAPL": 0.1}},
+            )
+        assert len(engine._memory.find_all_pending()) == 7
+
+        now = datetime.now(ZoneInfo(engine._trading_day_timezone))
+        pit_view = MagicMock()
+        pit_view.prices.return_value = pd.DataFrame()
+        engine._maybe_reflect(now, pit_view, {})
+
+        assert engine._memory.find_all_pending() == []
+        rollup = next(
+            e for e in engine._memory.list_decisions() if e.get("cycle_id") == "rollup"
+        )
+        assert rollup["n_cycles"] == 7
+
+
+class TestBuildStrategyPerformance:
+    """LiveTradingEngine._build_strategy_performance (2026-09-25) -- the
+    real realized-return data fed into reflect_day()'s prompt, replacing
+    the target-weight-only view that caused a real incident (an LLM citing
+    a target weight as if it were a P&L figure)."""
+
+    @staticmethod
+    @patch("firm.live.engine.build_orchestrator")
+    def _make_engine(tmp_path, mock_build):
+        mock_build.return_value = MagicMock()
+        broker = MockBroker()
+        feed = LiveDataFeed(providers={}, universe=["AAPL"])
+        queue = ApprovalQueue(broker=broker)
+        config = {
+            "initial_capital": 100_000,
+            "memory_log_path": str(tmp_path / "decisions.jsonl"),
+        }
+        return LiveTradingEngine(
+            config=config, broker=broker, data_feed=feed, approval_queue=queue,
+        )
+
+    def test_returns_empty_dict_when_no_attribution_history(self, tmp_path):
+        engine = self._make_engine(tmp_path)
+        assert engine._build_strategy_performance("2026-09-23") == {}
+
+    def test_includes_realized_return_for_the_requested_date(self, tmp_path):
+        engine = self._make_engine(tmp_path)
+        engine._attribution.update_daily(
+            date=datetime(2026, 9, 22), prices={"AAPL": 100.0}, nav=100_000,
+            strategy_holdings={"momentum": {"AAPL": 10.0}},
+        )
+        engine._attribution.update_daily(
+            date=datetime(2026, 9, 23), prices={"AAPL": 105.0}, nav=100_050,
+            strategy_holdings={"momentum": {"AAPL": 10.0}},
+        )
+
+        perf = engine._build_strategy_performance("2026-09-23")
+        assert "momentum" in perf
+        assert perf["momentum"]["return"] == pytest.approx(50.0 / 100_050)
+        # Only one prior observation -- not enough for a trailing baseline.
+        assert "trailing_mean" not in perf["momentum"]
+
+    def test_omits_strategies_with_no_observation_on_that_date(self, tmp_path):
+        engine = self._make_engine(tmp_path)
+        engine._attribution.update_daily(
+            date=datetime(2026, 9, 22), prices={"AAPL": 100.0}, nav=100_000,
+            strategy_holdings={"momentum": {"AAPL": 10.0}},
+        )
+        perf = engine._build_strategy_performance("2026-09-23")
+        assert perf == {}
+
+    def test_trailing_baseline_appears_with_enough_history(self, tmp_path):
+        engine = self._make_engine(tmp_path)
+        base = datetime(2026, 9, 1)
+        price = 100.0
+        for i in range(10):
+            price += 1.0
+            engine._attribution.update_daily(
+                date=base + timedelta(days=i), prices={"AAPL": price}, nav=100_000,
+                strategy_holdings={"momentum": {"AAPL": 10.0}},
+            )
+        target_date = (base + timedelta(days=9)).strftime("%Y-%m-%d")
+        perf = engine._build_strategy_performance(target_date)
+        assert "trailing_mean" in perf["momentum"]
+        assert perf["momentum"]["trailing_n"] == 9
 
     def test_uses_adj_close_when_close_is_nan(self):
         row = pd.Series({"close": float("nan"), "adj_close": 510.0})

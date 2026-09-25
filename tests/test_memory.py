@@ -466,6 +466,185 @@ class TestReflectDay:
         assert log.mark_recommendation_applied("2026-01-01") is False
 
 
+class TestStrategyPerformanceBlock:
+    """reflect_day()'s strategy_performance param (2026-09-25) -- real
+    realized returns fed into the prompt alongside (not instead of) the
+    target-weight breakdown, plus the block's own rendering."""
+
+    def _llm(self, **overrides):
+        llm = MagicMock()
+        payload = {
+            "verdict": "correct", "what_worked": "w", "what_failed": "", "lesson": "l",
+            "recommendation": {"action": "no_action"},
+        }
+        payload.update(overrides)
+        llm.chat_json.return_value = payload
+        return llm
+
+    def test_realized_returns_appear_in_the_prompt_sorted_worst_first(self, tmp_path):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        llm = self._llm()
+
+        log.reflect_day(
+            date="2026-01-01", raw_return=-0.05, benchmark_return=0.0, llm_service=llm,
+            strategy_performance={
+                "momentum": {"return": 0.01},
+                "stat_arb": {
+                    "return": -0.03, "trailing_mean": -0.001,
+                    "trailing_std": 0.01, "trailing_n": 10.0,
+                },
+            },
+        )
+
+        prompt = llm.chat_json.call_args[0][0][1]["content"]
+        assert "ACTUAL REALIZED" in prompt
+        assert "stat_arb: -3.000%" in prompt
+        assert "z=" in prompt
+        # Worst return (stat_arb) listed before momentum.
+        assert prompt.index("stat_arb") < prompt.index("momentum")
+
+    def test_omitted_entirely_when_none_supplied(self, tmp_path):
+        """Backward compat: a caller that doesn't pass strategy_performance
+        gets the exact old prompt, no new section at all."""
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        llm = self._llm()
+
+        log.reflect_day(date="2026-01-01", raw_return=0.01, benchmark_return=0.0, llm_service=llm)
+
+        prompt = llm.chat_json.call_args[0][0][1]["content"]
+        assert "ground truth for P&L" not in prompt
+
+
+class TestRecommendationSanityGate:
+    """_sanity_check_recommendation (2026-09-25) -- a mechanical, code-
+    enforced second layer behind the prompt's own "one bad day is not
+    sufficient evidence" instruction, added after an independent audit
+    found 3 of 4 ever-issued recommendations were factually wrong and not
+    caught by that instruction alone."""
+
+    def _llm(self, **overrides):
+        llm = MagicMock()
+        payload = {
+            "verdict": "correct", "what_worked": "w", "what_failed": "", "lesson": "l",
+            "recommendation": {"action": "no_action"},
+        }
+        payload.update(overrides)
+        llm.chat_json.return_value = payload
+        return llm
+
+    def _reflect(self, tmp_path, *, recommendation, strategy_performance):
+        log = _log(tmp_path)
+        log.store_decision(date="2026-01-01", proposal_weights={"AAPL": 0.1}, cycle_id=1, nav_at_decision=100_000)
+        llm = self._llm(recommendation=recommendation)
+        log.reflect_day(
+            date="2026-01-01", raw_return=-0.05, benchmark_return=0.0, llm_service=llm,
+            strategy_performance=strategy_performance,
+        )
+        return log
+
+    def test_downgrades_when_named_strategy_has_no_performance_data(self, tmp_path):
+        """Real incident: a strategy flagged with no way to verify it at
+        all must not reach list_recommendations() as actionable."""
+        log = self._reflect(
+            tmp_path,
+            recommendation={
+                "action": "flag_strategy_for_review", "strategy": "regime_hmm",
+                "rationale": "large loss",
+            },
+            strategy_performance={"momentum": {"return": -0.02}},  # regime_hmm absent
+        )
+        assert log.list_recommendations() == []
+        all_recs = log.list_recommendations(pending_only=False)
+        assert all_recs[0]["action"] == "no_action"
+        assert "auto-downgraded" in all_recs[0]["rationale"]
+
+    def test_downgrades_when_strategy_actually_had_a_positive_day(self, tmp_path):
+        """Real incident this closes exactly: regime_hmm flagged for
+        "dominating portfolio drag" on a day it actually returned +0.38%."""
+        log = self._reflect(
+            tmp_path,
+            recommendation={
+                "action": "flag_strategy_for_review", "strategy": "regime_hmm",
+                "rationale": "NVDA short generated large loss",
+            },
+            strategy_performance={"regime_hmm": {"return": 0.0038}},
+        )
+        assert log.list_recommendations() == []
+        rec = log.list_recommendations(pending_only=False)[0]
+        assert rec["action"] == "no_action"
+        assert "not a loss" in rec["rationale"]
+
+    def test_downgrades_negative_but_ordinary_day_for_that_strategy(self, tmp_path):
+        """Real incident this closes: volatility_breakout flagged for a
+        genuine but tiny (-0.016%) loss well within its own normal range
+        (lifetime Sharpe +0.36) -- sign alone isn't enough, z-score must
+        also indicate a genuine anomaly."""
+        log = self._reflect(
+            tmp_path,
+            recommendation={
+                "action": "flag_strategy_for_review", "strategy": "volatility_breakout",
+                "rationale": "negative net contribution dragged portfolio down",
+            },
+            strategy_performance={
+                "volatility_breakout": {
+                    "return": -0.00016, "trailing_mean": 0.0001,
+                    "trailing_std": 0.002, "trailing_n": 10.0,
+                },
+            },
+        )
+        assert log.list_recommendations() == []
+        rec = log.list_recommendations(pending_only=False)[0]
+        assert rec["action"] == "no_action"
+        assert "within its own normal range" in rec["rationale"]
+
+    def test_allows_through_a_genuine_negative_outlier(self, tmp_path):
+        """The one case that SHOULD survive: a real, negative, genuinely
+        unusual (z well below -1) return for the named strategy."""
+        log = self._reflect(
+            tmp_path,
+            recommendation={
+                "action": "reduce_position_limit", "strategy": "multi_factor",
+                "reduce_by_pct": 0.2, "rationale": "recurring negative alpha in chop",
+            },
+            strategy_performance={
+                "multi_factor": {
+                    "return": -0.028, "trailing_mean": -0.001,
+                    "trailing_std": 0.01, "trailing_n": 15.0,
+                },
+            },
+        )
+        recs = log.list_recommendations()
+        assert len(recs) == 1
+        assert recs[0]["action"] == "reduce_position_limit"
+        assert recs[0]["strategy"] == "multi_factor"
+
+    def test_never_gates_when_strategy_performance_not_supplied_at_all(self, tmp_path):
+        """None (not supplied) means the caller hasn't opted into this
+        check -- must reproduce the exact old ungated behavior."""
+        log = self._reflect(
+            tmp_path,
+            recommendation={
+                "action": "reduce_position_limit", "strategy": "stat_arb",
+                "reduce_by_pct": 0.3, "rationale": "x",
+            },
+            strategy_performance=None,
+        )
+        recs = log.list_recommendations()
+        assert len(recs) == 1
+        assert recs[0]["action"] == "reduce_position_limit"
+
+    def test_no_action_recommendations_are_never_touched(self, tmp_path):
+        log = self._reflect(
+            tmp_path,
+            recommendation={"action": "no_action", "rationale": "fine day"},
+            strategy_performance={},
+        )
+        rec = log.list_recommendations(pending_only=False)[0]
+        assert rec["rationale"] == "fine day"  # unmodified, no auto-downgrade note
+
+
 class TestRecommendationRAGLoop:
     """The self-improvement loop: reflect_day() writes its recommendation
     into the RAG "recommendations" collection (even a no_action one) and
