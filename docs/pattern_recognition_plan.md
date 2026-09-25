@@ -5,7 +5,17 @@
 been deliberately left open: two small bug fixes, a scheduled scan job +
 persistent history endpoint, real XGBoost training + ONNX export, and the
 CNN/GAF validator + PPO RL position sizer that were previously descoped for
-dependency reasons (`bbb72c8`, `d0e9727`, `4340b0b`, `680fa75`). ·
+dependency reasons (`bbb72c8`, `d0e9727`, `4340b0b`, `680fa75`). A second
+improvement round (§8, 2026-09-25 — uncommitted as of this writing) added
+ATR-scaled zigzag/retest/confluence quality modifiers, an XGBoost+CNN
+ensemble with per-model calibration wired into the live strategy, a
+meta-labeling Kelly path in `TraderAgent`, and a repeatable CPCV-style
+walk-forward validation harness + staged rollout gate — every new knob
+defaults off pending its own walk-forward re-validation. **The CNN-toggle
+re-validation itself came back negative** (8-fold walk-forward verdict=fail)
+and, per the user's decision, `cnn_scoring_enabled` has been rolled back to
+`false` in both live configs and hot-swapped into both running engines
+(no restart) — see §8.2. ·
 **Date:** 2026-09-09 · **Scope:** new `src/firm/patterns/` package feeding a
 new Strategy #13 (`pattern_recognition`) into the existing 12-strategy/8-agent
 pipeline, an XGBoost confirmation-classifier training pipeline with ONNX
@@ -853,3 +863,320 @@ log line (`Live engine strategies updated: [...,
 'pattern_recognition']`, `engine.py:427`). Both PIDs (`3682961` Alpaca,
 `3683272` IBKR) unchanged throughout — no restart, no broker
 reconnect, no interruption to either engine.
+
+## 8. 2026-09-25 improvement round — quick-wins, validation-rigor, model-ensemble-sizing, detection-quality
+
+A second research pass (web research on quality-scoring/validation
+best-practice, run in parallel across 4 subagents, then implemented as 4
+more parallel subagents with strictly disjoint file ownership + a final
+integration pass by the orchestrating agent) targeting four areas: cheap
+wins, rigor of the CNN-toggle validation, model ensembling/sizing, and raw
+detection quality. **Every new knob introduced in this round defaults to its
+old, unchanged behavior** — same convention as `cnn_scoring_enabled`
+(§4/config comments): nothing here is live in `config/live.yaml` or
+`config/live_alpaca.yaml` yet, pending each knob's own dedicated
+walk-forward re-validation (the exact harness this round built for
+`cnn_scoring_enabled` — §8.2 — is the template to repeat per-knob before
+flipping any of them true).
+
+### 8.1 Quick wins
+
+- **`FIRM_ENABLE_PATTERN_SCAN` enabled on the Alpaca instance only**
+  (`deploy/ai-trading-alpaca.service`, not the shared `.env` — see that
+  file's inline comment for why one instance, not both). Deployed via
+  `cp` to `/etc/systemd/system/` + `daemon-reload` + `restart`; confirmed
+  healthy afterward (`GET :8001/api/health` → `live_engine_running: true`)
+  and the job itself started cleanly (`PatternScanJob started: daily 16:30
+  ET scan of 35 symbols (data_source=cache)` in the unit's journal). Purely
+  additive — this existing, previously-unused feature (§7.2) was simply
+  switched on so `pattern_scan_history.db` starts accumulating real
+  rule-based `quality_score` + eventual target/stop/timeout outcome rows for
+  `scripts/analyze_pattern_scan_outcomes.py` (below) to mine once enough
+  history has built up. Zero effect on either live engine's real trading —
+  see `pattern_scan_job.py`'s own docstring for why it's inert by
+  construction.
+- **`scripts/analyze_pattern_scan_outcomes.py`** (new, 30 tests) — CLI
+  hit-rate/correlation report over `pattern_scan_history`'s resolved
+  (non-pending) rows: win rate by pattern/direction, `quality_score`-vs-
+  outcome correlation, and a plain-language summary. Deliberately reads
+  the *scheduled scan's own* rule-based-only history (see §8's correction
+  below), not a nonexistent "paired CNN vs. rule-based shadow" dataset.
+- **ATR-scaled ZigZag threshold** — `extrema.py`'s `zigzag_pivots` gained an
+  optional `threshold_fn` hook (per-bar callable, e.g. `2 * atr[i] /
+  close[i]`, falling back to the fixed `pct` on any invalid per-bar value);
+  dependency-free (numpy-only), backward-compatible (`threshold_fn=None` is
+  byte-identical to the old fixed-`pct` algorithm). Wired through
+  `scanner.py`'s new `zigzag_atr_mult` param (`None` = old behavior; a
+  positive float builds the ATR-scaled closure from the already-computed
+  `atr14` series) and `pattern_recognition.py`'s new `zigzag_atr_mult`
+  strategy param (also `None`/off by default). **Not yet flipped on** —
+  needs its own walk-forward comparison against the fixed-`pct` baseline
+  before it's config-enabled anywhere.
+- **Correction to an earlier assumption** (recorded honestly rather than
+  silently acted on): a prior session had assumed `Signal.meta`'s
+  `rule_based_quality_fraction`/`cnn_quality_fraction` pair was already
+  durably logged somewhere and just needed extracting for a CNN-vs-rule
+  comparison. Re-checked this round by grepping every write path for
+  `Signal.meta` — blackboard signals are ephemeral, per-cycle, in-memory
+  only; nothing persists them. `pattern_scan_history` (the store the
+  scheduled job above writes to) is a *separate*, rule-based-only scan, not
+  the live engine's actual paired CNN-vs-rule signals. There is currently no
+  durable paired dataset for a real CNN-vs-rule ablation — only the
+  rule-based-only history `analyze_pattern_scan_outcomes.py` reads. Flagging
+  this here rather than building a script against data that doesn't exist.
+
+### 8.2 Validation rigor
+
+- **`scripts/validate_pattern_cnn_walkforward.py`** (new) — reuses this
+  repo's existing CPCV-equivalent tooling
+  (`ExperimentRunner.run_walk_forward` + `param_grid` over
+  `cnn_scoring_enabled: [False, True]` + `aggregate_walk_forward`'s
+  automatic PBO/DSR/PSR/verdict via `firm.eval.overfitting`) rather than
+  building a bespoke CPCV harness — mirrors `scripts
+  /run_walk_forward_pbo_audit.py`'s established pattern. Confirmed the
+  11-strategy roster/25-symbol universe match that script's exactly, so
+  reused verbatim.
+- **Real run launched** (2018-01-01 to 2025-12-31, 8 folds — genuine
+  multi-regime coverage, not a shortened window): a timing check found one
+  3-month/11-strategy/25-symbol backtest costs ~261s, and — because
+  `_compute_walk_forward_splits`' total compute is dominated by the fixed
+  date range rather than `n_splits` — the full 8-fold run is a multi-hour
+  job (~2.5–3.5h estimated from observed per-fold pace), launched detached
+  (`nohup`, survives the building session) rather than cut short.
+- **Real result (completed 2026-09-25 08:07, ran ~6h): verdict = `fail`,
+  recommendation = ROLLBACK.** Candidate selection per fold (train-window
+  Sharpe, `cnn_scoring_enabled=True` vs. `False`) picked `True` in only
+  3/8 folds (0, 1, 3) — `true_fraction=0.375`. Aggregate out-of-sample
+  stats across all 8 folds' winning candidate: `sharpe_ratio` mean **-0.563**
+  (std 0.908, range -2.18..+0.78), `alpha` mean **-0.017**, `total_return`
+  mean **-0.0068**. Overfitting stats: **PBO 0.446** (technically clears the
+  conventional <0.5 bar, barely), but **probabilistic Sharpe 0.216** (needs
+  >0.95 to say the Sharpe is statistically distinguishable from zero) and
+  **deflated Sharpe ≈2.8e-6** (i.e. ~0, after correcting for the two-candidate
+  selection search) — the combined verdict logic in `eval/overfitting.py`
+  requires clearing both PBO *and* DSR/PSR bars, and this doesn't. This is
+  a real, negative answer to the exact question `config/live.yaml`'s own
+  `cnn_scoring_enabled` comment flagged as unresolved ("One walk-forward
+  window, not this codebase's usual 3-window robustness check — revisit if
+  live results diverge"): the original single-window positive result
+  (Sharpe 0.415→0.645) did not replicate under a genuine 8-fold multi-regime
+  CPCV-style audit.
+- **`scripts/pattern_recognition_rollout_gate.py`'s combined verdict differs
+  from Task A's own standalone one, by design.** Task A's script prints its
+  own recommendation from the backtest verdict alone (ROLLBACK, above).
+  The staged gate additionally requires a live-sample-size floor (§8.2's
+  design) before *ever* acting on live P&L, but — this is a real gap
+  surfaced by actually running it, not a hypothetical — it also declines to
+  act on a *failing backtest by itself* while the live sample is thin: with
+  IBKR `:8000` at 0 days of `pattern_recognition` attribution history and
+  Alpaca `:8001` at 11 days (both `<20`), the gate returns **HOLD** on both
+  instances (`overall_recommendation: "HOLD (insufficient live sample,
+  backtest verdict=fail)"`), not ROLLBACK, per `evaluate_rollout_gate`'s
+  documented judgment call for a failing/non-passing backtest with an
+  as-yet-unmet sample gate. Full output: `/tmp/pattern_cnn_walkforward_audit
+  .json` (Task A), `/tmp/pattern_recognition_rollout_gate_result.json`
+  (this gate, re-run against the real audit file above).
+- **Decision (user, 2026-09-25): rolled back.** Presented both
+  recommendations (Task A's ROLLBACK vs. the staged gate's more
+  conservative HOLD-pending-live-data) to the user directly rather than
+  silently picking one — this is a real live-trading-behavior change, not
+  a code refactor. User chose to trust the backtest audit and roll back
+  now rather than wait ~9 more days for the live-sample floor. Executed:
+  `cnn_scoring_enabled: false` in both `config/live.yaml` and
+  `config/live_alpaca.yaml` (comments updated in place citing this section),
+  then hot-swapped into both running engines via `PUT /api/live/config`
+  (`strategy_params`, same mechanism as §7.5) — confirmed via `GET
+  /api/live/config` on each and `state: running`/unchanged `uptime_seconds`
+  on `GET /api/live/status`, i.e. no restart, no broker reconnect on either
+  instance. `pattern_recognition` itself stays enabled on both (rule-based
+  scoring only, its pre-CNN baseline) — only the CNN quality-scoring layer
+  is off now.
+- **`scripts/pattern_recognition_rollout_gate.py`** (new, 18 tests) — the
+  keep/hold/rollback staged-rollout gate: requires BOTH a passing backtest
+  verdict (from the file above) AND a pre-committed live sample-size floor
+  (≥20 trading days / ≥30 signals) before ever acting on live P&L, refusing
+  to flip either direction on a noisy small sample. Run for real against
+  both live instances: `:8000` (IBKR) has 0 days of `pattern_recognition`
+  attribution history; `:8001` (Alpaca) has 11 days (2026-09-10→09-24,
+  cumulative return −0.61%, rough Sharpe ≈ −1.25) — both correctly returned
+  **HOLD (insufficient live sample)** rather than reacting to that thin,
+  noisy 11-day number. The KEEP path was separately exercised end-to-end via
+  a synthetic 22-day/passing-backtest fixture override, confirming the gate
+  logic itself (not just its HOLD branch) is correct.
+
+### 8.3 Model ensembling & sizing
+
+- **`src/firm/patterns/ml/calibration.py`** (new) — two calibration
+  techniques, one per model family (different miscalibration failure modes
+  — boosted-tree probability compression vs. deep-net overconfidence):
+  temperature scaling (`fit_temperature`/`apply_temperature`, 1-parameter,
+  fit via bounded NLL minimization) for the CNN's pre-softmax logits, Platt/
+  sigmoid scaling (`fit_sigmoid_calibration`/`apply_sigmoid_calibration`, via
+  an unregularized 1-feature `LogisticRegression`) for XGBoost's raw
+  per-class probability. Plus `save_calibration`/`load_calibration` JSON
+  sidecar persistence (schema-agnostic, caller-decided file layout).
+  `firm.patterns.ml.inference.score_pattern_quality` gained an optional
+  `temperature: float = 1.0` param (no-op default, byte-identical for every
+  existing caller) so a fitted CNN calibration can actually be applied at
+  inference time.
+- **`src/firm/patterns/ml/xgb_inference.py`** (new) — live-path ONNX
+  inference for the already-trained XGBoost pattern-confirmation classifier,
+  mirroring `ml/inference.py`'s CNN wrapper exactly (same `is_available`/
+  fail-soft/warn-once/lazy-`lru_cache` shape). **Better outcome than
+  originally assumed possible:** `xgb_classifier.py`'s own ONNX path is
+  documented `.venv-ml`-only (no Python 3.14 `onnxruntime` wheel at write
+  time) — re-checked this round and a genuine `cp314` wheel now exists
+  (confirmed importable in the main venv), so this module runs in the main
+  venv, always-on, fully tested, no environment gating needed. Verified the
+  on-disk model's real ONNX graph shape (`input: [None, 47]`) against
+  `feature_engineering.build_features`'s dict-insertion order to pin down
+  the exact, previously-undocumented 47-feature column layout the trained
+  model expects (documented in this module's docstring — load-bearing for
+  anyone retraining the model, since a schema drift here would silently
+  produce meaningless scores with no self-detection possible).
+- **XGBoost wired into `pattern_recognition.py` as a fixed-weight blend +
+  agreement gate** (new `xgb_confirmation_enabled`/`xgb_blend_weight`
+  /`xgb_agreement_gate`/`xgb_agreement_gate_threshold`
+  /`xgb_agreement_gate_dampen` params, all off/no-op by default): for each
+  symbol's best match, `build_features()` feeds the already-trained ONNX
+  model, and its calibrated `P(target hit)` is blended with the
+  CNN-or-rule-based quality fraction (`blend_weight * p_target + (1 -
+  blend_weight) * base_quality`); when the two disagree by more than
+  `xgb_agreement_gate_threshold`, the blend is *dampened*
+  (`* xgb_agreement_gate_dampen`) rather than trusted outright — two
+  independently-trained models agreeing is materially stronger evidence
+  than either alone, so a sharp disagreement should reduce confidence, not
+  just average it away. `p_target` is also written to the new
+  `Signal.meta["calibrated_probability"]` key (only when the ensemble
+  actually scored that match) for `TraderAgent._kelly` to consume directly
+  (below) — this is the "meta-labeling" probability the Kelly formula wants,
+  not a re-derivation of it.
+- **PPO position sizer retirement**: no code changes (it was already
+  standalone/unwired — §7.4), but the research recommendation to *not*
+  invest further in it is recorded here rather than left as tacit
+  knowledge — extend the existing, already-live Kelly sizer (below) instead
+  of building a second, competing sizing mechanism with its own SB3 serving
+  dependency.
+- **`TraderAgent._kelly` extended** (`src/firm/agents/trader.py`) — new
+  optional `blackboard` param (`None` = byte-identical legacy behavior for
+  every existing caller/test) and a new `_signal_calibrated_edge` static
+  method: for each selected symbol, looks up that symbol's live signals via
+  `blackboard.get_signals_by_symbol` and, when one or more carry
+  `meta["calibrated_probability"]`, converts it to a Kelly-style edge
+  directly (simple-averaged across multiple agreeing strategies) instead of
+  estimating `p`/`b` from realized return history — a genuine meta-labeling
+  upgrade path, falling back to the original `_kelly_edge` history-based
+  estimate whenever no signal for that symbol carries the convention
+  (i.e. unchanged behavior for every strategy except `pattern_recognition`
+  with the XGBoost ensemble enabled).
+
+### 8.4 Detection quality
+
+- **`scorer.py`'s two new optional components** — `breakout_distance`
+  (0-10, ATR-normalized breakout-bar distance past the pattern's own
+  structural level, *at the confirmation bar's own contemporaneous ATR* —
+  deliberately distinct from the existing `follow_through`, which uses
+  *current* ATR and can reflect drift long after confirmation) and
+  `pre_breakout_compression` (0-5, credit for ATR(14) being compressed vs.
+  its trailing 20-bar average just before confirmation — compressed-
+  volatility breakouts are documented as more credible). Weights rebalanced
+  (30/15/20/10/10/10/5 = 100, from 35/20/25/10/10) so `min_score` thresholds
+  tuned against the old 5-component scale stay roughly comparable. Both are
+  driven by new *optional* kwargs (`close_at_confirm`/`level_at_confirm`
+  /`atr_series`/`confirm_index`) — omit all four and both components
+  contribute a documented, tested 0.0, never a crash.
+- **`confirmation.py`'s retest-hold-vs-fail modifier** (`retest_outcome`/
+  `retest_score_modifier`) — a coarse, OHLCV-only read of whether price held
+  or failed on coming back to test a just-broken level within a lookback
+  window (`"no_retest"` — no pullback at all — is the common, perfectly
+  fine ~50% case, not a failure). A small, bounded (`+1.0`/`-1.0`/`0.0`)
+  scoring modifier, deliberately never a hard gate (hard-requiring a retest
+  would forfeit the ~50% of setups that never retest with no clear benefit).
+- **New `confluence.py`** — weekly-timeframe trend confirmation
+  (`resample_to_weekly`/`weekly_trend_direction`/`confluence_modifier`).
+  `resample_to_weekly` *unconditionally* drops the trailing (possibly
+  still-forming) week — the single most important correctness property here
+  (a 2025 multi-timeframe study found ~0.20 ROC-AUC inflation from exactly
+  this kind of look-ahead leak) — so nothing downstream can ever see a
+  partially-formed week regardless of caller/as-of context. Same
+  small-bounded-modifier design as the retest modifier above, never an
+  independent signal (would double the effective bet count on the same
+  underlying move without separate validation).
+- **Both modifiers wired into `scanner.py`** (`retest_modifier_enabled`
+  /`retest_lookback_bars`/`retest_modifier_scale`,
+  `confluence_modifier_enabled`/`confluence_lookback_weeks`
+  /`confluence_modifier_scale` — all off/no-op by default) and
+  `pattern_recognition.py`'s matching strategy params. Each modifier's
+  scaled value is added to `PatternMatch.quality_score` and the result
+  re-clipped to `[0, 100]`; `score_breakdown` gains `retest_outcome`
+  /`retest_modifier` and/or `weekly_trend`/`confluence_modifier` keys only
+  when the corresponding modifier actually ran (never present when off —
+  verified by test, not just by construction).
+- **Harmonic patterns (Gartley/Butterfly/Bat/Crab)**: explicitly skipped,
+  as originally planned — Fibonacci-ratio-based patterns are a different
+  detection paradigm (ratio-of-swing matching, not zigzag-pivot geometry
+  fitting) that would need its own dedicated rule module, not a small
+  addition to this round.
+
+### 8.5 Integration pass (this agent, not a parallel subagent)
+
+`scanner.py`/`pattern_recognition.py` were deliberately reserved from every
+parallel subagent above specifically so one agent could wire everything
+together without merge conflicts on a shared (non-worktree) checkout. This
+pass:
+
+- Reordered `scan_symbol` to compute `atr14` *before* `zigzag_pivots` (needed
+  either way once ATR-scaled thresholds exist) and threaded the full ATR
+  series + `close_at_confirm`/`level_at_confirm`/`confirm_index` into
+  `_score_and_finalize`'s `score_pattern` call — previously these four new
+  optional args were simply never passed, so `breakout_distance`/
+  `pre_breakout_compression` silently contributed 0.0 for every real match
+  (this is what caused the regressions below).
+- Wired `zigzag_atr_mult`, the retest modifier, and the confluence modifier
+  (needs a separate `dates` array — `pattern_recognition.py`'s adjusted
+  OHLCV frame has no date column of its own, so `scan_symbol` gained a
+  `dates` param threaded from the per-symbol `sym_df["date"]`) all the way
+  from `PatternRecognitionStrategy.default_params` through `scan_symbol`.
+- Wired the XGBoost ensemble + both calibration paths into
+  `pattern_recognition.py`'s `generate()` — feature-vector construction via
+  `build_features`, calibration sidecar loading, the blend/agreement-gate
+  formula, and `meta["calibrated_probability"]` population (§8.3).
+- **Fixed the two flagged pre-existing test regressions** (both correctly
+  diagnosed by the parallel subagents as caused by `scanner.py` not yet
+  passing the new scorer args, confirmed via `git stash`, and deliberately
+  left for this pass): `test_patterns.py`'s clean-setup test now also
+  exercises the two new components directly (was silently capped at an
+  effective max of 85 — see scorer.py's own documented backward-compat
+  contract; added a companion test pinning that 85-cap behavior explicitly)
+  and `test_patterns_api.py`'s two hardcoded match-count/score assertions
+  were re-verified against the real, now-fully-wired `scan_symbol` output
+  and updated in place (8 matches not 7; MSFT's falling_wedge ≈97.4 not
+  ≈98.8 — both *higher-fidelity* scores now that the two new components are
+  actually fed real data, not a regression in the scoring logic itself).
+- Added 6 new integration tests exercising the actual wiring end-to-end
+  (not just each module in isolation, already covered by the parallel
+  subagents' own unit tests): `zigzag_atr_mult` genuinely changes pivot
+  detection (an absurdly large multiple confirms zero pivots), the retest/
+  confluence modifiers apply their scaled adjustment and populate
+  `score_breakdown` only when enabled, confluence degrades gracefully with
+  no `dates` supplied, and the XGBoost ensemble's blend+gate formula and
+  `calibrated_probability`/`scoring_mode` population match hand-computed
+  expected values (both when enabled and confirming it's a true no-op when
+  off).
+- Full patterns/trader/tooling suite after integration: `pytest tests
+  /test_patterns.py tests/test_patterns_api.py tests/test_pattern_ml.py
+  tests/test_extrema.py tests/test_scorer.py tests/test_confirmation.py
+  tests/test_confluence.py tests/test_calibration.py tests
+  /test_xgb_inference.py tests/test_trader.py tests/test_trader_kelly.py
+  tests/test_pattern_recognition_rollout_gate.py tests
+  /test_analyze_pattern_scan_outcomes.py -q` → **289 passed, 9 skipped**
+  (skips are the same `.venv-ml`-only-gated tests as every prior phase).
+
+**Not yet done, tracked explicitly rather than silently dropped:** the
+§8.2 walk-forward audit is still running as of this writing (final PBO/DSR
+/PSR/verdict numbers pending); none of this round's new knobs
+(`zigzag_atr_mult`, `retest_modifier_enabled`, `confluence_modifier_enabled`,
+`xgb_confirmation_enabled`) have been flipped on in `config/live.yaml`
+/`config/live_alpaca.yaml` yet — each needs the same walk-forward
+re-validation treatment `cnn_scoring_enabled` already got before that
+happens.

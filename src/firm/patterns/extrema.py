@@ -17,9 +17,13 @@ for that use case.
 
 from __future__ import annotations
 
-from typing import Literal, NamedTuple
+import logging
+import math
+from typing import Callable, Literal, NamedTuple
 
 import numpy as np
+
+log = logging.getLogger(__name__)
 
 PivotKind = Literal["peak", "trough"]
 
@@ -30,7 +34,13 @@ class Pivot(NamedTuple):
     kind: PivotKind
 
 
-def zigzag_pivots(high: np.ndarray, low: np.ndarray, pct: float = 0.03) -> list[Pivot]:
+def zigzag_pivots(
+    high: np.ndarray,
+    low: np.ndarray,
+    pct: float = 0.03,
+    *,
+    threshold_fn: Callable[[int], float] | None = None,
+) -> list[Pivot]:
     """Confirmed alternating peak/trough pivots, oldest first.
 
     Only *confirmed* reversals are returned — the still-forming swing at the
@@ -38,10 +48,42 @@ def zigzag_pivots(high: np.ndarray, low: np.ndarray, pct: float = 0.03) -> list[
     every pivot returned is a stable anchor for pattern geometry. ``pct`` is
     the minimum retracement (as a fraction of the swing extreme) required to
     confirm a reversal; smaller values yield more, noisier pivots.
+
+    ``threshold_fn``, if given, is called as ``threshold_fn(i)`` at each bar
+    ``i`` to get that bar's reversal threshold instead of the fixed ``pct`` —
+    e.g. an ATR-scaled fraction such as ``2 * atr[i] / close[i]``. A single
+    fixed percentage is a poor fit across a multi-symbol universe spanning
+    different volatility regimes: it over-fires (too many noisy pivots) on
+    low-volatility names and under-fires (misses real swings) on
+    high-volatility ones, whereas a per-bar ATR-scaled threshold tracks each
+    symbol's (and each regime's) own volatility. This module deliberately
+    stays dependency-free (no ATR import here, numpy-only) — the caller
+    computes the per-bar threshold and supplies it via this closure, keeping
+    ``extrema.py`` free of any indicator-specific coupling. If
+    ``threshold_fn(i)`` returns ``None``, ``0``, a negative number, or NaN
+    for a given bar, that bar silently falls back to the fixed ``pct``
+    (never let one bad per-bar value break the whole scan); any exception
+    raised by ``threshold_fn`` itself is a caller bug and is left to
+    propagate rather than being swallowed, matching the rest of this
+    module's fail-loud (not fail-soft) style. When ``threshold_fn`` is
+    ``None`` (the default), behavior is unchanged from the fixed-``pct``
+    algorithm.
     """
     n = len(high)
     if n < 3:
         return []
+
+    def _threshold(i: int) -> float:
+        if threshold_fn is None:
+            return pct
+        value = threshold_fn(i)
+        if value is None or not isinstance(value, (int, float)) or math.isnan(value) or value <= 0:
+            log.debug(
+                "zigzag_pivots: threshold_fn(%d) returned invalid value %r, falling back to pct=%s",
+                i, value, pct,
+            )
+            return pct
+        return float(value)
 
     pivots: list[Pivot] = []
     direction = 0  # 0 = undetermined, 1 = tracking a swing high, -1 = tracking a swing low
@@ -63,12 +105,12 @@ def zigzag_pivots(high: np.ndarray, low: np.ndarray, pct: float = 0.03) -> list[
             # A confirmed downswing means the running high was a peak; a
             # confirmed upswing means the running low was a trough — note
             # each check compares against the *opposite* running extreme.
-            if low[i] <= max_price * (1 - pct):
+            if low[i] <= max_price * (1 - _threshold(i)):
                 if max_idx != 0:
                     pivots.append(Pivot(max_idx, max_price, "peak"))
                 direction = -1
                 extreme_idx, extreme_price = i, float(low[i])
-            elif high[i] >= min_price * (1 + pct):
+            elif high[i] >= min_price * (1 + _threshold(i)):
                 if min_idx != 0:
                     pivots.append(Pivot(min_idx, min_price, "trough"))
                 direction = 1
@@ -78,14 +120,14 @@ def zigzag_pivots(high: np.ndarray, low: np.ndarray, pct: float = 0.03) -> list[
         if direction == 1:
             if high[i] > extreme_price:
                 extreme_idx, extreme_price = i, float(high[i])
-            elif low[i] <= extreme_price * (1 - pct):
+            elif low[i] <= extreme_price * (1 - _threshold(i)):
                 pivots.append(Pivot(extreme_idx, extreme_price, "peak"))
                 direction = -1
                 extreme_idx, extreme_price = i, float(low[i])
         else:
             if low[i] < extreme_price:
                 extreme_idx, extreme_price = i, float(low[i])
-            elif high[i] >= extreme_price * (1 + pct):
+            elif high[i] >= extreme_price * (1 + _threshold(i)):
                 pivots.append(Pivot(extreme_idx, extreme_price, "trough"))
                 direction = 1
                 extreme_idx, extreme_price = i, float(high[i])

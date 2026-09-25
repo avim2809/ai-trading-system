@@ -120,7 +120,13 @@ class TestTriggerValidation:
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["scanned"] == 5  # StepRequest-style default symbols
-        assert data["matches"] == 7  # verified directly against scan_symbol
+        # 8, not 7 -- re-verified directly against scan_symbol after the
+        # 2026-09 breakout_distance/pre_breakout_compression scorer
+        # components started actually receiving real (nonzero) inputs from
+        # scanner.py (previously always zero -- see scorer.py's module
+        # docstring), nudging one match that used to sit just under the
+        # 60.0 min_score floor to just clear it.
+        assert data["matches"] == 8
 
 
 # ------------------------------------------------------------------
@@ -177,13 +183,15 @@ class TestTriggerScanRoundTrip:
         scores = [m["quality_score"] for m in matches]
         assert scores == sorted(scores, reverse=True)
 
-        # MSFT's falling_wedge (two confirmed windows, ~98.8 and ~98.4) is
-        # the single highest-scoring match in this fixture — confirms real
-        # per-symbol scan_symbol output actually reached the cache, not just
-        # a placeholder.
+        # MSFT's falling_wedge (two confirmed windows, ~97.4 and ~97.1 -- was
+        # ~98.8/~98.4 before the 2026-09 breakout_distance/
+        # pre_breakout_compression scorer components started receiving real
+        # inputs from scanner.py) is the single highest-scoring match in
+        # this fixture — confirms real per-symbol scan_symbol output
+        # actually reached the cache, not just a placeholder.
         assert matches[0]["symbol"] == "MSFT"
         assert matches[0]["pattern"] == "falling_wedge"
-        assert matches[0]["quality_score"] == pytest.approx(98.8, abs=0.5)
+        assert matches[0]["quality_score"] == pytest.approx(97.4, abs=0.5)
 
     def test_second_trigger_replaces_rather_than_appends(self, client):
         _trigger(client)

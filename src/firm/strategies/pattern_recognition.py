@@ -73,7 +73,10 @@ import numpy as np
 import pandas as pd
 
 from firm.contracts.models import Signal
+from firm.patterns.ml import calibration as ml_calibration
 from firm.patterns.ml import inference as cnn_inference
+from firm.patterns.ml import xgb_inference
+from firm.patterns.ml.feature_engineering import build_features
 from firm.patterns.scanner import scan_symbol
 from firm.strategies.base import BaseStrategy, PitView
 from firm.strategies.registry import register
@@ -130,6 +133,59 @@ class PatternRecognitionStrategy(BaseStrategy):
         # run (scripts/train_cnn_validator.py --data-source cache) is
         # re-validated the same way and clearly wins.
         "cnn_scoring_enabled": False,
+        # 2026-09 pattern-recognition improvement round (see
+        # docs/pattern_recognition_plan.md's newest phase). Every knob below
+        # is OFF/no-op by default -- same convention as cnn_scoring_enabled
+        # above: none of these has yet had its own dedicated walk-forward
+        # re-validation (scripts/validate_pattern_cnn_walkforward.py is the
+        # harness that validates cnn_scoring_enabled specifically; the same
+        # pattern should be repeated per-knob before flipping any of these
+        # true in config/live.yaml).
+        #
+        # ATR-scaled ZigZag threshold (quick-win): None = unchanged fixed
+        # `zigzag_pct`; a positive float replaces it with a per-bar
+        # ATR-scaled threshold (see firm.patterns.extrema.zigzag_pivots's
+        # `threshold_fn` docstring) that adapts to each symbol's/regime's
+        # own volatility instead of one fixed percentage universe-wide.
+        "zigzag_atr_mult": None,
+        # Retest-hold-vs-fail and weekly-timeframe-confluence quality
+        # modifiers (detection-quality): each is a small, bounded
+        # (+-*_modifier_scale points, added to the 0-100 quality_score and
+        # re-clipped) adjustment -- never a hard gate, never an independent
+        # signal. See firm.patterns.confirmation.retest_score_modifier /
+        # firm.patterns.confluence.confluence_modifier.
+        "retest_modifier_enabled": False,
+        "retest_lookback_bars": 10,
+        "retest_modifier_scale": 3.0,
+        "confluence_modifier_enabled": False,
+        "confluence_lookback_weeks": 8,
+        "confluence_modifier_scale": 3.0,
+        # XGBoost pattern-confirmation ensemble (model-ensemble-sizing):
+        # when enabled (and the ONNX model/onnxruntime are available --
+        # firm.patterns.ml.xgb_inference.is_available()), blends the
+        # XGBoost classifier's calibrated P(target hit) for this specific
+        # match with the CNN-or-rule-based quality fraction using a fixed
+        # weight, then *agreement-gates* the blend: when the two scores
+        # disagree by more than `xgb_agreement_gate_threshold`, the blended
+        # quality is dampened by `xgb_agreement_gate_dampen` rather than
+        # trusted outright -- two independently-trained models agreeing is
+        # much stronger evidence than either alone, so a sharp disagreement
+        # should reduce confidence, not just average it away. See
+        # generate()'s inline comments for the exact blend/gate formula.
+        "xgb_confirmation_enabled": False,
+        "xgb_blend_weight": 0.5,
+        "xgb_agreement_gate": True,
+        "xgb_agreement_gate_threshold": 0.35,
+        "xgb_agreement_gate_dampen": 0.7,
+        # Optional calibration sidecars (paths previously written by
+        # firm.patterns.ml.calibration.save_calibration -- a JSON dict with
+        # a "type" discriminator: "temperature" for the CNN's pre-softmax
+        # logits, "sigmoid" for XGBoost's raw target-hit probability). None
+        # (default) means "proceed uncalibrated" for that model -- see
+        # firm.patterns.ml.calibration's module docstring for why each model
+        # family needs a different calibration technique.
+        "cnn_calibration_path": None,
+        "xgb_calibration_path": None,
     }
 
     def __init__(self, params: dict | None = None):
@@ -147,6 +203,21 @@ class PatternRecognitionStrategy(BaseStrategy):
         enabled_patterns = p["enabled_patterns"]
         enabled_set = set(enabled_patterns) if enabled_patterns else None
 
+        zigzag_atr_mult = p["zigzag_atr_mult"]
+        zigzag_atr_mult = float(zigzag_atr_mult) if zigzag_atr_mult is not None else None
+        retest_enabled = bool(p["retest_modifier_enabled"])
+        retest_lookback_bars = int(p["retest_lookback_bars"])
+        retest_modifier_scale = float(p["retest_modifier_scale"])
+        confluence_enabled = bool(p["confluence_modifier_enabled"])
+        confluence_lookback_weeks = int(p["confluence_lookback_weeks"])
+        confluence_modifier_scale = float(p["confluence_modifier_scale"])
+
+        xgb_enabled = bool(p["xgb_confirmation_enabled"])
+        xgb_blend_weight = float(p["xgb_blend_weight"])
+        xgb_agreement_gate = bool(p["xgb_agreement_gate"])
+        xgb_gate_threshold = float(p["xgb_agreement_gate_threshold"])
+        xgb_gate_dampen = float(p["xgb_agreement_gate_dampen"])
+
         universe = pit_view.universe
         if not universe:
             return []
@@ -157,16 +228,42 @@ class PatternRecognitionStrategy(BaseStrategy):
 
         # One availability check per generate() call (the underlying session
         # load is itself a cached lazy singleton -- see
-        # firm.patterns.ml.inference._load_session) so the active scoring
-        # mode is logged clearly without spamming per-symbol.
+        # firm.patterns.ml.inference._load_session /
+        # firm.patterns.ml.xgb_inference._load_session) so the active
+        # scoring mode is logged clearly without spamming per-symbol.
         cnn_available = bool(p["cnn_scoring_enabled"]) and cnn_inference.is_available()
+        xgb_available = xgb_enabled and xgb_inference.is_available()
+
+        cnn_calibration = None
+        cnn_temperature = 1.0
+        if p["cnn_calibration_path"]:
+            cnn_calibration = ml_calibration.load_calibration(p["cnn_calibration_path"])
+            if cnn_calibration and cnn_calibration.get("type") == "temperature":
+                cnn_temperature = float(cnn_calibration.get("temperature", 1.0))
+            elif cnn_calibration:
+                log.debug(
+                    "pattern_recognition: cnn_calibration_path=%s has type=%r, not "
+                    "'temperature' -- ignoring", p["cnn_calibration_path"], cnn_calibration.get("type"),
+                )
+
+        xgb_calibration = None
+        if p["xgb_calibration_path"]:
+            xgb_calibration = ml_calibration.load_calibration(p["xgb_calibration_path"])
+
         log.info(
-            "pattern_recognition: quality scoring mode=%s",
+            "pattern_recognition: quality scoring mode=%s, xgb_confirmation=%s, "
+            "zigzag=%s, retest_modifier=%s, confluence_modifier=%s",
             "cnn" if cnn_available else "rule_based",
+            "on" if xgb_available else "off",
+            f"atr(mult={zigzag_atr_mult})" if zigzag_atr_mult else f"fixed(pct={zigzag_pct})",
+            "on" if retest_enabled else "off",
+            "on" if confluence_enabled else "off",
         )
 
         signals: list[Signal] = []
         cnn_scored = 0
+        xgb_scored = 0
+        rule_based_only = 0
         for symbol, sym_df in prices_df.groupby("symbol"):
             sym_df = sym_df.sort_values("date")
             try:
@@ -175,9 +272,17 @@ class PatternRecognitionStrategy(BaseStrategy):
                     ohlcv,
                     enabled_patterns=enabled_set,
                     zigzag_pct=zigzag_pct,
+                    zigzag_atr_mult=zigzag_atr_mult,
                     min_score=min_score,
                     confirm_lookback_bars=confirm_lookback_bars,
                     stop_atr_floor=stop_atr_floor,
+                    retest_modifier_enabled=retest_enabled,
+                    retest_lookback_bars=retest_lookback_bars,
+                    retest_modifier_scale=retest_modifier_scale,
+                    confluence_modifier_enabled=confluence_enabled,
+                    confluence_lookback_weeks=confluence_lookback_weeks,
+                    confluence_modifier_scale=confluence_modifier_scale,
+                    dates=sym_df["date"] if confluence_enabled else None,
                 )
             except Exception:
                 log.debug("pattern scan failed for %s", symbol, exc_info=True)
@@ -195,14 +300,55 @@ class PatternRecognitionStrategy(BaseStrategy):
             if cnn_available:
                 cnn_quality = cnn_inference.score_pattern_quality(
                     ohlcv["close"].to_numpy(dtype=float), best.confirm_index,
+                    temperature=cnn_temperature,
                 )
             if cnn_quality is not None:
-                quality_fraction = cnn_quality
+                base_quality_fraction = cnn_quality
                 scoring_mode = "cnn"
                 cnn_scored += 1
             else:
-                quality_fraction = rule_based_fraction
+                base_quality_fraction = rule_based_fraction
                 scoring_mode = "rule_based"
+
+            # XGBoost pattern-confirmation ensemble (model-ensemble-sizing,
+            # 2026-09): a fixed-weight blend of the XGBoost classifier's
+            # calibrated P(target hit) for *this* match with the
+            # CNN-or-rule-based quality fraction above, agreement-gated --
+            # see default_params' docstring comments for the rationale.
+            calibrated_probability = None
+            xgb_p_target = None
+            if xgb_available:
+                features = build_features(best, ohlcv)
+                xgb_result = xgb_inference.score_pattern_confirmation(
+                    np.fromiter(features.values(), dtype=np.float32, count=len(features)),
+                    apply_calibration=xgb_calibration,
+                )
+                if xgb_result is not None:
+                    _, _, xgb_p_target = xgb_result
+                    calibrated_probability = xgb_p_target
+
+            if xgb_p_target is not None:
+                disagreement = abs(xgb_p_target - base_quality_fraction)
+                blended = (
+                    xgb_blend_weight * xgb_p_target
+                    + (1.0 - xgb_blend_weight) * base_quality_fraction
+                )
+                if xgb_agreement_gate and disagreement > xgb_gate_threshold:
+                    log.debug(
+                        "pattern_recognition: %s %s XGBoost/%s disagreement=%.3f > "
+                        "threshold=%.3f -- dampening blended quality %.3f by %.2fx",
+                        symbol, best.pattern, scoring_mode, disagreement,
+                        xgb_gate_threshold, blended, xgb_gate_dampen,
+                    )
+                    blended *= xgb_gate_dampen
+                quality_fraction = float(np.clip(blended, 0.0, 1.0))
+                scoring_mode = f"{scoring_mode}+xgb"
+                xgb_scored += 1
+            else:
+                quality_fraction = base_quality_fraction
+                if cnn_quality is None:
+                    rule_based_only += 1
+
             signals.append(
                 Signal(
                     symbol=str(symbol),
@@ -221,6 +367,12 @@ class PatternRecognitionStrategy(BaseStrategy):
                         "quality_score": best.quality_score,
                         "rule_based_quality_fraction": rule_based_fraction,
                         "cnn_quality_fraction": cnn_quality,
+                        "xgb_p_target": xgb_p_target,
+                        # Meta-labeling convention consumed by
+                        # TraderAgent._signal_calibrated_edge -- only
+                        # populated when the XGBoost ensemble actually
+                        # scored this match (never a placeholder value).
+                        "calibrated_probability": calibrated_probability,
                         "scoring_mode": scoring_mode,
                         "score_breakdown": best.score_breakdown,
                         "volume_ratio": best.volume_ratio,
@@ -232,7 +384,8 @@ class PatternRecognitionStrategy(BaseStrategy):
             )
 
         log.info(
-            "pattern_recognition: %d symbols scanned, %d signals (%d CNN-scored, %d rule-based)",
-            len(universe), len(signals), cnn_scored, len(signals) - cnn_scored,
+            "pattern_recognition: %d symbols scanned, %d signals (%d CNN-scored, "
+            "%d XGB-ensembled, %d rule-based-only)",
+            len(universe), len(signals), cnn_scored, xgb_scored, rule_based_only,
         )
         return signals

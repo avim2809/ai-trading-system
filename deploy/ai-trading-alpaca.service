@@ -20,6 +20,19 @@ Environment=FIRM_DATA_DIR=data_alpaca
 # since 2026-09-08) so this stays a broker-only comparison, not a confounded
 # one. See docs/llm_ab_test_runbook.md.
 Environment=FIRM_LLM_CONFIG=config/llm_ab_llm.yaml
+# Daily 16:30 ET rule-based-only chart-pattern scan (docs/
+# pattern_recognition_plan.md's 2026-09 improvement round, "quick-wins").
+# Deliberately enabled on this instance only, not ai-trading.service's
+# shared .env, so it's a single-instance trial rather than doubling load on
+# both -- see firm.live.pattern_scan_job's module docstring: this is a
+# completely independent BackgroundScheduler that never touches
+# TradingScheduler/the live engine and reads from the cached price store
+# (data_source="cache"), so it's inert with respect to live trading by
+# construction. Its purpose here is to start accumulating
+# pattern_scan_history rows (rule-based quality_score + eventual
+# target/stop/timeout outcome) that scripts/analyze_pattern_scan_outcomes.py
+# can mine once enough history has built up.
+Environment=FIRM_ENABLE_PATTERN_SCAN=1
 # No IB Gateway dependency — Alpaca's REST API needs no local gateway process.
 ExecStart=/local/store/git/ai-trading-system/.venv/bin/firm-api
 Restart=always

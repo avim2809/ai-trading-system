@@ -18,11 +18,19 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 
 from firm.patterns._indicators import atr14, volume_ratio
+from firm.patterns.confirmation import retest_outcome, retest_score_modifier
+from firm.patterns.confluence import (
+    WeeklyTrend,
+    confluence_modifier,
+    resample_to_weekly,
+    weekly_trend_direction,
+)
 from firm.patterns.extrema import zigzag_pivots
 from firm.patterns.match import PatternMatch
 from firm.patterns.rules.continuation import detect_flag_pennant
@@ -58,12 +66,42 @@ def scan_symbol(
     *,
     enabled_patterns: set[str] | None = None,
     zigzag_pct: float = 0.03,
+    zigzag_atr_mult: float | None = None,
     min_score: float = 60.0,
     confirm_lookback_bars: int = 3,
     stop_atr_floor: float = 1.5,
+    retest_modifier_enabled: bool = False,
+    retest_lookback_bars: int = 10,
+    retest_modifier_scale: float = 3.0,
+    confluence_modifier_enabled: bool = False,
+    confluence_lookback_weeks: int = 8,
+    confluence_modifier_scale: float = 3.0,
+    dates: pd.Series | np.ndarray | None = None,
 ) -> list[PatternMatch]:
     """Scan one symbol's OHLCV window (ascending by date, columns high/low/
     close/volume) for confirmed, quality-scored patterns.
+
+    All new (2026-09) keyword args default to the original fixed-``pct``,
+    modifier-free behavior -- every existing caller (including every test
+    that predates this change) is unaffected unless it explicitly opts in.
+
+    ``zigzag_atr_mult``: when set to a positive float, replaces the fixed
+    ``zigzag_pct`` reversal threshold with a per-bar ATR-scaled one
+    (``zigzag_atr_mult * atr[i] / close[i]``) via
+    :func:`firm.patterns.extrema.zigzag_pivots`'s ``threshold_fn`` hook --
+    see that function's docstring for why a single fixed percentage is a
+    poor fit across a multi-symbol, multi-regime universe.
+
+    ``retest_modifier_enabled``/``confluence_modifier_enabled``: fold
+    :func:`firm.patterns.confirmation.retest_score_modifier` /
+    :func:`firm.patterns.confluence.confluence_modifier` into each match's
+    ``quality_score`` as a small, bounded (``+-retest_modifier_scale`` /
+    ``+-confluence_modifier_scale``) additive adjustment, clipped back into
+    ``[0, 100]`` afterward. ``dates`` (parallel to ``df``'s rows) is required
+    for the confluence modifier -- it's not derivable from ``df`` alone
+    (:mod:`firm.strategies.pattern_recognition`'s adjusted OHLCV frame has no
+    date column of its own) -- and is silently ignored (logged at debug) when
+    ``confluence_modifier_enabled`` is False, so passing it is always safe.
     """
     if len(df) < 20:
         return []
@@ -72,9 +110,32 @@ def scan_symbol(
     close = df["close"].to_numpy(dtype=float)
     volume = df["volume"].to_numpy(dtype=float)
 
-    pivots = zigzag_pivots(high, low, pct=zigzag_pct)
     atr = atr14(high, low, close)
     current_atr = float(atr[-1]) if len(atr) and not np.isnan(atr[-1]) else None
+
+    threshold_fn = None
+    if zigzag_atr_mult is not None and zigzag_atr_mult > 0:
+        def threshold_fn(i: int, _atr: np.ndarray = atr, _close: np.ndarray = close, _mult: float = zigzag_atr_mult) -> float | None:
+            if i >= len(_atr):
+                return None
+            a, c = _atr[i], _close[i]
+            if a != a or c <= 0:  # NaN guard
+                return None
+            return _mult * a / c
+        log.debug("scan_symbol: using ATR-scaled zigzag threshold (mult=%.2f)", zigzag_atr_mult)
+
+    pivots = zigzag_pivots(high, low, pct=zigzag_pct, threshold_fn=threshold_fn)
+
+    weekly_trend: WeeklyTrend | None = None
+    if confluence_modifier_enabled:
+        if dates is None:
+            log.debug(
+                "scan_symbol: confluence_modifier_enabled but no `dates` supplied -- "
+                "skipping weekly confluence for this symbol"
+            )
+        else:
+            weekly_df = resample_to_weekly(dates, high, low, close, volume)
+            weekly_trend = weekly_trend_direction(weekly_df, lookback_weeks=confluence_lookback_weeks)
 
     matches: list[PatternMatch] = []
     for detector in _ALL_DETECTORS:
@@ -89,7 +150,14 @@ def scan_symbol(
         for candidate in candidates:
             if enabled_patterns is not None and candidate.pattern not in enabled_patterns:
                 continue
-            scored = _score_and_finalize(candidate, close, volume, current_atr, stop_atr_floor)
+            scored = _score_and_finalize(
+                candidate, close, low, high, volume, atr, current_atr, stop_atr_floor,
+                retest_modifier_enabled=retest_modifier_enabled,
+                retest_lookback_bars=retest_lookback_bars,
+                retest_modifier_scale=retest_modifier_scale,
+                weekly_trend=weekly_trend,
+                confluence_modifier_scale=confluence_modifier_scale,
+            )
             if scored.quality_score >= min_score:
                 matches.append(scored)
 
@@ -100,9 +168,18 @@ def scan_symbol(
 def _score_and_finalize(
     candidate: PatternMatch,
     close: np.ndarray,
+    low: np.ndarray,
+    high: np.ndarray,
     volume: np.ndarray,
+    atr_series: np.ndarray,
     current_atr: float | None,
     stop_atr_floor: float,
+    *,
+    retest_modifier_enabled: bool = False,
+    retest_lookback_bars: int = 10,
+    retest_modifier_scale: float = 3.0,
+    weekly_trend: WeeklyTrend | None = None,
+    confluence_modifier_scale: float = 3.0,
 ) -> PatternMatch:
     vr = volume_ratio(volume, candidate.confirm_index)
     duration = candidate.confirm_index - candidate.pivots[0].index
@@ -119,7 +196,50 @@ def _score_and_finalize(
         volume_ratio=vr,
         duration_bars=duration,
         follow_through_atr=follow_through_atr,
+        # 2026-09: feeds scorer.py's two newest components
+        # (breakout_distance/pre_breakout_compression) -- `entry` doubles as
+        # `level_at_confirm` since on this dataclass it already *is* the
+        # breakout/confirmation level (see scorer.py's module docstring).
+        close_at_confirm=close_at_confirm,
+        level_at_confirm=candidate.entry,
+        atr_series=atr_series,
+        confirm_index=candidate.confirm_index,
     )
+
+    quality_score = score.total
+    breakdown = score.as_dict()
+
+    # Retest-hold-vs-fail and weekly-confluence modifiers (2026-09): small,
+    # bounded additive adjustments, off unless the caller opts in -- see
+    # confirmation.py/confluence.py's module docstrings for why both are
+    # scoring modifiers rather than hard gates or independent signals.
+    if retest_modifier_enabled:
+        direction: Literal["above", "below"] = "above" if candidate.direction == "long" else "below"
+        outcome = retest_outcome(
+            close, low, high, candidate.entry, direction, candidate.confirm_index,
+            lookback_bars=retest_lookback_bars,
+        )
+        modifier = retest_score_modifier(outcome) * retest_modifier_scale
+        quality_score += modifier
+        breakdown["retest_outcome"] = outcome
+        breakdown["retest_modifier"] = modifier
+        log.debug(
+            "scan_symbol: pattern=%s retest_outcome=%s modifier=%+.2f",
+            candidate.pattern, outcome, modifier,
+        )
+
+    if weekly_trend is not None:
+        modifier = confluence_modifier(candidate.direction, weekly_trend) * confluence_modifier_scale
+        quality_score += modifier
+        breakdown["weekly_trend"] = weekly_trend
+        breakdown["confluence_modifier"] = modifier
+        log.debug(
+            "scan_symbol: pattern=%s weekly_trend=%s modifier=%+.2f",
+            candidate.pattern, weekly_trend, modifier,
+        )
+
+    quality_score = float(np.clip(quality_score, 0.0, 100.0))
+    breakdown["total"] = quality_score
 
     # Floor the structural stop at stop_atr_floor * ATR so a tightly-fit
     # pattern (e.g. a shallow rectangle) never implies a noise-level stop.
@@ -142,6 +262,6 @@ def _score_and_finalize(
         duration_bars=duration,
         follow_through_atr=follow_through_atr,
         risk_reward=risk_reward,
-        quality_score=score.total,
-        score_breakdown=score.as_dict(),
+        quality_score=quality_score,
+        score_breakdown=breakdown,
     )

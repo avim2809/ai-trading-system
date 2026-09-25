@@ -315,6 +315,36 @@ def test_scan_symbol_never_raises_on_degenerate_input():
 # ---------------------------------------------------------------------------
 
 def test_score_pattern_rewards_clean_confirmed_setups():
+    # Also exercises the two 2026-09 optional components (breakout_distance,
+    # pre_breakout_compression — see scorer.py's module docstring): a
+    # "clean confirmed setup" now means clean on all seven, not just the
+    # original five, so this fixture is deliberately clean on those too --
+    # bar 24 (confirm_index - 1) is compressed vs. its trailing 20-bar
+    # average (0.5 vs. a ~0.975 rolling mean -> full pre_breakout_compression
+    # credit), and bar 25 (confirm_index)'s ATR of 5.0 makes the 5-point
+    # close/level gap exactly 1.0x ATR -> full breakout_distance credit.
+    atr_series = np.full(30, 1.0)
+    atr_series[24] = 0.5
+    atr_series[25] = 5.0
+    score = score_pattern(
+        geometry_tolerance_used=1.0,
+        fit_quality=1.0,
+        volume_ratio=2.0,
+        duration_bars=40,
+        follow_through_atr=3.0,
+        close_at_confirm=105.0,
+        level_at_confirm=100.0,
+        atr_series=atr_series,
+        confirm_index=25,
+    )
+    assert score.total == pytest.approx(100.0, abs=0.01)
+
+
+def test_score_pattern_without_new_optional_context_caps_at_85():
+    # Documented backward-compat contract (scorer.py module docstring): a
+    # caller that doesn't supply close_at_confirm/level_at_confirm/
+    # atr_series/confirm_index gets a zero contribution from both new
+    # components, not a crash -- effective max of 85, not 100.
     score = score_pattern(
         geometry_tolerance_used=1.0,
         fit_quality=1.0,
@@ -322,7 +352,9 @@ def test_score_pattern_rewards_clean_confirmed_setups():
         duration_bars=40,
         follow_through_atr=3.0,
     )
-    assert score.total == pytest.approx(100.0, abs=0.01)
+    assert score.total == pytest.approx(85.0, abs=0.01)
+    assert score.breakout_distance == 0.0
+    assert score.pre_breakout_compression == 0.0
 
 
 def test_score_pattern_penalizes_weak_setups():
@@ -377,6 +409,92 @@ def test_scan_symbol_filters_by_min_score_and_sorts_best_first():
 
     matches_strict = scan_symbol(df, min_score=200.0, zigzag_pct=0.03)  # impossible threshold
     assert matches_strict == []
+
+
+# ---------------------------------------------------------------------------
+# 2026-09 scanner.py integration: ATR-scaled zigzag threshold, retest and
+# weekly-confluence quality modifiers. All three default off (see
+# scan_symbol's own docstring) -- these tests exercise the *wiring*
+# (scan_symbol correctly reaches each new module and applies its result),
+# not the underlying business logic itself (already covered in isolation by
+# test_extrema.py/test_confirmation.py/test_confluence.py).
+# ---------------------------------------------------------------------------
+
+_DOUBLE_TOP_ANCHORS = [(0, 90.0), (10, 120.0), (20, 100.0), (30, 121.0), (45, 85.0)]
+
+
+def test_scan_symbol_zigzag_atr_mult_changes_pivot_detection():
+    df = _frame(_DOUBLE_TOP_ANCHORS, 46, spike_at=45)
+
+    baseline = scan_symbol(df, min_score=0.0, zigzag_pct=0.03)
+    assert baseline  # the fixed-pct threshold confirms the double top
+
+    # An absurdly large ATR multiple makes every per-bar threshold far
+    # larger than any real retracement in this fixture, so *no* reversal
+    # ever confirms -- zero pivots, zero matches. This alone proves
+    # `zigzag_atr_mult` is actually reaching zigzag_pivots' threshold_fn
+    # (not silently ignored): the same df with the same `zigzag_pct=0.03`
+    # given as a fallback now returns nothing once the ATR path is active.
+    gated = scan_symbol(df, min_score=0.0, zigzag_pct=0.03, zigzag_atr_mult=100.0)
+    assert gated == []
+
+
+def test_scan_symbol_retest_modifier_applies_scaled_adjustment(monkeypatch):
+    import firm.patterns.scanner as scanner_module
+
+    df = _frame(_DOUBLE_TOP_ANCHORS, 46, spike_at=45)
+    baseline = scan_symbol(df, min_score=0.0, zigzag_pct=0.03)
+    top = next(m for m in baseline if m.pattern == "double_top")
+    assert "retest_outcome" not in top.score_breakdown  # off by default -- no key at all
+
+    monkeypatch.setattr(scanner_module, "retest_outcome", lambda *a, **k: "held")
+    with_retest = scan_symbol(
+        df, min_score=0.0, zigzag_pct=0.03,
+        retest_modifier_enabled=True, retest_modifier_scale=4.0,
+    )
+    match = next(
+        m for m in with_retest if m.pattern == top.pattern and m.confirm_index == top.confirm_index
+    )
+    assert match.score_breakdown["retest_outcome"] == "held"
+    assert match.score_breakdown["retest_modifier"] == pytest.approx(4.0)  # retest_score_modifier("held") == 1.0
+    assert match.quality_score == pytest.approx(min(100.0, top.quality_score + 4.0), abs=1e-6)
+
+
+def test_scan_symbol_confluence_modifier_applies_scaled_adjustment(monkeypatch):
+    import firm.patterns.scanner as scanner_module
+
+    df = _frame(_DOUBLE_TOP_ANCHORS, 46, spike_at=45)
+    dates = pd.date_range("2024-01-01", periods=46, freq="B")
+    baseline = scan_symbol(df, min_score=0.0, zigzag_pct=0.03)
+    top = next(m for m in baseline if m.pattern == "double_top")
+    assert top.direction == "short"
+    assert "weekly_trend" not in top.score_breakdown  # off by default -- no key at all
+
+    # A "down" weekly trend agrees with a "short" pattern direction (see
+    # confluence.py's _AGREEING_TREND) -> +1.0 * scale.
+    monkeypatch.setattr(scanner_module, "weekly_trend_direction", lambda *a, **k: "down")
+    with_confluence = scan_symbol(
+        df, min_score=0.0, zigzag_pct=0.03,
+        confluence_modifier_enabled=True, confluence_modifier_scale=2.5, dates=dates,
+    )
+    match = next(
+        m for m in with_confluence if m.pattern == top.pattern and m.confirm_index == top.confirm_index
+    )
+    assert match.score_breakdown["weekly_trend"] == "down"
+    assert match.score_breakdown["confluence_modifier"] == pytest.approx(2.5)
+    assert match.quality_score == pytest.approx(min(100.0, top.quality_score + 2.5), abs=1e-6)
+
+
+def test_scan_symbol_confluence_modifier_skipped_without_dates(caplog):
+    df = _frame(_DOUBLE_TOP_ANCHORS, 46, spike_at=45)
+    # confluence_modifier_enabled with no `dates` supplied must degrade
+    # gracefully (no crash, no modifier applied) rather than raising --
+    # scan_symbol's own docstring documents this as always-safe.
+    matches = scan_symbol(
+        df, min_score=0.0, zigzag_pct=0.03, confluence_modifier_enabled=True, dates=None,
+    )
+    assert matches
+    assert all("weekly_trend" not in m.score_breakdown for m in matches)
 
 
 # ---------------------------------------------------------------------------
@@ -525,7 +643,9 @@ def test_pattern_recognition_uses_cnn_quality_when_available(monkeypatch):
 
     monkeypatch.setattr(pr_module.cnn_inference, "is_available", lambda: True)
     monkeypatch.setattr(
-        pr_module.cnn_inference, "score_pattern_quality", lambda close, confirm_index: 0.9
+        pr_module.cnn_inference,
+        "score_pattern_quality",
+        lambda close, confirm_index, **kwargs: 0.9,
     )
 
     prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
@@ -562,9 +682,75 @@ def test_pattern_recognition_falls_back_when_cnn_scorer_returns_none(monkeypatch
 
     monkeypatch.setattr(pr_module.cnn_inference, "is_available", lambda: True)
     monkeypatch.setattr(
-        pr_module.cnn_inference, "score_pattern_quality", lambda close, confirm_index: None
+        pr_module.cnn_inference,
+        "score_pattern_quality",
+        lambda close, confirm_index, **kwargs: None,
     )
 
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    # Pre-existing gap fixed 2026-09: without this override,
+    # cnn_scoring_enabled defaults False and the CNN path (mocked above)
+    # never actually runs, so the assertions below would previously pass
+    # vacuously regardless of what score_pattern_quality returned.
+    signals = PatternRecognitionStrategy(params={"cnn_scoring_enabled": True}).generate(pit_view)
+
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig.meta["scoring_mode"] == "rule_based"
+    expected_fraction = min(sig.meta["quality_score"] / 100.0, 1.0)
+    assert sig.confidence == pytest.approx(expected_fraction)
+
+
+# ---------------------------------------------------------------------------
+# 2026-09 XGBoost pattern-confirmation ensemble wiring
+# (firm.patterns.ml.xgb_inference) -- off by default; exercises the
+# fixed-weight blend + agreement-gate formula and the
+# meta["calibrated_probability"] convention TraderAgent._kelly consumes.
+# ---------------------------------------------------------------------------
+
+def test_pattern_recognition_xgb_ensemble_blends_and_gates_on_disagreement(monkeypatch):
+    from firm.strategies import pattern_recognition as pr_module
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference,
+        "score_pattern_confirmation",
+        lambda features, **kwargs: (0.1, 0.1, 0.8),  # (p_stop, p_timeout, p_target)
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={
+            "xgb_confirmation_enabled": True,
+            "xgb_blend_weight": 0.5,
+            "xgb_agreement_gate": True,
+            "xgb_agreement_gate_threshold": 0.35,
+            "xgb_agreement_gate_dampen": 0.7,
+        },
+    ).generate(pit_view)
+
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig.meta["xgb_p_target"] == pytest.approx(0.8)
+    # Meta-labeling convention consumed by TraderAgent._signal_calibrated_edge.
+    assert sig.meta["calibrated_probability"] == pytest.approx(0.8)
+    assert sig.meta["scoring_mode"] == "rule_based+xgb"
+
+    rule_based_fraction = sig.meta["rule_based_quality_fraction"]
+    disagreement = abs(0.8 - rule_based_fraction)
+    blended = 0.5 * 0.8 + 0.5 * rule_based_fraction
+    if disagreement > 0.35:
+        blended *= 0.7
+    expected = min(1.0, max(0.0, blended))
+    assert sig.confidence == pytest.approx(expected, abs=1e-6)
+    assert sig.score == pytest.approx(expected, abs=1e-6)  # bull flag -> long -> + sign
+
+
+def test_pattern_recognition_xgb_ensemble_off_by_default_leaves_meta_none():
     prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
     pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
 
@@ -572,6 +758,6 @@ def test_pattern_recognition_falls_back_when_cnn_scorer_returns_none(monkeypatch
 
     assert len(signals) == 1
     sig = signals[0]
-    assert sig.meta["scoring_mode"] == "rule_based"
-    expected_fraction = min(sig.meta["quality_score"] / 100.0, 1.0)
-    assert sig.confidence == pytest.approx(expected_fraction)
+    assert sig.meta["xgb_p_target"] is None
+    assert sig.meta["calibrated_probability"] is None
+    assert "+xgb" not in sig.meta["scoring_mode"]

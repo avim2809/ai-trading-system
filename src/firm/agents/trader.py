@@ -156,7 +156,7 @@ class TraderAgent(Agent):
         elif self.allocation_method == "risk_parity":
             targets = self._risk_parity(selected, ctx)
         elif self.allocation_method == "kelly":
-            targets = self._kelly(selected, ctx)
+            targets = self._kelly(selected, ctx, blackboard)
         elif self.allocation_method == "joint_optimizer":
             targets = self._joint_optimizer(selected, ctx, inputs.get("prices") or {})
         else:
@@ -228,17 +228,31 @@ class TraderAgent(Agent):
         return targets
 
     def _kelly(
-        self, results: list[DebateResult], ctx: AgentContext
+        self, results: list[DebateResult], ctx: AgentContext, blackboard: Any = None
     ) -> dict[str, float]:
-        """Fractional-Kelly allocation from each name's return history.
+        """Fractional-Kelly allocation from each name's return history --
+        optionally overridden per-symbol by a strategy's own calibrated
+        signal probability, when one is available (meta-labeling-style
+        sizing; see :meth:`_signal_calibrated_edge`).
 
-        For every selected name we estimate the win probability ``p`` and the
-        win/loss payoff ratio ``b`` from its realized daily returns in the
-        PitView, compute the classical Kelly fraction ``f = (p*b - q)/b``,
-        apply :attr:`kelly_fraction` (default half-Kelly), and sign it by the
-        conviction direction. Negative-edge names get zero weight. The surviving
-        magnitudes are L1-normalised so ``sum |w| = 1``. Falls back to
-        conviction weighting when no name has a positive edge (thin history).
+        For every selected name we first try
+        :meth:`_signal_calibrated_edge` (only when *blackboard* is given):
+        if a signal for that symbol carries the ``meta["calibrated_probability"]``
+        convention, its own Kelly-style edge is used directly. Otherwise we
+        fall back to the original behavior -- estimate the win probability
+        ``p`` and the win/loss payoff ratio ``b`` from the symbol's realized
+        daily returns in the PitView (:meth:`_kelly_edge`), compute the
+        classical Kelly fraction ``f = (p*b - q)/b``. Either way, the
+        resulting edge is scaled by :attr:`kelly_fraction` (default
+        half-Kelly) and signed by the conviction direction. Negative-edge
+        names get zero weight. The surviving magnitudes are L1-normalised so
+        ``sum |w| = 1``. Falls back to conviction weighting when no name has
+        a positive edge (thin history).
+
+        ``blackboard`` defaults to ``None`` (unchanged, byte-for-byte
+        backward-compatible behavior for any caller -- internal or test --
+        that doesn't pass one): every symbol then goes straight to the
+        original :meth:`_kelly_edge` return-history path.
         """
         if not results:
             return {}
@@ -247,7 +261,19 @@ class TraderAgent(Agent):
         magnitudes: dict[str, float] = {}
         signs: dict[str, float] = {}
         for r in results:
-            edge = self._kelly_edge(pit_view, r.symbol)
+            edge = None
+            if blackboard is not None:
+                edge = self._signal_calibrated_edge(blackboard, r.symbol)
+                if edge is not None:
+                    log.debug(
+                        "Kelly: %s using signal-calibrated edge=%.4f", r.symbol, edge,
+                    )
+            if edge is None:
+                edge = self._kelly_edge(pit_view, r.symbol)
+                if edge is not None:
+                    log.debug(
+                        "Kelly: %s using return-history edge=%.4f", r.symbol, edge,
+                    )
             if edge is None or edge <= 0:
                 continue
             magnitudes[r.symbol] = edge * self.kelly_fraction
@@ -296,6 +322,84 @@ class TraderAgent(Agent):
             return None
         q = 1.0 - p
         return (p * b - q) / b
+
+    @staticmethod
+    def _signal_calibrated_edge(blackboard: Any, symbol: str) -> float | None:
+        """Meta-labeling-style Kelly edge from a strategy's own calibrated
+        win-probability signal for *symbol*, or ``None``.
+
+        This is a new, **generic** ``Signal.meta`` convention any strategy
+        may opt into -- not specific to any one strategy (e.g.
+        ``pattern_recognition``): a strategy that has its own calibrated
+        estimate of "probability this signal wins" (see
+        ``firm.patterns.ml.calibration`` for one way to produce such a
+        calibrated probability) can attach it to the ``Signal`` it emits as
+
+        - ``meta["calibrated_probability"]`` (required): float in ``[0, 1]``,
+          that strategy's own calibrated win probability for this signal.
+        - ``meta["risk_reward"]`` (optional): the payoff ratio ``b`` (average
+          win / average loss) to use in the Kelly formula. Defaults to
+          ``1.0`` (a roughly symmetric bet) when absent, since not every
+          strategy naturally produces a risk:reward estimate.
+
+        Looks up every signal for *symbol* via
+        ``blackboard.get_signals_by_symbol`` (the same accessor
+        :meth:`_attribute_to_strategies` uses) and, for however many of them
+        carry ``meta["calibrated_probability"]``, converts each to a
+        Kelly-style edge via the same ``f = (p*b - q)/b`` formula as
+        :meth:`_kelly_edge`. With exactly one such signal, that edge is
+        returned directly; with more than one (multiple strategies agreeing
+        on this symbol), their edges are simple-averaged. Signals missing
+        the key, or carrying a non-numeric/out-of-range value for it, are
+        skipped (logged at debug); returns ``None`` when *no* signal for
+        *symbol* carries a usable value, so :meth:`_kelly` falls through to
+        the original :meth:`_kelly_edge` return-history path for that name.
+        """
+        try:
+            signals = blackboard.get_signals_by_symbol(symbol)
+        except Exception:
+            log.debug(
+                "Kelly: could not fetch signals for %s from blackboard", symbol, exc_info=True,
+            )
+            return None
+
+        edges: list[float] = []
+        for sig in signals:
+            meta = sig.meta or {}
+            if "calibrated_probability" not in meta:
+                continue
+            try:
+                p = float(meta["calibrated_probability"])
+            except (TypeError, ValueError):
+                log.debug(
+                    "Kelly: %s strategy=%s calibrated_probability=%r is not a float -- "
+                    "skipping this signal", symbol, sig.strategy, meta["calibrated_probability"],
+                )
+                continue
+            if not (0.0 <= p <= 1.0):
+                log.debug(
+                    "Kelly: %s strategy=%s calibrated_probability=%.4f outside [0, 1] -- "
+                    "skipping this signal", symbol, sig.strategy, p,
+                )
+                continue
+            b = meta.get("risk_reward", 1.0)
+            try:
+                b = float(b)
+            except (TypeError, ValueError):
+                b = 1.0
+            if b <= 0:
+                b = 1.0
+            q = 1.0 - p
+            edges.append((p * b - q) / b)
+
+        if not edges:
+            return None
+        avg_edge = float(np.mean(edges))
+        log.debug(
+            "Kelly: %s averaged %d signal-calibrated edge(s) -> %.4f",
+            symbol, len(edges), avg_edge,
+        )
+        return avg_edge
 
     @staticmethod
     def _symbol_returns(pit_view: Any, symbol: str, lookback: int):

@@ -170,17 +170,20 @@ strategy_params:
   # CNN/GAF chart-pattern quality scorer (2026-09-20) -- off by default in
   # firm.strategies.pattern_recognition itself (model-file presence alone
   # must never imply live usage, see the strategy's own default_params
-  # docstring), enabled here after a real walk-forward validation: a model
-  # trained on real cached history (2010-2025, not the CLI's synthetic
-  # smoke-test default the prior on-disk artifact was suspected to be)
-  # against 2010-06-01 to 2023-12-31 improved pattern_recognition's own
-  # Sharpe 0.415->0.645, total return 4.9%->7.7%, hit rate 49.3%->51.7%
-  # (max drawdown fractionally worse, 3.85%->4.12%, both small in absolute
-  # terms). One walk-forward window, not this codebase's usual 3-window
-  # robustness check (see rebalance_band_pct/rebalance_fraction's own
-  # comments for that gold standard) -- revisit if live results diverge.
+  # docstring). Was briefly enabled here after a single-window walk-forward
+  # validation (Sharpe 0.415->0.645, 2010-06-01..2023-12-31) that this
+  # comment itself flagged as needing a revisit ("One walk-forward window,
+  # not this codebase's usual 3-window robustness check -- revisit if live
+  # results diverge"). Revisited 2026-09-25 with a genuine 8-fold CPCV-style
+  # walk-forward audit (2018-01-01..2025-12-31, scripts
+  # /validate_pattern_cnn_walkforward.py) -- the original result did not
+  # replicate: PBO 0.446, but probabilistic Sharpe only 0.216 (need >0.95)
+  # and deflated Sharpe ~0 after correcting for the True/False selection
+  # search -- verdict=fail, recommendation=ROLLBACK. Rolled back to false
+  # per that audit (docs/pattern_recognition_plan.md SS8.2); do not re-enable
+  # without a fresh walk-forward result that actually clears PBO+DSR/PSR.
   pattern_recognition:
-    cnn_scoring_enabled: true
+    cnn_scoring_enabled: false
 
 universe:
   symbols:

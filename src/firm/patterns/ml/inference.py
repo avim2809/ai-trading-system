@@ -159,6 +159,7 @@ def score_pattern_quality(
     model_path: str | os.PathLike = DEFAULT_MODEL_PATH,
     window_bars: int = DEFAULT_WINDOW_BARS,
     image_size: int = DEFAULT_IMAGE_SIZE,
+    temperature: float = 1.0,
 ) -> float | None:
     """CNN-based replacement for the rule-based scanner's ``quality_score``.
 
@@ -180,6 +181,17 @@ def score_pattern_quality(
     :func:`_encode_gasf` replica only reproduces pyts's PAA step when it's a
     no-op -- rather than silently mis-encoding, this bails out), or any
     unexpected inference-time error. Never raises.
+
+    ``temperature`` (2026-09, default ``1.0`` = no-op, byte-for-byte
+    unchanged behavior for every existing caller): divides the model's
+    pre-softmax logits before re-applying softmax, via
+    :func:`firm.patterns.ml.calibration.apply_temperature` -- see that
+    module's docstring for why temperature scaling (rather than Platt/
+    sigmoid scaling, used for the XGBoost classifier instead) is the right
+    technique for this specific model. Pass the ``"temperature"`` value
+    from a calibration dict previously produced by
+    :func:`firm.patterns.ml.calibration.fit_temperature` +
+    :func:`~firm.patterns.ml.calibration.save_calibration`.
     """
     if window_bars != image_size:
         _warn_once(
@@ -211,8 +223,13 @@ def score_pattern_quality(
         input_name = session.get_inputs()[0].name
         (logits,) = session.run(None, {input_name: gasf[None, None, :, :]})
         logits = np.asarray(logits, dtype=np.float64)[0]
-        exp = np.exp(logits - logits.max())
-        probs = exp / exp.sum()
+        if temperature != 1.0:
+            from firm.patterns.ml.calibration import apply_temperature
+
+            probs = apply_temperature(logits[None, :], temperature)[0]
+        else:
+            exp = np.exp(logits - logits.max())
+            probs = exp / exp.sum()
         out = np.zeros(len(LABELS))
         for col, label in enumerate(present_labels):
             out[_LABEL_TO_INDEX[label]] = probs[col]
