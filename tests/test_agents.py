@@ -2527,6 +2527,30 @@ class TestExecution:
         assert by_sym["AAPL"]["strategy"] == "momentum"
         assert by_sym["MSFT"]["strategy"] == "trend"
 
+    def test_fills_carry_fractional_strategy_weights_alongside_dominant_tag(self):
+        """New (2026-09-27): each order also carries a fractional
+        {strategy: fraction} breakdown for PerformanceAttribution -- the
+        winner-take-all "strategy" tag stays as-is for approval routing,
+        but a strategy contributing real, smaller-magnitude weight should
+        still be visible (fractionally) rather than invisible."""
+        from firm.agents.execution import ExecutionAgent
+
+        execution = ExecutionAgent()
+        decision = RiskDecision(approved=True, adjusted_targets={"AAPL": 0.5})
+        per_strategy = {
+            "momentum": {"AAPL": 0.4},
+            "pattern_recognition": {"AAPL": 0.1},
+        }
+        report = execution.run(
+            AgentContext(now=NOW),
+            decision=decision,
+            prices={"AAPL": 100.0},
+            per_strategy=per_strategy,
+        )
+        order = next(o for o in report.fills if o["symbol"] == "AAPL")
+        assert order["strategy"] == "momentum"  # winner-take-all tag unchanged
+        assert order["strategy_weights"] == pytest.approx({"momentum": 0.8, "pattern_recognition": 0.2})
+
     def test_closing_order_attributed_via_held_position_not_composite(self):
         """Regression: a symbol dropped entirely from this cycle's targets
         (fully closed) has no *this-cycle* per_strategy entry, but should
@@ -2561,6 +2585,10 @@ class TestExecution:
         by_sym = {o["symbol"]: o for o in report.fills}
         assert by_sym["AAPL"]["side"] == "sell"
         assert by_sym["AAPL"]["strategy"] == "momentum"
+        # No this-cycle per_strategy breakdown for a fully-closed symbol --
+        # falls back to full (1.0) fractional credit for the held-position
+        # strategy, same as the winner-take-all tag.
+        assert by_sym["AAPL"]["strategy_weights"] == {"momentum": 1.0}
 
     def test_closing_order_falls_back_to_composite_when_untraceable(self):
         """Without attribution history (or with no matching held position),

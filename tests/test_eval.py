@@ -305,6 +305,72 @@ class TestPerformanceAttribution:
         # $10 * 5 = $50 P&L on a $100,000 NAV -> 0.05% return, not "50".
         assert s.iloc[0] == pytest.approx(0.0005)
 
+    def test_record_trades_splits_shares_fractionally_when_strategy_weights_given(self):
+        """New (2026-09-27): a fill carrying strategy_weights splits its
+        shares proportionally across every contributing strategy instead
+        of crediting 100% to the single "strategy" tag -- otherwise a
+        strategy whose contribution is real but consistently smaller than
+        its peers' never accumulates any attributed P&L at all."""
+        attr = PerformanceAttribution()
+        attr.record_trades(
+            [{
+                "symbol": "AAPL", "shares": 100, "price": 100.0,
+                "strategy": "momentum",
+                "strategy_weights": {"momentum": 0.8, "pattern_recognition": 0.2},
+            }],
+            {"AAPL": 100.0},
+        )
+        assert attr.get_strategy_holdings("momentum") == {"AAPL": 80.0}
+        assert attr.get_strategy_holdings("pattern_recognition") == {"AAPL": 20.0}
+
+    def test_record_trades_fractional_split_conserves_total_shares(self):
+        attr = PerformanceAttribution()
+        attr.record_trades(
+            [{
+                "symbol": "AAPL", "shares": 137, "price": 100.0,
+                "strategy": "momentum",
+                "strategy_weights": {"momentum": 0.5, "trend": 0.3, "pattern_recognition": 0.2},
+            }],
+            {"AAPL": 100.0},
+        )
+        total = sum(
+            attr.get_strategy_holdings(s).get("AAPL", 0.0)
+            for s in ("momentum", "trend", "pattern_recognition")
+        )
+        assert total == pytest.approx(137.0)
+
+    def test_record_trades_without_strategy_weights_falls_back_to_single_tag(self):
+        # Backward compatibility: no strategy_weights key -> old behavior.
+        attr = PerformanceAttribution()
+        attr.record_trades(
+            [{"symbol": "AAPL", "shares": 100, "price": 100.0, "strategy": "momentum"}],
+            {"AAPL": 100.0},
+        )
+        assert attr.get_strategy_holdings("momentum") == {"AAPL": 100.0}
+
+    def test_fractional_attribution_gives_smaller_contributor_a_measurable_return(self):
+        """The concrete scenario this closes: a smaller-magnitude
+        contributor (e.g. pattern_recognition) previously invisible under
+        winner-take-all now accumulates a real, proportional daily return."""
+        attr = PerformanceAttribution()
+        attr.record_trades(
+            [{
+                "symbol": "AAPL", "shares": 100, "price": 100.0,
+                "strategy": "momentum",
+                "strategy_weights": {"momentum": 0.8, "pattern_recognition": 0.2},
+            }],
+            {"AAPL": 100.0},
+        )
+        attr._prev_prices = {"AAPL": 100.0}
+        attr.update_daily(datetime(2023, 6, 2), {"AAPL": 105.0}, nav=100_000.0)
+
+        assert "pattern_recognition" in attr.get_all_daily_strategy_returns()
+        pr_return = attr.get_strategy_returns("pattern_recognition").iloc[0]
+        momentum_return = attr.get_strategy_returns("momentum").iloc[0]
+        # 20 shares * $5 move / $100k nav = 0.1%; momentum's is 4x that.
+        assert pr_return == pytest.approx(0.001)
+        assert momentum_return == pytest.approx(4 * pr_return)
+
     def test_strategies(self):
         attr = self._make_attribution()
         assert set(attr.strategies) == {"momentum", "value"}

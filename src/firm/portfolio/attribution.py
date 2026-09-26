@@ -37,15 +37,40 @@ class PerformanceAttribution:
     ) -> None:
         """Record executed trades with strategy tags for attribution.
 
-        Each fill dict: ``{"symbol", "shares", "price", "strategy"}``.
+        Each fill dict: ``{"symbol", "shares", "price", "strategy"}``, plus
+        an optional ``"strategy_weights"``: ``{strategy: fraction}``
+        (fractions summing to ~1.0) from
+        ``firm.agents.execution.ExecutionAgent._fractional_strategy_weights_by_symbol``.
+
+        When ``strategy_weights`` is present, the fill's shares are split
+        proportionally across every contributing strategy rather than
+        credited 100% to the single winner-take-all ``"strategy"`` tag.
+        That single-tag behavior (still used as the fallback here, and
+        still what ``"strategy"`` itself means for order-approval routing)
+        systematically hides any strategy whose contribution is real but
+        consistently smaller in magnitude than its peers for the symbols
+        that end up trading -- it will *never* accumulate a single
+        attributed day, however much it actually shaped the blended
+        decision (found investigating pattern_recognition showing zero
+        live attribution days despite contributing to 42 of the last 100
+        logged decisions -- see docs/pattern_recognition_plan.md). Backward
+        compatible: a fill with no ``strategy_weights`` key (any caller
+        that hasn't been updated, e.g. a test constructing fills by hand)
+        behaves exactly as before.
         """
         for fill in fills:
             self._trade_log.append(dict(fill))
-            strategy = fill.get("strategy", "_default")
             symbol = fill["symbol"]
             shares = fill["shares"]
-            cur = self._strategy_holdings[strategy].get(symbol, 0.0)
-            self._strategy_holdings[strategy][symbol] = cur + shares
+            weights = fill.get("strategy_weights")
+            if weights:
+                for strategy, fraction in weights.items():
+                    cur = self._strategy_holdings[strategy].get(symbol, 0.0)
+                    self._strategy_holdings[strategy][symbol] = cur + shares * fraction
+            else:
+                strategy = fill.get("strategy", "_default")
+                cur = self._strategy_holdings[strategy].get(symbol, 0.0)
+                self._strategy_holdings[strategy][symbol] = cur + shares
 
     def update_daily(
         self,

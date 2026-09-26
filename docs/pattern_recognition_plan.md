@@ -1377,7 +1377,77 @@ grading/aggregation logic against controlled inputs — deliberately not
 shifting *is* the point of running this benchmark, not something a green
 test suite should mask).
 
-### 9.7 Deferred (not done in this pass)
+### 9.7 Live attribution finding: winner-take-all P&L crediting hides small-magnitude strategies (cross-cutting, not pattern-recognition-specific)
+
+While chasing why the rollout gate saw zero live-attributed days for
+`pattern_recognition` on the IBKR (blended) instance despite it being live
+since `c4aa561` (2026-09-09), traced the actual mechanism rather than
+assuming "not enough time has passed":
+
+- **`pattern_recognition` is genuinely contributing every cycle.** The
+  persisted decision log (`data/memory/decisions.jsonl`) shows it with
+  real, nonzero per-symbol weight contributions in 42 of the last 100
+  logged decisions, starting the day after it went live.
+- **But `ExecutionAgent._dominant_strategy_by_symbol`
+  (`src/firm/agents/execution.py`) tags each *executed order* with
+  whichever single strategy contributed the largest-magnitude weight to
+  that symbol that cycle — winner-take-all.** `PerformanceAttribution.record_trades`
+  (`src/firm/portfolio/attribution.py`) only ever credits that one tagged
+  strategy with 100% of the fill's shares. `pattern_recognition`'s
+  contributions run ~0.004–0.02 in magnitude, consistently smaller than
+  the strategies that end up dominant on the same symbols (e.g.
+  `multi_factor` at 0.065 on the same symbol, same cycle) — so it has
+  apparently never once been the largest contributor for a symbol that
+  actually traded on IBKR. Zero dominant-strategy wins → zero fills ever
+  recorded under its name → zero attributed days, regardless of how real
+  or how long-running its actual contribution to the blended decision is.
+- This is a genuine measurement blind spot, not specific to
+  `pattern_recognition`: **any** strategy whose signal is real but
+  consistently smaller in magnitude than its peers for the symbols that
+  end up trading is structurally invisible to every consumer of
+  per-strategy attribution — the Strategy Performance page, the rollout
+  gate's live-sample check, reflection/lessons-learned. Confirmed
+  `PerformanceAttribution` is a plain in-memory object with no
+  persistence for blended mode (unlike sleeved mode's durable NAV
+  history), so this also silently resets on every restart — a second,
+  smaller compounding factor, not the root cause.
+
+**Fix applied** (same session, both live and backtest paths — `ExecutionAgent`/
+`PerformanceAttribution` are shared by `LiveTradingEngine` and
+`BacktestEngine` via the same `Orchestrator.step()`):
+
+- New `ExecutionAgent._fractional_strategy_weights_by_symbol`: maps each
+  traded symbol to `{strategy: fraction}` (proportional to `abs(weight)`,
+  summing to 1.0 across every strategy that contributed nonzero weight),
+  attached to each order as a new `"strategy_weights"` field — additive,
+  alongside the existing `"strategy"` tag, which is left untouched (still
+  winner-take-all, correctly: an approval-queue order still needs exactly
+  one human-facing owner).
+- `PerformanceAttribution.record_trades` now splits a fill's shares
+  proportionally across every strategy in `"strategy_weights"` when
+  present, instead of crediting 100% to the single `"strategy"` tag.
+  Backward compatible: any fill without the new field (old callers,
+  hand-built test fixtures) behaves exactly as before. Conservation holds
+  by construction (fractions sum to 1.0, so the split's total still equals
+  the fill's real share count).
+- Held/closing-position fallback (a symbol with no this-cycle
+  `per_strategy` entry) now also populates `strategy_weights` (100% to the
+  held-position strategy), keeping the two fields consistent in that path
+  too.
+- Tests: `tests/test_agents.py` (new fractional-weights-on-order cases,
+  alongside the existing dominant-tag regression tests) and
+  `tests/test_eval.py` (new `PerformanceAttribution` cases: proportional
+  split, conservation, backward-compat fallback, and the concrete
+  "smaller contributor gets a measurable return" scenario).
+
+Not done: no attempt to make blended-mode attribution durable across
+restarts (a separate, larger change); no re-check of whether Alpaca's
+sleeved-mode attribution has the same winner-take-all blind spot for its
+*inter-sleeve* reporting (sleeved mode capital is already segregated per
+strategy, so this specific mechanism may not even apply there — not
+verified this session).
+
+### 9.8 Deferred (not done in this pass)
 
 - The plan's secondary defense-in-depth gate check in
   `provider_utils.resolve_live_startup` (surfacing a refusal as an earlier

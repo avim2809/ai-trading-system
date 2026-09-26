@@ -188,6 +188,7 @@ class ExecutionAgent(Agent):
 
         target_weights = decision.adjusted_targets
         symbol_strategy = self._dominant_strategy_by_symbol(per_strategy)
+        symbol_strategy_fractions = self._fractional_strategy_weights_by_symbol(per_strategy)
         # This cycle's per-strategy attribution only covers symbols present in
         # the new target weights — a symbol being closed out entirely (held
         # today, absent from `targets`) has no entry here even though it was
@@ -201,6 +202,13 @@ class ExecutionAgent(Agent):
                 if sym not in symbol_strategy:
                     symbol_strategy[sym] = held_strategy[sym]
                     missing += 1
+                # No per-cycle fractional breakdown exists for a symbol with
+                # no current-cycle signal (it's a held/closing position) --
+                # fall back to giving the held-position strategy full
+                # (1.0) fractional credit too, rather than leaving it
+                # missing from symbol_strategy_fractions entirely.
+                if sym not in symbol_strategy_fractions:
+                    symbol_strategy_fractions[sym] = {held_strategy[sym]: 1.0}
             if missing:
                 log.debug(
                     "Attributed %d closing/held symbol(s) to strategy via "
@@ -315,6 +323,13 @@ class ExecutionAgent(Agent):
                 "notional": notional,
                 "price": price,
                 "strategy": symbol_strategy.get(sym, "composite"),
+                # Fractional {strategy: share} breakdown for this symbol,
+                # summing to 1.0 -- used only by PerformanceAttribution.
+                # record_trades for proportional P&L credit; "strategy"
+                # above (winner-take-all) remains the one used for
+                # approval routing. Absent (None) falls back to 100% on
+                # "strategy" -- see record_trades's docstring.
+                "strategy_weights": symbol_strategy_fractions.get(sym),
                 "est_commission": est_commission,
                 "est_slippage": est_slippage,
                 "est_spread": est_spread,
@@ -530,3 +545,44 @@ class ExecutionAgent(Agent):
                 if sym not in best or contribution > best[sym][0]:
                     best[sym] = (contribution, strat)
         return {sym: strat for sym, (_, strat) in best.items()}
+
+    @staticmethod
+    def _fractional_strategy_weights_by_symbol(
+        per_strategy: dict[str, dict[str, float]],
+    ) -> dict[str, dict[str, float]]:
+        """Map each symbol to ``{strategy: fraction}`` (fractions sum to 1.0
+        across every strategy that contributed a nonzero weight to that
+        symbol this cycle), proportional to ``abs(weight)``.
+
+        Complements (does not replace) :meth:`_dominant_strategy_by_symbol`:
+        that winner-take-all mapping is still the right choice for
+        ``order["strategy"]`` / approval routing (a human approval queue
+        needs one clear owner per order). But feeding the *same*
+        winner-take-all tag into ``PerformanceAttribution.record_trades``
+        means any strategy whose contribution is real but consistently
+        smaller in magnitude than its peers for the symbols that end up
+        trading is *never* credited with a single day of live P&L,
+        regardless of how much it actually shaped the blended decision --
+        found investigating why ``pattern_recognition`` showed zero
+        attributed live days on the IBKR (blended) book despite
+        contributing nonzero weight in 42 of the last 100 logged decisions
+        (see docs/pattern_recognition_plan.md). This is the fractional
+        breakdown that fixes the *measurement* side of that gap; it's
+        attached to each order as ``"strategy_weights"`` and used by
+        :meth:`~firm.portfolio.attribution.PerformanceAttribution.record_trades`
+        only, never for order routing.
+        """
+        totals: dict[str, float] = {}
+        raw: dict[str, dict[str, float]] = {}
+        for strat, weights in (per_strategy or {}).items():
+            for sym, weight in weights.items():
+                contribution = abs(weight)
+                if contribution <= 0:
+                    continue
+                raw.setdefault(sym, {})[strat] = contribution
+                totals[sym] = totals.get(sym, 0.0) + contribution
+        return {
+            sym: {strat: contribution / totals[sym] for strat, contribution in strat_contribs.items()}
+            for sym, strat_contribs in raw.items()
+            if totals.get(sym, 0.0) > 0
+        }
