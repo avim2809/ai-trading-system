@@ -82,30 +82,28 @@ _STRATEGIES = [
 ]
 
 # The genuine, currently-relevant decision: is config/live.yaml's
-# `strategy_params.pattern_recognition.cnn_scoring_enabled: true` justified
-# by real walk-forward evidence? Candidate 0 = current rule-based-only
-# fallback (the strategy's own default_params default); candidate 1 =
-# today's live setting.
-#
-# NOTE for future maintainers: once a separate workstream lands an
-# XGBoost-ensemble mode for pattern_recognition (a new strategy_params key,
-# name TBD), add a 3rd candidate here exercising it, e.g.
-#   {"strategy_params": {"pattern_recognition": {"cnn_scoring_enabled": False,
-#                                                  "<ensemble_key>": True}}}
-# As of 2026-09-25, PatternRecognitionStrategy.default_params (see
-# src/firm/strategies/pattern_recognition.py) has exactly one relevant key
-# (`cnn_scoring_enabled`) -- no ensemble key exists yet, so the grid below
-# stays at 2 candidates. The check below fails loudly (rather than silently
-# running a stale 2-candidate grid forever) once new keys do show up, so a
-# future run of this script surfaces the need to update DEFAULT_PARAM_GRID
-# instead of a human having to remember to.
+# `strategy_params.pattern_recognition.cnn_scoring_enabled: true` (or the
+# newer `xgb_confirmation_enabled: true`) justified by real walk-forward
+# evidence? Candidate 0 = current rule-based-only fallback (the strategy's
+# own default_params default); candidate 1 = the CNN toggle (already
+# audited once, 2026-09-25, verdict=fail -- this re-run uses a freshly
+# retrained, provenance-confirmed artifact, see
+# docs/pattern_recognition_plan.md §10); candidate 2 (2026-09-26) =
+# xgb_confirmation_enabled, isolated from the CNN (cnn_scoring_enabled
+# stays False for this candidate) so its effect is independently
+# attributable rather than conflated with the CNN's.
 _KNOWN_PATTERN_RECOGNITION_PARAMS = frozenset(
     PatternRecognitionStrategy.default_params.keys()
 )
 _EXPECTED_PATTERN_RECOGNITION_PARAMS = frozenset({
     "lookback_days", "zigzag_pct", "min_score", "min_risk_reward",
     "confirm_lookback_bars", "stop_atr_floor", "horizon", "enabled_patterns",
-    "cnn_scoring_enabled",
+    "cnn_scoring_enabled", "zigzag_atr_mult", "retest_modifier_enabled",
+    "retest_lookback_bars", "retest_modifier_scale", "confluence_modifier_enabled",
+    "confluence_lookback_weeks", "confluence_modifier_scale",
+    "xgb_confirmation_enabled", "xgb_blend_weight", "xgb_agreement_gate",
+    "xgb_agreement_gate_threshold", "xgb_agreement_gate_dampen",
+    "cnn_calibration_path", "xgb_calibration_path",
 })
 _NEW_PATTERN_RECOGNITION_PARAMS = (
     _KNOWN_PATTERN_RECOGNITION_PARAMS - _EXPECTED_PATTERN_RECOGNITION_PARAMS
@@ -113,17 +111,18 @@ _NEW_PATTERN_RECOGNITION_PARAMS = (
 if _NEW_PATTERN_RECOGNITION_PARAMS:
     log.warning(
         "pattern_recognition.default_params grew new key(s) %s since this "
-        "script's DEFAULT_PARAM_GRID was written -- if one of these is the "
-        "XGBoost-ensemble enable flag, add a 3rd param_grid candidate "
-        "exercising it (see the comment above DEFAULT_PARAM_GRID) before "
-        "trusting this audit as the final word on pattern_recognition's "
-        "current parameter set",
+        "script's DEFAULT_PARAM_GRID was written -- add a param_grid "
+        "candidate exercising it before trusting this audit as the final "
+        "word on pattern_recognition's current parameter set",
         sorted(_NEW_PATTERN_RECOGNITION_PARAMS),
     )
 
 DEFAULT_PARAM_GRID: list[dict] = [
     {"strategy_params": {"pattern_recognition": {"cnn_scoring_enabled": False}}},
     {"strategy_params": {"pattern_recognition": {"cnn_scoring_enabled": True}}},
+    {"strategy_params": {"pattern_recognition": {
+        "cnn_scoring_enabled": False, "xgb_confirmation_enabled": True,
+    }}},
 ]
 
 
@@ -169,15 +168,24 @@ def _build_config(
     }
 
 
-def _fold_cnn_selection_pattern(
-    runs: list, param_grid: list[dict]
+def _fold_flag_selection_pattern(
+    runs: list, param_grid: list[dict], *, flag_key: str = "cnn_scoring_enabled",
 ) -> list[dict]:
     """Read each fold's ``walk_forward_selection.json`` (written by
     ``ExperimentRunner.run_walk_forward`` for every fold with a genuine
     multi-candidate grid) and report, per fold, which candidate won on the
-    train window and whether that candidate has ``cnn_scoring_enabled: True``.
+    train window and whether that candidate has ``{flag_key}: True``.
 
-    Degrades gracefully (an entry with ``selected_cnn_enabled: None``) for a
+    Generalized (2026-09-26) beyond just ``cnn_scoring_enabled`` so the same
+    function attributes fold wins for any gated ``pattern_recognition``
+    boolean flag in the grid (e.g. ``xgb_confirmation_enabled``) -- a 3+
+    candidate grid varying multiple flags independently needs one call per
+    flag being evaluated, not one shared "cnn" reading that silently
+    conflates a rule-based-baseline win with a same-``False``-on-this-flag
+    win from a different candidate (e.g. the XGBoost candidate, which also
+    has ``cnn_scoring_enabled: False``).
+
+    Degrades gracefully (an entry with ``selected_flag_enabled: None``) for a
     fold that has no selection file (e.g. every candidate failed on train
     and _select_candidate_on_train defaulted to candidate 0 without writing
     one) so the pattern below is always well-formed for downstream reporting.
@@ -193,30 +201,30 @@ def _fold_cnn_selection_pattern(
             )
             pattern.append({
                 "fold": i, "run_id": run.run_id,
-                "selected_index": None, "selected_cnn_enabled": None,
+                "selected_index": None, "selected_flag_enabled": None,
             })
             continue
         selection = json.loads(sel_path.read_text(encoding="utf-8"))
         idx = selection.get("selected_index")
-        cnn_enabled = None
+        flag_enabled = None
         if idx is not None and 0 <= idx < len(param_grid):
-            cnn_enabled = bool(
+            flag_enabled = bool(
                 param_grid[idx]
                 .get("strategy_params", {})
                 .get("pattern_recognition", {})
-                .get("cnn_scoring_enabled", False)
+                .get(flag_key, False)
             )
         pattern.append({
             "fold": i, "run_id": run.run_id,
-            "selected_index": idx, "selected_cnn_enabled": cnn_enabled,
+            "selected_index": idx, "selected_flag_enabled": flag_enabled,
         })
     return pattern
 
 
-# Fraction of folds that must select a cnn_scoring_enabled=True candidate
-# for the pattern to count as "consistently favoring True" per the KEEP
-# branch below. Deliberately stricter than a bare >50% majority ("mixed" is
-# still mixed even if True edges out False 3-2) -- see derive_recommendation.
+# Fraction of folds that must select a {flag}=True candidate for the
+# pattern to count as "consistently favoring True" per the KEEP branch
+# below. Deliberately stricter than a bare >50% majority ("mixed" is still
+# mixed even if True edges out False 3-2) -- see derive_recommendation.
 CONSISTENT_MAJORITY_THRESHOLD = 0.75
 
 
@@ -224,22 +232,29 @@ def derive_recommendation(
     verdict: str | None,
     fold_selection_pattern: list[dict],
     consistent_majority_threshold: float = CONSISTENT_MAJORITY_THRESHOLD,
+    *,
+    flag_key: str = "cnn_scoring_enabled",
+    flag_label: str = "CNN scorer",
 ) -> dict:
-    """Deterministic KEEP / HOLD / ROLLBACK decision rule.
+    """Deterministic KEEP / HOLD / ROLLBACK decision rule for one gated
+    ``pattern_recognition`` boolean flag (``flag_key``).
 
     Pure function over already-computed inputs (no I/O) so it's directly
     unit-testable and auditable independent of the walk-forward run itself.
+    Generalized (2026-09-26) from a CNN-only original -- call once per
+    flag being evaluated in a multi-flag param_grid (see
+    ``_fold_flag_selection_pattern``'s docstring for why one shared
+    "cnn" reading isn't enough once a grid varies more than one flag).
 
     Rule (explicit, matches the task's decision policy):
       1. ``verdict != "pass"`` (fail, or no verdict could be computed at all,
          e.g. too few usable folds) -> ROLLBACK. An audit that doesn't clear
          the overfitting bar is not evidence strong enough to keep a change
-         live; the conservative default is the strategy's own pre-CNN
-         baseline (``cnn_scoring_enabled: False``).
+         live; the conservative default is ``{flag_key}: False``.
       2. ``verdict == "pass"`` AND at least ``consistent_majority_threshold``
          (default 75%) of folds with a usable selection independently picked
-         the CNN-on candidate on their train window -> KEEP
-         ``cnn_scoring_enabled: true`` as today's live config already has it.
+         the flag-on candidate on their train window -> KEEP
+         ``{flag_key}: true``.
       3. Everything else (verdict passes but the per-fold pattern is mixed,
          or ties, or there are no usable folds to attribute a pattern from)
          -> HOLD at the current live setting pending more data -- passing the
@@ -247,22 +262,22 @@ def derive_recommendation(
          preference is genuinely ambiguous, not grounds for either action.
     """
     usable = [
-        f for f in fold_selection_pattern if f["selected_cnn_enabled"] is not None
+        f for f in fold_selection_pattern if f["selected_flag_enabled"] is not None
     ]
-    n_true = sum(1 for f in usable if f["selected_cnn_enabled"] is True)
+    n_true = sum(1 for f in usable if f["selected_flag_enabled"] is True)
     true_fraction = (n_true / len(usable)) if usable else None
 
     if verdict != "pass":
         return {
+            "flag_key": flag_key,
             "recommendation": "ROLLBACK",
-            "target_cnn_scoring_enabled": False,
+            "target_flag_enabled": False,
             "reason": (
                 f"verdict={verdict!r} (not 'pass') -> ROLLBACK to "
-                "cnn_scoring_enabled=false. An overfitting audit that does "
-                "not clear PBO<0.5/DSR>0.95 is not strong enough evidence "
-                "to justify keeping the CNN scorer live; reverting to the "
-                "strategy's pre-CNN rule-based-only baseline is the "
-                "conservative default."
+                f"{flag_key}=false. An overfitting audit that does not "
+                "clear PBO<0.5/DSR>0.95 is not strong enough evidence to "
+                f"justify keeping the {flag_label} live; the conservative "
+                "default is the strategy's rule-based-only baseline."
             ),
             "true_fraction": true_fraction,
             "n_usable_folds": len(usable),
@@ -270,34 +285,32 @@ def derive_recommendation(
 
     if true_fraction is not None and true_fraction >= consistent_majority_threshold:
         return {
+            "flag_key": flag_key,
             "recommendation": "KEEP",
-            "target_cnn_scoring_enabled": True,
+            "target_flag_enabled": True,
             "reason": (
                 f"verdict='pass' AND {true_fraction * 100:.0f}% of "
-                f"{len(usable)} usable fold(s) selected cnn_scoring_enabled="
-                f"True on their train window (>= "
-                f"{consistent_majority_threshold * 100:.0f}% consistency "
-                "threshold) -> KEEP cnn_scoring_enabled=true as config/"
-                "live.yaml already has it; today's setting now has genuine "
-                "walk-forward statistical backing instead of the prior "
-                "single-window validation."
+                f"{len(usable)} usable fold(s) selected {flag_key}=True on "
+                f"their train window (>= {consistent_majority_threshold * 100:.0f}% "
+                f"consistency threshold) -> KEEP {flag_key}=true; this "
+                f"setting now has genuine walk-forward statistical backing."
             ),
             "true_fraction": true_fraction,
             "n_usable_folds": len(usable),
         }
 
     return {
+        "flag_key": flag_key,
         "recommendation": "HOLD",
-        "target_cnn_scoring_enabled": None,
+        "target_flag_enabled": None,
         "reason": (
             f"verdict='pass' but the per-fold selection pattern is mixed/"
             f"ambiguous ({true_fraction * 100:.0f}% of {len(usable)} usable "
             "fold(s) favored True" if true_fraction is not None
             else "verdict='pass' but no fold had a usable selection to "
             "attribute a winning candidate from"
-        ) + " -- HOLD at the current live setting (cnn_scoring_enabled: "
-            "true) pending more live data rather than acting on an "
-            "ambiguous backtest read.",
+        ) + f" -- HOLD at the current live setting for {flag_key} pending "
+            "more live data rather than acting on an ambiguous backtest read.",
         "true_fraction": true_fraction,
         "n_usable_folds": len(usable),
     }
@@ -386,12 +399,37 @@ def main() -> int:
 
     aggregate = runner.aggregate_walk_forward(runs, embargo_pct=args.pbo_embargo_pct)
     overfit = aggregate.get("overfitting") or {}
-    fold_selection_pattern = _fold_cnn_selection_pattern(runs, param_grid)
-    recommendation = derive_recommendation(
-        overfit.get("verdict"),
-        fold_selection_pattern,
-        consistent_majority_threshold=args.consistent_majority_threshold,
-    )
+
+    # Report a KEEP/HOLD/ROLLBACK recommendation independently for every
+    # gated pattern_recognition flag that actually varies across the grid
+    # (2026-09-26: was CNN-only when the grid only ever had 2 candidates --
+    # see _fold_flag_selection_pattern's docstring for why one shared "cnn"
+    # reading would otherwise silently conflate a rule-based-baseline win
+    # with an XGBoost-candidate win, since both have cnn_scoring_enabled:
+    # False). Mirrors firm.live.pattern_ml_gate's gated-flag set.
+    _TRACKED_FLAGS = {"cnn_scoring_enabled": "CNN scorer", "xgb_confirmation_enabled": "XGBoost ensemble"}
+    grid_flag_values = {
+        flag: {
+            cand.get("strategy_params", {}).get("pattern_recognition", {}).get(flag, False)
+            for cand in param_grid
+        }
+        for flag in _TRACKED_FLAGS
+    }
+    varying_flags = [flag for flag, values in grid_flag_values.items() if len(values) > 1]
+
+    recommendations: dict[str, dict] = {}
+    for flag_key in varying_flags:
+        fold_selection_pattern = _fold_flag_selection_pattern(runs, param_grid, flag_key=flag_key)
+        recommendations[flag_key] = {
+            "fold_selection_pattern": fold_selection_pattern,
+            **derive_recommendation(
+                overfit.get("verdict"),
+                fold_selection_pattern,
+                consistent_majority_threshold=args.consistent_majority_threshold,
+                flag_key=flag_key,
+                flag_label=_TRACKED_FLAGS[flag_key],
+            ),
+        }
 
     result = {
         "fold_ids": [r.run_id for r in runs],
@@ -404,8 +442,7 @@ def main() -> int:
         "date_range": {"start": args.start_date, "end": args.end_date},
         "strategies": list(_STRATEGIES),
         "universe": list(_UNIVERSE),
-        "fold_selection_pattern": fold_selection_pattern,
-        "recommendation": recommendation,
+        "recommendations": recommendations,
         **aggregate,
     }
 
@@ -425,19 +462,18 @@ def main() -> int:
     else:
         log.warning("No overfitting block — check walk_forward_selection.json per fold")
 
-    print(
-        f"\nRECOMMENDATION: {recommendation['recommendation']} "
-        f"(target cnn_scoring_enabled={recommendation['target_cnn_scoring_enabled']})"
-        f"\n  {recommendation['reason']}"
-    )
-    log.info(
-        "recommendation=%s target_cnn_scoring_enabled=%s true_fraction=%s "
-        "n_usable_folds=%s",
-        recommendation["recommendation"],
-        recommendation["target_cnn_scoring_enabled"],
-        recommendation["true_fraction"],
-        recommendation["n_usable_folds"],
-    )
+    for flag_key, rec in recommendations.items():
+        print(
+            f"\nRECOMMENDATION [{flag_key}]: {rec['recommendation']} "
+            f"(target {flag_key}={rec['target_flag_enabled']})"
+            f"\n  {rec['reason']}"
+        )
+        log.info(
+            "flag=%s recommendation=%s target_flag_enabled=%s true_fraction=%s "
+            "n_usable_folds=%s",
+            flag_key, rec["recommendation"], rec["target_flag_enabled"],
+            rec["true_fraction"], rec["n_usable_folds"],
+        )
     log.info("Full results: %s", out)
 
     if not overfit:
