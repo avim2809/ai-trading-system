@@ -1459,6 +1459,62 @@ verified this session).
 - Exhaustive per-detector boundary-tolerance fixtures (all 9 detectors'
   individual tolerance constants, not just the 2 representative cases
   above).
-- The CNN retrain + extended walk-forward audit (adding an XGBoost
-  candidate) — the operational, live-host-impacting step — is tracked
-  separately and not yet done as of this entry.
+
+### 9.9 CNN/XGBoost retrain + extended walk-forward audit (2026-09-26/27, done)
+
+Retrained both models on real cached data (2010-2025, 25 symbols) with the
+new time-ordered split (§9.5): CNN — 5,869 confirmed-pattern images, train
+acc 0.655, test acc 0.697; XGBoost — same dataset, train acc 0.848, test
+acc 0.753, test AUC 0.873. Both exported to ONNX and smoke-tested through
+the real live-inference path (`firm.patterns.ml.inference`/`xgb_inference`)
+before anything else touched them. This closes the review's top finding —
+the prior CNN artifact's training-data provenance was unconfirmed; this
+one is fully reproducible from a known command and known data range.
+Backed up the pre-existing (2026-09-20) artifacts to
+`data/models/backup_20260926/` first.
+
+Environment notes for future re-runs: `torch` (2.14.0) and `onnxruntime`
+(1.30.0) both have working Python 3.14 wheels now (the repo's various
+"no 3.14 wheel" claims are stale — see §9.5's `train_cnn_validator.py`
+docstring update). Installed `xgboost`, `onnxmltools`, `skl2onnx`, and
+`onnxscript` (torch 2.14's `torch.onnx.export` now routes through it) into
+the main venv — all resolved clean wheels, no environment blockers. `pyts`
+remains uninstalled and unnecessary (§9.5's numpy GASF replica covers the
+only configuration actually used).
+
+Extended `scripts/validate_pattern_cnn_walkforward.py`'s `DEFAULT_PARAM_GRID`
+to 3 candidates (rule-based baseline / CNN / XGBoost, XGBoost isolated
+from the CNN toggle) and generalized its recommendation logic to report
+independently per flag (§ commit `15d8b17` — the old CNN-only reading
+would have silently conflated a rule-based-baseline fold-win with an
+XGBoost-candidate fold-win, since both have `cnn_scoring_enabled: False`).
+
+**Result** (`data/models/pattern_recognition.walkforward_audit.json`,
+2018-01-01 to 2025-12-31, 8 folds, ~4h20m wall-clock on 4 pinned cores):
+
+| Metric | Value | Bar |
+|---|---|---|
+| PBO | 0.714 | fail (need < 0.50) |
+| Deflated Sharpe | 1.51e-05 | fail (need > 0.95) |
+| Probabilistic Sharpe | 0.445 | — |
+| **Verdict** | **fail** | |
+
+Both per-flag recommendations: **ROLLBACK** (`cnn_scoring_enabled=false`,
+`xgb_confirmation_enabled=false`) — no change to production, since both
+were already `false`. This is a fresh, independent confirmation with a
+provenance-known CNN artifact and a real (never-before-validated) XGBoost
+walk-forward result, not a re-hash of the 2026-09-25 finding: the CNN
+result got *worse* on retrained data (PBO 0.714 vs. the prior 0.446), and
+XGBoost — validated for the first time ever — fails the same bar just as
+clearly. Ran `scripts/pattern_recognition_rollout_gate.py` against both
+live instances: `overall_recommendation = "HOLD (insufficient live
+sample, backtest verdict=fail)"` (IBKR 0 attributed days, Alpaca 1 —
+consistent with §9.7's finding, not yet affected by that fix since it
+requires a live-service restart to pick up). Confirmed end-to-end: `firm.live.pattern_ml_gate.evaluate_gate`
+against this real record returns `{"allowed": False, ...}` — the fail-closed
+gate (§9.3) correctly refuses either flag.
+
+**Conclusion: neither ML enhancement is ready for live use.** Nothing in
+production changes as a result (both flags were already off); this
+round's value is the fresh, reproducible evidence base plus the guardrail
+that now enforces it going forward.
