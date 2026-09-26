@@ -736,8 +736,13 @@ def test_pattern_recognition_xgb_ensemble_blends_and_gates_on_disagreement(monke
     assert len(signals) == 1
     sig = signals[0]
     assert sig.meta["xgb_p_target"] == pytest.approx(0.8)
-    # Meta-labeling convention consumed by TraderAgent._signal_calibrated_edge.
-    assert sig.meta["calibrated_probability"] == pytest.approx(0.8)
+    # No xgb_calibration_path configured -- xgb_p_target is RAW/uncalibrated
+    # XGBoost output here, so calibrated_probability (the meta-labeling
+    # convention TraderAgent._signal_calibrated_edge trusts at face value)
+    # must stay None rather than mislabeling it. See
+    # test_pattern_recognition_xgb_ensemble_populates_calibrated_probability_when_calibration_configured
+    # for the case where it *is* populated.
+    assert sig.meta["calibrated_probability"] is None
     assert sig.meta["scoring_mode"] == "rule_based+xgb"
 
     rule_based_fraction = sig.meta["rule_based_quality_fraction"]
@@ -748,6 +753,68 @@ def test_pattern_recognition_xgb_ensemble_blends_and_gates_on_disagreement(monke
     expected = min(1.0, max(0.0, blended))
     assert sig.confidence == pytest.approx(expected, abs=1e-6)
     assert sig.score == pytest.approx(expected, abs=1e-6)  # bull flag -> long -> + sign
+
+
+def test_pattern_recognition_xgb_ensemble_populates_calibrated_probability_when_calibration_configured(monkeypatch, tmp_path):
+    from firm.patterns.ml.calibration import save_calibration
+    from firm.strategies import pattern_recognition as pr_module
+
+    calibration_path = tmp_path / "xgb_calibration.json"
+    save_calibration({"type": "sigmoid", "a": 1.0, "b": 0.0}, calibration_path)
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference,
+        "score_pattern_confirmation",
+        lambda features, **kwargs: (0.1, 0.1, 0.8),
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={
+            "xgb_confirmation_enabled": True,
+            "xgb_calibration_path": str(calibration_path),
+        },
+    ).generate(pit_view)
+
+    assert len(signals) == 1
+    sig = signals[0]
+    assert sig.meta["xgb_p_target"] == pytest.approx(0.8)
+    # A real "sigmoid" calibration file was configured and load_calibration
+    # confirms its type -- calibrated_probability may now be honored.
+    assert sig.meta["calibrated_probability"] == pytest.approx(0.8)
+
+
+def test_pattern_recognition_xgb_ensemble_ignores_wrong_calibration_type(monkeypatch, tmp_path):
+    from firm.patterns.ml.calibration import save_calibration
+    from firm.strategies import pattern_recognition as pr_module
+
+    # A "temperature" calibration is meaningful for the CNN's pre-softmax
+    # logits, not this ONNX graph's already-softmaxed probabilities --
+    # xgb_p_target must not be relabeled calibrated on a type mismatch.
+    calibration_path = tmp_path / "xgb_calibration.json"
+    save_calibration({"type": "temperature", "temperature": 1.2}, calibration_path)
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference,
+        "score_pattern_confirmation",
+        lambda features, **kwargs: (0.1, 0.1, 0.8),
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={
+            "xgb_confirmation_enabled": True,
+            "xgb_calibration_path": str(calibration_path),
+        },
+    ).generate(pit_view)
+
+    assert signals[0].meta["calibrated_probability"] is None
 
 
 def test_pattern_recognition_xgb_ensemble_off_by_default_leaves_meta_none():

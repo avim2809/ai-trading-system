@@ -111,6 +111,11 @@ def resample_to_weekly(
         },
         index=pd.DatetimeIndex(pd.to_datetime(pd.Series(dates).reset_index(drop=True))),
     ).sort_index()
+    # A duplicate calendar date in the input (upstream data bug) would
+    # otherwise double-count that day's volume in its week's sum via
+    # resample(...).agg({"volume": "sum"}) below. Keep the last occurrence,
+    # matching pandas' own default de-dup convention elsewhere in this repo.
+    daily = daily[~daily.index.duplicated(keep="last")]
 
     weekly = daily.resample("W-SUN").agg(
         {"high": "max", "low": "min", "close": "last", "volume": "sum"}

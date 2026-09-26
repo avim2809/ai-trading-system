@@ -4,6 +4,12 @@
 with ``firm.portfolio.attribution``.
 """
 
+from firm.eval.classification import (
+    binary_classification_report,
+    brier_score,
+    pr_auc,
+    reliability_diagram_bins,
+)
 from firm.eval.metrics import (
     annualized_volatility,
     cagr,
@@ -39,6 +45,10 @@ def __getattr__(name: str):
 
 
 __all__ = [
+    "binary_classification_report",
+    "brier_score",
+    "pr_auc",
+    "reliability_diagram_bins",
     "annualized_volatility",
     "cagr",
     "calmar_ratio",

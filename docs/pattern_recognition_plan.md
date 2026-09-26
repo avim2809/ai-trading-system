@@ -1180,3 +1180,215 @@ pass:
 /`config/live_alpaca.yaml` yet — each needs the same walk-forward
 re-validation treatment `cnn_scoring_enabled` already got before that
 happens.
+
+## 9. 2026-09-25 follow-up: guardrails, calibration wiring, golden benchmark
+
+An adversarial review of §7-§8's history (commits `53d5345`..`a8bb88f`)
+found the core detection/scoring logic causally sound and the §8.2 rollback
+methodologically justified, but surfaced concrete gaps: no automated
+control stopped a future config edit from re-enabling an
+audited-and-failed knob; `meta["calibrated_probability"]` was populated
+from raw, uncalibrated XGBoost output whenever no calibration file was
+configured (which was always, since nothing ever produced one); the
+walk-forward validator's own grid was self-admittedly stale; and there was
+no regression test for the look-ahead invariant §5/§6 rely on being true.
+This section tracks closing those gaps.
+
+### 9.1 Small correctness fixes
+
+- `pattern_recognition.py`'s module docstring still claimed "Registered
+  but NOT added to config/live.yaml's strategies.enabled list" — false
+  since §7.5/`c4aa561` (2026-09-09), never updated across two subsequent
+  edits to the same file. Corrected.
+- `trendline.fit_trendline`/`fit_poly2`: a degenerate flat-line input
+  (`ss_tot <= 1e-12`, nothing for the fit to explain) returned `r2 = 1.0`
+  ("perfect fit") rather than `0.0` — inflates `trendline_fit`/`geometry`
+  scoring for a pathological flat/illiquid symbol. Fixed; new
+  `tests/test_trendline.py`.
+- `confluence.resample_to_weekly` never de-duplicated timestamps before
+  `.agg({"volume": "sum", ...})` — a duplicate calendar date (upstream data
+  bug) would silently double-count that day's volume. Fixed
+  (`keep="last"`); regression test in `tests/test_confluence.py`.
+
+### 9.2 Look-ahead / prefix-invariance regression tests (new coverage)
+
+New `tests/test_pattern_invariance.py`. Manually re-verified the invariant
+(appending observations after decision time T must not change any result
+emitted at or before T) function-by-function, same conclusion as before:
+holds for `zigzag_pivots`, the score components that read only up to
+`confirm_index` (`volume_ratio`, `breakout_distance`,
+`pre_breakout_compression`), and every rule detector.
+
+Two genuine subtleties surfaced while writing the tests, worth recording
+since they'd otherwise cause a naive "append and compare" test to fail for
+the *wrong* reason:
+
+- `_score_and_finalize` floors `stop` at `stop_atr_floor * current_atr`,
+  where `current_atr = atr[-1]` — the last bar of the *whole input window*,
+  not the ATR as of `confirm_index`. Intentional (the stop reflects
+  *current* volatility, not volatility when the pattern formed) — no past
+  emitted signal is ever altered since live trading never re-scans history
+  — but `stop`/`risk_reward`/`follow_through_atr`/`quality_score` are
+  consequently not prefix-invariant *by design* and had to be excluded
+  from the structural-equality checks.
+- `confirmation.find_confirmation` searches newest-first and returns the
+  *freshest* bar still satisfying the breakout condition — so
+  `confirm_index` deliberately drifts forward as more bars are appended,
+  for as long as the breakout persists (the same mechanism §6.8 already
+  documented for training-data collection, seen here from the opposite
+  side: it's also why a bare `scan(data[:T])` vs `scan(data[:T+N])`
+  comparison is the wrong invariance test for `scan_symbol` — the correct
+  one truncates at the *longer* run's own reported `confirm_index` and
+  checks nothing after it mattered).
+
+### 9.3 Fail-closed rollout-gate enforcement
+
+New `src/firm/live/pattern_ml_gate.py`. `scripts/pattern_recognition_rollout_gate.py`
+was a real, tested decision function with zero callers outside its own
+test — nothing stopped `cnn_scoring_enabled`/`xgb_confirmation_enabled`
+from being flipped `true` without ever running it. The new module
+refuses to honor either flag in `strategy_params.pattern_recognition`
+unless a rollout-gate JSON with `overall_recommendation` starting `"KEEP"`
+exists at `data/models/pattern_recognition.rollout_gate.json`
+(`FIRM_PATTERN_ML_GATE` overrides), forcing the flag back to `False` and
+logging `REFUSED: ...` with the remediation command otherwise. Wired into
+`LiveTradingEngine.__init__` and `_rebuild_orchestrator` — the true funnel
+for every live start/hot-swap path (systemd/API startup, `POST
+/api/live/start`, `scripts/run_live_trading.py`, and all six existing
+`update_*` setters) — and deliberately *not* into
+`firm.runtime._build_categorized_strategies`, which the walk-forward
+validator itself shares to produce the very record this gate reads (guarding
+there would deadlock the harness). `_rebuild_orchestrator` now owns
+`self._config` after sanitizing it, closing a race where an `update_*`
+caller that stashed the raw (pre-sanitize) request into `self._config`
+before or after the rebuild could have silently un-done the refusal.
+Tests: `tests/test_pattern_ml_gate.py` (pure decision function + a
+`LiveTradingEngine`/`update_strategy_params`/`update_strategies`
+integration suite with a mocked orchestrator).
+
+### 9.4 Calibration wiring
+
+`meta["calibrated_probability"]` — the field `TraderAgent._signal_calibrated_edge`'s
+Kelly path trusts as an already-calibrated probability — was populated
+from `xgb_p_target` unconditionally whenever the XGBoost ensemble ran,
+regardless of whether `xgb_calibration_path` was configured (it never was
+— nothing in the repo had ever called `firm.patterns.ml.calibration.fit_sigmoid_calibration`
+outside its own test, so the field was silently uncalibrated in practice).
+Fixed: `pattern_recognition.py` now only populates it when a calibration
+file of type `"sigmoid"` actually loaded; `xgb_p_target` remains exposed
+under its own honest key either way. `TraderAgent._signal_calibrated_edge`
+already handled a `None` value safely (`float(None)` raises `TypeError`,
+caught, signal skipped, falls through to the return-history Kelly path) —
+confirmed by reading it, no change needed there, new test added for the
+explicit case (`tests/test_trader.py::test_none_probability_skipped`).
+
+New `scripts/fit_pattern_calibration.py` — the fitting pipeline this gap
+was really missing. `--source history` reads real resolved rows from
+`PatternScanHistoryStore` (refuses below 20 decisive rows, same bar as
+`analyze_pattern_scan_outcomes.py`'s `_MIN_RESOLVED_FOR_STATS` — as of this
+writing both live DBs have **zero** resolved rows, so this path correctly
+reports "not enough data" rather than fabricating a calibration).
+`--source synthetic` exercises the same fit/save wiring against a labeled
+sample built from `firm.data.synthetic.make_synthetic_prices` — and hit
+the *exact same* §6.8 single-shot-scan-has-no-forward-history bug while
+building it (every label came back `0`/timeout until the scan was rolled
+backward through history the same way `build_dataset` does), which is
+reassuring evidence that §6.8's fix is the correct general pattern for
+this failure mode, not a one-off. Only sigmoid/Platt calibration is
+supported (temperature scaling needs per-class logits nothing currently
+logs — CNN calibration isn't wired by this script; use
+`scripts/train_cnn_validator.py`'s own held-out split instead until a
+future schema change logs CNN logits). Tests:
+`tests/test_fit_pattern_calibration.py`.
+
+### 9.5 Time-ordered train/test split
+
+`scripts/train_pattern_ml.py`/`scripts/train_cnn_validator.py` both used a
+random `sklearn.train_test_split` on data §6.8 already established is
+"highly autocorrelated" (overlapping rolling-cutoff windows) — a random
+shuffle split lets near-duplicate rows from adjacent cutoffs of the *same*
+underlying pattern leak between train and test, inflating reported
+accuracy/AUC. Both scripts now record `confirm_date` (the source panel's
+actual date at `confirm_index`, positionally valid against `ohlcv` per
+§6.8) in their `meta` output and split via a new `time_ordered_split`: sort
+by `confirm_date`, take the trailing `--test-size` fraction as test, with
+an `--embargo-bars` (default = `--timeout-bars`) calendar-day gap dropped
+from the train period immediately before the cutoff, mirroring
+`validate_pattern_cnn_walkforward.py`'s own `--embargo-days` convention.
+Duplicated rather than shared between the two scripts (no cross-script
+imports in this repo; `train_cnn_validator.py`'s `X` is an image ndarray,
+`train_pattern_ml.py`'s is a feature DataFrame, so the indexing differs
+slightly anyway). `--seed` stays in both CLIs for backward compatibility
+but is now a no-op for splitting, documented as such. New
+`tests/test_train_pattern_ml.py`/`tests/test_train_cnn_validator.py` — the
+first tests of either script at all (previously only the underlying
+`firm.patterns.ml` primitives they call were tested).
+
+### 9.6 Golden pattern benchmark + classification-metrics harness
+
+Nothing anywhere in this repo previously measured whether the rule-based
+detectors' positive/negative calls, or `quality_score` as a probability
+proxy, are actually any good — only whether the pipeline runs without
+raising. New `src/firm/eval/classification.py` (thin `sklearn.metrics`
+wrappers — precision/recall/F1/confusion-matrix, PR-AUC, Brier score,
+reliability-diagram binning; exported from `firm.eval`'s `__all__`), new
+`tests/pattern_fixtures.py` (a shared, cross-importable golden corpus —
+positive/negative/boundary/ambiguous fixtures, honestly scoped: 15 of 17
+`PATTERN_NAMES` get a clean single-pattern positive fixture reused
+verbatim from `tests/test_patterns.py`'s own proven anchors; the remaining
+continuum pairs — bull_flag/pennant, cup_handle/rounding_bottom — are
+represented as ambiguous fixtures instead of forcing a fake clean split;
+boundary coverage is 2 representative cases, not all 9 detectors'
+tolerance constants — tracked as a real gap, not silently claimed as
+full), and new `scripts/benchmark_pattern_detectors.py` (runs every
+fixture plus a larger synthetic-GBM-noise negative sample through the
+real `scan_symbol` at its own live default `min_score=60.0`, reports
+per-category/per-family accuracy plus a corpus-wide binary classification
+report + PR-AUC + Brier score treating `quality_score/100` as a predicted
+probability).
+
+**Two genuine findings surfaced by building this, not designed in:**
+
+1. `tests/test_patterns.py`'s existing triple_top/triple_bottom fixtures,
+   when run through the *full* `scan_symbol` pipeline (every detector,
+   best-quality-score wins) rather than `detect_triple_top`/
+   `detect_triple_bottom` called in isolation, confirm a genuine
+   triple_top/triple_bottom (score ~90) but `head_shoulders_top`/
+   `inverse_head_shoulders` score marginally higher (~95-96) on the same
+   pivots and win the "best match" slot. Both are real, independently
+   correct detections on the same geometry — a real-pipeline ambiguity a
+   per-detector unit test structurally cannot see (moved to this corpus's
+   AMBIGUOUS category rather than treated as a corpus bug).
+2. **At the live production `min_score=60.0` default, ~2/3 of pure
+   random-walk (GBM) noise symbols still produce a "confirmed" pattern**
+   (14 of 21 in one 20-symbol/300-day run — reproduce with
+   `python scripts/benchmark_pattern_detectors.py --n-negative-symbols 20`).
+   This is the first quantified false-positive-rate measurement for this
+   subsystem and a direct, concrete answer to "is `quality_score`
+   actually meaningful" — worth a follow-up investigation in its own
+   right (P1 candidate: is 60 simply too low a bar, or is `quality_score`
+   not discriminating GBM-noise geometry as well as its component design
+   intends).
+
+Tests: `tests/test_eval_classification.py`, `tests/test_pattern_fixtures.py`,
+`tests/test_benchmark_pattern_detectors.py` (the latter tests the pure
+grading/aggregation logic against controlled inputs — deliberately not
+"does the corpus pass today," since real detector behavior legitimately
+shifting *is* the point of running this benchmark, not something a green
+test suite should mask).
+
+### 9.7 Deferred (not done in this pass)
+
+- The plan's secondary defense-in-depth gate check in
+  `provider_utils.resolve_live_startup` (surfacing a refusal as an earlier
+  HTTP 400 rather than a silent downgrade visible only in
+  `GET /api/live/config` + logs) was scoped as optional and skipped — the
+  primary `LiveTradingEngine` guard already covers every live path and is
+  tested; a second raise-based check in a broadly-used helper wasn't worth
+  the added risk for a UX nicety.
+- Exhaustive per-detector boundary-tolerance fixtures (all 9 detectors'
+  individual tolerance constants, not just the 2 representative cases
+  above).
+- The CNN retrain + extended walk-forward audit (adding an XGBoost
+  candidate) — the operational, live-host-impacting step — is tracked
+  separately and not yet done as of this entry.

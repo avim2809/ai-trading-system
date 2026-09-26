@@ -88,6 +88,23 @@ def test_resample_to_weekly_accepts_plain_numpy_datetime_array():
     assert len(weekly) == 2
 
 
+def test_resample_to_weekly_deduplicates_repeated_timestamp():
+    # A duplicate calendar date (upstream data bug) must not double-count
+    # that day's volume in its week's sum -- keep only the later occurrence.
+    dates, high, low, close, volume = _business_day_fixture(6)  # 5 complete + 1 partial
+    dup_dates = pd.DatetimeIndex(list(dates) + [dates[2]])
+    dup_high = np.append(high, high[2])
+    dup_low = np.append(low, low[2])
+    dup_close = np.append(close, close[2])
+    dup_volume = np.append(volume, volume[2])
+
+    deduped = resample_to_weekly(dup_dates, dup_high, dup_low, dup_close, dup_volume)
+    baseline = resample_to_weekly(dates, high, low, close, volume)
+
+    assert len(deduped) == 1
+    assert deduped.iloc[0]["volume"] == pytest.approx(baseline.iloc[0]["volume"])
+
+
 # ---------------------------------------------------------------------------
 # weekly_trend_direction
 # ---------------------------------------------------------------------------

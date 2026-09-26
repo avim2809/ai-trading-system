@@ -61,8 +61,11 @@ Risk notes:
     does for every other strategy including regime_hmm). A confirmed pattern
     in a strongly adverse regime will still fire here at full score; regime
     context should be layered on afterward, not inside this strategy.
-    Registered but NOT added to config/live.yaml's strategies.enabled list —
-    see docs/pattern_recognition_plan.md 5.1 for why that's deliberate.
+    Enabled in both config/live.yaml and config/live_alpaca.yaml's
+    strategies.enabled list since 2026-09-09 (see docs/pattern_recognition_plan.md
+    §8 for the CNN/XGBoost-ensemble rollout and rollback history — the
+    rule-based scanner runs live on both instances; the ML layer is
+    config-gated off pending its own walk-forward re-validation).
 """
 
 from __future__ import annotations
@@ -325,7 +328,18 @@ class PatternRecognitionStrategy(BaseStrategy):
                 )
                 if xgb_result is not None:
                     _, _, xgb_p_target = xgb_result
-                    calibrated_probability = xgb_p_target
+                    # Only populate meta["calibrated_probability"] -- the
+                    # generic TraderAgent._signal_calibrated_edge Kelly
+                    # convention -- when xgb_calibration was actually loaded
+                    # and is of the type score_pattern_confirmation applies
+                    # ("sigmoid"); otherwise xgb_p_target is the RAW,
+                    # uncalibrated model output and mislabeling it as
+                    # calibrated would silently feed an uncalibrated number
+                    # into Kelly sizing if allocation_method is ever set to
+                    # "kelly". The raw value is still exposed below under
+                    # its own honest key (xgb_p_target), never hidden.
+                    if xgb_calibration and xgb_calibration.get("type") == "sigmoid":
+                        calibrated_probability = xgb_p_target
 
             if xgb_p_target is not None:
                 disagreement = abs(xgb_p_target - base_quality_fraction)

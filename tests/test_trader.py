@@ -156,6 +156,17 @@ class TestSignalCalibratedEdge:
         edge = TraderAgent._signal_calibrated_edge(bb, "AAPL")
         assert edge is None
 
+    def test_none_probability_skipped(self):
+        # firm.strategies.pattern_recognition always sets this key, but
+        # its value is None whenever no calibration file was configured
+        # (see the "gate the field" fix) -- must fall through to the
+        # return-history Kelly path, not crash on float(None).
+        bb = _FakeBlackboard({
+            "AAPL": [_make_signal("AAPL", "pattern_recognition", meta={"calibrated_probability": None})],
+        })
+        edge = TraderAgent._signal_calibrated_edge(bb, "AAPL")
+        assert edge is None
+
     def test_non_positive_risk_reward_falls_back_to_one(self):
         # p=0.7, b invalid (0) -> should behave as b=1.0 -> f=0.4
         bb = _FakeBlackboard({

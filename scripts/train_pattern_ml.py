@@ -50,7 +50,6 @@ if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from sklearn.metrics import accuracy_score, roc_auc_score  # noqa: E402
-from sklearn.model_selection import train_test_split  # noqa: E402
 
 from firm.data.synthetic import DEFAULT_SYMBOLS, make_synthetic_prices  # noqa: E402
 from firm.patterns.ml import xgb_classifier  # noqa: E402
@@ -208,12 +207,72 @@ def build_dataset(
                     "direction": match.direction,
                     "confirm_index": match.confirm_index,
                     "quality_score": match.quality_score,
+                    # sym_df["date"] survives _adjusted_ohlc dropping it from
+                    # `ohlcv`/`window` -- confirm_index is still positionally
+                    # valid against it since ohlcv preserves sym_df's row
+                    # order. Used for a time-ordered (not random) train/test
+                    # split -- see time_ordered_split -- since this dataset
+                    # is explicitly autocorrelated/overlapping-window (see
+                    # this function's own docstring).
+                    "confirm_date": sym_df["date"].iloc[match.confirm_index],
                 })
 
     X = pd.DataFrame(feature_rows)
     y = np.array(labels, dtype=int)
     meta = pd.DataFrame(meta_rows)
     return X, y, meta
+
+
+def time_ordered_split(
+    X: pd.DataFrame,
+    y: np.ndarray,
+    meta: pd.DataFrame,
+    *,
+    test_size: float,
+    embargo_bars: int = 0,
+) -> tuple[pd.DataFrame, pd.DataFrame, np.ndarray, np.ndarray]:
+    """Trailing-time train/test split, replacing a random ``train_test_split``
+    on data this module's own docstring already calls "highly autocorrelated"
+    (overlapping rolling-cutoff windows) -- a random shuffle split lets
+    near-duplicate rows from adjacent cutoffs of the *same* underlying
+    pattern leak between train and test, inflating reported accuracy/AUC.
+
+    Sorts every row by ``meta["confirm_date"]`` and takes the last
+    ``test_size`` fraction (by row count) as the held-out test set,
+    everything strictly before as train. ``embargo_bars`` additionally
+    drops the trailing ``embargo_bars`` *calendar* days of the train period
+    immediately before the test cutoff (a calendar-day approximation, not a
+    per-symbol trading-day count, since rows aren't aligned to one shared
+    bar index across symbols) -- mirrors
+    ``scripts/validate_pattern_cnn_walkforward.py``'s own ``--embargo-days``
+    convention, guarding against a train row whose own triple-barrier label
+    window could still overlap into the test period.
+    """
+    n = len(meta)
+    if n == 0:
+        empty_y = np.array([], dtype=y.dtype if len(y) else int)
+        return X.iloc[0:0], X.iloc[0:0], empty_y, empty_y
+
+    order = np.argsort(pd.to_datetime(meta["confirm_date"]).to_numpy(), kind="stable")
+    X_sorted = X.iloc[order].reset_index(drop=True)
+    y_sorted = y[order]
+    dates_sorted = pd.to_datetime(meta["confirm_date"]).to_numpy()[order]
+
+    n_test = min(n - 1, max(1, int(round(n * test_size)))) if n > 1 else 0
+    split_at = n - n_test
+
+    train_end = split_at
+    if embargo_bars > 0 and split_at > 0:
+        cutoff = pd.Timestamp(dates_sorted[split_at])
+        embargo_start = cutoff - pd.Timedelta(days=embargo_bars)
+        train_dates = pd.to_datetime(dates_sorted[:split_at])
+        train_end = int(np.sum(train_dates < embargo_start))
+
+    X_train = X_sorted.iloc[:train_end]
+    y_train = y_sorted[:train_end]
+    X_test = X_sorted.iloc[split_at:]
+    y_test = y_sorted[split_at:]
+    return X_train, X_test, y_train, y_test
 
 
 def _safe_multiclass_auc(model, X_test, y_test) -> float | None:
@@ -254,12 +313,30 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Rolling as-of scan: bars between successive scan cutoffs -- smaller finds more "
              "(highly autocorrelated) rows per symbol at proportionally higher cost",
     )
-    parser.add_argument("--test-size", type=float, default=0.25)
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--test-size", type=float, default=0.25,
+        help="Fraction of rows (by count, after sorting by confirm_date) held out as a "
+             "trailing time-ordered test set -- see time_ordered_split.",
+    )
+    parser.add_argument(
+        "--embargo-bars", type=int, default=None,
+        help="Calendar-day embargo dropped from the trailing edge of the train period, "
+             "immediately before the test cutoff (see time_ordered_split). Defaults to "
+             "--timeout-bars, since that's the label window that could otherwise overlap "
+             "into the test period.",
+    )
+    parser.add_argument(
+        "--seed", type=int, default=42,
+        help="No longer used for the (now time-ordered, not random) train/test split -- "
+             "kept in the CLI contract for any future use of XGBoost's own internal "
+             "randomness.",
+    )
     parser.add_argument("--output", default="data/models/pattern_xgb.pkl")
     args = parser.parse_args(argv)
     if args.symbols:
         args.symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    if args.embargo_bars is None:
+        args.embargo_bars = args.timeout_bars
     return args
 
 
@@ -299,11 +376,17 @@ def main(argv: list[str] | None = None) -> int:
     print("Matches by pattern:")
     print(meta["pattern"].value_counts().to_string())
 
-    _, counts = np.unique(y, return_counts=True)
-    stratify = y if counts.min() >= 2 else None
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=args.test_size, random_state=args.seed, stratify=stratify,
+    X_train, X_test, y_train, y_test = time_ordered_split(
+        X, y, meta, test_size=args.test_size, embargo_bars=args.embargo_bars,
     )
+    if len(set(y_train.tolist())) < 2 or len(X_train) == 0:
+        print(
+            f"Time-ordered split left only {len(X_train)} train row(s) with "
+            f"{len(set(y_train.tolist()))} distinct label(s) -- try a wider universe, "
+            "longer date range, smaller --test-size, or smaller --embargo-bars.",
+            file=sys.stderr,
+        )
+        return 1
 
     try:
         model = xgb_classifier.train(X_train, y_train)

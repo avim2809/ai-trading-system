@@ -26,7 +26,10 @@ def fit_trendline(xs: list[float], ys: list[float]) -> Trendline | None:
     pred = slope * x + intercept
     ss_res = float(np.sum((y - pred) ** 2))
     ss_tot = float(np.sum((y - y.mean()) ** 2))
-    r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-12 else 1.0
+    # A degenerate flat-line input (ss_tot ~= 0, no variance to explain) is
+    # not evidence of a good trendline fit -- score it 0.0, not a "perfect"
+    # 1.0, so a flat/illiquid symbol can't inflate trendline_fit/geometry.
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-12 else 0.0
     return Trendline(float(slope), float(intercept), max(0.0, r2))
 
 
@@ -53,5 +56,6 @@ def fit_poly2(ys: np.ndarray) -> tuple[float, float, float, float]:
     pred = a * x**2 + b * x + c
     ss_res = float(np.sum((ys - pred) ** 2))
     ss_tot = float(np.sum((ys - ys.mean()) ** 2))
-    r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-12 else 1.0
+    # Same degenerate-flat-input rationale as fit_trendline above.
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 1e-12 else 0.0
     return float(a), float(b), float(c), max(0.0, r2)

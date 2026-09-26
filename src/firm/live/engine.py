@@ -28,6 +28,7 @@ import pandas as pd
 from firm.brokers.base import Broker, BrokerError, OrderRequest, OrderStatus
 from firm.live.approval import ApprovalQueue
 from firm.live.data_feed import LiveDataFeed
+from firm.live.pattern_ml_gate import sanitize_strategy_params
 from firm.live.planning_cycle import maybe_apply_overnight_plan
 from firm.live.portfolio_sync import CONTINGENT_ORDER_TYPES, sync_portfolio_from_broker
 from firm.live.scheduler import (
@@ -137,6 +138,7 @@ class LiveTradingEngine:
         kill_switch_state_path: str | Path | None = None,
         state_db_path: str | Path | None = None,
     ) -> None:
+        config = {**config, "strategy_params": sanitize_strategy_params(config.get("strategy_params"))}
         self._config = config
         self._broker = broker
         self._data_feed = data_feed
@@ -699,6 +701,15 @@ class LiveTradingEngine:
         """Rebuild ``self._orchestrator`` from *new_config*, carrying over any
         in-flight per-strategy sleeve state first.
 
+        Sanitizes ``new_config["strategy_params"]`` via ``pattern_ml_gate``
+        and sets ``self._config`` to the (possibly downgraded) result itself
+        -- the single source of truth, so every ``update_*`` caller's own
+        ``self._config = new_config`` before/after this call reflects the
+        same sanitized value rather than racing it (a REFUSED downgrade
+        must be visible in ``self._config`` for ``GET /api/live/config`` to
+        surface it, not silently overwritten back to the requested-but-
+        refused value by a caller that already stashed the raw request).
+
         ``capital_allocation_mode: "sleeved"`` sleeves keep their own
         virtual ``PortfolioState`` and per-strategy ``TraderAgent``
         conviction-EMA/NAV-history *in memory* on the orchestrator instance
@@ -713,6 +724,11 @@ class LiveTradingEngine:
         book, whose cash/holdings/broker connection are untouched by a
         rebuild.
         """
+        new_config = {
+            **new_config,
+            "strategy_params": sanitize_strategy_params(new_config.get("strategy_params")),
+        }
+        self._config = new_config
         old_orchestrator = self._orchestrator
         self._orchestrator = build_orchestrator(new_config)
         old_sleeve_traders = getattr(old_orchestrator, "sleeve_traders", None) or {}
@@ -748,8 +764,7 @@ class LiveTradingEngine:
         """
         self._enabled_strategies = list(names) if names else self._all_strategy_names()
         new_config = {**self._config, "strategies": self._enabled_strategies}
-        self._rebuild_orchestrator(new_config)
-        self._config = new_config
+        self._rebuild_orchestrator(new_config)  # sets self._config itself
         log.info("Live engine strategies updated: %s", self._enabled_strategies)
 
     def update_strategy_params(self, strategy_params: dict[str, Any]) -> None:

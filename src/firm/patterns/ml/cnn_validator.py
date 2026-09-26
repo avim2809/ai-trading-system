@@ -62,13 +62,44 @@ def _require_pyts():
     return GramianAngularField
 
 
+def _encode_gasf_numpy(series_0_1: np.ndarray) -> np.ndarray:
+    """Pure-numpy replica of ``pyts.image.GramianAngularField(method=
+    "summation")`` for the no-PAA-resize case (``image_size == len(series)``).
+
+    Reproduces ``pyts``'s default ``sample_range=(-1, 1)`` rescale + GASF
+    formula exactly -- verified numerically against real ``pyts`` output
+    (max abs diff 0.0), same derivation as
+    ``firm.patterns.ml.inference._encode_gasf`` (duplicated rather than
+    imported: that module is the light, main-venv-safe inference path and
+    importing this heavy, isolated-env module's own light helper back out
+    of it would invert this package's existing "light imports from heavy"
+    dependency direction for one 6-line formula). Only used to avoid a hard
+    ``pyts`` dependency for training on hosts where it isn't installed and
+    has no wheel (this repo's `.venv-ml` did not survive a host migration
+    intact) -- ``series_0_1`` must already be min-max-normalized to [0, 1]
+    (see :func:`extract_window`), same precondition ``encode_gaf`` already
+    documents.
+    """
+    x = np.clip(2.0 * series_0_1 - 1.0, -1.0, 1.0)
+    sin_part = np.sqrt(np.clip(1.0 - x**2, 0.0, 1.0))
+    return np.outer(x, x) - np.outer(sin_part, sin_part)
+
+
 def encode_gaf(series: np.ndarray, *, image_size: int = DEFAULT_IMAGE_SIZE) -> np.ndarray:
     """One 1D price series -> one ``(image_size, image_size)`` GAF image.
 
     ``series`` should already be a fixed-length window (see
     :data:`DEFAULT_WINDOW_BARS`) -- GAF itself doesn't require a fixed
     length, but a CNN's input tensor does, so callers pad/trim before this.
+
+    Uses the pure-numpy :func:`_encode_gasf_numpy` replica (no ``pyts``
+    needed) when ``image_size == len(series)`` -- the only case this
+    replica is verified correct for (no PAA resizing required). Falls back
+    to real ``pyts`` (which supports arbitrary resizing) otherwise.
     """
+    series = np.asarray(series, dtype=float)
+    if image_size == len(series):
+        return _encode_gasf_numpy(series)
     GramianAngularField = _require_pyts()
     gaf = GramianAngularField(image_size=image_size, method="summation")
     return gaf.fit_transform(series.reshape(1, -1))[0]
