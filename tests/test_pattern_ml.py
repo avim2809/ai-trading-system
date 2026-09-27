@@ -55,6 +55,7 @@ from firm.patterns.ml.labeling import (
     label_matches_meta_binary,
     label_meta_binary,
     label_triple_barrier,
+    label_triple_barrier_with_exit,
 )
 from firm.patterns.scanner import scan_symbol
 
@@ -370,6 +371,56 @@ class TestLabelTripleBarrier:
         assert labels.tolist() == [1]
 
 
+class TestLabelTripleBarrierWithExit:
+    """Part B item 3 (2026-09-27): label_triple_barrier_with_exit's exit_index
+    is the real span-end sample_weights.average_uniqueness needs, distinct
+    from just re-deriving the label."""
+
+    def test_matches_label_triple_barrier_and_reports_correct_exit_offset(self):
+        match = _make_match(direction="long", confirm_index=2, entry=100.0, stop=95.0, target=110.0)
+        ohlcv = _ohlcv_frame([100, 101, 100, 103, 108, 111, 120])
+        label, exit_index = label_triple_barrier_with_exit(match, ohlcv, timeout_bars=20)
+        assert label == label_triple_barrier(match, ohlcv, timeout_bars=20) == 1
+        # confirm_index=2 -> walk starts at bar 3; target (110) first cleared
+        # at bar 5 (108 -> hits at 111, the 3rd bar of the walk, i.e. offset 2).
+        assert exit_index == 5
+
+    def test_stop_hit_exit_offset(self):
+        match = _make_match(direction="long", confirm_index=2, entry=100.0, stop=95.0, target=110.0)
+        ohlcv = _ohlcv_frame([100, 101, 100, 98, 94, 108])
+        label, exit_index = label_triple_barrier_with_exit(match, ohlcv, timeout_bars=20)
+        assert label == -1
+        assert ohlcv["low"].iloc[exit_index] <= 95.0
+
+    def test_timeout_exit_index_is_last_available_bar(self):
+        match = _make_match(direction="long", confirm_index=2, entry=100.0, stop=90.0, target=120.0)
+        ohlcv = _ohlcv_frame([100, 101, 100, 102, 103, 101, 104, 102, 103, 101, 104])
+        label, exit_index = label_triple_barrier_with_exit(match, ohlcv, timeout_bars=5)
+        assert label == 0
+        assert exit_index == match.confirm_index + 5  # start + (timeout_bars - 1)
+
+    def test_no_bars_after_confirm_index_exit_is_confirm_index_itself(self):
+        match = _make_match(confirm_index=2, direction="long", stop=90.0, target=120.0)
+        ohlcv = _ohlcv_frame([100, 101, 102])  # confirm_index is the last bar
+        label, exit_index = label_triple_barrier_with_exit(match, ohlcv, timeout_bars=20)
+        assert label == 0
+        assert exit_index == match.confirm_index
+
+    def test_unconfirmed_match_raises(self):
+        match = _make_match(confirm_index=-1)
+        with pytest.raises(ValueError):
+            label_triple_barrier_with_exit(match, _ohlcv_frame([100, 101, 102]))
+
+    def test_exit_index_never_precedes_confirm_index(self):
+        match = _make_match(direction="long", confirm_index=0, entry=100.0, stop=95.0, target=110.0)
+        ohlcv = pd.DataFrame({
+            "high": [100.5, 115.0], "low": [99.5, 90.0], "close": [100.0, 102.0], "volume": [1e6, 1e6],
+        })
+        label, exit_index = label_triple_barrier_with_exit(match, ohlcv, timeout_bars=20)
+        assert label == -1  # same-bar collision prefers stop, matching label_triple_barrier
+        assert exit_index >= match.confirm_index
+
+
 class TestLabelMetaBinary:
     """Part B item 2 (2026-09-27): a separate binary act/no-act target for
     the meta-labeling secondary model, distinct from the 3-class
@@ -468,6 +519,40 @@ class TestXGBClassifierWrapper:
         X = pd.DataFrame(np.zeros((0, 3)))
         with pytest.raises(ValueError):
             xgb_classifier.train(X, np.array([], dtype=int))
+
+    def test_sample_weight_none_matches_default_unweighted_behavior(self):
+        # Part B item 3 (2026-09-27): explicit sample_weight=None must be
+        # identical to never passing the argument at all -- every existing
+        # caller (predating this feature) relies on that.
+        X, y = _toy_xy()
+        model_default = xgb_classifier.train(X, y)
+        model_explicit_none = xgb_classifier.train(X, y, sample_weight=None)
+        np.testing.assert_allclose(
+            xgb_classifier.predict_proba(model_default, X),
+            xgb_classifier.predict_proba(model_explicit_none, X),
+        )
+
+    def test_sample_weight_rejects_mismatched_length(self):
+        X, y = _toy_xy(n=10)
+        with pytest.raises(ValueError):
+            xgb_classifier.train(X, y, sample_weight=np.ones(5))
+
+    def test_sample_weight_actually_changes_the_fit(self):
+        # A real (if crude) check that sample_weight isn't silently ignored:
+        # zeroing out half the rows' weight should change predictions
+        # relative to an unweighted fit on the same data.
+        rng = np.random.RandomState(3)
+        n = 60
+        X = pd.DataFrame(rng.rand(n, 5), columns=[f"f{i}" for i in range(5)])
+        y = rng.randint(-1, 2, size=n)
+        weights = np.array([1.0 if i % 2 == 0 else 0.0 for i in range(n)])
+
+        unweighted = xgb_classifier.train(X, y)
+        weighted = xgb_classifier.train(X, y, sample_weight=weights)
+
+        proba_unweighted = xgb_classifier.predict_proba(unweighted, X)
+        proba_weighted = xgb_classifier.predict_proba(weighted, X)
+        assert not np.allclose(proba_unweighted, proba_weighted)
 
     def test_save_load_roundtrip(self, tmp_path):
         X, y = _toy_xy()

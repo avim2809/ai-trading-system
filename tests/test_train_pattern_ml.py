@@ -62,6 +62,52 @@ class TestBuildDatasetConfirmDate:
             assert pd.Timestamp(row["confirm_date"]) == pd.Timestamp(expected_date)
 
 
+class TestBuildDatasetSampleWeight:
+    """Part B item 3 (2026-09-27): build_dataset now also computes de Prado
+    ch.4 average-uniqueness sample weights per row."""
+
+    def test_meta_includes_exit_index_and_sample_weight_in_unit_interval(self):
+        panel = _panel(["AAPL", "MSFT", "NVDA"], n_days=500)
+        X, y, meta = build_dataset(
+            panel, zigzag_pct=0.03, min_score=0.0, confirm_lookback_bars=3,
+            stop_atr_floor=1.5, timeout_bars=20, min_window_bars=60, step_bars=10,
+        )
+        if meta.empty:
+            pytest.skip("fixture produced zero confirmed matches -- nothing to check")
+
+        assert "exit_index" in meta.columns
+        assert "sample_weight" in meta.columns
+        assert (meta["exit_index"] >= meta["confirm_index"]).all()
+        assert meta["sample_weight"].between(0.0, 1.0, inclusive="right").all()
+
+    def test_sample_weight_matches_sample_weights_by_group_directly(self):
+        # The wiring, not the math (average_uniqueness/sample_weights_by_group
+        # have their own dedicated unit tests) -- build_dataset's own output
+        # must equal calling that function on the same (symbol, span) data.
+        from firm.patterns.ml.sample_weights import sample_weights_by_group
+
+        panel = _panel(["AAPL", "MSFT"], n_days=400)
+        X, y, meta = build_dataset(
+            panel, zigzag_pct=0.03, min_score=0.0, confirm_lookback_bars=3,
+            stop_atr_floor=1.5, timeout_bars=20, min_window_bars=60, step_bars=10,
+        )
+        if meta.empty:
+            pytest.skip("fixture produced zero confirmed matches -- nothing to check")
+
+        expected = sample_weights_by_group(
+            meta["symbol"].tolist(), list(zip(meta["confirm_index"].tolist(), meta["exit_index"].tolist())),
+        )
+        np.testing.assert_allclose(meta["sample_weight"].to_numpy(), expected)
+
+    def test_empty_dataset_has_sample_weight_column_too(self):
+        X, y, meta = build_dataset(
+            pd.DataFrame(), zigzag_pct=0.03, min_score=0.0, confirm_lookback_bars=3,
+            stop_atr_floor=1.5, timeout_bars=20,
+        )
+        assert meta.empty
+        assert "sample_weight" in meta.columns
+
+
 class TestTimeOrderedSplit:
     def _fixture(self, n=20):
         dates = pd.date_range("2024-01-01", periods=n, freq="B")
@@ -211,3 +257,40 @@ class TestMainTrainsBothModels:
             "--meta-output", "data/models/custom_meta.pkl",
         ])
         assert args.meta_output == "data/models/custom_meta.pkl"
+
+
+@requires_xgboost
+class TestMainPassesSampleWeight:
+    """Part B item 3 (2026-09-27): a regression test against the wiring
+    silently regressing back to unweighted training in some future
+    refactor -- monkeypatches xgb_classifier.train to record exactly what
+    it was called with, for BOTH the direction and meta models."""
+
+    def test_both_models_trained_with_real_non_none_sample_weight(self, tmp_path, monkeypatch):
+        import train_pattern_ml as script
+
+        calls = []
+        real_train = xgb_classifier.train
+
+        def _recording_train(X, y, *, sample_weight=None, params=None):
+            calls.append(sample_weight)
+            return real_train(X, y, sample_weight=sample_weight, params=params)
+
+        monkeypatch.setattr(script.xgb_classifier, "train", _recording_train)
+
+        output = tmp_path / "pattern_xgb.pkl"
+        argv = [
+            "--data-source", "synthetic",
+            "--n-days", "800",
+            "--symbols", "AAPL,MSFT,GOOG,AMZN,META,TSLA,NVDA,JPM,V,JNJ",
+            "--min-score", "0",
+            "--output", str(output),
+        ]
+        rc = main(argv)
+        if rc != 0:
+            pytest.skip("synthetic fixture produced too few/degenerate rows to train this run")
+
+        assert len(calls) == 2  # direction model, then meta model
+        for sample_weight in calls:
+            assert sample_weight is not None
+            assert np.all((sample_weight > 0.0) & (sample_weight <= 1.0))

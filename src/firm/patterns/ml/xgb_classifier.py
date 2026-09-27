@@ -118,7 +118,11 @@ def _require_xgboost():
     return xgb
 
 
-def train(X: pd.DataFrame | np.ndarray, y, *, params: dict[str, Any] | None = None) -> _FittedPatternModel:
+def train(
+    X: pd.DataFrame | np.ndarray, y, *,
+    sample_weight: np.ndarray | None = None,
+    params: dict[str, Any] | None = None,
+) -> _FittedPatternModel:
     """Fit an XGBoost multi-class classifier over triple-barrier labels.
 
     Args:
@@ -133,6 +137,14 @@ def train(X: pd.DataFrame | np.ndarray, y, *, params: dict[str, Any] | None = No
         y: Matching sequence of int labels drawn from :data:`LABELS`
             (``-1``/``0``/``1``; see :mod:`firm.patterns.ml.labeling`). Need
             not contain all three values (see module docstring).
+        sample_weight: Optional per-row weights, same length as ``y`` --
+            e.g. de Prado ch.4 average-uniqueness weights (see
+            :mod:`firm.patterns.ml.sample_weights`, Part B item 3,
+            2026-09-27) down-weighting overlapping/correlated events rather
+            than treating every row as an equally-weighted i.i.d. sample.
+            ``None`` (default) is XGBoost's own equal-weighting behavior --
+            identical to never passing this argument at all, so every
+            existing caller is unaffected.
         params: Overrides merged over :data:`_DEFAULT_PARAMS` (e.g. to raise
             ``n_jobs`` on a bigger box, or tune ``n_estimators``).
 
@@ -147,6 +159,10 @@ def train(X: pd.DataFrame | np.ndarray, y, *, params: dict[str, Any] | None = No
     unknown = set(int(v) for v in np.unique(y_arr)) - set(LABELS)
     if unknown:
         raise ValueError(f"train: y contains labels outside {LABELS}: {sorted(unknown)}")
+    if sample_weight is not None and len(sample_weight) != len(y_arr):
+        raise ValueError(
+            f"train: sample_weight (n={len(sample_weight)}) must be the same length as y (n={len(y_arr)})"
+        )
 
     present_labels = tuple(sorted(int(v) for v in np.unique(y_arr)))
     if len(present_labels) < 2:
@@ -169,11 +185,12 @@ def train(X: pd.DataFrame | np.ndarray, y, *, params: dict[str, Any] | None = No
     X_fit = X.to_numpy() if hasattr(X, "to_numpy") else X
     model_params = {**_DEFAULT_PARAMS, **(params or {})}
     booster = xgb.XGBClassifier(**model_params)
-    booster.fit(X_fit, y_compact)
+    booster.fit(X_fit, y_compact, sample_weight=sample_weight)
     n_features = X.shape[1] if hasattr(X, "shape") else len(X[0])
     log.info(
-        "xgb_classifier.train: fit on %d rows x %d features, labels present=%s",
-        len(y_compact), n_features, present_labels,
+        "xgb_classifier.train: fit on %d rows x %d features, labels present=%s, "
+        "sample_weight=%s",
+        len(y_compact), n_features, present_labels, "provided" if sample_weight is not None else "none (equal-weighted)",
     )
     return _FittedPatternModel(booster=booster, present_labels=present_labels)
 

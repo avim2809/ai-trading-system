@@ -54,7 +54,8 @@ from sklearn.metrics import accuracy_score, roc_auc_score  # noqa: E402
 from firm.data.synthetic import DEFAULT_SYMBOLS, make_synthetic_prices  # noqa: E402
 from firm.patterns.ml import xgb_classifier  # noqa: E402
 from firm.patterns.ml.feature_engineering import build_features  # noqa: E402
-from firm.patterns.ml.labeling import label_triple_barrier  # noqa: E402
+from firm.patterns.ml.labeling import label_triple_barrier_with_exit  # noqa: E402
+from firm.patterns.ml.sample_weights import sample_weights_by_group  # noqa: E402
 from firm.patterns.sample_size import DEFAULT_SAMPLE_COUNTS_FILENAME, save_sample_counts  # noqa: E402
 from firm.patterns.scanner import scan_symbol  # noqa: E402
 
@@ -159,7 +160,9 @@ def build_dataset(
     meta_rows: list[dict] = []
 
     if panel.empty or "symbol" not in panel.columns:
-        return pd.DataFrame(), np.array([], dtype=int), pd.DataFrame()
+        empty_meta = pd.DataFrame()
+        empty_meta["sample_weight"] = pd.Series(dtype=float)
+        return pd.DataFrame(), np.array([], dtype=int), empty_meta
 
     for symbol, sym_df in panel.groupby("symbol"):
         sym_df = sym_df.sort_values("date").reset_index(drop=True)
@@ -196,7 +199,7 @@ def build_dataset(
                     # but build features only from `window` (what a live scan
                     # as-of that date would actually have seen) to avoid
                     # leaking future data into the features themselves.
-                    label = label_triple_barrier(match, ohlcv, timeout_bars=timeout_bars)
+                    label, exit_index = label_triple_barrier_with_exit(match, ohlcv, timeout_bars=timeout_bars)
                 except ValueError:
                     log.exception("build_dataset: labeling failed for %s/%s", symbol, match.pattern)
                     continue
@@ -207,6 +210,12 @@ def build_dataset(
                     "pattern": match.pattern,
                     "direction": match.direction,
                     "confirm_index": match.confirm_index,
+                    # This event's real outcome-determining span
+                    # [confirm_index, exit_index] (Part B item 3,
+                    # 2026-09-27) -- used below to compute average-
+                    # uniqueness sample weights, distinct from just
+                    # re-deriving the label.
+                    "exit_index": exit_index,
                     "quality_score": match.quality_score,
                     # sym_df["date"] survives _adjusted_ohlc dropping it from
                     # `ohlcv`/`window` -- confirm_index is still positionally
@@ -221,6 +230,19 @@ def build_dataset(
     X = pd.DataFrame(feature_rows)
     y = np.array(labels, dtype=int)
     meta = pd.DataFrame(meta_rows)
+    if not meta.empty:
+        # Part B item 3 (2026-09-27): de Prado ch.4 average-uniqueness
+        # weights, computed per symbol (spans from different symbols are
+        # not comparable -- see firm.patterns.ml.sample_weights' module
+        # docstring) over each event's REAL span
+        # [confirm_index, exit_index], not the fixed timeout_bars window
+        # every row would otherwise be (wrongly) assumed to occupy.
+        meta["sample_weight"] = sample_weights_by_group(
+            meta["symbol"].tolist(),
+            list(zip(meta["confirm_index"].tolist(), meta["exit_index"].tolist())),
+        )
+    else:
+        meta["sample_weight"] = pd.Series(dtype=float)
     return X, y, meta
 
 
@@ -415,8 +437,18 @@ def main(argv: list[str] | None = None) -> int:
     print("Matches by pattern:")
     print(meta["pattern"].value_counts().to_string())
 
+    # Part B item 3 (2026-09-27): carry meta["sample_weight"] through
+    # time_ordered_split as an extra column of X itself -- that function's
+    # own contract (see its docstring/tests) only ever sorts/slices
+    # whatever DataFrame it's handed as `X` by row, generically, with no
+    # notion of a weight column; this avoids changing its tested signature/
+    # return arity for every existing caller just to plumb one more array
+    # through in lockstep. Popped back off immediately after the split,
+    # before any feature matrix is touched by the model.
+    X_with_weight = X.copy()
+    X_with_weight["_sample_weight"] = meta["sample_weight"].to_numpy()
     X_train, X_test, y_train, y_test = time_ordered_split(
-        X, y, meta, test_size=args.test_size, embargo_bars=args.embargo_bars,
+        X_with_weight, y, meta, test_size=args.test_size, embargo_bars=args.embargo_bars,
     )
     if len(set(y_train.tolist())) < 2 or len(X_train) == 0:
         print(
@@ -427,8 +459,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    w_train = X_train.pop("_sample_weight").to_numpy()
+    X_test = X_test.drop(columns=["_sample_weight"])
+
     try:
-        model = xgb_classifier.train(X_train, y_train)
+        model = xgb_classifier.train(X_train, y_train, sample_weight=w_train)
     except ImportError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -470,7 +505,10 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
 
-    meta_model = xgb_classifier.train(X_train, y_meta_train)
+    # Same uniqueness weights as the direction model above -- overlap/
+    # correlation between events is a property of the events themselves
+    # (which bars they occupy), not of which label they're trained toward.
+    meta_model = xgb_classifier.train(X_train, y_meta_train, sample_weight=w_train)
     meta_train_p_act = _meta_p_act(meta_model, X_train)
     meta_test_p_act = _meta_p_act(meta_model, X_test)
     meta_train_acc = accuracy_score(y_meta_train, (meta_train_p_act >= 0.5).astype(int))

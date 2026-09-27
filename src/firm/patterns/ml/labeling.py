@@ -92,6 +92,90 @@ def label_triple_barrier(
     return first_barrier_hit(high, low, direction=match.direction, stop=float(match.stop), target=float(match.target))
 
 
+def label_triple_barrier_with_exit(
+    match: PatternMatch,
+    ohlcv: pd.DataFrame,
+    *,
+    timeout_bars: int = DEFAULT_TIMEOUT_BARS,
+) -> tuple[int, int]:
+    """Same label as :func:`label_triple_barrier`, plus the absolute bar
+    index (a position into ``ohlcv``, same indexing as ``match.confirm_index``)
+    where that label was actually determined -- i.e. de Prado's ``t1`` for
+    this labeled event (ch. 3/4: the event "occupies"
+    ``[match.confirm_index, exit_index]``, not just its single confirm bar).
+
+    Added for :mod:`firm.patterns.ml.sample_weights`'s average-uniqueness
+    weighting (Part B item 3, 2026-09-27), which needs each event's real
+    span to compute how many OTHER labeled events were concurrently
+    "in-flight" at any given bar -- :func:`label_triple_barrier` alone only
+    ever exposes the label, not how long it took to resolve, so every event
+    would otherwise have to be (wrongly) treated as spanning the full fixed
+    ``timeout_bars`` regardless of whether it actually resolved on bar 1 or
+    bar 20.
+
+    Returns ``(label, exit_index)``. When there are no bars after
+    ``confirm_index`` to look at (mirrors :func:`label_triple_barrier`'s own
+    degenerate case), ``exit_index`` is ``match.confirm_index`` itself --
+    a zero-length span, the only sensible answer when nothing is actually
+    known about what happens next.
+    """
+    if not match.confirmed:
+        raise ValueError(
+            f"label_triple_barrier_with_exit requires a confirmed match (confirm_index >= 0), "
+            f"got confirm_index={match.confirm_index} for pattern={match.pattern!r}"
+        )
+
+    n = len(ohlcv)
+    start = match.confirm_index + 1
+    if start >= n:
+        log.debug(
+            "label_triple_barrier_with_exit: no bars after confirm_index=%d (n=%d) for %s -- "
+            "labeling as 0 (timeout), exit_index=confirm_index (zero-length span)",
+            match.confirm_index, n, match.pattern,
+        )
+        return 0, match.confirm_index
+
+    end = min(n, start + timeout_bars)
+    high = ohlcv["high"].to_numpy(dtype=float)[start:end]
+    low = ohlcv["low"].to_numpy(dtype=float)[start:end]
+    label, offset = _first_barrier_hit_with_offset(
+        high, low, direction=match.direction, stop=float(match.stop), target=float(match.target),
+    )
+    return label, start + offset
+
+
+def _first_barrier_hit_with_offset(
+    high: np.ndarray,
+    low: np.ndarray,
+    *,
+    direction: str,
+    stop: float,
+    target: float,
+) -> tuple[int, int]:
+    """Shared core of :func:`first_barrier_hit`/:func:`label_triple_barrier_with_exit`:
+    walk ``high``/``low`` bar-by-bar and return ``(label, offset)``, where
+    ``offset`` is the 0-indexed position *within the passed arrays* where
+    the label was determined -- the last bar (``len(high) - 1``) when
+    neither barrier is touched (the vertical/timeout barrier, or simply
+    running out of array). Never returns an offset past the array's own
+    bounds, and never called on an empty array (see both public callers'
+    own empty-input handling).
+    """
+    is_long = direction == "long"
+    for i, (bar_high, bar_low) in enumerate(zip(high, low)):
+        if is_long:
+            hit_stop = bar_low <= stop
+            hit_target = bar_high >= target
+        else:
+            hit_stop = bar_high >= stop
+            hit_target = bar_low <= target
+        if hit_stop:
+            return -1, i
+        if hit_target:
+            return 1, i
+    return 0, len(high) - 1
+
+
 def first_barrier_hit(
     high: np.ndarray,
     low: np.ndarray,
@@ -109,19 +193,8 @@ def first_barrier_hit(
     ``PatternMatch`` + its original scan-time array aren't available for a
     row read back out of storage days/weeks later).
     """
-    is_long = direction == "long"
-    for bar_high, bar_low in zip(high, low):
-        if is_long:
-            hit_stop = bar_low <= stop
-            hit_target = bar_high >= target
-        else:
-            hit_stop = bar_high >= stop
-            hit_target = bar_low <= target
-        if hit_stop:
-            return -1
-        if hit_target:
-            return 1
-    return 0
+    label, _offset = _first_barrier_hit_with_offset(high, low, direction=direction, stop=stop, target=target)
+    return label
 
 
 def label_meta_binary(
