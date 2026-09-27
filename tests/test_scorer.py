@@ -37,10 +37,13 @@ def test_score_pattern_without_new_kwargs_never_crashes():
 
 def test_score_pattern_rewards_clean_setup_without_new_components():
     """Mirrors the original (pre-rebalance) 'clean setup' case: all 5
-    original inputs maxed. With the two new components omitted (zero
-    contribution, by contract), the new effective ceiling for a caller that
-    hasn't upgraded is 85, not 100 -- the documented weight-rebalance
-    trade-off (see scorer.py's module docstring).
+    original inputs maxed. With breakout_distance/pre_breakout_compression
+    omitted (zero contribution, by contract) and duration excluded from
+    total (2026-09-27 -- confirmed non-discriminative on the golden
+    benchmark, see scorer.py's module docstring), the effective ceiling
+    for a caller that hasn't upgraded is 85, not 100 -- unchanged from
+    before this fix, though volume_confirmation now carries duration's
+    former 10 points (20 -> 30).
     """
     score = score_pattern(
         geometry_tolerance_used=1.0,
@@ -52,8 +55,8 @@ def test_score_pattern_rewards_clean_setup_without_new_components():
     assert score.total == pytest.approx(85.0, abs=0.01)
     assert score.geometry == pytest.approx(30.0)
     assert score.trendline_fit == pytest.approx(15.0)
-    assert score.volume_confirmation == pytest.approx(20.0)
-    assert score.duration == pytest.approx(10.0)
+    assert score.volume_confirmation == pytest.approx(30.0)
+    assert score.duration == pytest.approx(10.0)  # reported, but not in .total
     assert score.follow_through == pytest.approx(10.0)
 
 
@@ -311,7 +314,8 @@ def test_pattern_score_default_construction_has_zero_new_components():
     score = PatternScore(geometry=1.0, trendline_fit=2.0, volume_confirmation=3.0, duration=4.0, follow_through=5.0)
     assert score.breakout_distance == 0.0
     assert score.pre_breakout_compression == 0.0
-    assert score.total == pytest.approx(15.0)
+    # duration (4.0) excluded from total as of 2026-09-27 -- 1+2+3+5=11, not 15.
+    assert score.total == pytest.approx(11.0)
 
 
 def test_pattern_score_as_dict_includes_new_component_keys():
@@ -327,5 +331,8 @@ def test_pattern_score_as_dict_includes_new_component_keys():
     d = score.as_dict()
     assert d["breakout_distance"] == 6.0
     assert d["pre_breakout_compression"] == 7.0
-    assert d["total"] == pytest.approx(28.0)
+    # duration (4.0) still reported in as_dict() but excluded from total:
+    # 1+2+3+5+6+7=24, not 28.
+    assert d["total"] == pytest.approx(24.0)
     assert d["total"] == pytest.approx(score.total)
+    assert d["duration"] == 4.0

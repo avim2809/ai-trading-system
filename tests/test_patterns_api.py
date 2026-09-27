@@ -120,13 +120,17 @@ class TestTriggerValidation:
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["scanned"] == 5  # StepRequest-style default symbols
-        # 8, not 7 -- re-verified directly against scan_symbol after the
-        # 2026-09 breakout_distance/pre_breakout_compression scorer
-        # components started actually receiving real (nonzero) inputs from
-        # scanner.py (previously always zero -- see scorer.py's module
-        # docstring), nudging one match that used to sit just under the
-        # 60.0 min_score floor to just clear it.
-        assert data["matches"] == 8
+        # 4, not 8 -- re-verified directly against scan_symbol after the
+        # 2026-09-27 false-positive-rate scorer rebalance (duration
+        # excluded from total, follow_through redefined to measure
+        # post-confirmation drift instead of re-measuring the same
+        # quantity breakout_distance already covers -- see scorer.py's
+        # module docstring). Real per-symbol scores at this seed/asof:
+        # AAPL inverse_head_shoulders 58.77 (was >=60, now just under),
+        # MSFT falling_wedge x2 (87.41, 87.06) + symmetrical_triangle
+        # (66.38), AMZN rising_wedge (72.20) clear the 60.0 floor; GOOG/
+        # META do not.
+        assert data["matches"] == 4
 
 
 # ------------------------------------------------------------------
@@ -183,15 +187,15 @@ class TestTriggerScanRoundTrip:
         scores = [m["quality_score"] for m in matches]
         assert scores == sorted(scores, reverse=True)
 
-        # MSFT's falling_wedge (two confirmed windows, ~97.4 and ~97.1 -- was
-        # ~98.8/~98.4 before the 2026-09 breakout_distance/
-        # pre_breakout_compression scorer components started receiving real
-        # inputs from scanner.py) is the single highest-scoring match in
-        # this fixture — confirms real per-symbol scan_symbol output
-        # actually reached the cache, not just a placeholder.
+        # MSFT's falling_wedge (two confirmed windows, ~87.4 and ~87.1 -- was
+        # ~97.4/~97.1 before the 2026-09-27 false-positive-rate scorer
+        # rebalance, see scorer.py's module docstring) is the single
+        # highest-scoring match in this fixture — confirms real per-symbol
+        # scan_symbol output actually reached the cache, not just a
+        # placeholder.
         assert matches[0]["symbol"] == "MSFT"
         assert matches[0]["pattern"] == "falling_wedge"
-        assert matches[0]["quality_score"] == pytest.approx(97.4, abs=0.5)
+        assert matches[0]["quality_score"] == pytest.approx(87.4, abs=0.5)
 
     def test_second_trigger_replaces_rather_than_appends(self, client):
         _trigger(client)
@@ -205,13 +209,15 @@ class TestTriggerScanRoundTrip:
         matches_loose = client.get("/api/patterns/scan").json()
         _trigger(client, min_score=80.0)
         matches = client.get("/api/patterns/scan").json()
-        # Verified directly: MSFT (falling_wedge, ~98.8/~98.4), NVDA
-        # (head_shoulders_top, ~91.1; triple_top, ~85.2) and AMZN
-        # (rising_wedge, ~80.3) clear an 80 floor in this fixture.
-        assert len(matches) == 5
+        # Verified directly against scan_symbol after the 2026-09-27
+        # false-positive-rate scorer rebalance: only MSFT (falling_wedge
+        # x2, ~87.4/~87.1) and NVDA (head_shoulders_top, ~81.0) clear an
+        # 80 floor in this fixture now -- AMZN's rising_wedge (~72.2) and
+        # NVDA's own triple_top matches (~76.3, ~58.0) no longer do.
+        assert len(matches) == 3
         assert len(matches) < len(matches_loose)
         assert all(m["quality_score"] >= 80.0 for m in matches)
-        assert {m["symbol"] for m in matches} == {"NVDA", "AMZN", "MSFT"}
+        assert {m["symbol"] for m in matches} == {"NVDA", "MSFT"}
 
     def test_trigger_cache_missing_symbol_reports_no_data_not_a_crash(self, client, monkeypatch):
         """data_source="cache" loads whatever firm.runtime.load_prices
@@ -300,8 +306,8 @@ class TestScanFilters:
         r = client.get("/api/patterns/scan?min_score=80")
         assert r.status_code == 200
         matches = r.json()
-        assert len(matches) == 5
-        assert {m["symbol"] for m in matches} == {"NVDA", "AMZN", "MSFT"}
+        assert len(matches) == 3
+        assert {m["symbol"] for m in matches} == {"NVDA", "MSFT"}
 
     def test_filters_combine(self, client):
         _trigger(client)
@@ -335,7 +341,7 @@ class TestSummary:
     def test_summary_reflects_last_trigger_only(self, client):
         _trigger(client, min_score=80.0)
         data = client.get("/api/patterns/summary").json()
-        assert data["total"] == 5
+        assert data["total"] == 3
 
 
 # ------------------------------------------------------------------
@@ -383,10 +389,10 @@ class TestHistoryEndpoint:
         assert len(client.get("/api/patterns/history").json()) == 20
 
     def test_history_accumulates_across_multiple_triggers(self, client):
-        _trigger(client, min_score=80.0)  # 5 matches
+        _trigger(client, min_score=80.0)  # 3 matches (post 2026-09-27 rebalance)
         _trigger(client, min_score=30.0)  # 20 matches
         history = client.get("/api/patterns/history").json()
-        assert len(history) == 25
+        assert len(history) == 23
         # /scan (the in-memory cache) reflects only the *second* trigger.
         assert len(client.get("/api/patterns/scan").json()) == 20
 

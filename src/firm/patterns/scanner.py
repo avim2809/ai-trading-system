@@ -185,8 +185,29 @@ def _score_and_finalize(
     duration = candidate.confirm_index - candidate.pivots[0].index
 
     close_at_confirm = float(close[candidate.confirm_index])
+    # follow_through_atr redefined 2026-09-27 (Part A false-positive fix):
+    # this used to be abs(close_at_confirm - candidate.entry) / current_atr
+    # -- the exact same numerator scorer.py's breakout_distance component
+    # already measures (abs(close_at_confirm - level_at_confirm), and
+    # level_at_confirm IS candidate.entry), just divided by ATR from a
+    # different point in time. The two components were therefore
+    # measuring the same underlying quantity, not independent evidence --
+    # confirmed empirically: on pure random-walk noise, this redundant
+    # pair averaged 15.5 of their combined 20 points (see
+    # docs/pattern_recognition_plan.md's false-positive-rate finding).
+    # Now measures genuine POST-confirmation drift instead (close_now vs.
+    # close_at_confirm, signed by the pattern's own direction so adverse
+    # drift after confirmation scores 0, not negative-then-clipped) --
+    # real, non-redundant information: "has price kept moving favorably
+    # since the breakout," distinct from breakout_distance's "was the
+    # breakout itself decisive." A freshly-confirmed match (confirm_index
+    # == last bar) correctly scores 0 here -- there's been no time yet to
+    # follow through, which is honest, not a bug.
     if current_atr and current_atr > 0:
-        follow_through_atr = abs(close_at_confirm - candidate.entry) / current_atr
+        close_now = float(close[-1])
+        raw_drift = close_now - close_at_confirm
+        signed_drift = raw_drift if candidate.direction == "long" else -raw_drift
+        follow_through_atr = max(0.0, signed_drift) / current_atr
     else:
         follow_through_atr = 0.0
 

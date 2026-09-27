@@ -111,35 +111,49 @@ POSITIVE_FIXTURES: tuple[PatternFixture, ...] = (
         [(0, 120.0), (10, 90.0), (20, 110.0), (30, 89.0), (45, 130.0)],
         46, 45, frozenset({"double_bottom"}),
     ),
+    # Triangle/wedge/rectangle fixtures below carry a volume spike at the
+    # breakout bar (2026-09-27, Part A false-positive fix): the original
+    # tests/test_patterns.py anchors these are copied from were built only
+    # to exercise detect_triangle_wedge_rectangle's geometry recognition
+    # directly (bypassing the scorer entirely), so they never had one --
+    # an existing gap in the corpus, not a property of real triangle/wedge/
+    # rectangle breakouts. Volume confirmation is standard TA practice for
+    # these families too, not just reversals, and scorer.py's
+    # volume_confirmation component now carries real weight (absorbed
+    # duration's points) -- without a spike here, every one of these
+    # fixtures under-scores not because the detector is wrong, but because
+    # the *fixture* omits evidence a real breakout would show. Verified
+    # directly: adding the spike moves every one of these from ~46-55
+    # (below min_score=60) to ~76-85 (clears it comfortably).
     PatternFixture(
         "ascending_triangle", "positive",
         [(0, 100.0), (6, 120.0), (12, 108.0), (18, 120.5), (24, 113.0), (30, 125.0)],
-        31, None, frozenset({"ascending_triangle"}),
+        31, 30, frozenset({"ascending_triangle"}),
     ),
     PatternFixture(
         "descending_triangle", "positive",
         [(0, 100.0), (6, 120.0), (12, 105.0), (18, 113.0), (24, 106.0), (27, 110.0), (33, 95.0)],
-        34, None, frozenset({"descending_triangle"}),
+        34, 33, frozenset({"descending_triangle"}),
     ),
     PatternFixture(
         "symmetrical_triangle", "positive",
         [(0, 100.0), (6, 130.0), (12, 100.0), (18, 120.0), (24, 108.0), (30, 115.0)],
-        31, None, frozenset({"symmetrical_triangle"}),
+        31, 30, frozenset({"symmetrical_triangle"}),
     ),
     PatternFixture(
         "rising_wedge", "positive",
         [(0, 100.0), (6, 110.0), (12, 100.0), (18, 118.0), (24, 112.0), (27, 116.0), (33, 100.0)],
-        34, None, frozenset({"rising_wedge"}),
+        34, 33, frozenset({"rising_wedge"}),
     ),
     PatternFixture(
         "falling_wedge", "positive",
         [(0, 100.0), (6, 130.0), (12, 110.0), (18, 118.0), (24, 104.0), (30, 115.0)],
-        31, None, frozenset({"falling_wedge"}),
+        31, 30, frozenset({"falling_wedge"}),
     ),
     PatternFixture(
         "rectangle", "positive",
         [(0, 100.0), (6, 120.0), (12, 100.0), (18, 120.3), (24, 99.7), (30, 125.0)],
-        31, None, frozenset({"rectangle"}),
+        31, 30, frozenset({"rectangle"}),
     ),
 )
 
@@ -169,15 +183,19 @@ AMBIGUOUS_FIXTURES: tuple[PatternFixture, ...] = (
         [(0, 130.0), (8, 100.0), (16, 118.0), (24, 99.0), (32, 117.0), (40, 100.0), (55, 125.0)],
         56, 55, frozenset({"triple_bottom", "inverse_head_shoulders"}),
     ),
+    # Same volume-spike fix as the triangle/wedge/rectangle fixtures above
+    # (2026-09-27): these previously had no breakout-bar spike either and
+    # scored ~32 (well under min_score=60, entirely due to missing volume
+    # evidence, not a real detection failure) -- with one, ~62.
     PatternFixture(
         "bull_flag_or_pennant", "ambiguous",
         [(0, 100.0), (4, 90.0), (10, 120.0), (14, 117.0), (18, 119.0), (22, 116.0), (26, 118.0), (30, 130.0)],
-        31, None, frozenset({"bull_flag", "pennant"}),
+        31, 30, frozenset({"bull_flag", "pennant"}),
     ),
     PatternFixture(
         "bear_flag_or_pennant", "ambiguous",
         [(0, 100.0), (4, 110.0), (10, 80.0), (14, 83.0), (18, 81.0), (22, 84.0), (26, 82.0), (30, 70.0)],
-        31, None, frozenset({"bear_flag", "pennant"}),
+        31, 30, frozenset({"bear_flag", "pennant"}),
     ),
 )
 

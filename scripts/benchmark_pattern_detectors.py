@@ -81,12 +81,15 @@ def run_fixture(fixture: PatternFixture, *, frame=None, min_score: float = 60.0)
     ``min_score`` defaults to 60.0 -- ``PatternRecognitionStrategy``'s own
     live default -- deliberately, not 0.0: this benchmark measures whether
     a fixture would actually produce a live signal, not just whether the
-    underlying geometry is recognizable to an unfiltered detector call (a
-    real, if perhaps surprising, finding from building this corpus: the
-    bull_flag/bear_flag ambiguous fixtures score ~52, correctly geometry-
-    matched but below the live quality bar -- reported as misses here on
-    purpose, not tuned away, since that's a genuine live-threshold
-    calibration question this benchmark exists to surface).
+    underlying geometry is recognizable to an unfiltered detector call.
+    (Earlier finding, since fixed: the triangle/wedge/rectangle and
+    bull_flag/bear_flag fixtures originally had no breakout-bar volume
+    spike -- an artifact of being copied from tests/test_patterns.py
+    fixtures that only ever exercised the geometry detectors directly,
+    bypassing the scorer -- so they scored well under 60 for a reason
+    unrelated to detection quality. Fixed 2026-09-27 by adding a
+    realistic spike to each, matching the reversal-family fixtures'
+    existing convention; see tests/pattern_fixtures.py.)
 
     A NEGATIVE/BOUNDARY fixture (``expected_patterns`` empty) is correct
     iff nothing confirms. A POSITIVE/AMBIGUOUS fixture is correct iff the
