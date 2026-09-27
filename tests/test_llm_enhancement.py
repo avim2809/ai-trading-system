@@ -287,6 +287,30 @@ class TestBoundsClampingAndReZScore:
         # so zscore_signals actually re-normalises rather than passing through.
         assert sum(scores) / len(scores) == pytest.approx(0.0, abs=1e-9)
 
+    def test_zscore_demean_false_is_honored_on_the_llm_re_zscore(self, monkeypatch):
+        """Regression (2026-09-27): the final zscore_signals(enhanced_signals)
+        call in every LLM analyst (technical/fundamental/sentiment) used to
+        hardcode demean=True regardless of the zscore_demean config knob --
+        SentimentAnalyst.run/TechnicalAnalyst.run/FundamentalAnalyst.run all
+        already honor it (self._zscore_demean), but the LLM subclass's own
+        re-normalisation after overriding scores did not, so on exactly the
+        cycles where LLM enhancement runs (llm_open_close_only routes it to
+        open/close), a deployment with zscore_demean: false silently got
+        demean=True anyway. With the fix, a one-sided (all-positive) group
+        must stay one-sided after LLM re-zscoring, not get pulled to zero
+        mean."""
+        signals = [_sig("AAPL", "news", 0.9), _sig("MSFT", "news", 0.5), _sig("GOOG", "news", 0.1)]
+        llm = _OutOfBoundsLLMService(confidence=0.8, score_sequence=[0.9, 0.5, 0.1])
+        agent = self._agent(monkeypatch, signals, llm)
+        agent._zscore_demean = False
+
+        result = agent.run(AgentContext(now=NOW, pit_view=MagicMock()))
+        scores = [s.score for s in result.signals]
+        # A one-sided (all-positive) group stays one-sided with demean=False
+        # -- if the bug were still present (demean hardcoded True), the mean
+        # would be pulled to ~0 and at least one score would flip negative.
+        assert all(s > 0 for s in scores)
+
 
 class TestLLMOverrideBoundsHelper:
     """Direct unit coverage of the shared clamp helper on LLMAgentMixin."""

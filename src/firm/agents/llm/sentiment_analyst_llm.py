@@ -95,7 +95,11 @@ class LLMSentimentAnalyst(SentimentAnalyst, LLMAgentMixin):
         # (clamped to [-1, 1], not z-scored), so the whole group must be
         # re-normalised here or the LLM-enhanced and pass-through signals
         # would sit on two different, incomparable scales.
+        #
+        # demean=self._zscore_demean (2026-09-27 fix): see
+        # technical_analyst_llm.py's identical fix for why this must not use
+        # zscore_signals' default unconditionally.
         return SignalSet(
             domain=quant_result.domain, asof=quant_result.asof,
-            signals=zscore_signals(enhanced_signals),
+            signals=zscore_signals(enhanced_signals, demean=self._zscore_demean),
         )

@@ -334,6 +334,27 @@ class TestExperimentRunner:
         assert "total_turnover" in result.metrics
         assert "rebalance_count" in result.metrics
 
+    def test_run_metrics_includes_trade_metrics(self, tmp_runs_dir, sample_config):
+        """Regression (2026-09-27): compute_trade_metrics' output
+        (num_trades/trade_win_rate/profit_factor/expectancy/avg_win/
+        avg_loss/gross_profit/gross_loss) was already included in
+        report.to_dict()['trade_metrics'] (BacktestReport.trade_metrics_summary)
+        but silently dropped in _execute_backtest before reaching
+        result.metrics -- the same class of bug test_run_metrics_includes_turnover
+        above already caught for avg_turnover. Without this, no walk-forward
+        run can ever select folds on --selection-metric expectancy (it
+        silently resolved to -inf and fell back to candidate 0), and a
+        strategy's realized trade-level expectancy never reaches
+        aggregate_walk_forward's per-fold mean/std/min/max treatment."""
+        runner = ExperimentRunner(registry=RunRegistry(base_dir=tmp_runs_dir))
+        result = runner.run(sample_config)
+
+        for key in (
+            "num_trades", "trade_win_rate", "profit_factor", "expectancy",
+            "avg_win", "avg_loss", "gross_profit", "gross_loss",
+        ):
+            assert key in result.metrics, f"{key!r} missing from result.metrics"
+
     def test_flatten_config_passes_through_conviction_smoothing(self):
         """Backtest parity with live for TraderAgent's conviction-EMA
         smoothing -- previously silently dropped by _flatten_config's

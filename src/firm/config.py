@@ -28,7 +28,11 @@ class BacktestConfig(BaseModel):
     start_date: str = "2018-01-01"
     end_date: str = "2023-12-31"
     initial_capital: float = 10_000_000
-    commission_pct: float = 0.001
+    # 2026-09-27: was 0.001 (10bps); matched to the live commission rate
+    # (0.0005, both config/live.yaml and config/live_alpaca.yaml) -- see
+    # config/settings.yaml's own comment on the same fix for why this
+    # matters and what it makes non-comparable.
+    commission_pct: float = 0.0005
     slippage_pct: float = 0.0005
     # Bid-ask spread cost: an approximation of the cost of crossing the
     # quoted spread, charged per trade like commission (distinct from

@@ -7,7 +7,18 @@ backtest:
   start_date: "2018-01-01"
   end_date: "2023-12-31"
   initial_capital: 10_000_000
-  commission_pct: 0.001
+  # 2026-09-27: was 0.001 (10bps) -- both live configs charge 0.0005 (5bps,
+  # "realistic IBKR tiered rate", see config/live.yaml's own comment), so
+  # every backtest/walk-forward run reading this file (including the PBO/
+  # DSR audits in docs/formal_pbo_audit.md and
+  # docs/pattern_ml_isolated_evaluation_2026_09.md) had overstated
+  # round-trip cost by ~40% (34bps vs the real 24bps) relative to what the
+  # system actually pays live. Fixed to match. This makes every prior
+  # backtest number in docs/ NON-COMPARABLE to anything run after this
+  # change -- a strategy that failed a cost-sensitive bar before this fix
+  # may look different (better) now purely from the lower cost assumption,
+  # not from any code change to the strategy itself.
+  commission_pct: 0.0005
   slippage_pct: 0.0005
   spread_pct: 0.0002           # bid-ask spread cost, charged per trade like commission
   short_borrow_annual_pct: 0.003  # annualized short-borrow fee, charged daily on short notional

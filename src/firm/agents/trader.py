@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -56,14 +57,31 @@ class TraderAgent(Agent):
         self.conviction_smoothing_enabled: bool = bool(
             cfg.get("conviction_smoothing_enabled", False)
         )
-        halflife_days = float(cfg.get("conviction_smoothing_halflife_days", 3.0))
-        # EMA weight on today's new reading, derived from the half-life so
-        # the config knob stays interpretable ("days until a shock's
-        # influence halves") instead of a bare, unintuitive alpha.
-        self._conviction_smoothing_alpha: float = (
-            1.0 - 0.5 ** (1.0 / halflife_days) if halflife_days > 0 else 1.0
+        # Half-life in *wall-clock days*, not "cycles" -- see
+        # _smooth_convictions' docstring for the bug this fixes (2026-09-27):
+        # a fixed per-call alpha derived from "1 call = 1 day" silently
+        # assumed daily rebalancing, which is true in a backtest but false
+        # live (config/live.yaml's "hourly_market_hours" schedule runs ~7
+        # cycles/day), so the SAME halflife_days=3.0 config produced an
+        # effective halflife of ~3 days in backtest and ~0.43 days live --
+        # a real, undocumented live/backtest divergence, confirmed live on
+        # both instances (conviction_smoothing_enabled: true in both
+        # config/live.yaml and config/live_alpaca.yaml). Kept as a plain
+        # float (not pre-derived into a fixed alpha) since the alpha is now
+        # computed per-call from actual elapsed time -- see
+        # _smooth_convictions.
+        self._conviction_smoothing_halflife_days: float = float(
+            cfg.get("conviction_smoothing_halflife_days", 3.0)
         )
         self._conviction_ema: dict[str, float] = {}
+        # Wall-clock timestamp of the last EMA update -- None until the
+        # first smoothed run() call, restart-safe via get_state/load_state
+        # below. Elapsed time since this (not "1" per call) drives the
+        # per-call alpha, so a multi-day gap (weekend, holiday, a live
+        # instance being down) decays the EMA by the right amount instead
+        # of by one cycle's worth regardless of how much calendar time
+        # actually passed.
+        self._conviction_ema_last_update: datetime | None = None
 
         # allocation_method == "joint_optimizer" config. Field names for the
         # structural constraints deliberately match RiskAgent's own config
@@ -114,23 +132,60 @@ class TraderAgent(Agent):
         ``firm.live.state_store.LiveStateStore.save_trader_state``)."""
         return {
             "conviction_ema": dict(self._conviction_ema),
+            "conviction_ema_last_update": (
+                self._conviction_ema_last_update.isoformat()
+                if self._conviction_ema_last_update is not None
+                else None
+            ),
             "book_nav_history": list(self._book_nav_history),
         }
 
     def load_state(self, state: dict[str, Any]) -> None:
         self._conviction_ema = dict(state.get("conviction_ema") or {})
+        last_update = state.get("conviction_ema_last_update")
+        self._conviction_ema_last_update = (
+            datetime.fromisoformat(last_update) if last_update else None
+        )
         self._book_nav_history = list(state.get("book_nav_history") or [])
 
     def _smooth_convictions(
-        self, results: list[DebateResult]
+        self, results: list[DebateResult], now: datetime,
     ) -> list[DebateResult]:
         """Blend each symbol's fresh conviction with its running EMA.
 
         A symbol with no prior EMA (new to the universe, or its first
         appearance after a gap) starts at full strength rather than being
         damped toward zero — there is no "yesterday" to blend with yet.
+
+        The per-call alpha is derived from *actual elapsed wall-clock time*
+        since the last smoothed call, not from a fixed "one call = one day"
+        assumption (2026-09-27 fix). The old code pre-derived a single alpha
+        from ``conviction_smoothing_halflife_days`` once at construction and
+        applied it identically every ``run()`` call -- correct only if
+        ``run()`` is called exactly once per day, which holds in a daily
+        backtest but not live: ``config/live.yaml``'s ``hourly_market_hours``
+        schedule calls this ~7x/day, so the SAME ``halflife_days=3.0``
+        config silently produced an effective halflife of ~3 days in
+        backtest and ~0.43 days live -- a real, undocumented divergence
+        between what was validated and what actually ran (confirmed live on
+        both instances, ``conviction_smoothing_enabled: true`` in both
+        ``config/live.yaml`` and ``config/live_alpaca.yaml``). Computing
+        ``alpha`` from real elapsed days makes the two match, and as a side
+        effect correctly decays the EMA further across a multi-day gap
+        (weekend, holiday, a live instance being down) instead of by only
+        one cycle's worth regardless of how much calendar time passed.
         """
-        alpha = self._conviction_smoothing_alpha
+        last_update = self._conviction_ema_last_update
+        if last_update is None:
+            elapsed_days = None  # irrelevant this call -- every symbol's `prev` is None too
+        else:
+            elapsed_days = max(0.0, (now - last_update).total_seconds() / 86400.0)
+        halflife = self._conviction_smoothing_halflife_days
+        if elapsed_days is None or halflife <= 0:
+            alpha = 1.0
+        else:
+            alpha = 1.0 - 0.5 ** (elapsed_days / halflife)
+
         smoothed = []
         for r in results:
             prev = self._conviction_ema.get(r.symbol)
@@ -139,6 +194,7 @@ class TraderAgent(Agent):
             )
             self._conviction_ema[r.symbol] = ema
             smoothed.append(replace(r, net_conviction=ema))
+        self._conviction_ema_last_update = now
         return smoothed
 
     def run(self, ctx: AgentContext, **inputs: Any) -> TradeProposal:
@@ -146,7 +202,7 @@ class TraderAgent(Agent):
         blackboard = inputs.get("blackboard")
 
         if self.conviction_smoothing_enabled:
-            debate_results = self._smooth_convictions(debate_results)
+            debate_results = self._smooth_convictions(debate_results, ctx.now)
 
         ranked = sorted(debate_results, key=lambda r: abs(r.net_conviction), reverse=True)
         selected = [r for r in ranked if abs(r.net_conviction) > 1e-8][: self.max_positions]

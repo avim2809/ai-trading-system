@@ -173,6 +173,19 @@ class ExperimentRunner:
         # per-fold mean/std/min/max treatment aggregate_walk_forward gives
         # every other metric here.
         metrics.update(report_dict.get("turnover", {}))
+        # num_trades/trade_win_rate/profit_factor/expectancy/avg_win/
+        # avg_loss/gross_profit/gross_loss (2026-09-27 fix): report.to_dict()
+        # already includes this block (BacktestReport.trade_metrics_summary,
+        # see reports.py) but it was silently dropped here, so it never
+        # reached walk-forward aggregation or --selection-metric. A strategy
+        # trading a few dozen times per test window (e.g. pattern_recognition,
+        # ~38 trades/window) has far more statistical power at the trade
+        # level than at the daily-Sharpe level, and there was previously no
+        # way to select folds on expectancy/profit_factor at all --
+        # --selection-metric expectancy silently resolved every candidate to
+        # -inf and fell back to candidate 0 (see _select_candidate_on_train's
+        # own all-candidates-failed fallback).
+        metrics.update(report_dict.get("trade_metrics", {}))
 
         results: dict[str, Any] = {"metrics": metrics}
         (artifacts / "results.json").write_text(

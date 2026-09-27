@@ -534,7 +534,17 @@ class TestTrader:
         conviction swinging day-to-day pushed most of the book to its
         per-name cap on both sides every cycle. A sign flip the very next
         cycle must land closer to zero than the raw signal, not fully
-        flip — that's the point of the smoothing."""
+        flip — that's the point of the smoothing.
+
+        ``ctx.now`` advances by exactly one day between calls (2026-09-27
+        fix): alpha is now derived from real elapsed wall-clock time, not
+        from a fixed "one run() call = one day" assumption — see
+        ``_smooth_convictions``'s docstring for the live/backtest divergence
+        that assumption caused. Two calls at the SAME timestamp now
+        correctly apply zero decay (see
+        ``test_conviction_smoothing_no_decay_when_no_time_has_elapsed``)."""
+        from datetime import timedelta
+
         from firm.agents.trader import TraderAgent
 
         trader = TraderAgent(
@@ -546,12 +556,75 @@ class TestTrader:
         )
         ctx = AgentContext(now=NOW)
         trader.run(ctx, debate_results=[DebateResult(symbol="AAPL", net_conviction=0.8)])
-        trader.run(ctx, debate_results=[DebateResult(symbol="AAPL", net_conviction=-0.8)])
+        ctx_next_day = AgentContext(now=NOW + timedelta(days=1))
+        trader.run(ctx_next_day, debate_results=[DebateResult(symbol="AAPL", net_conviction=-0.8)])
         smoothed_conviction = trader._conviction_ema["AAPL"]
         # A 3-day half-life gives one day's reading only ~21% weight, so a
         # full sign flip in a single cycle is exactly what must NOT happen.
         assert smoothed_conviction < 0.8  # moved down from the prior EMA...
         assert smoothed_conviction > 0  # ...but nowhere near the new -0.8
+
+    def test_conviction_smoothing_no_decay_when_no_time_has_elapsed(self):
+        """Two run() calls at the identical timestamp (e.g. a real production
+        scenario: a live cycle retried after a transient failure) must not
+        double-decay the EMA -- zero elapsed wall-clock time means alpha=0,
+        the prior EMA is untouched by the new reading. This is the live/
+        backtest divergence bug's mirror image: the fixed old per-call alpha
+        would have applied a full day's decay twice for zero elapsed time."""
+        from firm.agents.trader import TraderAgent
+
+        trader = TraderAgent(
+            config={
+                "conviction_smoothing_enabled": True,
+                "conviction_smoothing_halflife_days": 3.0,
+            }
+        )
+        ctx = AgentContext(now=NOW)
+        trader.run(ctx, debate_results=[DebateResult(symbol="AAPL", net_conviction=0.8)])
+        trader.run(ctx, debate_results=[DebateResult(symbol="AAPL", net_conviction=-0.8)])
+        assert trader._conviction_ema["AAPL"] == pytest.approx(0.8)
+
+    def test_conviction_smoothing_decay_scales_with_elapsed_time_not_call_count(self):
+        """Regression for the actual bug (2026-09-27): the old code derived
+        one fixed alpha from ``halflife_days`` at construction and applied
+        it identically on every ``run()`` call, so decay was driven purely
+        by how many times ``run()`` was called, never by how much wall-clock
+        time had actually passed between calls -- live (~7 calls/day) and
+        backtest (~1 call/day) therefore decayed at very different real
+        rates under the SAME config. The fix must make a single call's decay
+        scale with its own elapsed time: a gap of exactly one half-life
+        must land the EMA almost exactly halfway to the new reading, and a
+        near-zero gap (e.g. a live cycle retried immediately after a
+        transient failure) must barely move it at all -- regardless of how
+        many `run()` calls happen to occur along the way."""
+        from datetime import timedelta
+
+        from firm.agents.trader import TraderAgent
+
+        def _final_ema(elapsed: timedelta) -> float:
+            trader = TraderAgent(
+                config={"conviction_smoothing_enabled": True, "conviction_smoothing_halflife_days": 3.0}
+            )
+            trader.run(AgentContext(now=NOW), debate_results=[DebateResult(symbol="AAPL", net_conviction=0.8)])
+            trader.run(
+                AgentContext(now=NOW + elapsed),
+                debate_results=[DebateResult(symbol="AAPL", net_conviction=-0.8)],
+            )
+            return trader._conviction_ema["AAPL"]
+
+        ema_after_one_halflife = _final_ema(timedelta(days=3.0))
+        ema_after_one_hour = _final_ema(timedelta(hours=1))
+        ema_after_one_day = _final_ema(timedelta(days=1.0))
+
+        # Exactly one half-life elapsed -> ~50/50 blend of +0.8 and -0.8.
+        assert ema_after_one_halflife == pytest.approx(0.0, abs=1e-6)
+        # A near-immediate retry (same live cycle, transient failure) must
+        # barely move the EMA at all -- the old fixed-per-call alpha would
+        # have applied a full "one call" decay regardless.
+        assert ema_after_one_hour == pytest.approx(0.8, abs=0.02)
+        # Elapsed time must be monotonic: more real time elapsed -> more
+        # decay toward the new reading, for the identical pair of readings.
+        assert ema_after_one_hour > ema_after_one_day > ema_after_one_halflife
 
     def test_conviction_smoothing_state_round_trips(self):
         """get_state/load_state back LiveStateStore persistence (see

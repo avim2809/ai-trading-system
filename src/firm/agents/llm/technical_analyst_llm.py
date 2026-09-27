@@ -103,9 +103,18 @@ class LLMTechnicalAnalyst(TechnicalAnalyst, LLMAgentMixin):
         # (clamped to [-1, 1], not z-scored), so the whole group must be
         # re-normalised here or the LLM-enhanced and pass-through signals
         # would sit on two different, incomparable scales.
+        #
+        # demean=self._zscore_demean (2026-09-27 fix): this call previously
+        # used zscore_signals' default (demean=True) unconditionally, silently
+        # ignoring the zscore_demean config knob TechnicalAnalyst.run already
+        # honours (technical.py). Since llm_open_close_only routes LLM
+        # enhancement to exactly the open/close cycles, any deployment that
+        # set zscore_demean: false was still getting demean=True on those two
+        # cycles every day -- the opt-out never actually applied when it
+        # mattered.
         return SignalSet(
             domain=quant_result.domain, asof=quant_result.asof,
-            signals=zscore_signals(enhanced_signals),
+            signals=zscore_signals(enhanced_signals, demean=self._zscore_demean),
         )
 
     @staticmethod
