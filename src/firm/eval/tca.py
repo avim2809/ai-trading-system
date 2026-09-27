@@ -27,6 +27,23 @@ from typing import Any
 _PRICE_BASED_EST_KEYS = ("est_slippage", "est_spread", "est_impact")
 
 
+def _normalize_side(side: Any) -> str | None:
+    """Normalize a persisted ``side`` value to plain ``"buy"``/``"sell"``.
+
+    Handles both the plain string this module originally assumed and an
+    enum-repr string (``"orderside.buy"``/``"orderside.sell"``, i.e.
+    ``str(OrderSide.BUY).lower()``) confirmed present in real Alpaca order
+    history -- takes the substring after the last ``"."`` so either form
+    normalizes the same way. Returns ``None`` (not "sell") for anything
+    unrecognized, so a genuinely bad/missing value doesn't silently get
+    treated as the "else" branch's sell case either.
+    """
+    if not isinstance(side, str):
+        return None
+    normalized = side.strip().lower().rsplit(".", 1)[-1]
+    return normalized if normalized in ("buy", "sell") else None
+
+
 def compute_tca_record(entry: dict[str, Any]) -> dict[str, Any]:
     """Derive realized-vs-modeled cost for one persisted order record.
 
@@ -49,12 +66,14 @@ def compute_tca_record(entry: dict[str, Any]) -> dict[str, Any]:
     fill_price = _to_float(entry.get("avg_fill_price"))
     filled_qty = _to_float(entry.get("filled_quantity"))
     status = entry.get("status")
+    side = _normalize_side(entry.get("side"))
 
     computable = (
         status in ("filled", "partial")
         and decision_price is not None and decision_price > 0
         and fill_price is not None and fill_price > 0
         and filled_qty is not None and filled_qty > 0
+        and side is not None
     )
 
     record: dict[str, Any] = {
@@ -80,8 +99,17 @@ def compute_tca_record(entry: dict[str, Any]) -> dict[str, Any]:
     # Adverse direction depends on side: a buy is worse the higher the fill
     # lands above the decision price; a sell is worse the lower it lands
     # below it. Positive == cost, negative == price improvement.
+    #
+    # Bug fixed 2026-09-27: some persisted records (confirmed in real
+    # Alpaca order history) store side as an enum repr, e.g.
+    # "orderside.buy"/"orderside.sell" (str(OrderSide.BUY).lower()),
+    # rather than the plain "buy"/"sell" this comparison originally
+    # assumed. An unmatched value silently fell into the "else" (sell)
+    # branch, flipping the sign of realized slippage for every such
+    # buy record -- confirmed against real data to affect 379 of 454
+    # Alpaca order-history rows. _normalize_side handles both forms.
     adverse = (
-        (fill_price - decision_price) if entry.get("side") == "buy"
+        (fill_price - decision_price) if side == "buy"
         else (decision_price - fill_price)
     )
     decision_notional = _to_float(entry.get("notional")) or (decision_price * filled_qty)

@@ -81,6 +81,38 @@ class TestComputeTcaRecord:
         assert record["computable"] is True
         assert record["realized_slippage_bps"] == 0.0
 
+    def test_enum_repr_buy_side_matches_plain_buy(self):
+        """Regression (2026-09-27): real Alpaca order history stores side
+        as "orderside.buy"/"orderside.sell" (str(OrderSide.BUY).lower())
+        for some records, alongside plain "buy"/"sell" for others -- an
+        unmatched "orderside.buy" previously fell into the sell branch,
+        flipping the sign of realized slippage. Confirmed to affect 379 of
+        454 real Alpaca order-history rows before this fix."""
+        plain = compute_tca_record(_order(side="buy", price=149.0, avg_fill_price=150.0, filled_quantity=10.0))
+        enum_repr = compute_tca_record(_order(side="orderside.buy", price=149.0, avg_fill_price=150.0, filled_quantity=10.0))
+        assert enum_repr["computable"] is True
+        assert enum_repr["realized_slippage_bps"] == plain["realized_slippage_bps"]
+        assert enum_repr["realized_cost_dollars"] == plain["realized_cost_dollars"]
+
+    def test_enum_repr_sell_side_matches_plain_sell(self):
+        plain = compute_tca_record(_order(side="sell", price=150.0, avg_fill_price=149.0, filled_quantity=10.0))
+        enum_repr = compute_tca_record(_order(side="OrderSide.SELL".lower(), price=150.0, avg_fill_price=149.0, filled_quantity=10.0))
+        assert enum_repr["computable"] is True
+        assert enum_repr["realized_slippage_bps"] == plain["realized_slippage_bps"]
+
+    def test_unrecognized_side_is_not_computable(self):
+        # Fail closed: an unrecognized side must not silently default to
+        # "sell" (the old bug's effective behavior for any unmatched value).
+        record = compute_tca_record(_order(side="short_cover", price=149.0, avg_fill_price=150.0))
+        assert record["computable"] is False
+        assert record["realized_slippage_bps"] is None
+
+    def test_missing_side_is_not_computable(self):
+        order = _order(price=149.0, avg_fill_price=150.0)
+        del order["side"]
+        record = compute_tca_record(order)
+        assert record["computable"] is False
+
     def test_modeled_cost_excludes_commission(self):
         """Commission is a flat fee, not a price deviation -- it must not
         be folded into modeled_cost_bps (which is compared against a

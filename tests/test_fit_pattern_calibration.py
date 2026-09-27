@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
@@ -21,7 +22,10 @@ if str(_SCRIPTS) not in sys.path:
 from fit_pattern_calibration import (  # noqa: E402
     _MIN_RESOLVED_FOR_CALIBRATION,
     _resolved_sample_from_history,
+    _resolved_sample_from_synthetic_rule_based,
+    _resolved_sample_from_synthetic_xgboost,
     build_calibration,
+    main,
 )
 
 from firm.live.pattern_scan_history import PatternScanHistoryStore  # noqa: E402
@@ -32,18 +36,27 @@ class TestBuildCalibration:
         n = _MIN_RESOLVED_FOR_CALIBRATION - 1
         scores = np.linspace(0.1, 0.9, n)
         labels = np.array([1.0 if s > 0.5 else 0.0 for s in scores])
-        assert build_calibration(scores, labels) is None
+        assert build_calibration(scores, labels, model="rule_based") is None
 
     def test_fits_at_minimum_sample_size(self):
         rng = np.random.RandomState(0)
         n = _MIN_RESOLVED_FOR_CALIBRATION
         scores = rng.uniform(0.0, 1.0, n)
         labels = (scores + rng.normal(0, 0.1, n) > 0.5).astype(float)
-        result = build_calibration(scores, labels)
+        result = build_calibration(scores, labels, model="rule_based")
         assert result is not None
         assert result["type"] == "sigmoid"
+        assert result["model"] == "rule_based"
         assert result["n_samples"] == n
         assert "a" in result and "b" in result
+
+    def test_rejects_unknown_model(self):
+        rng = np.random.RandomState(0)
+        n = _MIN_RESOLVED_FOR_CALIBRATION
+        scores = rng.uniform(0.0, 1.0, n)
+        labels = (scores > 0.5).astype(float)
+        with pytest.raises(ValueError, match="model"):
+            build_calibration(scores, labels, model="not_a_real_model")
 
     def test_higher_scores_predict_higher_calibrated_probability(self):
         # A well-separated sample: low scores lose, high scores win.
@@ -51,8 +64,9 @@ class TestBuildCalibration:
         n = 200
         scores = rng.uniform(0.0, 1.0, n)
         labels = (scores > 0.5).astype(float)
-        result = build_calibration(scores, labels)
+        result = build_calibration(scores, labels, model="xgboost")
         assert result is not None
+        assert result["model"] == "xgboost"
 
         from firm.patterns.ml.calibration import apply_sigmoid_calibration
 
@@ -112,3 +126,62 @@ class TestResolvedSampleFromHistory:
         scores, labels = _resolved_sample_from_history(store, score_field="quality_score")
         assert len(scores) == 0
         assert len(labels) == 0
+
+
+class TestSyntheticSamplers:
+    """Regression coverage for the 2026-09-27 model-mismatch fix: the
+    xgboost sampler must score matches with the REAL trained model's
+    p_target, not reuse quality_score, and both samplers should draw from
+    the same underlying match set (same seed) so a rule_based vs. xgboost
+    comparison is a fair one."""
+
+    def test_rule_based_sampler_uses_quality_score(self):
+        scores, labels = _resolved_sample_from_synthetic_rule_based(n_symbols=40, seed=42, timeout_bars=40)
+        assert len(scores) > 0
+        assert np.all((scores >= 0.0) & (scores <= 1.0))
+        assert set(labels.tolist()) <= {0.0, 1.0}
+
+    def test_xgboost_sampler_uses_real_model_not_quality_score(self):
+        from firm.patterns.ml import xgb_inference
+        if not xgb_inference.is_available():
+            pytest.skip("XGBoost ONNX model not available on this host")
+
+        rule_based_scores, rule_based_labels = _resolved_sample_from_synthetic_rule_based(
+            n_symbols=40, seed=42, timeout_bars=40,
+        )
+        xgb_scores, xgb_labels = _resolved_sample_from_synthetic_xgboost(
+            n_symbols=40, seed=42, timeout_bars=40,
+        )
+        assert len(xgb_scores) > 0
+        assert np.all((xgb_scores >= 0.0) & (xgb_scores <= 1.0))
+        # Same underlying match set (same seed/labeling) -> same sample
+        # count and labels, but genuinely different raw scores (the real
+        # model's p_target, not quality_score/100) -- this is exactly the
+        # thing the bug this fix closes would NOT have distinguished.
+        assert len(xgb_scores) == len(rule_based_scores)
+        assert xgb_labels.tolist() == rule_based_labels.tolist()
+        assert not np.allclose(xgb_scores, rule_based_scores)
+
+    def test_xgboost_sampler_raises_clearly_when_model_unavailable(self, monkeypatch):
+        from firm.patterns.ml import xgb_inference
+
+        monkeypatch.setattr(xgb_inference, "is_available", lambda: False)
+        with pytest.raises(RuntimeError, match="xgboost"):
+            _resolved_sample_from_synthetic_xgboost(n_symbols=5, seed=42, timeout_bars=40)
+
+
+class TestMainCliGuards:
+    def test_xgboost_history_combo_refused(self, tmp_path, capsys):
+        # Call via argv injection instead of Namespace construction, since
+        # main() owns arg parsing end to end.
+        import sys as _sys
+        old_argv = _sys.argv
+        try:
+            _sys.argv = [
+                "fit_pattern_calibration.py", "--model", "xgboost", "--source", "history",
+                "--db-path", str(tmp_path / "history.db"),
+            ]
+            exit_code = main()
+        finally:
+            _sys.argv = old_argv
+        assert exit_code == 1

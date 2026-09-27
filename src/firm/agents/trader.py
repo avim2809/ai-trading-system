@@ -269,10 +269,11 @@ class TraderAgent(Agent):
                         "Kelly: %s using signal-calibrated edge=%.4f", r.symbol, edge,
                     )
             if edge is None:
-                edge = self._kelly_edge(pit_view, r.symbol)
+                direction = "long" if r.net_conviction >= 0 else "short"
+                edge = self._kelly_edge(pit_view, r.symbol, direction=direction)
                 if edge is not None:
                     log.debug(
-                        "Kelly: %s using return-history edge=%.4f", r.symbol, edge,
+                        "Kelly: %s %s using return-history edge=%.4f", r.symbol, direction, edge,
                     )
             if edge is None or edge <= 0:
                 continue
@@ -297,19 +298,40 @@ class TraderAgent(Agent):
 
     @classmethod
     def _kelly_edge(
-        cls, pit_view: Any, symbol: str, lookback: int = 252
+        cls, pit_view: Any, symbol: str, lookback: int = 252, *, direction: str = "long",
     ) -> float | None:
         """Full-Kelly fraction from *symbol*'s realized daily returns, or None.
 
         ``f = (p*b - q)/b`` where ``p`` is the empirical win rate and ``b`` is
         the average-win / average-loss payoff ratio. Returns None when history
         is too thin or degenerate. May be negative (negative edge).
+
+        ``direction`` (2026-09-27 fix): a "win" is direction-dependent -- for
+        a long, a positive daily return is a win; for a short, a *negative*
+        daily return is a win (you profit when the price falls). Before this
+        fix, every call used the long-only definition (win = positive return)
+        regardless of the position's actual direction, then just flipped the
+        resulting edge's *sign* in :meth:`_kelly` based on conviction. That
+        gets the sign right but not the *magnitude*: a symbol in a
+        persistent uptrend (say 60% up-days) would compute a strong long
+        edge from its up-day frequency, and a *short* on that same symbol
+        would inherit that same strong-magnitude edge (just negated) instead
+        of its own, correctly weaker (or negative) short edge -- sizing a
+        short as if shorting an uptrending stock were nearly as favorable as
+        going long on it, base rate alone. Computing wins/losses relative to
+        *direction* here fixes the magnitude, not just the sign; ``_kelly``
+        no longer needs to (and no longer does) flip the sign of this
+        return value itself -- it already reflects the right direction.
         """
         returns = cls._symbol_returns(pit_view, symbol, lookback)
         if returns is None or len(returns) < 20:
             return None
-        wins = returns[returns > 0]
-        losses = returns[returns < 0]
+        if direction == "short":
+            wins = -returns[returns < 0]
+            losses = -returns[returns > 0]
+        else:
+            wins = returns[returns > 0]
+            losses = returns[returns < 0]
         if len(wins) == 0 or len(losses) == 0:
             return None
         p = float(len(wins) / len(returns))

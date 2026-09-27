@@ -760,7 +760,7 @@ def test_pattern_recognition_xgb_ensemble_populates_calibrated_probability_when_
     from firm.strategies import pattern_recognition as pr_module
 
     calibration_path = tmp_path / "xgb_calibration.json"
-    save_calibration({"type": "sigmoid", "a": 1.0, "b": 0.0}, calibration_path)
+    save_calibration({"type": "sigmoid", "model": "xgboost", "a": 1.0, "b": 0.0}, calibration_path)
 
     monkeypatch.setattr(pr_module.xgb_inference, "is_available", lambda: True)
     monkeypatch.setattr(
@@ -796,6 +796,39 @@ def test_pattern_recognition_xgb_ensemble_ignores_wrong_calibration_type(monkeyp
     # xgb_p_target must not be relabeled calibrated on a type mismatch.
     calibration_path = tmp_path / "xgb_calibration.json"
     save_calibration({"type": "temperature", "temperature": 1.2}, calibration_path)
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference,
+        "score_pattern_confirmation",
+        lambda features, **kwargs: (0.1, 0.1, 0.8),
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={
+            "xgb_confirmation_enabled": True,
+            "xgb_calibration_path": str(calibration_path),
+        },
+    ).generate(pit_view)
+
+    assert signals[0].meta["calibrated_probability"] is None
+
+
+def test_pattern_recognition_xgb_ensemble_ignores_calibration_fit_on_wrong_model(monkeypatch, tmp_path):
+    """Regression (2026-09-27): a calibration file with the RIGHT type
+    ("sigmoid") but fit on the WRONG model's raw score (model="rule_based",
+    i.e. quality_score, not XGBoost's p_target) must be rejected too --
+    "type" matching alone is not sufficient, since two different models'
+    raw scores can both be validly sigmoid-calibrated while being
+    completely incompatible fits."""
+    from firm.patterns.ml.calibration import save_calibration
+    from firm.strategies import pattern_recognition as pr_module
+
+    calibration_path = tmp_path / "mismatched_calibration.json"
+    save_calibration({"type": "sigmoid", "model": "rule_based", "a": 1.0, "b": 0.0}, calibration_path)
 
     monkeypatch.setattr(pr_module.xgb_inference, "is_available", lambda: True)
     monkeypatch.setattr(

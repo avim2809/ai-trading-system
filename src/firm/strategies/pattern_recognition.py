@@ -241,17 +241,38 @@ class PatternRecognitionStrategy(BaseStrategy):
         cnn_temperature = 1.0
         if p["cnn_calibration_path"]:
             cnn_calibration = ml_calibration.load_calibration(p["cnn_calibration_path"])
-            if cnn_calibration and cnn_calibration.get("type") == "temperature":
+            # "model" discriminator (2026-09-27 fix): "type" alone doesn't
+            # prove this file was actually fit against the CNN's own
+            # score distribution -- an XGBoost-fit sigmoid calibration
+            # could coincidentally never collide on "type" today (CNN
+            # uses "temperature", XGBoost uses "sigmoid"), but checking
+            # both is the honest guard against a future mismatch, and
+            # documents the intent explicitly rather than relying on the
+            # two types never colliding by chance. See
+            # scripts/fit_pattern_calibration.py's module docstring for
+            # the real mismatch this closes (it used to fit on
+            # quality_score and label the file for XGBoost's use).
+            if cnn_calibration and cnn_calibration.get("type") == "temperature" and cnn_calibration.get("model") == "cnn":
                 cnn_temperature = float(cnn_calibration.get("temperature", 1.0))
             elif cnn_calibration:
                 log.debug(
-                    "pattern_recognition: cnn_calibration_path=%s has type=%r, not "
-                    "'temperature' -- ignoring", p["cnn_calibration_path"], cnn_calibration.get("type"),
+                    "pattern_recognition: cnn_calibration_path=%s has type=%r model=%r, "
+                    "expected type='temperature' model='cnn' -- ignoring",
+                    p["cnn_calibration_path"], cnn_calibration.get("type"), cnn_calibration.get("model"),
                 )
+                cnn_calibration = None
 
         xgb_calibration = None
         if p["xgb_calibration_path"]:
-            xgb_calibration = ml_calibration.load_calibration(p["xgb_calibration_path"])
+            loaded = ml_calibration.load_calibration(p["xgb_calibration_path"])
+            if loaded and loaded.get("type") == "sigmoid" and loaded.get("model") == "xgboost":
+                xgb_calibration = loaded
+            elif loaded:
+                log.debug(
+                    "pattern_recognition: xgb_calibration_path=%s has type=%r model=%r, "
+                    "expected type='sigmoid' model='xgboost' -- ignoring",
+                    p["xgb_calibration_path"], loaded.get("type"), loaded.get("model"),
+                )
 
         log.info(
             "pattern_recognition: quality scoring mode=%s, xgb_confirmation=%s, "
