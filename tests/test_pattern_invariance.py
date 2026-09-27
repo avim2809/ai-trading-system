@@ -14,29 +14,53 @@ random walk, so a specific pattern is deterministically present).
 Two genuine subtleties were found while writing these tests and are handled
 explicitly below rather than papered over:
 
-1. ``scanner._score_and_finalize`` floors ``stop`` at ``stop_atr_floor *
-   current_atr`` where ``current_atr = atr[-1]`` -- the *last bar of the
-   whole input window*, not the ATR as of ``confirm_index``. Intentional
-   adaptive-stop design (the stop reflects *current* volatility, not
-   volatility when the pattern formed), not a look-ahead bug -- live trading
-   never re-scans the past, so no previously *emitted* signal is ever
-   altered. But ``stop``, ``risk_reward``, ``follow_through_atr``,
-   ``quality_score``, and ``score_breakdown`` are consequently *not*
-   prefix-invariant by design and are excluded from the structural-equality
-   checks below.
+1. ``scanner._score_and_finalize`` used to floor ``stop`` at
+   ``stop_atr_floor * current_atr`` where ``current_atr = atr[-1]`` -- the
+   *last bar of the whole input window*, not the ATR as of
+   ``confirm_index``. That made some sense while ``confirm_index`` was
+   *also* effectively "today" (the pre-2026-09-27 is-beyond confirmation
+   bug -- see point 2), since entry and stop were both implicitly anchored
+   to "now" together. Now that ``confirm_index`` is a genuine, stable
+   historical bar (fix below), leaving the stop floored on ``atr[-1]``
+   would have made the stop -- and ``risk_reward`` -- drift purely with
+   how many extra bars happen to be in the scanned window, even though
+   ``entry`` itself wouldn't move: an inconsistent bracket describing two
+   different points in time. Fixed 2026-09-27 (same commit as the
+   confirmation fix) to freeze the floor to ``atr[confirm_index]``
+   instead -- see ``scanner.py``'s own comment at that line. ``stop`` and
+   ``risk_reward`` are consequently now genuinely prefix-invariant too and
+   are included in the structural-equality checks below (test 1
+   specifically verifies this). ``follow_through_atr``, ``quality_score``,
+   and ``score_breakdown`` remain *not* prefix-invariant by design --
+   ``follow_through_atr`` deliberately measures drift relative to
+   *current* volatility/price (see its own definition in
+   ``scanner.py::_score_and_finalize``), and the other two are downstream
+   of it -- so those three stay excluded.
 2. ``confirmation.find_confirmation`` searches *newest-first* within its
-   lookback window and returns the freshest bar that still satisfies the
-   breakout condition (see its own docstring: "the most recent such close").
-   This means ``confirm_index`` deliberately *drifts forward* as more bars
-   are appended, for as long as the breakout persists -- comparing
-   ``scan_symbol(data[:T])`` against ``scan_symbol(data[:T+N])`` directly
-   and expecting the *same* ``confirm_index`` to reappear is therefore the
-   wrong test (it would fail on correct-by-design behavior, not a bug). The
-   right test instead: find a match on the *longer* series, note the
-   ``confirm_index`` it actually reports, then truncate to exactly
-   ``data[:confirm_index+1]`` and re-scan -- everything strictly after
-   ``confirm_index`` must have been irrelevant to that match's structural
-   fields, which is the real "no look-ahead beyond confirmation" property.
+   lookback window, but (2026-09-27 fix -- see that module's docstring for
+   the full bug history) now requires a genuine ``close[i-1]``-inside ->
+   ``close[i]``-beyond transition, not merely "still beyond." Before that
+   fix, this was a plain is-beyond test with no edge condition, so
+   ``confirm_index`` was *always* ``n - 1`` (today) for as long as the
+   breakout persisted -- which, read literally, made the comparison this
+   file exists to make **vacuous**: truncating to ``data[:confirm_index+1]``
+   truncated to nothing at all (the confirm_index equalled the full
+   series' own last index), so ``truncated_df == full_df`` by construction
+   and every "prefix invariance" assertion below was comparing a scan
+   against itself. That was itself a symptom of the same bug this test
+   module was meant to guard against, not a property of prefix invariance.
+   Now that ``confirm_index`` is a genuine historical crossing bar, it's
+   still bounded to the last ``lookback_bars`` of *whatever window is
+   scanned* (``start = max(min_index + 1, n - lookback_bars)`` in
+   ``find_confirmation`` -- unchanged by the fix), so a "confirmed" match on
+   the full series still has its ``confirm_index`` within a few bars of the
+   series' own end. The fixture below is built so the genuine crossing
+   lands with 1-2 real bars still after it in the full series, making the
+   truncation non-trivial (a real, if short, comparison) while the sharper
+   check remains test 3 below: appending one bar that does *not* satisfy
+   the crossing condition (a bounce back above the broken level) must not
+   shift ``confirm_index`` at all -- that's the real "no look-ahead /
+   no false re-confirmation" property post-fix.
 """
 
 from __future__ import annotations
@@ -59,6 +83,9 @@ _STRUCTURAL_FIELDS = (
     "geometry_tolerance_used",
     "volume_ratio",
     "duration_bars",
+    # 2026-09-27: now genuinely prefix-invariant -- see point 1 above.
+    "stop",
+    "risk_reward",
 )
 
 
@@ -100,14 +127,24 @@ def _find(matches, *, pattern: str, confirm_index: int | None = None):
     return candidates[0]
 
 
-# A double-top confirmed mid-series, with a long decline afterward so the
-# fixture genuinely has bars strictly after confirmation to test against.
-_DOUBLE_TOP_ANCHORS = [(0, 90.0), (10, 120.0), (20, 100.0), (30, 121.0), (45, 85.0), (75, 60.0)]
+# A double-top whose genuine breakdown crossing lands at bar 73 (verified
+# against the real detector, not hand-derived) -- inside find_confirmation's
+# 3-bar lookback window for this 76-bar series, with bars 74-75 left over as
+# real (if few) bars after confirmation. 2026-09-27 (find_confirmation
+# edge-trigger fix): the previous anchors ran a single 15-bar ramp straight
+# from the last peak (30, 121.0) down to (45, 85.0) and then a further
+# decline to (75, 60.0) -- the genuine crossing happened around bar 39, and
+# since the tail from 45 to 75 never re-crosses back above the neckline, no
+# match is found at all under the corrected semantics (the is-beyond bug
+# this file's own module docstring now documents is exactly what used to
+# paper over that). Holding just above the neckline (72, 105.0) until a
+# short final drop confines the real crossing to the last 3 bars instead.
+_DOUBLE_TOP_ANCHORS = [(0, 90.0), (10, 120.0), (20, 100.0), (30, 121.0), (72, 105.0), (75, 60.0)]
 _TOTAL_BARS = 76
 
 
 def _full_df() -> pd.DataFrame:
-    return _frame(_DOUBLE_TOP_ANCHORS, _TOTAL_BARS, spike_at=45)
+    return _frame(_DOUBLE_TOP_ANCHORS, _TOTAL_BARS, spike_at=73)  # spike at the real breakout bar
 
 
 def test_scan_symbol_unaffected_by_bars_after_confirmation():

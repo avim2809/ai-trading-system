@@ -264,9 +264,37 @@ def _score_and_finalize(
 
     # Floor the structural stop at stop_atr_floor * ATR so a tightly-fit
     # pattern (e.g. a shallow rectangle) never implies a noise-level stop.
+    #
+    # Frozen to ATR *as of confirm_index* (2026-09-27, Workstream C -- see
+    # firm.patterns.confirmation's module docstring for why confirm_index
+    # itself just became a fixed historical point instead of drifting to
+    # "today"): this used to be current_atr (== atr[-1], the last bar of
+    # whatever window happens to be scanned), which made sense only while
+    # confirm_index was *also* effectively "today" under the old is-beyond
+    # confirmation bug -- entry and stop were both implicitly anchored to
+    # "now" together. Now that confirm_index is stable, entry
+    # (level_at(confirm_index)) is a fixed historical price, but leaving
+    # the stop floored on atr[-1] would still make the stop -- and
+    # therefore risk_reward -- drift purely with how many extra bars
+    # happen to be in the scanned window, even though nothing about the
+    # pattern itself changed. Freezing both ends of the bracket to the
+    # same point in time is the internally-consistent choice: an
+    # entry/stop pair that actually describes one dated trading decision,
+    # not two different points in time glued together. Falls back to
+    # current_atr (unchanged old behavior) when the ATR at confirm_index
+    # itself is unusable (NaN/non-positive/out of range) -- same "neutral
+    # degradation, not a crash" convention as scorer.py's
+    # _breakout_distance_score.
     stop = candidate.stop
-    if current_atr and current_atr > 0:
-        min_distance = stop_atr_floor * current_atr
+    atr_at_confirm = None
+    ci = candidate.confirm_index
+    if 0 <= ci < len(atr_series):
+        candidate_atr = float(atr_series[ci])
+        if candidate_atr == candidate_atr and candidate_atr > 0:  # not NaN
+            atr_at_confirm = candidate_atr
+    stop_floor_atr = atr_at_confirm if atr_at_confirm is not None else current_atr
+    if stop_floor_atr and stop_floor_atr > 0:
+        min_distance = stop_atr_floor * stop_floor_atr
         if candidate.direction == "long":
             stop = min(stop, candidate.entry - min_distance)
         else:

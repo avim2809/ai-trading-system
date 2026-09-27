@@ -38,19 +38,59 @@ def find_confirmation(
     min_index: int,
 ) -> int:
     """Most recent bar index in the last *lookback_bars* where ``close``
-    crossed ``level_at(i)`` in *direction*, searching newest-first so the
-    freshest breakout wins. Returns -1 if none found (pattern not yet, or no
-    longer, confirmed). Never considers bars at or before *min_index* (the
-    pattern's own last structural pivot) — a "breakout" before the pattern
-    even finished forming isn't one.
+    genuinely **crossed** ``level_at(i)`` in *direction* — i.e. ``close[i]``
+    is beyond ``level_at(i)`` *and* ``close[i-1]`` was still on the near side
+    of ``level_at(i-1)`` — searching newest-first so the freshest breakout
+    (the most recent such crossing event, not merely the most recent bar
+    that happens to still be past the level) wins. Returns -1 if none found
+    (pattern not yet, or no longer, confirmed).
+
+    Bug history (2026-09-27): this used to be a plain **is-beyond** test —
+    ``if close[i] > level: return i`` — with no edge condition at all,
+    despite this same docstring always having described it as finding where
+    price *crossed* the level. Searching newest-first, that returned
+    **today** (``n - 1``) every time price was still past the level, which
+    it structurally almost always is for many bars after a real breakout.
+    Measured impact: ``bars_since_confirm`` was pinned to ``{0, 1, 2}`` by
+    construction, sitting at 0 on ~93% of emissions, and every rule module's
+    ``entry = level_at(confirm_index)`` was therefore a price already run
+    through (median overshoot +1.72R), not a real, tradeable entry. See
+    ``docs/pattern_recognition_plan.md`` (Workstream C) for the full
+    measurement. This function now requires an actual transition, so
+    ``confirm_index`` becomes a fixed historical point (the real breakout
+    bar) rather than drifting forward with every new bar of data — which
+    also makes it prefix-invariant / restart-safe for free.
+
+    Never considers bars at or before *min_index* (the pattern's own last
+    structural pivot) — a "breakout" before the pattern even finished
+    forming isn't one — as a *candidate* confirmation bar ``i``. The one
+    exception is the edge check's reference bar ``i - 1``: when ``i ==
+    start`` (the oldest bar this function is willing to call a
+    confirmation), the *previous* bar — which may be ``min_index`` itself,
+    or even earlier when ``lookback_bars`` is the binding constraint instead
+    of ``min_index`` — is still read purely to determine whether bar ``i``
+    was a genuine transition, not treated as a confirmation candidate in its
+    own right. That is the more correct reading of this docstring's own
+    "crossed" intent: the pattern's structural pivot is very often sitting
+    exactly at the level (e.g. a neckline pivot), so refusing to look one
+    bar back would make the very first bar after the pivot structurally
+    unconfirmable. The only case truly excluded for lack of information is
+    ``i == 0`` (no bar ``-1`` exists at all).
     """
     n = len(close)
     start = max(min_index + 1, n - lookback_bars)
     for i in range(n - 1, start - 1, -1):
+        if i - 1 < 0:
+            continue  # no prior bar at all -- can't tell if this is a genuine crossing
         level = level_at(i)
-        if direction == "above" and close[i] > level:
-            return i
-        if direction == "below" and close[i] < level:
+        prev_level = level_at(i - 1)
+        if direction == "above":
+            beyond = close[i] > level
+            prev_inside = close[i - 1] <= prev_level
+        else:
+            beyond = close[i] < level
+            prev_inside = close[i - 1] >= prev_level
+        if beyond and prev_inside:
             return i
     return -1
 
