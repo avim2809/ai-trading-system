@@ -38,7 +38,10 @@ except ImportError:
     _ONNX_TRAIN_STACK_AVAILABLE = False
 
 
-N_FEATURES = 47  # matches the real on-disk data/models/pattern_xgb.onnx artifact
+N_FEATURES = 52  # matches the real on-disk data/models/pattern_xgb.onnx artifact
+# (retrained 2026-09-27, Part B item 8/7, against the current build_features
+# schema post Part B item 5/6 -- was 47 before that retrain; see
+# docs/pattern_ml_isolated_evaluation_2026_09.md)
 
 
 @pytest.fixture(autouse=True)
