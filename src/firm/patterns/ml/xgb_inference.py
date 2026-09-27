@@ -47,7 +47,8 @@ source of the expected shape/column order is
 :func:`firm.patterns.ml.feature_engineering.build_features` (equivalently,
 one row of :func:`firm.patterns.ml.feature_engineering.build_feature_frame`'s
 output) -- see :func:`score_pattern_confirmation`'s docstring for the exact,
-verified 47-column layout the currently-trained on-disk model expects.
+verified current column layout, and for the (as of this writing, stale
+pending retrain) 47-column layout the on-disk model itself still expects.
 
 **Fail-soft contract:** every public function here is exception-safe. If
 ``onnxruntime`` isn't installed, the model/sidecar files are missing or
@@ -169,44 +170,51 @@ def score_pattern_confirmation(
     """XGBoost-based pattern-confirmation scoring for ONE pattern match.
 
     Args:
-        features: A 1D feature vector, shape ``(47,)`` for the currently
-            trained on-disk ``data/models/pattern_xgb.onnx`` artifact --
-            **the exact column order must match**
-            :func:`firm.patterns.ml.feature_engineering.build_features`'s
+        features: A 1D feature vector -- **the exact column order must
+            match** :func:`firm.patterns.ml.feature_engineering.build_features`'s
             dict-insertion order (equivalently,
             :func:`~firm.patterns.ml.feature_engineering.build_feature_frame`'s
             DataFrame column order for a single row), which is the
             authoritative source of truth this function defers to rather
             than re-deriving/hardcoding feature names itself. As of this
-            writing that order is (verified against
-            ``scripts/train_pattern_ml.py``'s ``build_dataset``, which feeds
-            ``build_features`` output straight into
-            ``xgb_classifier.train`` with no reordering, and against the
-            real on-disk model's ``input: [None, 47]`` ONNX graph shape):
-            ``direction_sign, entry, stop, target, fit_quality,
-            geometry_tolerance_used, volume_ratio, volume_ratio_missing,
-            duration_bars, follow_through_atr, risk_reward, quality_score,
-            num_pivots, confirm_index, stop_distance_pct,
-            target_distance_pct, score_geometry, score_trendline_fit,
-            score_volume_confirmation, score_duration, score_follow_through,
-            score_total, family_reversal, family_triangle,
-            family_continuation, family_cup_handle, pattern_<name>`` (one
-            column per entry of
+            writing (post Part B item 5, 2026-09-27 -- ``entry``/``stop``/
+            ``target``/``confirm_index`` removed, ``bars_since_confirm``
+            added, see that function's docstring) that order is:
+            ``direction_sign, fit_quality, geometry_tolerance_used,
+            volume_ratio, volume_ratio_missing, duration_bars,
+            follow_through_atr, risk_reward, quality_score, num_pivots,
+            stop_distance_pct, target_distance_pct, score_geometry,
+            score_trendline_fit, score_volume_confirmation, score_duration,
+            score_follow_through, score_total, family_reversal,
+            family_triangle, family_continuation, family_cup_handle,
+            pattern_<name>`` (one column per entry of
             ``firm.patterns.ml.feature_engineering.PATTERN_NAMES``, in that
             tuple's order) ``, pre_pattern_return, pre_pattern_volatility,
-            atr_pct, ohlcv_context_available``. A 2D ``(1, n_features)``
-            array is also accepted (squeezed internally) for callers that
+            atr_pct, bars_since_confirm, ohlcv_context_available`` -- 44
+            columns total. **The on-disk ``data/models/pattern_xgb.onnx``
+            artifact as of this writing still expects the OLD 47-column
+            layout** (trained before this schema change) and is therefore
+            stale: :func:`score_pattern_confirmation` will detect the
+            count mismatch, log a clear warning, and return ``None`` (see
+            the feature-count check below) until the model is retrained
+            against the current schema (``scripts/train_pattern_ml.py`` --
+            tracked as Part B item 7, gated on items 1-6 landing first).
+            A 2D ``(1, n_features)`` array is also accepted (squeezed
+            internally) for callers that
             already batch a single row through a DataFrame-derived array.
             **This function pushes all feature-engineering responsibility
             to the caller** -- it performs no pattern/OHLCV processing of
             its own, exactly like ``xgb_classifier.predict_proba`` takes a
             feature matrix rather than raw pattern data (see module
-            docstring). A model retrained against a different feature
-            schema will silently produce meaningless scores if this
-            contract drifts -- there is no way for this function to
-            self-detect a column-order mismatch beyond the raw feature
-            *count*, which it does not even attempt to validate (accepts
-            whatever shape the loaded ONNX graph's input allows).
+            docstring). A feature-*count* mismatch (2026-09-27) is now
+            caught explicitly before ``session.run`` and treated as
+            "model unavailable" (warn-once, return ``None``) rather than
+            an opaque onnxruntime shape exception -- but a same-length,
+            wrong-*order* feature vector is still undetectable here (no
+            column names travel with a raw ndarray) and will silently
+            produce meaningless scores. The column order above is the only
+            protection against that; keep it in sync with
+            ``build_features`` by hand.
         model_path: Path to the ``.onnx`` file (its ``.onnx.labels.json``
             sidecar is derived automatically, same convention as
             ``xgb_classifier.export_onnx``/``firm.patterns.ml.inference``).
@@ -249,6 +257,28 @@ def score_pattern_confirmation(
                 f"score_pattern_confirmation: expected a single feature row "
                 f"(shape (n_features,) or (1, n_features)), got shape {arr.shape}"
             )
+
+        # Feature-COUNT check (2026-09-27): the caller-vs-model column-order
+        # contract this function's own docstring warns about is still
+        # unverifiable here (no column names travel with a raw ndarray),
+        # but a count mismatch is cheap to catch and a real failure mode --
+        # e.g. firm.patterns.ml.feature_engineering.build_features changing
+        # its column set (as Part B item 5 just did, -3 net columns) makes
+        # every existing on-disk model stale until retrained. Catching it
+        # here, before session.run, turns an opaque onnxruntime shape
+        # exception into a clear, specific, warn-once diagnostic.
+        expected_dim = session.get_inputs()[0].shape[1]
+        if isinstance(expected_dim, int) and arr.shape[1] != expected_dim:
+            _warn_once(
+                str(model_path) + ":shape_mismatch",
+                "pattern XGBoost confirmation scoring unavailable: model at %s expects "
+                "%d features, got %d -- the on-disk model is stale relative to the "
+                "current firm.patterns.ml.feature_engineering.build_features schema "
+                "and needs retraining (scripts/train_pattern_ml.py) -- no ML-based "
+                "confirmation score will be produced.",
+                model_path, expected_dim, arr.shape[1],
+            )
+            return None
 
         input_name = session.get_inputs()[0].name
         outputs = session.run(None, {input_name: arr})

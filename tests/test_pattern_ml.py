@@ -241,6 +241,69 @@ class TestBuildFeatures:
     def test_build_feature_frame_empty_input(self):
         assert build_feature_frame([]).empty
 
+    def test_raw_non_transferable_fields_are_excluded(self):
+        # Part B item 5 (2026-09-27): entry/stop/target (raw price levels)
+        # and confirm_index (raw-time-leaking positional index) must never
+        # appear as features -- see build_features' own docstring for why.
+        feats = build_features(_make_match())
+        assert "entry" not in feats
+        assert "stop" not in feats
+        assert "target" not in feats
+        assert "confirm_index" not in feats
+
+    def test_bars_since_confirm_zeroed_when_ohlcv_unavailable(self):
+        feats = build_features(_make_match(), None)
+        assert feats["bars_since_confirm"] == 0.0
+
+    def test_bars_since_confirm_zeroed_when_confirm_index_out_of_range(self):
+        match = _make_match(confirm_index=999)
+        ohlcv = pd.DataFrame({"high": [1.0, 2.0], "low": [1.0, 2.0], "close": [1.0, 2.0], "volume": [1.0, 1.0]})
+        feats = build_features(match, ohlcv)
+        assert feats["bars_since_confirm"] == 0.0
+
+    def test_bars_since_confirm_is_bars_from_window_end_not_a_raw_index(self):
+        match = _make_match(confirm_index=20)
+        closes = 100.0 + 2.0 * np.arange(25)  # 25-bar window, confirm at idx 20
+        ohlcv = pd.DataFrame({
+            "high": closes + 0.5, "low": closes - 0.5, "close": closes,
+            "volume": np.full(25, 1_000_000.0),
+        })
+        feats = build_features(match, ohlcv)
+        # len(ohlcv) - 1 - confirm_index == 24 - 20 == 4
+        assert feats["bars_since_confirm"] == pytest.approx(4.0)
+
+    def test_bars_since_confirm_is_stationary_across_growing_windows(self):
+        # This is the actual bug fixed here: scripts/train_pattern_ml.py
+        # scans a MONOTONICALLY GROWING window (`ohlcv.iloc[:cutoff]` for an
+        # increasing cutoff) as calendar time advances through a symbol's
+        # history, so a raw confirm_index would trend upward with cutoff
+        # alone -- nothing to do with the pattern's own quality. Two matches
+        # confirmed the same number of bars before very different total
+        # window lengths must report the SAME bars_since_confirm.
+        small_closes = 100.0 + 1.0 * np.arange(30)
+        small_ohlcv = pd.DataFrame({
+            "high": small_closes + 0.5, "low": small_closes - 0.5, "close": small_closes,
+            "volume": np.full(30, 1_000_000.0),
+        })
+        large_closes = 100.0 + 1.0 * np.arange(500)
+        large_ohlcv = pd.DataFrame({
+            "high": large_closes + 0.5, "low": large_closes - 0.5, "close": large_closes,
+            "volume": np.full(500, 1_000_000.0),
+        })
+        # Both confirmed 5 bars before the end of their respective windows.
+        small_match = _make_match(confirm_index=len(small_ohlcv) - 1 - 5)
+        large_match = _make_match(confirm_index=len(large_ohlcv) - 1 - 5)
+
+        small_feats = build_features(small_match, small_ohlcv)
+        large_feats = build_features(large_match, large_ohlcv)
+
+        assert small_feats["bars_since_confirm"] == pytest.approx(5.0)
+        assert large_feats["bars_since_confirm"] == pytest.approx(5.0)
+        assert small_feats["bars_since_confirm"] == large_feats["bars_since_confirm"]
+        # ...whereas the raw confirm_index values themselves are wildly
+        # different (24 vs. 494) -- exactly the leak this feature replaced.
+        assert small_match.confirm_index != large_match.confirm_index
+
 
 # ---------------------------------------------------------------------------
 # label_triple_barrier

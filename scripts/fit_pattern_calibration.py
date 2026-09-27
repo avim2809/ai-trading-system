@@ -40,7 +40,10 @@ see ``scripts/analyze_pattern_scan_outcomes.py``'s own docstring):
 - ``--source history`` (default): reads real resolved rows from
   ``PatternScanHistoryStore``. Only supports ``--model rule_based`` --
   history rows store summary stats (``quality_score``, etc.), not the raw
-  OHLCV window a match was detected from, so XGBoost's 47 features cannot
+  OHLCV window a match was detected from, so XGBoost's OHLCV-dependent
+  features (``firm.patterns.ml.feature_engineering.build_features``, whose
+  exact column count/set has changed before and will again -- see that
+  module's docstring -- so it is deliberately not repeated here) cannot
   be recomputed from a history row; ``--model xgboost --source history``
   refuses with a clear error rather than guessing. Refuses to write a
   calibration file below ``_MIN_RESOLVED_FOR_STATS`` resolved rows (same
@@ -308,8 +311,8 @@ def main() -> int:
             log.error(
                 "--model xgboost --source history is not supported: history rows "
                 "store summary stats (quality_score, entry/stop/target, ...), not "
-                "the raw OHLCV window a match was detected from, so XGBoost's 47 "
-                "features cannot be recomputed from a history row. Use "
+                "the raw OHLCV window a match was detected from, so XGBoost's "
+                "OHLCV-dependent features cannot be recomputed from a history row. Use "
                 "--source synthetic, or extend pattern_scan_history's schema to log "
                 "ML features/scores directly (tracked as a known gap, not solved here)."
             )

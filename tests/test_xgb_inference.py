@@ -123,6 +123,42 @@ class TestScorePatternConfirmationFallbacks:
         result = xinf.score_pattern_confirmation(bad_features, model_path="/tmp/whatever.onnx")
         assert result is None
 
+    def test_returns_none_on_feature_count_mismatch_without_calling_session_run(self, monkeypatch):
+        # 2026-09-27: a stale on-disk model (e.g. trained before
+        # feature_engineering.build_features's schema changed -- see Part B
+        # item 5) must be caught as a clear, specific "unavailable" case,
+        # not left to an opaque onnxruntime shape exception.
+        session = MagicMock()
+        input_stub = MagicMock()
+        input_stub.name = "input"
+        input_stub.shape = [None, 47]  # concrete expected width
+        session.get_inputs.return_value = [input_stub]
+        monkeypatch.setattr(xinf, "_load_session", lambda path: (session, (-1, 0, 1)))
+
+        mismatched_features = np.zeros(44)  # current build_features width
+        result = xinf.score_pattern_confirmation(mismatched_features, model_path="/tmp/whatever.onnx")
+
+        assert result is None
+        session.run.assert_not_called()
+
+    def test_dynamic_input_dim_is_not_treated_as_a_mismatch(self, monkeypatch):
+        # A symbolic/dynamic ONNX dim (None, or a string dim name) can't be
+        # compared to a concrete feature count -- must fall through to
+        # session.run rather than false-positive-rejecting every call.
+        proba = np.array([0.2, 0.3, 0.5])
+        session = MagicMock()
+        input_stub = MagicMock()
+        input_stub.name = "input"
+        input_stub.shape = [None, None]
+        session.get_inputs.return_value = [input_stub]
+        session.run.return_value = [np.array([2]), proba[None, :]]
+        monkeypatch.setattr(xinf, "_load_session", lambda path: (session, (-1, 0, 1)))
+
+        result = xinf.score_pattern_confirmation(np.zeros(44), model_path="/tmp/whatever.onnx")
+
+        assert result is not None
+        session.run.assert_called_once()
+
 
 class TestScorePatternConfirmationWithMockedSession:
     def _make_session(self, proba_row: np.ndarray, input_name: str = "input"):

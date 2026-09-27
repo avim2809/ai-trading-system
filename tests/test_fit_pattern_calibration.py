@@ -31,6 +31,42 @@ from fit_pattern_calibration import (  # noqa: E402
 from firm.live.pattern_scan_history import PatternScanHistoryStore  # noqa: E402
 
 
+def _xgb_model_is_stale_relative_to_current_feature_schema() -> bool:
+    """True if the real on-disk pattern_xgb.onnx artifact's expected input
+    width no longer matches firm.patterns.ml.feature_engineering.build_features'
+    current column count -- i.e. the model needs retraining (see Part B item
+    7) before any test that scores real synthetic matches through it can
+    assert anything meaningful. Self-healing: once the model is retrained
+    against the current schema, this returns False again and the skip above
+    stops firing, with no further test maintenance needed.
+    """
+    from firm.patterns.ml import xgb_inference
+
+    if not xgb_inference.DEFAULT_MODEL_PATH.exists():
+        return False  # "not available" is a separate, already-handled skip
+    try:
+        import onnxruntime as ort
+
+        from firm.patterns.match import PatternMatch
+        from firm.patterns.ml.feature_engineering import build_features
+
+        session = ort.InferenceSession(
+            str(xgb_inference.DEFAULT_MODEL_PATH), providers=["CPUExecutionProvider"],
+        )
+        expected = session.get_inputs()[0].shape[1]
+        dummy = PatternMatch(
+            pattern="bull_flag", direction="long", pivots=(), confirm_index=1,
+            entry=100.0, stop=95.0, target=110.0, fit_quality=1.0,
+            geometry_tolerance_used=1.0, volume_ratio=1.0, duration_bars=1,
+            follow_through_atr=1.0, risk_reward=1.0, quality_score=1.0,
+            score_breakdown={},
+        )
+        actual = len(build_features(dummy))
+        return isinstance(expected, int) and expected != actual
+    except Exception:
+        return False  # can't tell -- let the real test run and surface any issue
+
+
 class TestBuildCalibration:
     def test_refuses_below_minimum_sample_size(self):
         n = _MIN_RESOLVED_FOR_CALIBRATION - 1
@@ -145,6 +181,16 @@ class TestSyntheticSamplers:
         from firm.patterns.ml import xgb_inference
         if not xgb_inference.is_available():
             pytest.skip("XGBoost ONNX model not available on this host")
+        if _xgb_model_is_stale_relative_to_current_feature_schema():
+            pytest.skip(
+                "on-disk data/models/pattern_xgb.onnx was trained against an older "
+                "firm.patterns.ml.feature_engineering.build_features schema (Part B "
+                "item 5, 2026-09-27, removed entry/stop/target/confirm_index, added "
+                "bars_since_confirm) -- xgb_inference now correctly detects this "
+                "count mismatch and returns None for every sample, so this real-"
+                "model comparison has nothing to assert until the model is retrained "
+                "(Part B item 7, gated on items 1-6 landing first)"
+            )
 
         rule_based_scores, rule_based_labels = _resolved_sample_from_synthetic_rule_based(
             n_symbols=40, seed=42, timeout_bars=40,

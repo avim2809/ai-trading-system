@@ -92,6 +92,13 @@ def _ohlcv_context_features(
         "pre_pattern_return": 0.0,
         "pre_pattern_volatility": 0.0,
         "atr_pct": 0.0,
+        # Stationary replacement for the raw `confirm_index` feature removed
+        # 2026-09-27 (Part B item 5 -- see build_features' own docstring):
+        # 0.0 here is indistinguishable from a genuine "confirmed on the
+        # window's last bar" case, but this whole block is already flagged
+        # by ohlcv_context_available, so that's consistent with every other
+        # zero-filled field here.
+        "bars_since_confirm": 0.0,
         "ohlcv_context_available": 0.0,
     }
     if ohlcv is None or len(ohlcv) == 0:
@@ -122,6 +129,14 @@ def _ohlcv_context_features(
         "pre_pattern_return": pre_pattern_return,
         "pre_pattern_volatility": pre_pattern_volatility,
         "atr_pct": atr_pct,
+        # Bars between confirmation and the end of the CURRENTLY AVAILABLE
+        # window (len(ohlcv) - 1 - idx), not a raw positional index into
+        # `ohlcv` -- see build_features' docstring for why this replaced
+        # `confirm_index` as a feature. Same formula/name as
+        # PatternRecognitionStrategy.generate()'s own
+        # meta["bars_since_confirm"], so training-time and live-inference-
+        # time features mean exactly the same thing.
+        "bars_since_confirm": float(len(ohlcv) - 1 - idx),
         "ohlcv_context_available": 1.0,
     }
 
@@ -142,6 +157,30 @@ def build_features(
     encoding and a one-hot specific-pattern encoding, and — only when
     ``ohlcv`` is supplied — a small block of price-context features computed
     from the ``momentum_lookback`` bars leading into ``confirm_index``.
+
+    Deliberately excludes two non-transferable raw fields (Part B item 5,
+    2026-09-27 -- see docs/pattern_recognition_plan.md):
+
+    - ``entry``/``stop``/``target`` (raw price levels): a $500 stock and a
+      $5 stock convey nothing comparable through their raw price levels —
+      only ``stop_distance_pct``/``target_distance_pct`` (already scale-
+      free) carry real, transferable-across-symbols information. Keeping
+      the raw levels risked the model learning "which symbol/price-regime
+      is this" instead of "how good is this pattern."
+    - ``confirm_index`` (raw positional index into the scanned array): in
+      ``scripts/train_pattern_ml.py``'s rolling-cutoff training-set
+      construction (``window = ohlcv.iloc[:cutoff]`` for a growing
+      ``cutoff``), this index grows monotonically with calendar time —
+      every later-dated training row necessarily has a larger
+      ``confirm_index`` than an earlier one, purely because the window it
+      was scanned from is longer, not because of anything about the
+      pattern itself. That is a raw-time leak dressed up as a geometry
+      feature. Replaced by ``bars_since_confirm`` (bars between
+      confirmation and the *end* of the currently-available window),
+      which is stationary and, not coincidentally, the exact same quantity
+      ``PatternRecognitionStrategy.generate()`` already reports live in
+      ``meta["bars_since_confirm"]`` — training and live inference now
+      describe "how stale is this confirmation" identically.
 
     ``ohlcv`` should be the same high/low/close/volume frame (ascending by
     date) that was passed to :func:`firm.patterns.scanner.scan_symbol` to
@@ -174,10 +213,12 @@ def build_features(
 
     features: dict[str, float] = {
         # --- raw PatternMatch scalar fields ---
+        # entry/stop/target/confirm_index deliberately excluded -- see this
+        # function's docstring (Part B item 5, 2026-09-27): non-transferable
+        # raw price levels and a raw-time-leaking positional index,
+        # respectively, both superseded by scale-free/stationary companions
+        # below.
         "direction_sign": direction_sign,
-        "entry": entry,
-        "stop": float(match.stop),
-        "target": float(match.target),
         "fit_quality": float(match.fit_quality),
         "geometry_tolerance_used": float(match.geometry_tolerance_used),
         "volume_ratio": volume_ratio_filled,
@@ -187,7 +228,6 @@ def build_features(
         "risk_reward": float(match.risk_reward),
         "quality_score": float(match.quality_score),
         "num_pivots": float(len(match.pivots)),
-        "confirm_index": float(match.confirm_index),
         # --- derived, scale-invariant versions of entry/stop/target ---
         "stop_distance_pct": float(stop_distance_pct),
         "target_distance_pct": float(target_distance_pct),
