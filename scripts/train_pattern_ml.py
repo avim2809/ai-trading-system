@@ -41,6 +41,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -55,6 +56,7 @@ from firm.data.synthetic import DEFAULT_SYMBOLS, make_synthetic_prices  # noqa: 
 from firm.patterns.ml import xgb_classifier  # noqa: E402
 from firm.patterns.ml.feature_engineering import build_features  # noqa: E402
 from firm.patterns.ml.labeling import label_triple_barrier_with_exit  # noqa: E402
+from firm.patterns.ml.purged_cv import purged_kfold_splits  # noqa: E402
 from firm.patterns.ml.sample_weights import sample_weights_by_group  # noqa: E402
 from firm.patterns.sample_size import DEFAULT_SAMPLE_COUNTS_FILENAME, save_sample_counts  # noqa: E402
 from firm.patterns.scanner import scan_symbol  # noqa: E402
@@ -162,6 +164,7 @@ def build_dataset(
     if panel.empty or "symbol" not in panel.columns:
         empty_meta = pd.DataFrame()
         empty_meta["sample_weight"] = pd.Series(dtype=float)
+        empty_meta["exit_date"] = pd.Series(dtype="datetime64[ns]")
         return pd.DataFrame(), np.array([], dtype=int), empty_meta
 
     for symbol, sym_df in panel.groupby("symbol"):
@@ -225,6 +228,14 @@ def build_dataset(
                     # is explicitly autocorrelated/overlapping-window (see
                     # this function's own docstring).
                     "confirm_date": sym_df["date"].iloc[match.confirm_index],
+                    # Part B item 4 (2026-09-27): the real calendar-date
+                    # counterpart to exit_index above -- de Prado's "t1" as
+                    # an actual date, needed by purged_kfold_splits (fold
+                    # assignment/purging must compare across symbols on a
+                    # shared calendar, unlike sample_weight's per-symbol bar
+                    # positions -- see firm.patterns.ml.purged_cv's module
+                    # docstring for why the two are computed differently).
+                    "exit_date": sym_df["date"].iloc[exit_index],
                 })
 
     X = pd.DataFrame(feature_rows)
@@ -303,10 +314,23 @@ def _safe_multiclass_auc(model, X_test, y_test) -> float | None:
         return None
     proba = xgb_classifier.predict_proba(model, X_test)
     try:
-        return float(roc_auc_score(y_test, proba, multi_class="ovr", labels=list(xgb_classifier.LABELS)))
+        auc = float(roc_auc_score(y_test, proba, multi_class="ovr", labels=list(xgb_classifier.LABELS)))
     except ValueError as exc:
         log.warning("AUC computation failed (%s) -- reporting n/a", exc)
         return None
+    if not np.isfinite(auc):
+        # sklearn silently returns nan (not a ValueError) when y_test has
+        # >=2 classes overall but is still missing one of xgb_classifier.
+        # LABELS' 3 possible values -- exactly the common case for a small
+        # Purged CV fold (Part B item 4, 2026-09-27), where this function is
+        # now called once per fold rather than once for a single final
+        # holdout. Treating nan as "not a real number" here (rather than
+        # letting a caller average it into a summary statistic and silently
+        # turn the whole thing into nan) matters more now than it did before.
+        log.warning("AUC computation returned a non-finite value (a present-but-absent-from-y_test "
+                    "class) -- reporting n/a")
+        return None
+    return auc
 
 
 # xgb_classifier.py is a deliberately thin, label-agnostic wrapper (see its
@@ -334,6 +358,83 @@ def _safe_binary_auc(p_act: np.ndarray, y_test: np.ndarray) -> float | None:
     except ValueError as exc:
         log.warning("Meta-label AUC computation failed (%s) -- reporting n/a", exc)
         return None
+
+
+def run_purged_cv_report(
+    X: pd.DataFrame,
+    y: np.ndarray,
+    meta: pd.DataFrame,
+    *,
+    n_splits: int,
+    embargo_days: int,
+    label_name: str,
+    is_binary_meta: bool,
+) -> dict[str, Any]:
+    """Part B item 4 (2026-09-27): report Purged K-Fold CV accuracy/AUC for
+    one (X, y) pair over the FULL dataset (not just time_ordered_split's
+    train portion -- CV's whole point is multiple independent train/test
+    partitions of everything available, complementing rather than
+    replacing that single final holdout). Prints a per-fold line plus a
+    mean+-std summary; a fold whose train split lacks class diversity (or
+    with too few rows to fit at all) is skipped with a clear message, never
+    aborting the whole run. Returns a small summary dict for tests to
+    assert against without parsing printed text.
+    """
+    result: dict[str, Any] = {"label_name": label_name, "n_usable_folds": 0, "n_folds": n_splits,
+                              "mean_accuracy": None, "mean_auc": None}
+    if n_splits <= 0:
+        return result
+    if len(X) < n_splits:
+        print(f"Purged CV ({label_name}): skipped -- only {len(X)} row(s), fewer than --cv-splits={n_splits}")
+        return result
+    try:
+        splits = purged_kfold_splits(
+            meta["confirm_date"], meta["exit_date"], n_splits=n_splits, embargo_days=embargo_days,
+        )
+    except ValueError as exc:
+        print(f"Purged CV ({label_name}): skipped ({exc})")
+        return result
+
+    weights_all = meta["sample_weight"].to_numpy()
+    fold_accs: list[float] = []
+    fold_aucs: list[float] = []
+    for i, (train_idx, test_idx) in enumerate(splits):
+        y_train_fold, y_test_fold = y[train_idx], y[test_idx]
+        if len(train_idx) == 0 or len(test_idx) == 0 or len(set(y_train_fold.tolist())) < 2:
+            print(
+                f"  Purged CV ({label_name}) fold {i}: skipped (n_train={len(train_idx)}, "
+                f"n_test={len(test_idx)}, distinct train labels={len(set(y_train_fold.tolist()))})"
+            )
+            continue
+        model = xgb_classifier.train(X.iloc[train_idx], y_train_fold, sample_weight=weights_all[train_idx])
+        pred = xgb_classifier.predict_label(model, X.iloc[test_idx])
+        acc = accuracy_score(y_test_fold, pred)
+        fold_accs.append(acc)
+        if is_binary_meta:
+            auc = _safe_binary_auc(_meta_p_act(model, X.iloc[test_idx]), y_test_fold)
+        else:
+            auc = _safe_multiclass_auc(model, X.iloc[test_idx], y_test_fold)
+        if auc is not None:
+            fold_aucs.append(auc)
+        print(
+            f"  Purged CV ({label_name}) fold {i}: n_train={len(train_idx)} n_test={len(test_idx)} "
+            f"acc={acc:.3f}" + (f" auc={auc:.3f}" if auc is not None else " auc=n/a")
+        )
+
+    result["n_usable_folds"] = len(fold_accs)
+    if fold_accs:
+        result["mean_accuracy"] = float(np.mean(fold_accs))
+        summary = (
+            f"Purged CV ({label_name}): {len(fold_accs)}/{n_splits} usable folds, "
+            f"mean acc={np.mean(fold_accs):.3f} (+/-{np.std(fold_accs):.3f})"
+        )
+        if fold_aucs:
+            result["mean_auc"] = float(np.mean(fold_aucs))
+            summary += f", mean AUC={np.mean(fold_aucs):.3f} (+/-{np.std(fold_aucs):.3f})"
+        print(summary)
+    else:
+        print(f"Purged CV ({label_name}): no usable folds (all {n_splits} skipped)")
+    return result
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -390,6 +491,20 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "to --output with a '_meta' suffix inserted before the extension (e.g. "
              "pattern_xgb.pkl -> pattern_xgb_meta.pkl).",
     )
+    parser.add_argument(
+        "--cv-splits", type=int, default=5,
+        help="Purged K-Fold cross-validation folds (Part B item 4 -- see "
+             "firm.patterns.ml.purged_cv), reported ADDITIONALLY alongside the single "
+             "trailing time_ordered_split holdout above -- a more robust performance "
+             "estimate than one lucky/unlucky split, over the SAME full dataset (X, y), "
+             "not just the train portion. Set to 0 to skip (e.g. for a fast smoke run).",
+    )
+    parser.add_argument(
+        "--cv-embargo-days", type=int, default=None,
+        help="Embargo (calendar days) for purged_kfold_splits. Defaults to --embargo-bars "
+             "(itself already a calendar-day quantity despite the historical flag name -- "
+             "see time_ordered_split's own docstring).",
+    )
     args = parser.parse_args(argv)
     if args.symbols:
         args.symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
@@ -398,6 +513,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if args.meta_output is None:
         out = Path(args.output)
         args.meta_output = str(out.with_name(out.stem + "_meta" + out.suffix))
+    if args.cv_embargo_days is None:
+        args.cv_embargo_days = args.embargo_bars
     return args
 
 
@@ -521,6 +638,25 @@ def main(argv: list[str] | None = None) -> int:
 
     xgb_classifier.save(meta_model, args.meta_output)
     print(f"Meta-label model saved to {args.meta_output}")
+
+    # Part B item 4 (2026-09-27): Purged K-Fold CV over the FULL dataset
+    # (not just X_train/y_train above) -- a more robust performance
+    # estimate than the single trailing holdout reported above, with
+    # leakage-safe purging/embargoing on each fold (see
+    # firm.patterns.ml.purged_cv's module docstring). Reported for BOTH
+    # models; does not change which model is ultimately saved (that's
+    # still the single time_ordered_split fit above -- this is an
+    # additional diagnostic, not a replacement).
+    print()
+    run_purged_cv_report(
+        X, y, meta, n_splits=args.cv_splits, embargo_days=args.cv_embargo_days,
+        label_name="direction", is_binary_meta=False,
+    )
+    y_meta_full = (y == 1).astype(int)
+    run_purged_cv_report(
+        X, y_meta_full, meta, n_splits=args.cv_splits, embargo_days=args.cv_embargo_days,
+        label_name="meta", is_binary_meta=True,
+    )
 
     # Part A (2026-09-27 false-positive-rate fix): persist per-pattern
     # historical sample counts alongside the model, so

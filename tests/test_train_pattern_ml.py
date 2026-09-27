@@ -24,7 +24,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from train_pattern_ml import build_dataset, main, time_ordered_split  # noqa: E402
+from train_pattern_ml import build_dataset, main, run_purged_cv_report, time_ordered_split  # noqa: E402
 
 from firm.data.synthetic import make_synthetic_prices  # noqa: E402
 from firm.patterns.ml import xgb_classifier  # noqa: E402
@@ -106,6 +106,17 @@ class TestBuildDatasetSampleWeight:
         )
         assert meta.empty
         assert "sample_weight" in meta.columns
+        assert "exit_date" in meta.columns
+
+    def test_exit_date_is_on_or_after_confirm_date(self):
+        panel = _panel(["AAPL", "MSFT"], n_days=400)
+        X, y, meta = build_dataset(
+            panel, zigzag_pct=0.03, min_score=0.0, confirm_lookback_bars=3,
+            stop_atr_floor=1.5, timeout_bars=20, min_window_bars=60, step_bars=10,
+        )
+        if meta.empty:
+            pytest.skip("fixture produced zero confirmed matches -- nothing to check")
+        assert (pd.to_datetime(meta["exit_date"]) >= pd.to_datetime(meta["confirm_date"])).all()
 
 
 class TestTimeOrderedSplit:
@@ -209,6 +220,58 @@ class TestSafeBinaryAuc:
 
 
 @requires_xgboost
+class TestSafeMulticlassAuc:
+    """Part B item 4 (2026-09-27) regression coverage: sklearn's
+    roc_auc_score silently returns nan (not a ValueError) for a y_test that
+    has >=2 classes overall but is still missing one of xgb_classifier.
+    LABELS' 3 possible values -- exactly the routine case for a small
+    Purged CV fold. _safe_multiclass_auc must treat that as "n/a" (None),
+    not let nan corrupt a caller's summary statistic."""
+
+    def test_returns_none_when_test_set_is_single_class(self):
+        from train_pattern_ml import _safe_multiclass_auc
+
+        model = xgb_classifier.train(
+            pd.DataFrame(np.random.RandomState(0).rand(20, 3)),
+            np.random.RandomState(0).randint(-1, 2, size=20),
+        )
+        X_test = pd.DataFrame(np.random.RandomState(1).rand(5, 3))
+        assert _safe_multiclass_auc(model, X_test, np.array([1, 1, 1, 1, 1])) is None
+
+    def test_returns_none_not_nan_when_one_label_is_absent_from_y_test(self):
+        # y_test has 2 distinct classes (passes the len(set())>=2 guard)
+        # but never the "0"/timeout label -- the real bug this closes.
+        from train_pattern_ml import _safe_multiclass_auc
+
+        rng = np.random.RandomState(2)
+        X = pd.DataFrame(rng.rand(30, 3))
+        y = rng.randint(-1, 2, size=30)
+        model = xgb_classifier.train(X, y)
+
+        X_test = pd.DataFrame(rng.rand(8, 3))
+        y_test = np.array([-1, -1, 1, 1, -1, 1, -1, 1])  # no "0" present
+
+        result = _safe_multiclass_auc(model, X_test, y_test)
+        assert result is None  # not nan, not a float that would corrupt np.mean
+
+    def test_returns_real_auc_when_all_three_labels_present(self):
+        from train_pattern_ml import _safe_multiclass_auc
+
+        rng = np.random.RandomState(3)
+        X = pd.DataFrame(rng.rand(40, 3))
+        y = rng.randint(-1, 2, size=40)
+        model = xgb_classifier.train(X, y)
+
+        X_test = pd.DataFrame(rng.rand(15, 3))
+        y_test = np.array([-1, 0, 1] * 5)  # all 3 labels present
+
+        result = _safe_multiclass_auc(model, X_test, y_test)
+        assert result is not None
+        assert np.isfinite(result)
+        assert 0.0 <= result <= 1.0
+
+
+@requires_xgboost
 class TestMainTrainsBothModels:
     """End-to-end smoke test (Part B item 2): a real `main()` invocation
     against synthetic data must produce BOTH the 3-class direction model AND
@@ -290,7 +353,77 @@ class TestMainPassesSampleWeight:
         if rc != 0:
             pytest.skip("synthetic fixture produced too few/degenerate rows to train this run")
 
-        assert len(calls) == 2  # direction model, then meta model
+        # >= 2: the two final models (direction, meta), plus one call per
+        # usable purged-CV fold per label (Part B item 4) -- every one of
+        # them must still receive real weights, not just the first two.
+        assert len(calls) >= 2
         for sample_weight in calls:
             assert sample_weight is not None
             assert np.all((sample_weight > 0.0) & (sample_weight <= 1.0))
+
+
+@requires_xgboost
+class TestRunPurgedCvReport:
+    """Part B item 4 (2026-09-27): purged K-Fold CV reporting, wired into
+    train_pattern_ml.py -- tests the reporting function directly against a
+    small, controlled, learnable synthetic dataset (with real confirm_date/
+    exit_date/sample_weight columns, exactly what build_dataset produces)."""
+
+    def _fixture(self, n=80, seed=0):
+        rng = np.random.RandomState(seed)
+        X = pd.DataFrame(rng.rand(n, 5), columns=[f"f{i}" for i in range(5)])
+        y = (X["f0"] > 0.5).astype(int).to_numpy() * 2 - 1  # {-1, 1}, learnable
+        dates = pd.date_range("2024-01-01", periods=n, freq="D")
+        meta = pd.DataFrame({
+            "confirm_date": dates,
+            "exit_date": dates + pd.Timedelta(days=2),
+            "sample_weight": np.ones(n),
+        })
+        return X, y, meta
+
+    def test_reports_n_splits_folds_with_real_accuracy(self, capsys):
+        X, y, meta = self._fixture()
+        result = run_purged_cv_report(
+            X, y, meta, n_splits=5, embargo_days=0, label_name="test-direction", is_binary_meta=False,
+        )
+        assert result["n_usable_folds"] == 5
+        assert result["mean_accuracy"] is not None
+        assert 0.0 <= result["mean_accuracy"] <= 1.0
+        captured = capsys.readouterr()
+        assert "Purged CV (test-direction)" in captured.out
+        assert "5/5 usable folds" in captured.out
+
+    def test_binary_meta_path_uses_binary_auc(self):
+        X, y, meta = self._fixture()
+        y_binary = (y == 1).astype(int)
+        result = run_purged_cv_report(
+            X, y_binary, meta, n_splits=4, embargo_days=0, label_name="test-meta", is_binary_meta=True,
+        )
+        assert result["n_usable_folds"] == 4
+        assert result["mean_auc"] is not None
+
+    def test_n_splits_zero_is_a_no_op(self, capsys):
+        X, y, meta = self._fixture()
+        result = run_purged_cv_report(
+            X, y, meta, n_splits=0, embargo_days=0, label_name="test", is_binary_meta=False,
+        )
+        assert result["n_usable_folds"] == 0
+        assert result["mean_accuracy"] is None
+
+    def test_too_few_rows_for_requested_splits_skips_cleanly(self, capsys):
+        X, y, meta = self._fixture(n=3)
+        result = run_purged_cv_report(
+            X, y, meta, n_splits=10, embargo_days=0, label_name="test", is_binary_meta=False,
+        )
+        assert result["n_usable_folds"] == 0
+        captured = capsys.readouterr()
+        assert "skipped" in captured.out
+
+    def test_degenerate_single_class_dataset_skips_every_fold_without_raising(self):
+        X, y, meta = self._fixture()
+        y_degenerate = np.ones_like(y)  # only one class anywhere
+        result = run_purged_cv_report(
+            X, y_degenerate, meta, n_splits=5, embargo_days=0, label_name="test", is_binary_meta=False,
+        )
+        assert result["n_usable_folds"] == 0
+        assert result["mean_accuracy"] is None
