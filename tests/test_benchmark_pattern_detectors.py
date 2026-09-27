@@ -23,7 +23,12 @@ _TESTS = Path(__file__).resolve().parent
 if str(_TESTS) not in sys.path:
     sys.path.insert(0, str(_TESTS))
 
-from benchmark_pattern_detectors import apply_significance_and_fdr, build_report, run_fixture  # noqa: E402
+from benchmark_pattern_detectors import (  # noqa: E402
+    apply_significance_and_fdr,
+    build_report,
+    run_benchmark,
+    run_fixture,
+)
 
 from pattern_fixtures import (  # noqa: E402
     BOUNDARY_FIXTURES,
@@ -160,3 +165,90 @@ class TestFullFixtureBuildFrame:
         df = build_frame(fx)
         assert list(df.columns) == ["high", "low", "close", "volume"]
         assert len(df) == fx.total_bars
+
+
+# ---------------------------------------------------------------------------
+# CI-enforced release gate (Part A item 7, 2026-09-27): everything above this
+# point tests the report-BUILDING logic against controlled/fake inputs, by
+# design (see this module's docstring). These tests are different on
+# purpose: they run the REAL fixture corpus through the REAL scan_symbol
+# pipeline and fail the build if a pre-registered floor is violated --
+# turning this benchmark from "informative" into a hard release gate, per
+# docs/pattern_recognition_plan.md's Part A item 7.
+#
+# Thresholds are fixed BEFORE looking at results, against a deterministic,
+# reproducible run of this exact corpus (n_negative_symbols=20, seed=42 --
+# see run_benchmark's own seeding; a repeat run with identical arguments has
+# been verified byte-for-byte identical). They are headroom above the
+# measured baseline, not the measured value itself: tight enough to catch a
+# real regression (e.g. back toward the pre-Part-A 70% synthetic-noise
+# false-positive rate), loose enough that a still-healthy run doesn't flake
+# the build. If these ever need to move, that is a deliberate, reviewed
+# decision (a new corpus, a new detector generation) made in its own commit
+# with fresh numbers -- never a quiet loosening to make a failing PR pass.
+#
+# Measured on this exact run as of 2026-09-27 (Part A items 1-2 landed,
+# items 3-6 exist but are opt-in/off by default in PatternRecognitionStrategy):
+#   Baseline (rule-based scan_symbol only, min_score=60.0 -- what actually
+#     ships live today): negative-category accuracy=0.810 (FPR=19.0%),
+#     positive/ambiguous/boundary accuracy=1.000 (perfect recall),
+#     Brier=0.073, PR-AUC=0.942.
+#   With significance test + FDR control applied on top (Part A items 3-4,
+#     not yet the strategy's live default): negative-category
+#     accuracy=0.952 (FPR=4.8%), recall still 1.000.
+GOLDEN_BENCHMARK_N_NEGATIVE_SYMBOLS = 20
+GOLDEN_BENCHMARK_SEED = 42
+
+MAX_BASELINE_FALSE_POSITIVE_RATE = 0.30
+MAX_SIGNIFICANCE_FDR_FALSE_POSITIVE_RATE = 0.15
+MIN_RECALL = 1.0  # never regress on a real, confirmed pattern -- no tolerance
+MAX_BRIER_SCORE = 0.25  # uninformative-forecaster baseline (see run_fixture docstring)
+MIN_PR_AUC = 0.85
+
+
+class TestGoldenBenchmarkReleaseGate:
+    def _report(self, *, compute_significance: bool) -> dict:
+        results = run_benchmark(
+            n_negative_symbols=GOLDEN_BENCHMARK_N_NEGATIVE_SYMBOLS,
+            seed=GOLDEN_BENCHMARK_SEED,
+            compute_significance=compute_significance,
+        )
+        if compute_significance:
+            results = apply_significance_and_fdr(results)
+        return build_report(results)
+
+    def test_baseline_never_misses_a_real_pattern(self):
+        report = self._report(compute_significance=False)
+        assert report["classification"]["recall"] == MIN_RECALL
+        for category in ("positive", "ambiguous", "boundary"):
+            assert report["by_category"][category]["accuracy"] == 1.0, (
+                f"{category} category accuracy regressed below 1.0 -- a real, "
+                "previously-detected pattern is now being missed"
+            )
+
+    def test_baseline_false_positive_rate_stays_under_registered_ceiling(self):
+        report = self._report(compute_significance=False)
+        fpr = 1.0 - report["by_category"]["negative"]["accuracy"]
+        assert fpr <= MAX_BASELINE_FALSE_POSITIVE_RATE, (
+            f"synthetic-noise false-positive rate regressed to {fpr:.1%} "
+            f"(ceiling {MAX_BASELINE_FALSE_POSITIVE_RATE:.0%}) -- rerun "
+            "scripts/benchmark_pattern_detectors.py and investigate the scorer "
+            "before touching this ceiling"
+        )
+
+    def test_baseline_brier_score_beats_uninformative_forecaster(self):
+        report = self._report(compute_significance=False)
+        assert report["brier_score"] < MAX_BRIER_SCORE
+
+    def test_baseline_pr_auc_stays_above_registered_floor(self):
+        report = self._report(compute_significance=False)
+        assert report["pr_auc"] >= MIN_PR_AUC
+
+    def test_significance_and_fdr_tightens_the_false_positive_rate_further(self):
+        report = self._report(compute_significance=True)
+        fpr = 1.0 - report["by_category"]["negative"]["accuracy"]
+        assert fpr <= MAX_SIGNIFICANCE_FDR_FALSE_POSITIVE_RATE, (
+            f"significance+FDR-adjusted false-positive rate regressed to "
+            f"{fpr:.1%} (ceiling {MAX_SIGNIFICANCE_FDR_FALSE_POSITIVE_RATE:.0%})"
+        )
+        assert report["classification"]["recall"] == MIN_RECALL
