@@ -71,12 +71,13 @@ Risk notes:
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from firm.contracts.models import Signal
-from firm.patterns import significance
+from firm.patterns import sample_size, significance
 from firm.patterns.ml import calibration as ml_calibration
 from firm.patterns.ml import inference as cnn_inference
 from firm.patterns.ml import xgb_inference
@@ -86,6 +87,14 @@ from firm.strategies.base import BaseStrategy, PitView
 from firm.strategies.registry import register
 
 log = logging.getLogger(__name__)
+
+#: Shared code-level asset (like the CNN/XGBoost model files themselves --
+#: see firm.patterns.ml.inference.DEFAULT_MODEL_PATH's identical rationale):
+#: both live instances share one checkout and should read the same
+#: per-pattern sample counts from the same place, not a FIRM_DATA_DIR-
+#: relative per-instance path.
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_SAMPLE_COUNTS_PATH = _PROJECT_ROOT / "data" / "models" / sample_size.DEFAULT_SAMPLE_COUNTS_FILENAME
 
 
 def _adjusted_ohlc(sym_df: pd.DataFrame) -> pd.DataFrame:
@@ -202,6 +211,15 @@ class PatternRecognitionStrategy(BaseStrategy):
         "significance_n_draws": 200,
         "significance_max_p_value": 0.05,
         "significance_seed": 42,
+        # Per-pattern minimum-sample confidence discount (Part A -- see
+        # firm.patterns.sample_size's module docstring). Off by default,
+        # same convention. None (default path) resolves to the shared
+        # model-artifact directory, same repo-level-asset convention as
+        # DEFAULT_MODEL_PATH in firm.patterns.ml.inference/xgb_inference
+        # (both live instances read the same trained-model directory).
+        "sample_size_discount_enabled": False,
+        "min_reliable_samples": sample_size.DEFAULT_MIN_RELIABLE_SAMPLES,
+        "sample_counts_path": None,
     }
 
     def __init__(self, params: dict | None = None):
@@ -238,6 +256,14 @@ class PatternRecognitionStrategy(BaseStrategy):
         significance_n_draws = int(p["significance_n_draws"])
         significance_max_p_value = float(p["significance_max_p_value"])
         significance_seed = int(p["significance_seed"])
+
+        sample_discount_enabled = bool(p["sample_size_discount_enabled"])
+        min_reliable_samples = int(p["min_reliable_samples"])
+        sample_counts_path = p["sample_counts_path"] or DEFAULT_SAMPLE_COUNTS_PATH
+        # Loaded once per generate() call (cheap: a single small JSON file),
+        # not per-symbol -- fail-soft to None (no discount) if missing/corrupt,
+        # same convention as firm.patterns.ml.calibration.load_calibration.
+        sample_counts = sample_size.load_sample_counts(sample_counts_path) if sample_discount_enabled else None
 
         universe = pit_view.universe
         if not universe:
@@ -433,6 +459,13 @@ class PatternRecognitionStrategy(BaseStrategy):
                 if cnn_quality is None:
                     rule_based_only += 1
 
+            sample_size_discount = 1.0
+            if sample_discount_enabled:
+                sample_size_discount = sample_size.confidence_discount(
+                    best.pattern, sample_counts, min_reliable_samples=min_reliable_samples,
+                )
+                quality_fraction = float(np.clip(quality_fraction * sample_size_discount, 0.0, 1.0))
+
             signals.append(
                 Signal(
                     symbol=str(symbol),
@@ -467,6 +500,9 @@ class PatternRecognitionStrategy(BaseStrategy):
                         # (the default) -- never a placeholder value, same
                         # convention as calibrated_probability above.
                         "significance_p_value": p_value,
+                        # 1.0 (no-op) whenever sample_size_discount_enabled
+                        # is False (the default) -- never a placeholder.
+                        "sample_size_discount": sample_size_discount,
                     },
                 )
             )

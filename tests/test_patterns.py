@@ -997,3 +997,80 @@ def test_pattern_recognition_significance_fdr_accepts_a_genuinely_significant_pa
     ).generate(pit_view)
 
     assert {s.symbol for s in signals} == {"AAA", "BBB"}
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-27 Part A: per-pattern minimum-sample confidence discount
+# (firm.patterns.sample_size). Off by default.
+# ---------------------------------------------------------------------------
+
+def test_pattern_recognition_sample_discount_off_by_default_leaves_meta_at_one():
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy().generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["sample_size_discount"] == 1.0
+
+
+def test_pattern_recognition_sample_discount_shrinks_rare_pattern_confidence(tmp_path):
+    from firm.patterns.sample_size import save_sample_counts
+
+    counts_path = tmp_path / "pattern_sample_counts.json"
+    # _BULL_FLAG_ANCHORS confirms as bull_flag or pennant (family-ambiguous,
+    # see tests/pattern_fixtures.py) -- give it a heavily-discounted count.
+    save_sample_counts({"bull_flag": 1, "pennant": 1}, counts_path)
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    baseline = PatternRecognitionStrategy().generate(pit_view)
+    discounted = PatternRecognitionStrategy(
+        params={
+            "sample_size_discount_enabled": True,
+            "sample_counts_path": str(counts_path),
+            "min_reliable_samples": 30,
+        },
+    ).generate(pit_view)
+
+    assert len(baseline) == 1 and len(discounted) == 1
+    assert discounted[0].meta["sample_size_discount"] == pytest.approx(1 / 30)
+    assert abs(discounted[0].confidence) == pytest.approx(baseline[0].confidence * (1 / 30))
+    assert abs(discounted[0].score) < abs(baseline[0].score)
+
+
+def test_pattern_recognition_sample_discount_no_file_is_a_no_op(tmp_path):
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={
+            "sample_size_discount_enabled": True,
+            "sample_counts_path": str(tmp_path / "does_not_exist.json"),
+        },
+    ).generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["sample_size_discount"] == 1.0
+
+
+def test_pattern_recognition_sample_discount_well_represented_pattern_unaffected(tmp_path):
+    from firm.patterns.sample_size import save_sample_counts
+
+    counts_path = tmp_path / "pattern_sample_counts.json"
+    save_sample_counts({"bull_flag": 500, "pennant": 500}, counts_path)
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={
+            "sample_size_discount_enabled": True,
+            "sample_counts_path": str(counts_path),
+            "min_reliable_samples": 30,
+        },
+    ).generate(pit_view)
+
+    assert signals[0].meta["sample_size_discount"] == 1.0
+

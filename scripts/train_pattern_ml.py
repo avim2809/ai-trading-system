@@ -55,6 +55,7 @@ from firm.data.synthetic import DEFAULT_SYMBOLS, make_synthetic_prices  # noqa: 
 from firm.patterns.ml import xgb_classifier  # noqa: E402
 from firm.patterns.ml.feature_engineering import build_features  # noqa: E402
 from firm.patterns.ml.labeling import label_triple_barrier  # noqa: E402
+from firm.patterns.sample_size import DEFAULT_SAMPLE_COUNTS_FILENAME, save_sample_counts  # noqa: E402
 from firm.patterns.scanner import scan_symbol  # noqa: E402
 
 # Reuses the strategy's own split/dividend adjustment (scales raw high/low by
@@ -406,6 +407,16 @@ def main(argv: list[str] | None = None) -> int:
 
     xgb_classifier.save(model, args.output)
     print(f"Model saved to {args.output}")
+
+    # Part A (2026-09-27 false-positive-rate fix): persist per-pattern
+    # historical sample counts alongside the model, so
+    # firm.patterns.sample_size.confidence_discount can discount rare
+    # patterns (e.g. this run's own cup_handle=1, bull_flag=8) instead of
+    # trusting every pattern name at face value regardless of how much
+    # historical evidence backs it.
+    counts_path = Path(args.output).with_name(DEFAULT_SAMPLE_COUNTS_FILENAME)
+    save_sample_counts(meta["pattern"].value_counts().to_dict(), counts_path)
+    print(f"Per-pattern sample counts saved to {counts_path}")
     return 0
 
 
