@@ -218,13 +218,17 @@ call, so it isn't grounds for one now.
 - Does **not** re-run the full 11-strategy diluted portfolio audit with the new model (that would be
   the ~4-hour "confirmatory secondary check" per the plan's own priority ordering — the isolated test
   above is the primary signal and was prioritized per the task's instructions instead).
-- Does **not** wire `xgb_inference.score_pattern_meta_confirmation` (the new meta model) into
-  `PatternRecognitionStrategy.generate()`'s `calibrated_probability` — the strategy still sources that
-  from the 3-class model's own `p_target` (a known, already-documented gap in
-  `src/firm/strategies/pattern_recognition.py` lines ~611-625, flagged there as "tracked as part of
-  Part B item 7's retrain"). The isolated backtest in §3 therefore tests the **current wiring**
-  (3-class model blended into quality score via `xgb_blend_weight`/agreement gate), which is what the
-  live config flag would actually do if flipped — a faithful test of the real toggle, but it means the
-  meta model's own precision/recall/PR-AUC edge (§2) is not yet reachable through the live decision
-  path at all. Rewiring that is a separate, non-trivial change to a production strategy file (touches
-  Kelly-sizing semantics) that wasn't asked for in items 7/8 and wasn't attempted here.
+- At the time this evaluation ran, `PatternRecognitionStrategy.generate()` did **not** yet wire
+  `xgb_inference.score_pattern_meta_confirmation` (the new meta model) into `calibrated_probability` —
+  it still sourced that field from the 3-class model's own `p_target`. **This has since been closed**
+  (commit `c4f70de`, same session, immediately after this evaluation's retrain made a real
+  `pattern_xgb_meta.onnx` artifact available to wire against): a new, independently-toggled
+  `xgb_meta_confirmation_enabled` knob (default `false`, same convention as every other knob here) now
+  sources `calibrated_probability` from the meta model's own output when enabled, with its own
+  `"xgboost_meta"` calibration-file discriminator distinct from the 3-class model's `"xgboost"`. The
+  isolated backtest in §3 above still reflects the **pre-fix wiring** (3-class model blended into
+  quality score via `xgb_blend_weight`/agreement gate — `xgb_confirmation_enabled`, unaffected by this
+  follow-up change) since it ran before that commit; re-running §3 with `xgb_meta_confirmation_enabled`
+  also flipped on would be a natural, still-pending follow-up if this is ever revisited, since the meta
+  model's own strong precision/recall/PR-AUC (§2) is now reachable through the live decision path for
+  the first time, but has not itself been walk-forward-tested end to end yet.
