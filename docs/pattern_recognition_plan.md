@@ -1518,3 +1518,129 @@ gate (§9.3) correctly refuses either flag.
 production changes as a result (both flags were already off); this
 round's value is the fresh, reproducible evidence base plus the guardrail
 that now enforces it going forward.
+
+## 10. 2026-09-27 false-positive-rate fix (Part A) + real meta-labeling infrastructure (Part B)
+
+A "very deep research" pass (finance/quant-specialist framing) into two
+findings — "the detector flags ~2/3 of random noise as a real pattern under
+current settings" and "make the ML layer actually worth turning on" —
+produced a research-and-engineering plan
+(`/root/.claude/plans/typed-splashing-moonbeam.md`) executed with full
+autonomy through Parts C/A/D1/B (pausing only before any new paid-data
+spend, per Part D5). This section is the implementation log; commits
+`e688f90`..`1d44093` on `main`.
+
+### 10.1 Part A — false-positive-rate fix (7 items, all shipped)
+
+Reframed `quality_score` from an arbitrary heuristic toward calibrated
+evidence strength, with a hard, CI-enforced floor going forward:
+
+1. **Removed double-counted scorer components** (`follow_through`/
+   `breakout_distance` measured the same underlying quantity through
+   different ATR denominators) and **fixed the non-discriminative
+   `duration` component** (noise scored 10/10 on it essentially always) —
+   `scorer.py`/`scanner.py`. Freed points redistributed toward volume
+   confirmation (the only component that already discriminated noise).
+2. **Statistical significance test** (`firm.patterns.significance`) —
+   bootstraps a null score distribution from the symbol's own realized
+   returns (reusing `firm.eval.robustness.MonteCarloAnalyzer`), reports a
+   p-value instead of trusting the raw score.
+3. **Benjamini-Hochberg FDR control** across every candidate a scan cycle
+   produces — the missing correction for scanning ~35 symbols x 9
+   detectors x multiple windows and keeping the max score per symbol.
+4. **Per-pattern minimum-sample confidence discount**
+   (`firm.patterns.sample_size`) — a pattern with fewer than
+   `min_reliable_samples` (default 30) historical confirmations gets its
+   confidence shrunk proportionally, rather than trusted at
+   `rising_wedge`-level (1,351 examples) face value.
+5. **Regime-aware confidence discount** — builds its own
+   `MarketRegimeDetector` instance (strategies never receive
+   `ctx.market_regime`) and discounts a pattern whose direction conflicts
+   with the labelled regime, or any pattern in Chop, damped toward a no-op
+   when the label itself was thin-margin/untrustworthy
+   (`RegimeState.separation`).
+6. **Golden benchmark promoted to a hard CI release gate**
+   (`tests/test_benchmark_pattern_detectors.py::TestGoldenBenchmarkReleaseGate`)
+   — pre-registered floors (recall=1.000 no tolerance, baseline FPR<=30%,
+   Brier<0.25, PR-AUC>=0.85, significance+FDR-adjusted FPR<=15%), verified
+   genuinely live (a tightened threshold was confirmed to actually fail).
+
+**Net measured result** (`scripts/benchmark_pattern_detectors.py`, 37
+fixtures + 20 synthetic-noise symbols, seed=42, reproducible):
+synthetic-noise false-positive rate **70% -> 19.0%** (scorer fix alone,
+items 1-2 — this is what ships live today, since items 2-5's own knobs
+default off pending their own walk-forward re-validation, matching every
+other optional knob in this strategy) **-> 4.8%** (with the opt-in
+significance+FDR layer, items 3-4, on top). Recall stayed 100% throughout
+— no positive/ambiguous/boundary fixture regressed. Brier 0.269 (worse
+than an uninformative 0.25 forecaster) -> 0.073; PR-AUC 0.481 -> 0.942.
+
+### 10.2 Part B — meta-labeling infrastructure (items 1-6 of 9, shipped; items 7-9 in progress)
+
+De Prado's meta-labeling recipe (*Advances in Financial Machine Learning*)
+was ~50% built (a real primary/secondary model split already existed) but
+missing every piece that makes it statistically honest:
+
+1. *(done via Part C — see the calibration-model-mismatch fix,
+   `522c44a`.)*
+2. **Separate binary act/no-act target**
+   (`firm.patterns.ml.labeling.label_meta_binary` — target-hit vs.
+   stop-hit-or-timeout collapsed together) trained as its OWN model
+   (`firm.patterns.ml.xgb_inference.score_pattern_meta_confirmation`
+   against a new `pattern_xgb_meta.onnx` artifact), not reusing the
+   3-class direction model's own `p_target` as if it were a calibrated
+   confidence gate — the conflation de Prado's recipe specifically warns
+   against. Not yet wired into `pattern_recognition.py`'s
+   `calibrated_probability` (no real trained meta artifact existed until
+   item 8 below) — documented inline as a known, deliberately-deferred gap.
+3. **Sample-uniqueness weighting** (`firm.patterns.ml.sample_weights`, de
+   Prado ch.4) — per-symbol average uniqueness from each event's real
+   `[confirm_index, exit_index]` span, feeding `xgb_classifier.train`'s
+   new `sample_weight` parameter. `scripts/train_pattern_ml.py`'s own
+   rolling-cutoff sampling was already documented as "highly
+   autocorrelated"; every row was previously trained as an equal-weight
+   i.i.d. sample regardless.
+4. **Purged + embargoed K-Fold CV** (`firm.patterns.ml.purged_cv`, de
+   Prado ch.7.4) — standard (non-combinatorial) Purged K-Fold, the plan's
+   own sanctioned minimum bar. Operates on calendar dates
+   (`confirm_date`/`exit_date`), purging train rows whose own label span
+   overlaps a test fold's date range plus an embargo buffer. Surfaced and
+   fixed a real latent bug along the way: `roc_auc_score` silently returns
+   `nan` (not a `ValueError`) when a small CV fold's `y_test` is missing
+   one of the 3 possible labels — previously would have silently corrupted
+   any caller averaging it into a summary statistic.
+5. **Non-transferable features removed**: raw `entry`/`stop`/`target`
+   price levels (a $5 stock and a $500 stock convey nothing comparable
+   through them) and `confirm_index` — a raw-time leak, since
+   `build_dataset`'s rolling-cutoff construction scans a monotonically
+   growing window, so this index trended upward with cutoff alone,
+   unrelated to pattern quality. `confirm_index` replaced by
+   `bars_since_confirm` (bars to the *end of the currently-available
+   window* — stationary, and identical to what
+   `PatternRecognitionStrategy.generate()` already reports live).
+6. **Regime/cross-sectional/liquidity features** added to `build_features`
+   (44 -> 52 columns): `dollar_volume_adv_log` (liquidity), plus — given an
+   optional, positionally-aligned market-proxy window —
+   `market_return_pct`/`relative_strength` and four raw regime features via
+   `firm.regime.features.compute_regime_features` (deliberately not a full
+   HMM refit per match — too expensive, and lets gradient boosting learn
+   its own regime structure rather than a hand-collapsed label). Wired into
+   BOTH real callers (`pattern_recognition.py` live, `train_pattern_ml.py`
+   training), verified actually populated for real rows, not dead
+   infrastructure.
+
+**Items 7-9** (evaluate the strategy's own isolated edge on true
+out-of-sample data before any portfolio-level re-audit; retrain both
+models against real cached data with every fix above; gate any re-enable
+through the existing fail-closed rollout gate plus a real live shadow
+period) were in progress as of this writing — update this section with
+the real result once that lands, honestly, whichever way the evidence
+points (leave-off-with-evidence is an acceptable outcome here, same as
+§9.9's conclusion was).
+
+**Net engineering scope**: ~200 new/updated tests across 15 files, every
+commit landed with a full green run of the pattern/ML-adjacent suite
+(final count 571 passed, 6 skipped) plus the full repo suite checked
+separately. No config file changed — every new knob in
+`pattern_recognition.py` defaults off, matching this file's own
+established convention throughout.
