@@ -83,10 +83,29 @@ class TestAppWiring:
 
 
 class TestRunOnce:
+    # 2026-09-27 (find_confirmation edge-trigger fix -- see
+    # firm.patterns.confirmation's module docstring): a genuine breakout
+    # confirmed within the last 3 bars is a much rarer event on random GBM
+    # noise than "still past some level" was, so the original 3-symbol
+    # universe (AAPL/MSFT/NVDA, seed=42, asof 2023-12-31 -- both hardcoded
+    # in firm.api.routers.patterns.run_scan's synthetic path, not
+    # test-overridable) now genuinely produces zero confirmed matches for
+    # this test's specific symbols/date, not a broken fixture. Widened to
+    # 20 large-cap tickers (same seed/asof) purely to raise the odds that
+    # at least one produces a real breakout somewhere in its own 252-bar
+    # window -- verified against the real pipeline to yield 2 matches
+    # (JNJ head_shoulders_top, META ascending_triangle), not cherry-picked
+    # on the assertion itself.
+    _SYMBOLS = [
+        "AAPL", "MSFT", "NVDA", "GOOG", "AMZN", "META", "TSLA", "JPM", "JNJ", "XOM",
+        "V", "PG", "UNH", "HD", "MA", "DIS", "BAC", "KO", "PFE", "CSCO",
+    ]
+
     def _job(self, tmp_path, **kwargs):
         store = PatternScanHistoryStore(db_path=str(tmp_path / "history.db"))
         kwargs.setdefault("data_source", "synthetic")
-        return PatternScanJob(symbols=["AAPL", "MSFT", "NVDA"], history_store=store, **kwargs), store
+        symbols = kwargs.pop("symbols", ["AAPL", "MSFT", "NVDA"])
+        return PatternScanJob(symbols=symbols, history_store=store, **kwargs), store
 
     def test_run_once_persists_matches_with_scheduled_source(self, tmp_path, monkeypatch):
         # _check_pending_outcomes() always re-checks against real cached
@@ -101,9 +120,9 @@ class TestRunOnce:
             raise FileNotFoundError("isolated from real data/cache for this test")
 
         monkeypatch.setattr(runtime_mod, "load_prices", _no_cache)
-        job, store = self._job(tmp_path)
+        job, store = self._job(tmp_path, symbols=self._SYMBOLS)
         result = job.run_once(asof="2023-12-31")
-        assert result["scanned"] == 3
+        assert result["scanned"] == len(self._SYMBOLS)
         assert result["matches"] > 0
 
         history = store.list_history(limit=1000)

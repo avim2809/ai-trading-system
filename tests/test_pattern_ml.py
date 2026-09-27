@@ -740,40 +740,50 @@ def _flat_forward(df: pd.DataFrame, price: float, *, timeout_bars: int, buffer_b
 # for the geometric rationale behind each anchor list. Each is paired with
 # the triple-barrier outcome its forward continuation is engineered to
 # realize, giving 3 favorable (+1) / 3 adverse (-1) / 2 timeout (0) rows.
+#
+# 2026-09-27 (find_confirmation edge-trigger fix -- see
+# firm.patterns.confirmation's module docstring): every anchor list below
+# updated in lockstep with tests/test_patterns.py's identical fix, for the
+# identical reason -- the old tails ran a single long ramp to the series'
+# last bar, whose genuine level-crossing happened many bars before the
+# fixed find_confirmation's 3-bar lookback window, so `scan_symbol` no
+# longer confirmed anything on the original anchors at all.
 _PATTERN_FIXTURES: dict[str, tuple[list[tuple[int, float]], int, int, str]] = {
     "bull_flag": (
-        [(0, 100.0), (4, 90.0), (10, 120.0), (14, 117.0), (18, 119.0),
-         (22, 116.0), (26, 118.0), (30, 130.0)],
+        [(0, 100.0), (4, 90.0), (10, 150.0), (14, 144.0), (18, 147.0),
+         (22, 141.0), (26, 135.0), (29, 135.0), (30, 180.0)],
         31, 30, "favorable",
     ),
     "bear_flag": (
-        [(0, 100.0), (4, 110.0), (10, 80.0), (14, 83.0), (18, 81.0),
-         (22, 84.0), (26, 82.0), (30, 70.0)],
-        31, 30, "favorable",
+        [(0, 100.0), (4, 110.0), (10, 80.0), (14, 84.0), (18, 82.0),
+         (22, 86.0), (26, 88.0), (27, 88.0), (30, 60.0)],
+        31, 28, "favorable",
     ),
     "triple_bottom": (
-        [(0, 130.0), (8, 100.0), (16, 118.0), (24, 99.0), (32, 117.0), (40, 100.0), (55, 125.0)],
-        56, 55, "favorable",
+        [(0, 130.0), (8, 100.0), (16, 118.0), (24, 99.0), (32, 117.0), (40, 100.0), (42, 130.0)],
+        43, 42, "favorable",
     ),
     "head_shoulders_top": (
-        [(0, 100.0), (10, 130.0), (20, 110.0), (30, 140.0), (40, 112.0), (50, 131.0), (70, 100.0)],
-        71, 70, "adverse",
+        [(0, 100.0), (10, 130.0), (20, 110.0), (30, 140.0), (40, 112.0), (50, 131.0),
+         (67, 116.0), (70, 100.0)],
+        71, 68, "adverse",
     ),
     "inverse_head_shoulders": (
-        [(0, 100.0), (10, 70.0), (20, 90.0), (30, 60.0), (40, 88.0), (50, 70.0), (70, 100.0)],
-        71, 70, "adverse",
+        [(0, 100.0), (10, 70.0), (20, 90.0), (30, 60.0), (40, 88.0), (50, 70.0),
+         (67, 85.0), (70, 100.0)],
+        71, 68, "adverse",
     ),
     "triple_top": (
-        [(0, 90.0), (8, 120.0), (16, 102.0), (24, 121.0), (32, 103.0), (40, 120.0), (55, 90.0)],
-        56, 55, "adverse",
+        [(0, 90.0), (8, 120.0), (16, 102.0), (24, 121.0), (32, 103.0), (40, 120.0), (42, 90.0)],
+        43, 42, "adverse",
     ),
     "double_top": (
-        [(0, 90.0), (10, 120.0), (20, 100.0), (30, 121.0), (45, 85.0)],
-        46, 45, "timeout",
+        [(0, 90.0), (10, 120.0), (20, 100.0), (30, 121.0), (33, 85.0)],
+        34, 32, "timeout",
     ),
     "double_bottom": (
-        [(0, 120.0), (10, 90.0), (20, 110.0), (30, 89.0), (45, 130.0)],
-        46, 45, "timeout",
+        [(0, 120.0), (10, 90.0), (20, 110.0), (30, 89.0), (33, 130.0)],
+        34, 32, "timeout",
     ),
 }
 

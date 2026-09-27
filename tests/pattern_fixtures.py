@@ -91,25 +91,45 @@ def build_frame(fixture: PatternFixture) -> pd.DataFrame:
 # tests (see that file for the geometric reasoning behind each one).
 # ---------------------------------------------------------------------------
 POSITIVE_FIXTURES: tuple[PatternFixture, ...] = (
+    # 2026-09-27 (find_confirmation edge-trigger fix -- see
+    # firm.patterns.confirmation's module docstring for the bug history):
+    # every reversal/triangle/continuation fixture below had its tail
+    # reshaped so the genuine level-crossing (not merely "still past the
+    # level") lands inside find_confirmation's 3-bar lookback window, and
+    # each fixture's ``spike_at`` moved to match its real (verified, not
+    # hand-derived) ``confirm_index`` rather than the series' last bar --
+    # volume_confirmation is scored *at* confirm_index, so a spike anywhere
+    # else contributes nothing. Anchors mirror the equivalent fixes in
+    # tests/test_patterns.py; see that file for the shape-by-shape
+    # reasoning. rectangle/cup_handle needed no change (rectangle's
+    # existing tail happened to already cross within-window; cup_handle
+    # uses its own forward first-breach scan, not find_confirmation, and
+    # was never affected by this bug).
     PatternFixture(
         "head_shoulders_top", "positive",
-        [(0, 100.0), (10, 130.0), (20, 110.0), (30, 140.0), (40, 112.0), (50, 131.0), (70, 100.0)],
-        71, 70, frozenset({"head_shoulders_top"}),
+        [
+            (0, 100.0), (10, 130.0), (20, 110.0), (30, 140.0), (40, 112.0), (50, 131.0),
+            (67, 116.0), (70, 100.0),
+        ],
+        71, 68, frozenset({"head_shoulders_top"}),
     ),
     PatternFixture(
         "inverse_head_shoulders", "positive",
-        [(0, 100.0), (10, 70.0), (20, 90.0), (30, 60.0), (40, 88.0), (50, 70.0), (70, 100.0)],
-        71, 70, frozenset({"inverse_head_shoulders"}),
+        [
+            (0, 100.0), (10, 70.0), (20, 90.0), (30, 60.0), (40, 88.0), (50, 70.0),
+            (67, 85.0), (70, 100.0),
+        ],
+        71, 68, frozenset({"inverse_head_shoulders"}),
     ),
     PatternFixture(
         "double_top", "positive",
-        [(0, 90.0), (10, 120.0), (20, 100.0), (30, 121.0), (45, 85.0)],
-        46, 45, frozenset({"double_top"}),
+        [(0, 90.0), (10, 120.0), (20, 100.0), (30, 121.0), (33, 85.0)],
+        34, 32, frozenset({"double_top"}),
     ),
     PatternFixture(
         "double_bottom", "positive",
-        [(0, 120.0), (10, 90.0), (20, 110.0), (30, 89.0), (45, 130.0)],
-        46, 45, frozenset({"double_bottom"}),
+        [(0, 120.0), (10, 90.0), (20, 110.0), (30, 89.0), (33, 130.0)],
+        34, 32, frozenset({"double_bottom"}),
     ),
     # Triangle/wedge/rectangle fixtures below carry a volume spike at the
     # breakout bar (2026-09-27, Part A false-positive fix): the original
@@ -127,33 +147,33 @@ POSITIVE_FIXTURES: tuple[PatternFixture, ...] = (
     # (below min_score=60) to ~76-85 (clears it comfortably).
     PatternFixture(
         "ascending_triangle", "positive",
-        [(0, 100.0), (6, 120.0), (12, 108.0), (18, 120.5), (24, 113.0), (30, 125.0)],
-        31, 30, frozenset({"ascending_triangle"}),
+        [(0, 100.0), (6, 120.0), (12, 108.0), (18, 120.5), (24, 113.0), (27, 125.0)],
+        28, 27, frozenset({"ascending_triangle"}),
     ),
     PatternFixture(
         "descending_triangle", "positive",
-        [(0, 100.0), (6, 120.0), (12, 105.0), (18, 113.0), (24, 106.0), (27, 110.0), (33, 95.0)],
-        34, 33, frozenset({"descending_triangle"}),
+        [(0, 100.0), (6, 120.0), (12, 105.0), (18, 113.0), (24, 106.0), (27, 110.0), (30, 95.0)],
+        31, 28, frozenset({"descending_triangle"}),
     ),
     PatternFixture(
         "symmetrical_triangle", "positive",
-        [(0, 100.0), (6, 130.0), (12, 100.0), (18, 120.0), (24, 108.0), (30, 115.0)],
-        31, 30, frozenset({"symmetrical_triangle"}),
+        [(0, 100.0), (6, 130.0), (12, 100.0), (18, 120.0), (24, 108.0), (27, 115.0)],
+        28, 27, frozenset({"symmetrical_triangle"}),
     ),
     PatternFixture(
         "rising_wedge", "positive",
-        [(0, 100.0), (6, 110.0), (12, 100.0), (18, 118.0), (24, 112.0), (27, 116.0), (33, 100.0)],
-        34, 33, frozenset({"rising_wedge"}),
+        [(0, 100.0), (6, 110.0), (12, 100.0), (18, 118.0), (24, 112.0), (27, 116.0), (30, 100.0)],
+        31, 28, frozenset({"rising_wedge"}),
     ),
     PatternFixture(
         "falling_wedge", "positive",
-        [(0, 100.0), (6, 130.0), (12, 110.0), (18, 118.0), (24, 104.0), (30, 115.0)],
-        31, 30, frozenset({"falling_wedge"}),
+        [(0, 100.0), (6, 130.0), (12, 110.0), (18, 118.0), (24, 104.0), (27, 115.0)],
+        28, 26, frozenset({"falling_wedge"}),
     ),
     PatternFixture(
         "rectangle", "positive",
-        [(0, 100.0), (6, 120.0), (12, 100.0), (18, 120.3), (24, 99.7), (30, 125.0)],
-        31, 30, frozenset({"rectangle"}),
+        [(0, 100.0), (6, 120.0), (12, 100.0), (18, 120.3), (24, 99.7), (27, 125.0)],
+        28, 27, frozenset({"rectangle"}),
     ),
 )
 
@@ -167,35 +187,52 @@ AMBIGUOUS_FIXTURES: tuple[PatternFixture, ...] = (
     # tests/test_patterns.py's own triple_top anchors, when scanned through
     # the FULL scan_symbol pipeline (every detector, best-quality-score
     # wins) rather than called against detect_triple_top in isolation,
-    # confirm a genuine triple_top (score ~90.4) but head_shoulders_top
-    # scores marginally higher (~95.3) on the same pivots and wins the
-    # "best match" slot -- both are real, legitimately-confirmed
-    # detections on the same geometry, not a corpus bug. Real-pipeline
-    # ambiguity a per-detector unit test can't see. Same for the
-    # triple_bottom/inverse_head_shoulders mirror case.
+    # confirm a genuine triple_top but head_shoulders_top scores marginally
+    # higher on the same pivots and wins the "best match" slot -- both are
+    # real, legitimately-confirmed detections on the same geometry, not a
+    # corpus bug. Real-pipeline ambiguity a per-detector unit test can't
+    # see. Same for the triple_bottom/inverse_head_shoulders mirror case.
+    #
+    # 2026-09-27 (find_confirmation edge-trigger fix): same shrink-the-tail
+    # treatment as the reversal fixtures above -- see this module's
+    # POSITIVE_FIXTURES comment.
     PatternFixture(
         "triple_top_or_head_shoulders", "ambiguous",
-        [(0, 90.0), (8, 120.0), (16, 102.0), (24, 121.0), (32, 103.0), (40, 120.0), (55, 90.0)],
-        56, 55, frozenset({"triple_top", "head_shoulders_top"}),
+        [(0, 90.0), (8, 120.0), (16, 102.0), (24, 121.0), (32, 103.0), (40, 120.0), (42, 90.0)],
+        43, 42, frozenset({"triple_top", "head_shoulders_top"}),
     ),
     PatternFixture(
         "triple_bottom_or_inverse_head_shoulders", "ambiguous",
-        [(0, 130.0), (8, 100.0), (16, 118.0), (24, 99.0), (32, 117.0), (40, 100.0), (55, 125.0)],
-        56, 55, frozenset({"triple_bottom", "inverse_head_shoulders"}),
+        [(0, 130.0), (8, 100.0), (16, 118.0), (24, 99.0), (32, 117.0), (40, 100.0), (42, 130.0)],
+        43, 42, frozenset({"triple_bottom", "inverse_head_shoulders"}),
     ),
     # Same volume-spike fix as the triangle/wedge/rectangle fixtures above
     # (2026-09-27): these previously had no breakout-bar spike either and
     # scored ~32 (well under min_score=60, entirely due to missing volume
     # evidence, not a real detection failure) -- with one, ~62.
+    #
+    # 2026-09-27 (find_confirmation edge-trigger fix, on top of the above):
+    # reshaped again so the genuine crossing lands inside the confirm
+    # window and the spike sits at the real confirm_index -- identical
+    # anchors/reasoning to tests/test_patterns.py's _BULL_FLAG_ANCHORS
+    # (bull) and test_bear_flag (bear, mirrored and re-scaled so bear_flag
+    # -- not a competing symmetrical_triangle match on the same tail --
+    # wins best-match with the volume spike at its own confirm_index=29).
     PatternFixture(
         "bull_flag_or_pennant", "ambiguous",
-        [(0, 100.0), (4, 90.0), (10, 120.0), (14, 117.0), (18, 119.0), (22, 116.0), (26, 118.0), (30, 130.0)],
+        [
+            (0, 100.0), (4, 90.0), (10, 150.0), (14, 144.0), (18, 147.0),
+            (22, 141.0), (26, 135.0), (29, 135.0), (30, 180.0),
+        ],
         31, 30, frozenset({"bull_flag", "pennant"}),
     ),
     PatternFixture(
         "bear_flag_or_pennant", "ambiguous",
-        [(0, 100.0), (4, 110.0), (10, 80.0), (14, 83.0), (18, 81.0), (22, 84.0), (26, 82.0), (30, 70.0)],
-        31, 30, frozenset({"bear_flag", "pennant"}),
+        [
+            (0, 100.0), (4, 110.0), (10, 50.0), (14, 56.0), (18, 53.0),
+            (22, 59.0), (26, 65.0), (29, 65.0), (30, 20.0),
+        ],
+        31, 29, frozenset({"bear_flag", "pennant"}),
     ),
 )
 
