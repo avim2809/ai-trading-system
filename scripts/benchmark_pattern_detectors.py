@@ -53,6 +53,11 @@ from firm.eval.classification import (  # noqa: E402
 )
 from firm.patterns.ml.feature_engineering import PATTERN_FAMILY_MAP  # noqa: E402
 from firm.patterns.scanner import scan_symbol  # noqa: E402
+from firm.patterns.significance import (  # noqa: E402
+    benjamini_hochberg_accept,
+    cached_null_score_distribution,
+    pattern_p_value,
+)
 
 from pattern_fixtures import (  # noqa: E402
     AMBIGUOUS_FIXTURES,
@@ -75,7 +80,10 @@ def _family_of(expected_patterns: frozenset[str]) -> str | None:
     return sorted(families)[0] if families else None
 
 
-def run_fixture(fixture: PatternFixture, *, frame=None, min_score: float = 60.0) -> dict[str, Any]:
+def run_fixture(
+    fixture: PatternFixture, *, frame=None, min_score: float = 60.0,
+    compute_significance: bool = False, significance_n_draws: int = 200, significance_seed: int = 42,
+) -> dict[str, Any]:
     """Scan one fixture and grade it against its expected_patterns.
 
     ``min_score`` defaults to 60.0 -- ``PatternRecognitionStrategy``'s own
@@ -104,6 +112,16 @@ def run_fixture(fixture: PatternFixture, *, frame=None, min_score: float = 60.0)
         correct = did_detect and best.pattern in fixture.expected_patterns
     else:
         correct = not did_detect
+
+    p_value = None
+    if compute_significance and best is not None:
+        null = cached_null_score_distribution(
+            df["high"].to_numpy(dtype=float), df["low"].to_numpy(dtype=float),
+            df["close"].to_numpy(dtype=float), df["volume"].to_numpy(dtype=float),
+            n_draws=significance_n_draws, seed=significance_seed,
+        )
+        p_value = pattern_p_value(best.quality_score, null)
+
     return {
         "name": fixture.name,
         "category": fixture.category,
@@ -114,22 +132,57 @@ def run_fixture(fixture: PatternFixture, *, frame=None, min_score: float = 60.0)
         "should_detect_something": should_detect,
         "did_detect_something": did_detect,
         "correct": correct,
+        "p_value": p_value,
     }
 
 
-def run_benchmark(*, n_negative_symbols: int = 10, seed: int = 42, min_score: float = 60.0) -> list[dict[str, Any]]:
-    results = [run_fixture(fx, min_score=min_score) for fx in POSITIVE_FIXTURES]
-    results += [run_fixture(fx, min_score=min_score) for fx in AMBIGUOUS_FIXTURES]
+def apply_significance_and_fdr(results: list[dict[str, Any]], *, q: float = 0.05) -> list[dict[str, Any]]:
+    """Re-grade a ``run_benchmark`` result set as if the significance test +
+    cross-sectional FDR control (Part A) had been applied that cycle --
+    mirrors exactly what ``PatternRecognitionStrategy.generate`` does: BH
+    correction across every fixture with a computed p-value (from
+    ``run_fixture(..., compute_significance=True)``), rejecting (flipping
+    ``did_detect_something``/``correct``) any that doesn't survive.
+    Fixtures with no p_value (nothing detected, or significance wasn't
+    computed) pass through unchanged.
+    """
+    import numpy as np
+
+    adjusted = [dict(r) for r in results]
+    indices_with_p = [i for i, r in enumerate(adjusted) if r.get("p_value") is not None]
+    if not indices_with_p:
+        return adjusted
+    p_arr = np.array([adjusted[i]["p_value"] for i in indices_with_p])
+    accept = benjamini_hochberg_accept(p_arr, q=q)
+    for idx, keep in zip(indices_with_p, accept):
+        r = adjusted[idx]
+        if not keep:
+            r["did_detect_something"] = False
+            r["detected_pattern"] = None
+            r["correct"] = not r["should_detect_something"]
+    return adjusted
+
+
+def run_benchmark(
+    *, n_negative_symbols: int = 10, seed: int = 42, min_score: float = 60.0,
+    compute_significance: bool = False, significance_n_draws: int = 200,
+) -> list[dict[str, Any]]:
+    kwargs = dict(
+        min_score=min_score, compute_significance=compute_significance,
+        significance_n_draws=significance_n_draws, significance_seed=seed,
+    )
+    results = [run_fixture(fx, **kwargs) for fx in POSITIVE_FIXTURES]
+    results += [run_fixture(fx, **kwargs) for fx in AMBIGUOUS_FIXTURES]
     cup_handle_fixture = PatternFixture(
         "cup_handle_or_rounding_bottom", "ambiguous", [], 0, None, CUP_HANDLE_AMBIGUOUS_EXPECTED,
     )
-    results.append(run_fixture(cup_handle_fixture, frame=_cup_handle_frame(), min_score=min_score))
-    results += [run_fixture(fx, min_score=min_score) for fx in NEGATIVE_FIXTURES]
-    results += [run_fixture(fx, min_score=min_score) for fx in BOUNDARY_FIXTURES]
+    results.append(run_fixture(cup_handle_fixture, frame=_cup_handle_frame(), **kwargs))
+    results += [run_fixture(fx, **kwargs) for fx in NEGATIVE_FIXTURES]
+    results += [run_fixture(fx, **kwargs) for fx in BOUNDARY_FIXTURES]
 
     negative_fixture = PatternFixture("synthetic_noise", "negative", [], 0, None, frozenset())
     for i, frame in enumerate(synthetic_negative_frames(n_symbols=n_negative_symbols, seed=seed)):
-        result = run_fixture(negative_fixture, frame=frame, min_score=min_score)
+        result = run_fixture(negative_fixture, frame=frame, **kwargs)
         result["name"] = f"synthetic_noise_{i:02d}"
         results.append(result)
     return results
@@ -229,6 +282,17 @@ def _parse_args() -> argparse.Namespace:
         help="quality_score threshold applied (matches PatternRecognitionStrategy's own "
              "live default of 60.0 -- see run_fixture's docstring for why this isn't 0.0)",
     )
+    parser.add_argument(
+        "--significance-test", action="store_true",
+        help="Also compute the Part A statistical-significance test + cross-sectional "
+             "FDR control (firm.patterns.significance) for every fixture, and print a "
+             "second report showing its effect on top of --min-score alone. Off by "
+             "default since it's not the live default either (significance_test_enabled "
+             "defaults False in PatternRecognitionStrategy) and is meaningfully slower "
+             "(order --significance-n-draws extra scan_symbol calls per fixture).",
+    )
+    parser.add_argument("--significance-n-draws", type=int, default=200)
+    parser.add_argument("--significance-fdr-q", type=float, default=0.05)
     parser.add_argument("--output", default=None, help="Optional path to also write the report as JSON")
     return parser.parse_args()
 
@@ -237,16 +301,27 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     args = _parse_args()
 
-    results = run_benchmark(n_negative_symbols=args.n_negative_symbols, seed=args.seed, min_score=args.min_score)
+    results = run_benchmark(
+        n_negative_symbols=args.n_negative_symbols, seed=args.seed, min_score=args.min_score,
+        compute_significance=args.significance_test, significance_n_draws=args.significance_n_draws,
+    )
     report = build_report(results)
     print(format_report_text(report))
+
+    if args.significance_test:
+        adjusted_results = apply_significance_and_fdr(results, q=args.significance_fdr_q)
+        adjusted_report = build_report(adjusted_results)
+        print("\n\nWITH SIGNIFICANCE TEST + FDR CONTROL APPLIED (q=%.3f):\n" % args.significance_fdr_q)
+        print(format_report_text(adjusted_report))
+        report = {"baseline": report, "with_significance_test": adjusted_report}
 
     if args.output:
         out_path = Path(args.output)
         out_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
         log.info("Wrote JSON report to %s", out_path)
 
-    return 0 if report["overall"]["n_correct"] == report["overall"]["n"] else 1
+    final = report["with_significance_test"] if args.significance_test else report
+    return 0 if final["overall"]["n_correct"] == final["overall"]["n"] else 1
 
 
 if __name__ == "__main__":

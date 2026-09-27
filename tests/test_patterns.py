@@ -861,3 +861,139 @@ def test_pattern_recognition_xgb_ensemble_off_by_default_leaves_meta_none():
     assert sig.meta["xgb_p_target"] is None
     assert sig.meta["calibrated_probability"] is None
     assert "+xgb" not in sig.meta["scoring_mode"]
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-27 Part A: statistical-significance test against a matched-
+# volatility null (firm.patterns.significance). Off by default.
+# ---------------------------------------------------------------------------
+
+def test_pattern_recognition_significance_test_off_by_default_leaves_meta_none():
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy().generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["significance_p_value"] is None
+
+
+def test_pattern_recognition_significance_test_rejects_insignificant_match(monkeypatch):
+    from firm.strategies import pattern_recognition as pr_module
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    # Force a high (insignificant) p-value regardless of the real null.
+    monkeypatch.setattr(
+        pr_module.significance, "cached_null_score_distribution",
+        lambda *a, **k: __import__("numpy").array([90.0, 91.0, 92.0]),
+    )
+    monkeypatch.setattr(pr_module.significance, "pattern_p_value", lambda score, null: 0.99)
+
+    signals = PatternRecognitionStrategy(
+        params={"significance_test_enabled": True},
+    ).generate(pit_view)
+
+    assert signals == []
+
+
+def test_pattern_recognition_significance_test_accepts_significant_match(monkeypatch):
+    from firm.strategies import pattern_recognition as pr_module
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    monkeypatch.setattr(
+        pr_module.significance, "cached_null_score_distribution",
+        lambda *a, **k: __import__("numpy").array([10.0, 20.0, 30.0]),
+    )
+    monkeypatch.setattr(pr_module.significance, "pattern_p_value", lambda score, null: 0.01)
+
+    signals = PatternRecognitionStrategy(
+        params={"significance_test_enabled": True, "significance_max_p_value": 0.05},
+    ).generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["significance_p_value"] == pytest.approx(0.01)
+
+
+def test_pattern_recognition_significance_test_failure_degrades_to_none_not_crash(monkeypatch):
+    """A significance-test exception (e.g. scan_symbol raising on a
+    pathological surrogate) must not take down the whole strategy --
+    degrades to p_value=None (not rejected), same fail-soft convention as
+    the CNN/XGBoost layers."""
+    from firm.strategies import pattern_recognition as pr_module
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    def _boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(pr_module.significance, "cached_null_score_distribution", _boom)
+
+    signals = PatternRecognitionStrategy(
+        params={"significance_test_enabled": True},
+    ).generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["significance_p_value"] is None
+
+
+def test_pattern_recognition_significance_applies_fdr_across_symbols_not_a_naive_per_symbol_threshold(monkeypatch):
+    """The crux of the FDR-control design: two candidates with p-values
+    (0.04, 0.06) would BOTH clear a naive per-symbol threshold of 0.05 in
+    AAA's case (0.04 < 0.05) and both would be borderline -- but under
+    real Benjamini-Hochberg correction for m=2 simultaneous tests at
+    q=0.05, the BH thresholds are (1/2)*0.05=0.025 and (2/2)*0.05=0.05, so
+    NEITHER 0.04 nor 0.06 clears its own rank's threshold and BOTH are
+    correctly rejected -- demonstrating this is a real cross-sectional
+    correction, not just re-deriving the same per-symbol accept/reject
+    decision a naive threshold would already give."""
+    from firm.strategies import pattern_recognition as pr_module
+
+    prices_df = pd.concat([
+        _build_prices_df("AAA", _BULL_FLAG_ANCHORS, 31, spike_at=30),
+        _build_prices_df("BBB", _BULL_FLAG_ANCHORS, 31, spike_at=30),
+    ], ignore_index=True)
+    pit_view = _FakePitView(prices_df, ["AAA", "BBB"], datetime(2024, 3, 1))
+
+    p_values = iter([0.04, 0.06])  # groupby("symbol") -> alphabetical: AAA then BBB
+    monkeypatch.setattr(
+        pr_module.significance, "cached_null_score_distribution",
+        lambda *a, **k: np.array([1.0]),  # never inspected; pattern_p_value is mocked directly
+    )
+    monkeypatch.setattr(pr_module.significance, "pattern_p_value", lambda score, null: next(p_values))
+
+    signals = PatternRecognitionStrategy(
+        params={"significance_test_enabled": True, "significance_max_p_value": 0.05},
+    ).generate(pit_view)
+
+    assert signals == []  # both rejected under real BH correction, not just BBB
+
+
+def test_pattern_recognition_significance_fdr_accepts_a_genuinely_significant_pair(monkeypatch):
+    """Sanity complement to the test above: two candidates with p-values
+    (0.005, 0.01) both clear BH's thresholds at m=2, q=0.05
+    ((1/2)*0.05=0.025, (2/2)*0.05=0.05) -- both accepted."""
+    from firm.strategies import pattern_recognition as pr_module
+
+    prices_df = pd.concat([
+        _build_prices_df("AAA", _BULL_FLAG_ANCHORS, 31, spike_at=30),
+        _build_prices_df("BBB", _BULL_FLAG_ANCHORS, 31, spike_at=30),
+    ], ignore_index=True)
+    pit_view = _FakePitView(prices_df, ["AAA", "BBB"], datetime(2024, 3, 1))
+
+    p_values = iter([0.005, 0.01])
+    monkeypatch.setattr(
+        pr_module.significance, "cached_null_score_distribution",
+        lambda *a, **k: np.array([1.0]),
+    )
+    monkeypatch.setattr(pr_module.significance, "pattern_p_value", lambda score, null: next(p_values))
+
+    signals = PatternRecognitionStrategy(
+        params={"significance_test_enabled": True, "significance_max_p_value": 0.05},
+    ).generate(pit_view)
+
+    assert {s.symbol for s in signals} == {"AAA", "BBB"}

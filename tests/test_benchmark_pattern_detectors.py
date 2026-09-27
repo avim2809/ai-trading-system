@@ -23,7 +23,7 @@ _TESTS = Path(__file__).resolve().parent
 if str(_TESTS) not in sys.path:
     sys.path.insert(0, str(_TESTS))
 
-from benchmark_pattern_detectors import build_report, run_fixture  # noqa: E402
+from benchmark_pattern_detectors import apply_significance_and_fdr, build_report, run_fixture  # noqa: E402
 
 from pattern_fixtures import (  # noqa: E402
     BOUNDARY_FIXTURES,
@@ -112,6 +112,46 @@ class TestBuildReport:
         report = build_report([])
         assert report["overall"]["n"] == 0
         assert report["overall"]["accuracy"] is None
+
+
+class TestApplySignificanceAndFdr:
+    def _fake_result(self, name, *, should_detect, p_value, detected="double_top"):
+        return {
+            "name": name, "category": "positive" if should_detect else "negative",
+            "family": "reversal", "expected_patterns": [detected] if should_detect else [],
+            "detected_pattern": detected, "detected_quality_fraction": 0.8,
+            "should_detect_something": should_detect, "did_detect_something": True,
+            "correct": should_detect, "p_value": p_value,
+        }
+
+    def test_significant_result_survives(self):
+        results = [self._fake_result("a", should_detect=True, p_value=0.001)]
+        adjusted = apply_significance_and_fdr(results, q=0.05)
+        assert adjusted[0]["did_detect_something"] is True
+        assert adjusted[0]["correct"] is True
+
+    def test_insignificant_result_is_rejected(self):
+        results = [self._fake_result("a", should_detect=False, p_value=0.9)]
+        adjusted = apply_significance_and_fdr(results, q=0.05)
+        assert adjusted[0]["did_detect_something"] is False
+        assert adjusted[0]["detected_pattern"] is None
+        assert adjusted[0]["correct"] is True  # correctly rejected a false positive
+
+    def test_results_with_no_pvalue_pass_through_unchanged(self):
+        result = self._fake_result("a", should_detect=False, p_value=None)
+        result["did_detect_something"] = False
+        result["correct"] = True
+        adjusted = apply_significance_and_fdr([result], q=0.05)
+        assert adjusted[0] == result
+
+    def test_empty_results_does_not_raise(self):
+        assert apply_significance_and_fdr([], q=0.05) == []
+
+    def test_does_not_mutate_input(self):
+        results = [self._fake_result("a", should_detect=False, p_value=0.9)]
+        original = dict(results[0])
+        apply_significance_and_fdr(results, q=0.05)
+        assert results[0] == original
 
 
 class TestFullFixtureBuildFrame:

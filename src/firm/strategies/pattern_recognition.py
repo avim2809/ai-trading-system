@@ -76,6 +76,7 @@ import numpy as np
 import pandas as pd
 
 from firm.contracts.models import Signal
+from firm.patterns import significance
 from firm.patterns.ml import calibration as ml_calibration
 from firm.patterns.ml import inference as cnn_inference
 from firm.patterns.ml import xgb_inference
@@ -189,6 +190,18 @@ class PatternRecognitionStrategy(BaseStrategy):
         # family needs a different calibration technique.
         "cnn_calibration_path": None,
         "xgb_calibration_path": None,
+        # Statistical-significance test against a matched-volatility null
+        # (Part A of the 2026-09-27 false-positive-rate fix -- see
+        # firm.patterns.significance's module docstring). Off by default,
+        # same convention as every other new knob here: needs its own
+        # walk-forward re-validation before being trusted live, and is
+        # computationally heavier per-symbol than the rest of the scanner
+        # (though memoized per distinct scanned window -- see
+        # significance.cached_null_score_distribution).
+        "significance_test_enabled": False,
+        "significance_n_draws": 200,
+        "significance_max_p_value": 0.05,
+        "significance_seed": 42,
     }
 
     def __init__(self, params: dict | None = None):
@@ -220,6 +233,11 @@ class PatternRecognitionStrategy(BaseStrategy):
         xgb_agreement_gate = bool(p["xgb_agreement_gate"])
         xgb_gate_threshold = float(p["xgb_agreement_gate_threshold"])
         xgb_gate_dampen = float(p["xgb_agreement_gate_dampen"])
+
+        significance_enabled = bool(p["significance_test_enabled"])
+        significance_n_draws = int(p["significance_n_draws"])
+        significance_max_p_value = float(p["significance_max_p_value"])
+        significance_seed = int(p["significance_seed"])
 
         universe = pit_view.universe
         if not universe:
@@ -276,15 +294,20 @@ class PatternRecognitionStrategy(BaseStrategy):
 
         log.info(
             "pattern_recognition: quality scoring mode=%s, xgb_confirmation=%s, "
-            "zigzag=%s, retest_modifier=%s, confluence_modifier=%s",
+            "zigzag=%s, retest_modifier=%s, confluence_modifier=%s, significance_test=%s",
             "cnn" if cnn_available else "rule_based",
             "on" if xgb_available else "off",
             f"atr(mult={zigzag_atr_mult})" if zigzag_atr_mult else f"fixed(pct={zigzag_pct})",
             "on" if retest_enabled else "off",
             "on" if confluence_enabled else "off",
+            "on" if significance_enabled else "off",
         )
 
         signals: list[Signal] = []
+        # Parallel to `signals` (same index) -- the significance p-value
+        # each signal was computed with, or None (not computed / not
+        # applicable). Used for the post-loop FDR pass below.
+        signal_p_values: list[float | None] = []
         cnn_scored = 0
         xgb_scored = 0
         rule_based_only = 0
@@ -317,6 +340,32 @@ class PatternRecognitionStrategy(BaseStrategy):
             best = matches[0]
             if best.risk_reward < min_risk_reward:
                 continue
+
+            # Significance test (2026-09-27 Part A): compute the p-value
+            # here, but do NOT reject inline against a raw per-symbol
+            # threshold -- that would be exactly the uncorrected,
+            # across-symbol multiple-comparisons problem
+            # benjamini_hochberg_accept exists to fix. The actual
+            # accept/reject decision happens once, after this loop, across
+            # every candidate this cycle produced (see below). A p_value
+            # of None (couldn't be computed -- e.g. too little history)
+            # is a pass-through, same fail-soft convention as the CNN/
+            # XGBoost layers: never held against the candidate.
+            p_value = None
+            if significance_enabled:
+                try:
+                    null_scores = significance.cached_null_score_distribution(
+                        ohlcv["high"].to_numpy(dtype=float),
+                        ohlcv["low"].to_numpy(dtype=float),
+                        ohlcv["close"].to_numpy(dtype=float),
+                        ohlcv["volume"].to_numpy(dtype=float),
+                        n_draws=significance_n_draws,
+                        zigzag_pct=zigzag_pct,
+                        seed=significance_seed,
+                    )
+                    p_value = significance.pattern_p_value(best.quality_score, null_scores)
+                except Exception:
+                    log.debug("significance test failed for %s", symbol, exc_info=True)
 
             direction_sign = 1.0 if best.direction == "long" else -1.0
             rule_based_fraction = min(best.quality_score / 100.0, 1.0)
@@ -414,9 +463,38 @@ class PatternRecognitionStrategy(BaseStrategy):
                         "duration_bars": best.duration_bars,
                         "bars_since_confirm": len(ohlcv) - 1 - best.confirm_index,
                         "other_patterns": [m.pattern for m in matches[1:4]],
+                        # None whenever significance_test_enabled is False
+                        # (the default) -- never a placeholder value, same
+                        # convention as calibrated_probability above.
+                        "significance_p_value": p_value,
                     },
                 )
             )
+            signal_p_values.append(p_value)
+
+        # Post-loop False Discovery Rate control (2026-09-27 Part A): the
+        # cross-sectional multiple-comparisons correction across every
+        # candidate THIS cycle produced, not a per-symbol threshold (see
+        # the in-loop comment above and firm.patterns.significance.
+        # benjamini_hochberg_accept's own docstring for why the two are
+        # different problems). A signal with no computed p_value (None)
+        # passes through untouched.
+        if significance_enabled and signals:
+            has_p = np.array([pv is not None for pv in signal_p_values])
+            if has_p.any():
+                p_arr = np.array([pv if pv is not None else 1.0 for pv in signal_p_values])
+                accept = np.ones(len(signals), dtype=bool)
+                accept[has_p] = significance.benjamini_hochberg_accept(
+                    p_arr[has_p], q=significance_max_p_value,
+                )
+                n_rejected = int(np.sum(~accept))
+                if n_rejected:
+                    log.debug(
+                        "pattern_recognition: FDR control (q=%.3f) rejected %d/%d "
+                        "significance-tested signal(s) this cycle",
+                        significance_max_p_value, n_rejected, int(has_p.sum()),
+                    )
+                signals = [s for s, keep in zip(signals, accept) if keep]
 
         log.info(
             "pattern_recognition: %d symbols scanned, %d signals (%d CNN-scored, "
