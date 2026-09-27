@@ -244,6 +244,26 @@ class PatternRecognitionStrategy(BaseStrategy):
         "xgb_agreement_gate": True,
         "xgb_agreement_gate_threshold": 0.35,
         "xgb_agreement_gate_dampen": 0.7,
+        # Meta-labeling secondary model (Part B item 2, 2026-09-27 -- see
+        # firm.patterns.ml.labeling.label_meta_binary /
+        # firm.patterns.ml.xgb_inference.score_pattern_meta_confirmation's
+        # docstrings): a SEPARATE binary act/no-act model, distinct from
+        # the 3-class model blended into quality_fraction above. This is
+        # the correct source for meta["calibrated_probability"] (de
+        # Prado's recipe: the secondary/meta model IS the calibrated
+        # confidence gate; a 3-class model's own p_target answering "which
+        # of three things happens" is a different question). Independent
+        # on/off switch from xgb_confirmation_enabled -- one strategy can
+        # use either, both, or neither model. Off by default, same
+        # convention as every other knob here; a real
+        # data/models/pattern_xgb_meta.onnx artifact now exists (retrained
+        # 2026-09-27) but the isolated walk-forward evaluation of this
+        # strategy's own edge still failed its pre-registered PBO/DSR bar
+        # (see docs/pattern_ml_isolated_evaluation_2026_09.md) -- flipping
+        # this true needs its own re-validation, not just artifact
+        # existence.
+        "xgb_meta_confirmation_enabled": False,
+        "xgb_meta_calibration_path": None,
         # Optional calibration sidecars (paths previously written by
         # firm.patterns.ml.calibration.save_calibration -- a JSON dict with
         # a "type" discriminator: "temperature" for the CNN's pre-softmax
@@ -347,6 +367,7 @@ class PatternRecognitionStrategy(BaseStrategy):
         xgb_agreement_gate = bool(p["xgb_agreement_gate"])
         xgb_gate_threshold = float(p["xgb_agreement_gate_threshold"])
         xgb_gate_dampen = float(p["xgb_agreement_gate_dampen"])
+        xgb_meta_enabled = bool(p["xgb_meta_confirmation_enabled"])
 
         significance_enabled = bool(p["significance_test_enabled"])
         significance_n_draws = int(p["significance_n_draws"])
@@ -402,20 +423,26 @@ class PatternRecognitionStrategy(BaseStrategy):
         # scoring mode is logged clearly without spamming per-symbol.
         cnn_available = bool(p["cnn_scoring_enabled"]) and cnn_inference.is_available()
         xgb_available = xgb_enabled and xgb_inference.is_available()
+        xgb_meta_available = xgb_meta_enabled and xgb_inference.is_meta_available()
+        # Either model consumes the SAME build_features output (only the
+        # model artifact/training target differs -- see
+        # score_pattern_meta_confirmation's own docstring), so features are
+        # built whenever either is on.
+        xgb_features_needed = xgb_available or xgb_meta_available
 
         # Market-proxy close series, date-keyed, built ONCE per generate()
-        # call (Part B item 6, 2026-09-27) -- only when xgb_available,
+        # call (Part B item 6, 2026-09-27) -- only when xgb_features_needed,
         # since this feeds build_features' market_ohlcv argument, which
-        # only matters inside the xgb_available branch below; skipping it
+        # only matters when features actually get built below; skipping it
         # otherwise avoids the pivot/mean cost on the (default) path where
-        # xgb_confirmation_enabled is off. Equal-weight average of
-        # adj_close across the whole scanned universe, same convention as
+        # both XGBoost knobs are off. Equal-weight average of adj_close
+        # across the whole scanned universe, same convention as
         # firm.regime.detector.MarketRegimeDetector._market_proxy's own
         # universe-average fallback (no single benchmark_symbol config
         # here -- this strategy has no equivalent knob, and an equal-weight
         # proxy needs no extra config to already be point-in-time correct).
         market_proxy_by_date = None
-        if xgb_available:
+        if xgb_features_needed:
             try:
                 market_proxy_by_date = (
                     prices_df.pivot_table(index="date", columns="symbol", values="adj_close")
@@ -463,12 +490,33 @@ class PatternRecognitionStrategy(BaseStrategy):
                     p["xgb_calibration_path"], loaded.get("type"), loaded.get("model"),
                 )
 
+        # "xgboost_meta" (2026-09-27, Part B item 2) -- deliberately its own
+        # discriminator value, distinct from "xgboost" above: a calibration
+        # curve fit against the 3-class model's p_target distribution is
+        # NOT valid for the meta model's own p_act distribution even though
+        # both models are "xgboost" -- exactly the class of mismatch the
+        # "model" discriminator itself exists to catch (see
+        # scripts/fit_pattern_calibration.py's module docstring for the
+        # original CNN/XGBoost version of this same bug).
+        xgb_meta_calibration = None
+        if p["xgb_meta_calibration_path"]:
+            loaded = ml_calibration.load_calibration(p["xgb_meta_calibration_path"])
+            if loaded and loaded.get("type") == "sigmoid" and loaded.get("model") == "xgboost_meta":
+                xgb_meta_calibration = loaded
+            elif loaded:
+                log.debug(
+                    "pattern_recognition: xgb_meta_calibration_path=%s has type=%r model=%r, "
+                    "expected type='sigmoid' model='xgboost_meta' -- ignoring",
+                    p["xgb_meta_calibration_path"], loaded.get("type"), loaded.get("model"),
+                )
+
         log.info(
             "pattern_recognition: quality scoring mode=%s, xgb_confirmation=%s, "
-            "zigzag=%s, retest_modifier=%s, confluence_modifier=%s, significance_test=%s, "
-            "regime_discount=%s",
+            "xgb_meta_confirmation=%s, zigzag=%s, retest_modifier=%s, confluence_modifier=%s, "
+            "significance_test=%s, regime_discount=%s",
             "cnn" if cnn_available else "rule_based",
             "on" if xgb_available else "off",
+            "on" if xgb_meta_available else "off",
             f"atr(mult={zigzag_atr_mult})" if zigzag_atr_mult else f"fixed(pct={zigzag_pct})",
             "on" if retest_enabled else "off",
             "on" if confluence_enabled else "off",
@@ -565,7 +613,8 @@ class PatternRecognitionStrategy(BaseStrategy):
             # see default_params' docstring comments for the rationale.
             calibrated_probability = None
             xgb_p_target = None
-            if xgb_available:
+            xgb_meta_p_act = None
+            if xgb_features_needed:
                 # Market-proxy window aligned to THIS symbol's own dates
                 # (Part B item 6, 2026-09-27) -- reindexing the shared,
                 # once-per-cycle date-keyed proxy onto sym_df["date"]
@@ -589,13 +638,44 @@ class PatternRecognitionStrategy(BaseStrategy):
                         )
                         market_ohlcv = None
 
+                # Same feature vector feeds both models below -- only the
+                # model artifact/training target differs (see
+                # score_pattern_meta_confirmation's own docstring).
                 features = build_features(best, ohlcv, market_ohlcv=market_ohlcv)
-                xgb_result = xgb_inference.score_pattern_confirmation(
-                    np.fromiter(features.values(), dtype=np.float32, count=len(features)),
-                    apply_calibration=xgb_calibration,
-                )
-                if xgb_result is not None:
-                    _, _, xgb_p_target = xgb_result
+                feature_vec = np.fromiter(features.values(), dtype=np.float32, count=len(features))
+
+                if xgb_available:
+                    xgb_result = xgb_inference.score_pattern_confirmation(
+                        feature_vec, apply_calibration=xgb_calibration,
+                    )
+                    if xgb_result is not None:
+                        _, _, xgb_p_target = xgb_result
+
+                if xgb_meta_available:
+                    # The meta model IS the calibrated confidence gate by
+                    # construction (de Prado's recipe -- see
+                    # default_params' own docstring comment for this knob),
+                    # so it takes priority over the 3-class model's p_target
+                    # for meta["calibrated_probability"] whenever it's on
+                    # (Part B item 2, 2026-09-27 -- closes the conflation
+                    # this strategy previously had: sourcing that field from
+                    # a model trained to answer a different question).
+                    xgb_meta_result = xgb_inference.score_pattern_meta_confirmation(
+                        feature_vec, apply_calibration=xgb_meta_calibration,
+                    )
+                    if xgb_meta_result is not None:
+                        xgb_meta_p_act = xgb_meta_result
+                        # Same "only trust as calibrated once a real
+                        # calibration file was fit for THIS model" caution
+                        # as the 3-class path above -- XGBoost's raw
+                        # probability output is not calibrated by
+                        # construction just because the target it was
+                        # trained on happens to match calibrated_probability's
+                        # semantics.
+                        if xgb_meta_calibration and xgb_meta_calibration.get("type") == "sigmoid":
+                            calibrated_probability = xgb_meta_p_act
+
+                if calibrated_probability is None and xgb_p_target is not None:
                     # Only populate meta["calibrated_probability"] -- the
                     # generic TraderAgent._signal_calibrated_edge Kelly
                     # convention -- when xgb_calibration was actually loaded
@@ -605,24 +685,11 @@ class PatternRecognitionStrategy(BaseStrategy):
                     # calibrated would silently feed an uncalibrated number
                     # into Kelly sizing if allocation_method is ever set to
                     # "kelly". The raw value is still exposed below under
-                    # its own honest key (xgb_p_target), never hidden.
+                    # its own honest key (xgb_p_target), never hidden. Only
+                    # reached when the meta model above didn't already
+                    # populate this field -- see the priority comment there.
                     if xgb_calibration and xgb_calibration.get("type") == "sigmoid":
                         calibrated_probability = xgb_p_target
-                    # KNOWN GAP, not yet closed here (Part B item 2,
-                    # 2026-09-27 -- see firm.patterns.ml.labeling.label_meta_binary
-                    # / firm.patterns.ml.xgb_inference.score_pattern_meta_confirmation's
-                    # docstrings): a genuine meta-labeling secondary model,
-                    # trained on its own binary act/no-act target, now
-                    # exists as infrastructure, but this strategy still
-                    # sources "calibrated_probability" from the 3-class
-                    # direction model's own p_target above -- exactly the
-                    # conflation de Prado's recipe warns against (one model
-                    # answering two different questions). Deliberately not
-                    # rewired to score_pattern_meta_confirmation yet: no
-                    # real data/models/pattern_xgb_meta.onnx artifact exists
-                    # to call it against (training one now, ahead of Part B
-                    # items 3/4/6's feature/CV fixes, would just have to be
-                    # redone). Tracked as part of Part B item 7's retrain.
 
             if xgb_p_target is not None:
                 disagreement = abs(xgb_p_target - base_quality_fraction)
@@ -685,10 +752,22 @@ class PatternRecognitionStrategy(BaseStrategy):
                         "rule_based_quality_fraction": rule_based_fraction,
                         "cnn_quality_fraction": cnn_quality,
                         "xgb_p_target": xgb_p_target,
+                        # Raw P(act) from the SEPARATE meta-labeling model
+                        # (Part B item 2, 2026-09-27) -- None whenever
+                        # xgb_meta_confirmation_enabled is off or the match
+                        # wasn't scored, never a placeholder. Distinct from
+                        # xgb_p_target above (a different model, a
+                        # different question -- see default_params' own
+                        # docstring comment for this knob).
+                        "xgb_meta_p_act": xgb_meta_p_act,
                         # Meta-labeling convention consumed by
                         # TraderAgent._signal_calibrated_edge -- only
-                        # populated when the XGBoost ensemble actually
-                        # scored this match (never a placeholder value).
+                        # populated when a real calibration file was fit
+                        # for whichever model actually scored this match
+                        # (never a placeholder value). Prefers the meta
+                        # model over the 3-class model's own p_target when
+                        # both are available -- see the priority comment
+                        # above where this is computed.
                         "calibrated_probability": calibrated_probability,
                         "scoring_mode": scoring_mode,
                         "score_breakdown": best.score_breakdown,

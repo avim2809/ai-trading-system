@@ -892,6 +892,192 @@ def test_pattern_recognition_xgb_ensemble_ignores_calibration_fit_on_wrong_model
     assert signals[0].meta["calibrated_probability"] is None
 
 
+# ---------------------------------------------------------------------------
+# XGBoost meta-labeling secondary model (Part B item 2, 2026-09-27) --
+# distinct on/off switch and distinct model from the 3-class ensemble above.
+# ---------------------------------------------------------------------------
+
+def test_pattern_recognition_xgb_meta_off_by_default_leaves_meta_none():
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy().generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["xgb_meta_p_act"] is None
+
+
+def test_pattern_recognition_xgb_meta_populates_p_act_when_enabled(monkeypatch):
+    from firm.strategies import pattern_recognition as pr_module
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_meta_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference, "score_pattern_meta_confirmation", lambda features, **kwargs: 0.72,
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(params={"xgb_meta_confirmation_enabled": True}).generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["xgb_meta_p_act"] == pytest.approx(0.72)
+    # No calibration file configured -- raw p_act, so calibrated_probability
+    # stays None (same "never trust raw output as calibrated" convention as
+    # the 3-class model).
+    assert signals[0].meta["calibrated_probability"] is None
+    # The 3-class ensemble is off -- quality_fraction/scoring_mode must be
+    # completely unaffected by the meta model (it never touches score, only
+    # calibrated_probability).
+    assert signals[0].meta["scoring_mode"] == "rule_based"
+    assert signals[0].meta["xgb_p_target"] is None
+
+
+def test_pattern_recognition_xgb_meta_calibration_configured_populates_calibrated_probability(monkeypatch, tmp_path):
+    from firm.patterns.ml.calibration import save_calibration
+    from firm.strategies import pattern_recognition as pr_module
+
+    calibration_path = tmp_path / "xgb_meta_calibration.json"
+    save_calibration({"type": "sigmoid", "model": "xgboost_meta", "a": 1.0, "b": 0.0}, calibration_path)
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_meta_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference, "score_pattern_meta_confirmation", lambda features, **kwargs: 0.65,
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={
+            "xgb_meta_confirmation_enabled": True,
+            "xgb_meta_calibration_path": str(calibration_path),
+        },
+    ).generate(pit_view)
+
+    assert signals[0].meta["calibrated_probability"] == pytest.approx(0.65)
+
+
+def test_pattern_recognition_xgb_meta_ignores_calibration_fit_on_3class_model(monkeypatch, tmp_path):
+    """Regression: a calibration file fit for the 3-class model
+    (model="xgboost") must be rejected for the meta model even though both
+    are "xgboost" family and both use type="sigmoid" -- the two models have
+    different output distributions (p_target vs. p_act), exactly the
+    mismatch the "xgboost_meta" discriminator exists to catch."""
+    from firm.patterns.ml.calibration import save_calibration
+    from firm.strategies import pattern_recognition as pr_module
+
+    calibration_path = tmp_path / "wrong_model_calibration.json"
+    save_calibration({"type": "sigmoid", "model": "xgboost", "a": 1.0, "b": 0.0}, calibration_path)
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_meta_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference, "score_pattern_meta_confirmation", lambda features, **kwargs: 0.65,
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={
+            "xgb_meta_confirmation_enabled": True,
+            "xgb_meta_calibration_path": str(calibration_path),
+        },
+    ).generate(pit_view)
+
+    assert signals[0].meta["xgb_meta_p_act"] == pytest.approx(0.65)  # still scored...
+    assert signals[0].meta["calibrated_probability"] is None  # ...just not trusted as calibrated
+
+
+def test_pattern_recognition_xgb_meta_takes_priority_over_3class_for_calibrated_probability(monkeypatch, tmp_path):
+    """When BOTH models are enabled and calibrated, the meta model's own
+    output wins for calibrated_probability -- it IS the de Prado meta-label
+    confidence gate by construction; the 3-class model's p_target answers a
+    different question (see default_params' docstring for this knob)."""
+    from firm.patterns.ml.calibration import save_calibration
+    from firm.strategies import pattern_recognition as pr_module
+
+    xgb_cal_path = tmp_path / "xgb_calibration.json"
+    save_calibration({"type": "sigmoid", "model": "xgboost", "a": 1.0, "b": 0.0}, xgb_cal_path)
+    meta_cal_path = tmp_path / "xgb_meta_calibration.json"
+    save_calibration({"type": "sigmoid", "model": "xgboost_meta", "a": 1.0, "b": 0.0}, meta_cal_path)
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference, "score_pattern_confirmation", lambda features, **kwargs: (0.1, 0.1, 0.8),
+    )
+    monkeypatch.setattr(pr_module.xgb_inference, "is_meta_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference, "score_pattern_meta_confirmation", lambda features, **kwargs: 0.55,
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={
+            "xgb_confirmation_enabled": True,
+            "xgb_calibration_path": str(xgb_cal_path),
+            "xgb_meta_confirmation_enabled": True,
+            "xgb_meta_calibration_path": str(meta_cal_path),
+        },
+    ).generate(pit_view)
+
+    sig = signals[0]
+    assert sig.meta["xgb_p_target"] == pytest.approx(0.8)
+    assert sig.meta["xgb_meta_p_act"] == pytest.approx(0.55)
+    # Meta model wins for calibrated_probability, NOT the 3-class p_target.
+    assert sig.meta["calibrated_probability"] == pytest.approx(0.55)
+    # ...but quality_fraction/score are still driven by the 3-class blend
+    # only -- the meta model never touches scoring, just the Kelly signal.
+    assert sig.meta["scoring_mode"] == "rule_based+xgb"
+
+
+def test_pattern_recognition_xgb_meta_and_3class_independently_toggleable(monkeypatch):
+    """The two models must be independently switchable -- enabling one
+    must not silently enable or require the other."""
+    from firm.strategies import pattern_recognition as pr_module
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference, "score_pattern_confirmation", lambda features, **kwargs: (0.1, 0.1, 0.8),
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(params={"xgb_confirmation_enabled": True}).generate(pit_view)
+
+    assert signals[0].meta["xgb_p_target"] == pytest.approx(0.8)
+    assert signals[0].meta["xgb_meta_p_act"] is None
+
+
+def test_pattern_recognition_xgb_meta_features_built_even_when_3class_disabled(monkeypatch):
+    """xgb_features_needed must trigger on xgb_meta_confirmation_enabled
+    ALONE -- market-proxy construction and build_features must not be
+    silently skipped just because the (separately-toggled) 3-class ensemble
+    is off."""
+    from firm.strategies import pattern_recognition as pr_module
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_available", lambda: False)
+    monkeypatch.setattr(pr_module.xgb_inference, "is_meta_available", lambda: True)
+    captured = {}
+
+    def _capturing_meta_score(features, **kwargs):
+        captured["called"] = True
+        return 0.9
+
+    monkeypatch.setattr(pr_module.xgb_inference, "score_pattern_meta_confirmation", _capturing_meta_score)
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(params={"xgb_meta_confirmation_enabled": True}).generate(pit_view)
+
+    assert captured.get("called") is True
+    assert signals[0].meta["xgb_meta_p_act"] == pytest.approx(0.9)
+
+
 def test_pattern_recognition_xgb_ensemble_off_by_default_leaves_meta_none():
     prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
     pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
