@@ -296,6 +296,100 @@ class TestApplyCalibrationParameter:
         assert result[2] == pytest.approx(0.5)
 
 
+class TestScorePatternMetaConfirmation:
+    """Part B item 2 (2026-09-27): the SEPARATE binary meta-labeling model
+    score, distinct from score_pattern_confirmation's 3-class p_target."""
+
+    def _make_session(self, proba_row: np.ndarray):
+        session = MagicMock()
+        input_stub = MagicMock()
+        input_stub.name = "input"
+        session.get_inputs.return_value = [input_stub]
+        labels_out = np.array([int(np.argmax(proba_row))])
+        session.run.return_value = [labels_out, proba_row[None, :]]
+        return session
+
+    def test_full_binary_label_set_mapped_correctly(self, monkeypatch):
+        proba = np.array([0.35, 0.65])  # (0, 1) order -- "act" is column 1
+        session = self._make_session(proba)
+        monkeypatch.setattr(xinf, "_load_session", lambda path: (session, (0, 1)))
+
+        features = np.zeros(N_FEATURES)
+        p_act = xinf.score_pattern_meta_confirmation(features, model_path="/tmp/meta.onnx")
+
+        assert p_act == pytest.approx(0.65)
+
+    def test_degenerate_single_class_never_acted_returns_zero_not_none(self):
+        # xgb_classifier.train's own docstring: a fit that only ever saw one
+        # class is degenerate but valid, not a failure -- if that class is
+        # "0" (never a win), P(act) is honestly 0.0.
+        session = MagicMock()
+        input_stub = MagicMock()
+        input_stub.name = "input"
+        session.get_inputs.return_value = [input_stub]
+        session.run.return_value = [np.array([0]), np.array([[1.0]])]
+
+        import unittest.mock as mock
+        with mock.patch.object(xinf, "_load_session", lambda path: (session, (0,))):
+            p_act = xinf.score_pattern_meta_confirmation(np.zeros(N_FEATURES), model_path="/tmp/meta.onnx")
+
+        assert p_act == 0.0
+
+    def test_returns_none_when_meta_model_unavailable(self, tmp_path):
+        p_act = xinf.score_pattern_meta_confirmation(
+            np.zeros(N_FEATURES), model_path=str(tmp_path / "missing.onnx"),
+        )
+        assert p_act is None
+
+    def test_returns_none_on_feature_count_mismatch(self, monkeypatch):
+        session = MagicMock()
+        input_stub = MagicMock()
+        input_stub.name = "input"
+        input_stub.shape = [None, 44]
+        session.get_inputs.return_value = [input_stub]
+        monkeypatch.setattr(xinf, "_load_session", lambda path: (session, (0, 1)))
+
+        p_act = xinf.score_pattern_meta_confirmation(np.zeros(10), model_path="/tmp/meta.onnx")
+
+        assert p_act is None
+        session.run.assert_not_called()
+
+    def test_sigmoid_calibration_applied(self, monkeypatch):
+        proba = np.array([0.4, 0.6])
+        session = self._make_session(proba)
+        monkeypatch.setattr(xinf, "_load_session", lambda path: (session, (0, 1)))
+
+        calibration_params = {"type": "sigmoid", "a": -2.0, "b": 0.5}
+        p_act = xinf.score_pattern_meta_confirmation(
+            np.zeros(N_FEATURES), model_path="/tmp/meta.onnx", apply_calibration=calibration_params,
+        )
+
+        expected = cal.apply_sigmoid_calibration(
+            np.array([0.6]), calibration_params["a"], calibration_params["b"],
+        )[0]
+        assert p_act == pytest.approx(float(expected))
+        assert p_act != pytest.approx(0.6)  # sanity: calibration actually changed it
+
+    def test_independent_from_the_3class_model_same_features_different_path(self, monkeypatch):
+        # The core bug this item fixes: these two functions must be able to
+        # return genuinely different numbers for the SAME feature vector,
+        # because they load DIFFERENT model artifacts by DIFFERENT paths.
+        direction_session = self._make_session(np.array([0.1, 0.1, 0.8]))
+        meta_session = self._make_session(np.array([0.7, 0.3]))
+
+        def _fake_load(path):
+            return (direction_session, (-1, 0, 1)) if "meta" not in path else (meta_session, (0, 1))
+
+        monkeypatch.setattr(xinf, "_load_session", _fake_load)
+        features = np.zeros(N_FEATURES)
+
+        direction_result = xinf.score_pattern_confirmation(features, model_path="/tmp/pattern_xgb.onnx")
+        meta_result = xinf.score_pattern_meta_confirmation(features, model_path="/tmp/pattern_xgb_meta.onnx")
+
+        assert direction_result[2] == pytest.approx(0.8)  # 3-class p_target
+        assert meta_result == pytest.approx(0.3)  # binary P(act) -- genuinely different model/number
+
+
 class TestIsAvailable:
     def test_false_when_model_missing(self, tmp_path):
         assert xinf.is_available(tmp_path / "nope.onnx") is False
@@ -305,6 +399,11 @@ class TestIsAvailable:
         if not xinf.DEFAULT_MODEL_PATH.exists():
             pytest.skip("no trained data/models/pattern_xgb.onnx artifact on disk")
         assert xinf.is_available(xinf.DEFAULT_MODEL_PATH) is True
+
+
+class TestIsMetaAvailable:
+    def test_false_when_model_missing(self, tmp_path):
+        assert xinf.is_meta_available(tmp_path / "nope.onnx") is False
 
 
 class TestRealArtifactIfPresent:

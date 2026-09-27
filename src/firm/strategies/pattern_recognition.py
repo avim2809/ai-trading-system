@@ -562,6 +562,21 @@ class PatternRecognitionStrategy(BaseStrategy):
                     # its own honest key (xgb_p_target), never hidden.
                     if xgb_calibration and xgb_calibration.get("type") == "sigmoid":
                         calibrated_probability = xgb_p_target
+                    # KNOWN GAP, not yet closed here (Part B item 2,
+                    # 2026-09-27 -- see firm.patterns.ml.labeling.label_meta_binary
+                    # / firm.patterns.ml.xgb_inference.score_pattern_meta_confirmation's
+                    # docstrings): a genuine meta-labeling secondary model,
+                    # trained on its own binary act/no-act target, now
+                    # exists as infrastructure, but this strategy still
+                    # sources "calibrated_probability" from the 3-class
+                    # direction model's own p_target above -- exactly the
+                    # conflation de Prado's recipe warns against (one model
+                    # answering two different questions). Deliberately not
+                    # rewired to score_pattern_meta_confirmation yet: no
+                    # real data/models/pattern_xgb_meta.onnx artifact exists
+                    # to call it against (training one now, ahead of Part B
+                    # items 3/4/6's feature/CV fixes, would just have to be
+                    # redone). Tracked as part of Part B item 7's retrain.
 
             if xgb_p_target is not None:
                 disagreement = abs(xgb_p_target - base_quality_fraction)

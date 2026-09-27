@@ -124,6 +124,57 @@ def first_barrier_hit(
     return 0
 
 
+def label_meta_binary(
+    match: PatternMatch,
+    ohlcv: pd.DataFrame,
+    *,
+    timeout_bars: int = DEFAULT_TIMEOUT_BARS,
+) -> int:
+    """Binary meta-label (Lopez de Prado ch. 3.6): ``1`` ("act" -- this
+    detection would have been a genuine win, target hit first) or ``0``
+    ("don't act" -- stop hit first, or neither barrier touched before the
+    vertical/timeout barrier).
+
+    Why this exists as its OWN function rather than callers thresholding
+    :func:`label_triple_barrier`'s ``-1``/``0``/``1`` output inline (Part B
+    item 2, 2026-09-27): meta-labeling's whole premise is a SEPARATE
+    secondary model answering "should I act on the primary model's call at
+    all" (here, ``pattern_recognition``'s own directional signal is the
+    primary call), trained on a genuinely different target than "which of
+    three things will happen" -- collapsing stop-hit and timeout into the
+    same ``0`` class is a deliberate modeling decision (both mean "this
+    specific trade wasn't a win"), not an implementation detail a caller
+    should have to re-derive correctly every time. Reusing
+    :func:`label_triple_barrier`'s barrier-walk (rather than a second,
+    separately-hand-written copy) keeps there being exactly one place that
+    decides same-bar-collision/timeout/no-remaining-data semantics.
+
+    Args/timeout_bars/raises: identical contract to
+    :func:`label_triple_barrier` (see its docstring) -- this is a pure
+    relabeling of that function's output, not a different walk.
+    """
+    return 1 if label_triple_barrier(match, ohlcv, timeout_bars=timeout_bars) == 1 else 0
+
+
+def label_matches_meta_binary(
+    matches: list[PatternMatch],
+    ohlcv: pd.DataFrame,
+    *,
+    timeout_bars: int = DEFAULT_TIMEOUT_BARS,
+) -> np.ndarray:
+    """Batch convenience mirroring :func:`label_matches`, for the binary
+    meta-label (:func:`label_meta_binary`) instead of the 3-class
+    triple-barrier label.
+    """
+    labels = []
+    for match in matches:
+        if not match.confirmed:
+            log.debug("label_matches_meta_binary: skipping unconfirmed match %s", match.pattern)
+            continue
+        labels.append(label_meta_binary(match, ohlcv, timeout_bars=timeout_bars))
+    return np.array(labels, dtype=int)
+
+
 def label_matches(
     matches: list[PatternMatch],
     ohlcv: pd.DataFrame,

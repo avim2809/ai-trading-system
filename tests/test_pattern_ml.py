@@ -49,7 +49,13 @@ from firm.patterns.ml.feature_engineering import (
     build_feature_frame,
     build_features,
 )
-from firm.patterns.ml.labeling import DEFAULT_TIMEOUT_BARS, label_matches, label_triple_barrier
+from firm.patterns.ml.labeling import (
+    DEFAULT_TIMEOUT_BARS,
+    label_matches,
+    label_matches_meta_binary,
+    label_meta_binary,
+    label_triple_barrier,
+)
 from firm.patterns.scanner import scan_symbol
 
 try:
@@ -361,6 +367,55 @@ class TestLabelTripleBarrier:
         unconfirmed = _make_match(confirm_index=-1)
         ohlcv = _ohlcv_frame([100, 101, 100, 103, 108, 111])
         labels = label_matches([confirmed, unconfirmed], ohlcv, timeout_bars=20)
+        assert labels.tolist() == [1]
+
+
+class TestLabelMetaBinary:
+    """Part B item 2 (2026-09-27): a separate binary act/no-act target for
+    the meta-labeling secondary model, distinct from the 3-class
+    return-direction label above."""
+
+    def test_target_hit_is_act(self):
+        match = _make_match(direction="long", confirm_index=2, entry=100.0, stop=95.0, target=110.0)
+        ohlcv = _ohlcv_frame([100, 101, 100, 103, 108, 111, 120])
+        assert label_triple_barrier(match, ohlcv, timeout_bars=20) == 1  # sanity: same underlying event
+        assert label_meta_binary(match, ohlcv, timeout_bars=20) == 1
+
+    def test_stop_hit_is_dont_act(self):
+        match = _make_match(direction="long", confirm_index=2, entry=100.0, stop=95.0, target=110.0)
+        ohlcv = _ohlcv_frame([100, 101, 100, 98, 94, 108])
+        assert label_triple_barrier(match, ohlcv, timeout_bars=20) == -1  # sanity
+        assert label_meta_binary(match, ohlcv, timeout_bars=20) == 0
+
+    def test_timeout_is_dont_act(self):
+        match = _make_match(direction="long", confirm_index=2, entry=100.0, stop=90.0, target=120.0)
+        ohlcv = _ohlcv_frame([100, 101, 100, 102, 103, 101, 104, 102, 103, 101, 104])
+        assert label_triple_barrier(match, ohlcv, timeout_bars=5) == 0  # sanity
+        assert label_meta_binary(match, ohlcv, timeout_bars=5) == 0
+
+    def test_stop_and_timeout_collapse_to_the_same_class(self):
+        # The whole point of the meta-label: de Prado's secondary model only
+        # ever answers "was this specific trade a win", not "which of three
+        # things happened" -- both non-win outcomes must be indistinguishable
+        # to it.
+        stop_match = _make_match(direction="long", confirm_index=2, entry=100.0, stop=95.0, target=110.0)
+        stop_ohlcv = _ohlcv_frame([100, 101, 100, 98, 94, 108])
+        timeout_match = _make_match(direction="long", confirm_index=2, entry=100.0, stop=90.0, target=120.0)
+        timeout_ohlcv = _ohlcv_frame([100, 101, 100, 102, 103, 101, 104, 102, 103, 101, 104])
+
+        assert label_meta_binary(stop_match, stop_ohlcv, timeout_bars=20) == 0
+        assert label_meta_binary(timeout_match, timeout_ohlcv, timeout_bars=5) == 0
+
+    def test_unconfirmed_match_raises(self):
+        match = _make_match(confirm_index=-1)
+        with pytest.raises(ValueError):
+            label_meta_binary(match, _ohlcv_frame([100, 101, 102]))
+
+    def test_label_matches_meta_binary_batch_skips_unconfirmed(self):
+        confirmed = _make_match(confirm_index=2, direction="long", stop=95.0, target=110.0)
+        unconfirmed = _make_match(confirm_index=-1)
+        ohlcv = _ohlcv_frame([100, 101, 100, 103, 108, 111])
+        labels = label_matches_meta_binary([confirmed, unconfirmed], ohlcv, timeout_bars=20)
         assert labels.tolist() == [1]
 
 

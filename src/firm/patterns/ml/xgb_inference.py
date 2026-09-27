@@ -89,6 +89,14 @@ _LABEL_TO_INDEX: dict[int, int] = {label: i for i, label in enumerate(LABELS)}
 _PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_MODEL_PATH = _PROJECT_ROOT / "data" / "models" / "pattern_xgb.onnx"
 
+#: Part B item 2 (2026-09-27) meta-labeling secondary model -- a
+#: SEPARATE binary act/no-act classifier (see
+#: firm.patterns.ml.labeling.label_meta_binary), trained and saved
+#: independently of the 3-class direction model above (same
+#: scripts/train_pattern_ml.py run, distinct --meta-output artifact). Same
+#: shared-code-level-asset rationale as DEFAULT_MODEL_PATH.
+DEFAULT_META_MODEL_PATH = _PROJECT_ROOT / "data" / "models" / "pattern_xgb_meta.onnx"
+
 # Logged once per (path, reason) so a persistently-missing/broken model logs
 # a single clear WARNING instead of spamming every live cycle.
 _warned_paths: set[str] = set()
@@ -159,6 +167,67 @@ def is_available(model_path: str | os.PathLike = DEFAULT_MODEL_PATH) -> bool:
     :func:`score_pattern_confirmation` would.
     """
     return _load_session(str(model_path)) is not None
+
+
+def _run_onnx_inference(
+    session, present_labels: tuple[int, ...], features: np.ndarray, model_path: str,
+) -> np.ndarray | None:
+    """Shared inference core for both :func:`score_pattern_confirmation`
+    (3-class) and :func:`score_pattern_meta_confirmation` (binary) --
+    validates ``features``' shape, checks it against the ONNX graph's own
+    expected feature count (2026-09-27; see :func:`score_pattern_confirmation`'s
+    docstring), runs the session, and returns the raw per-class probability
+    row in ``present_labels`` order (i.e. **not** remapped to either
+    caller's own fixed label layout -- that remapping is each caller's own
+    responsibility, since a 3-class and a binary model use ``present_labels``
+    differently). Returns ``None`` on any failure; never raises.
+    """
+    try:
+        arr = np.asarray(features, dtype=np.float32)
+        if arr.ndim == 1:
+            arr = arr[None, :]
+        elif arr.ndim != 2 or arr.shape[0] != 1:
+            raise ValueError(
+                f"_run_onnx_inference: expected a single feature row "
+                f"(shape (n_features,) or (1, n_features)), got shape {arr.shape}"
+            )
+
+        # Feature-COUNT check (2026-09-27): the caller-vs-model column-order
+        # contract these functions' own docstrings warn about is still
+        # unverifiable here (no column names travel with a raw ndarray),
+        # but a count mismatch is cheap to catch and a real failure mode --
+        # e.g. firm.patterns.ml.feature_engineering.build_features changing
+        # its column set (as Part B item 5 just did, -3 net columns) makes
+        # every existing on-disk model stale until retrained. Catching it
+        # here, before session.run, turns an opaque onnxruntime shape
+        # exception into a clear, specific, warn-once diagnostic.
+        expected_dim = session.get_inputs()[0].shape[1]
+        if isinstance(expected_dim, int) and arr.shape[1] != expected_dim:
+            _warn_once(
+                model_path + ":shape_mismatch",
+                "pattern XGBoost scoring unavailable: model at %s expects "
+                "%d features, got %d -- the on-disk model is stale relative to the "
+                "current firm.patterns.ml.feature_engineering.build_features schema "
+                "and needs retraining (scripts/train_pattern_ml.py) -- no ML-based "
+                "score will be produced.",
+                model_path, expected_dim, arr.shape[1],
+            )
+            return None
+
+        input_name = session.get_inputs()[0].name
+        outputs = session.run(None, {input_name: arr})
+        # sklearn-onnx classifier graphs (onnxmltools.convert_xgboost) emit
+        # two outputs: [0] predicted label (unused here), [1] per-class
+        # probabilities over `present_labels` (see module docstring).
+        return np.asarray(outputs[1], dtype=np.float64)[0]
+    except Exception:
+        _warn_once(
+            model_path + ":inference_error",
+            "pattern XGBoost scoring failed during inference -- no ML-based "
+            "score will be produced.",
+        )
+        log.debug("XGBoost ONNX inference failure detail", exc_info=True)
+        return None
 
 
 def score_pattern_confirmation(
@@ -248,59 +317,15 @@ def score_pattern_confirmation(
         return None
     session, present_labels = loaded
 
-    try:
-        arr = np.asarray(features, dtype=np.float32)
-        if arr.ndim == 1:
-            arr = arr[None, :]
-        elif arr.ndim != 2 or arr.shape[0] != 1:
-            raise ValueError(
-                f"score_pattern_confirmation: expected a single feature row "
-                f"(shape (n_features,) or (1, n_features)), got shape {arr.shape}"
-            )
-
-        # Feature-COUNT check (2026-09-27): the caller-vs-model column-order
-        # contract this function's own docstring warns about is still
-        # unverifiable here (no column names travel with a raw ndarray),
-        # but a count mismatch is cheap to catch and a real failure mode --
-        # e.g. firm.patterns.ml.feature_engineering.build_features changing
-        # its column set (as Part B item 5 just did, -3 net columns) makes
-        # every existing on-disk model stale until retrained. Catching it
-        # here, before session.run, turns an opaque onnxruntime shape
-        # exception into a clear, specific, warn-once diagnostic.
-        expected_dim = session.get_inputs()[0].shape[1]
-        if isinstance(expected_dim, int) and arr.shape[1] != expected_dim:
-            _warn_once(
-                str(model_path) + ":shape_mismatch",
-                "pattern XGBoost confirmation scoring unavailable: model at %s expects "
-                "%d features, got %d -- the on-disk model is stale relative to the "
-                "current firm.patterns.ml.feature_engineering.build_features schema "
-                "and needs retraining (scripts/train_pattern_ml.py) -- no ML-based "
-                "confirmation score will be produced.",
-                model_path, expected_dim, arr.shape[1],
-            )
-            return None
-
-        input_name = session.get_inputs()[0].name
-        outputs = session.run(None, {input_name: arr})
-        # sklearn-onnx classifier graphs (onnxmltools.convert_xgboost) emit
-        # two outputs: [0] predicted label (unused here), [1] per-class
-        # probabilities over `present_labels` (see module docstring).
-        proba = np.asarray(outputs[1], dtype=np.float64)[0]
-
-        out = np.zeros(len(LABELS))
-        for col, label in enumerate(present_labels):
-            out[_LABEL_TO_INDEX[label]] = proba[col]
-        p_stop = float(out[_LABEL_TO_INDEX[-1]])
-        p_timeout = float(out[_LABEL_TO_INDEX[0]])
-        p_target = float(out[_LABEL_TO_INDEX[1]])
-    except Exception:
-        _warn_once(
-            str(model_path) + ":inference_error",
-            "pattern XGBoost confirmation scoring failed during inference -- no "
-            "ML-based confirmation score will be produced.",
-        )
-        log.debug("XGBoost ONNX inference failure detail", exc_info=True)
+    proba = _run_onnx_inference(session, present_labels, features, str(model_path))
+    if proba is None:
         return None
+    out = np.zeros(len(LABELS))
+    for col, label in enumerate(present_labels):
+        out[_LABEL_TO_INDEX[label]] = proba[col]
+    p_stop = float(out[_LABEL_TO_INDEX[-1]])
+    p_timeout = float(out[_LABEL_TO_INDEX[0]])
+    p_target = float(out[_LABEL_TO_INDEX[1]])
 
     if apply_calibration is not None:
         cal_type = apply_calibration.get("type")
@@ -325,6 +350,97 @@ def score_pattern_confirmation(
             )
 
     return p_stop, p_timeout, p_target
+
+
+def score_pattern_meta_confirmation(
+    features: np.ndarray,
+    *,
+    model_path: str | os.PathLike = DEFAULT_META_MODEL_PATH,
+    apply_calibration: dict | None = None,
+) -> float | None:
+    """Meta-labeling secondary-model score (Part B item 2, 2026-09-27):
+    ``P(act)`` -- the probability this specific confirmed pattern match
+    would have been a genuine win (target hit first), from a model trained
+    SEPARATELY on :func:`firm.patterns.ml.labeling.label_meta_binary`'s
+    binary target, not reused from :func:`score_pattern_confirmation`'s
+    3-class ``p_target`` column.
+
+    Why this matters (the bug this closes): before this function existed,
+    the only "meta-labeled" probability available was the 3-class model's
+    own ``p_target`` -- one model was being asked to do two different jobs
+    at once (predict which of three things happens, AND separately gate
+    "should I trust this enough to size a bet on it"). de Prado's
+    meta-labeling recipe is explicit that the secondary model must be
+    trained on its own binary target for exactly this reason: a model
+    optimized for 3-class log-loss is not the same model a well-calibrated
+    binary act/no-act gate would produce.
+
+    Args:
+        features: Same column contract as
+            :func:`score_pattern_confirmation` (this is the SAME
+            :func:`firm.patterns.ml.feature_engineering.build_features`
+            output fed to both models -- only the model artifact and its
+            training target differ, not the feature vector).
+        model_path: Path to the ``.onnx`` file for the META model
+            specifically -- **not** interchangeable with
+            :data:`DEFAULT_MODEL_PATH` (the 3-class model). Defaults to
+            :data:`DEFAULT_META_MODEL_PATH`.
+        apply_calibration: Same convention as
+            :func:`score_pattern_confirmation`'s own parameter -- a
+            ``"sigmoid"``-typed calibration dict (fit specifically against
+            this meta model's own raw output, not the 3-class model's) is
+            applied to the returned probability.
+
+    Returns:
+        ``P(act)`` in ``[0, 1]``, or ``None`` on any failure (model
+        unavailable, feature-count mismatch, malformed input, or any
+        inference error -- never raises). If the on-disk model happened to
+        be fit on data containing only the ``0`` (never-act) class (a
+        degenerate but valid single-class fit -- see
+        ``xgb_classifier.train``'s own warning for this case), this
+        correctly returns ``0.0``, not ``None`` -- that is a real answer
+        ("this model has never seen a win"), not a failure.
+    """
+    loaded = _load_session(str(model_path))
+    if loaded is None:
+        return None
+    session, present_labels = loaded
+
+    proba = _run_onnx_inference(session, present_labels, features, str(model_path))
+    if proba is None:
+        return None
+
+    label_to_col = {label: i for i, label in enumerate(present_labels)}
+    p_act = float(proba[label_to_col[1]]) if 1 in label_to_col else 0.0
+
+    if apply_calibration is not None:
+        cal_type = apply_calibration.get("type")
+        if cal_type == "sigmoid":
+            from firm.patterns.ml.calibration import apply_sigmoid_calibration
+
+            try:
+                calibrated = apply_sigmoid_calibration(
+                    np.array([p_act]), apply_calibration["a"], apply_calibration["b"],
+                )
+                p_act = float(np.clip(calibrated[0], 0.0, 1.0))
+            except Exception:
+                log.debug(
+                    "score_pattern_meta_confirmation: failed to apply sigmoid calibration "
+                    "%s -- returning raw p_act instead", apply_calibration, exc_info=True,
+                )
+        else:
+            log.debug(
+                "score_pattern_meta_confirmation: apply_calibration type=%r not applicable "
+                "to this ONNX graph's already-softmaxed output -- skipping calibration",
+                cal_type,
+            )
+
+    return p_act
+
+
+def is_meta_available(model_path: str | os.PathLike = DEFAULT_META_MODEL_PATH) -> bool:
+    """Same convention as :func:`is_available`, for the meta model."""
+    return _load_session(str(model_path)) is not None
 
 
 def reset_cache() -> None:

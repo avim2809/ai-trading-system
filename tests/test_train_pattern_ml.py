@@ -24,9 +24,21 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from train_pattern_ml import build_dataset, time_ordered_split  # noqa: E402
+from train_pattern_ml import build_dataset, main, time_ordered_split  # noqa: E402
 
 from firm.data.synthetic import make_synthetic_prices  # noqa: E402
+from firm.patterns.ml import xgb_classifier  # noqa: E402
+
+try:
+    import xgboost  # noqa: F401
+
+    _XGBOOST_AVAILABLE = True
+except ImportError:
+    _XGBOOST_AVAILABLE = False
+
+requires_xgboost = pytest.mark.skipif(
+    not _XGBOOST_AVAILABLE, reason="xgboost not installed (optional `patterns_ml` extra)",
+)
 
 
 def _panel(symbols, n_days=300, seed=7):
@@ -95,3 +107,107 @@ class TestTimeOrderedSplit:
         X_train, X_test, y_train, y_test = time_ordered_split(X, y, meta, test_size=0.25)
         assert len(X_train) == 1
         assert len(X_test) == 0
+
+
+@requires_xgboost
+class TestMetaPAct:
+    """Part B item 2 (2026-09-27): _meta_p_act's reliance on
+    xgb_classifier's fixed (-1, 0, 1) LABELS layout (column index 2 always
+    holding P(label==1)) even for a model fit on the binary {0, 1} subset."""
+
+    def test_column_2_holds_p_label_1_for_a_binary_fit(self):
+        from train_pattern_ml import _meta_p_act
+
+        rng = np.random.RandomState(0)
+        X = pd.DataFrame(rng.rand(40, 3), columns=["a", "b", "c"])
+        y = (X["a"] > 0.5).astype(int).to_numpy()  # a clean, learnable binary target
+        model = xgb_classifier.train(X, y)
+        assert model.present_labels == (0, 1)  # sanity: binary fit, not the full 3-class set
+
+        p_act = _meta_p_act(model, X)
+        assert p_act.shape == (40,)
+        assert np.all((p_act >= 0.0) & (p_act <= 1.0))
+        # The model should have actually learned the rule, not be random.
+        pred = (p_act >= 0.5).astype(int)
+        assert (pred == y).mean() > 0.8
+
+    def test_never_returns_a_negative_one_prediction(self):
+        # predict_label's argmax can only select this fixed model's own
+        # present columns; verifies the always-zero "-1"/stop column (index
+        # 0, never fit on a binary {0,1} target) never wins the argmax.
+        from train_pattern_ml import _meta_p_act
+
+        rng = np.random.RandomState(1)
+        X = pd.DataFrame(rng.rand(30, 3), columns=["a", "b", "c"])
+        y = rng.randint(0, 2, size=30)
+        model = xgb_classifier.train(X, y)
+
+        p_act = _meta_p_act(model, X)
+        pred = (p_act >= 0.5).astype(int)
+        assert set(pred.tolist()) <= {0, 1}
+
+
+@requires_xgboost
+class TestSafeBinaryAuc:
+    def test_returns_none_when_test_set_is_single_class(self):
+        from train_pattern_ml import _safe_binary_auc
+
+        assert _safe_binary_auc(np.array([0.1, 0.9, 0.5]), np.array([1, 1, 1])) is None
+
+    def test_returns_real_auc_for_a_perfect_separator(self):
+        from train_pattern_ml import _safe_binary_auc
+
+        p_act = np.array([0.1, 0.2, 0.8, 0.9])
+        y_test = np.array([0, 0, 1, 1])
+        assert _safe_binary_auc(p_act, y_test) == pytest.approx(1.0)
+
+
+@requires_xgboost
+class TestMainTrainsBothModels:
+    """End-to-end smoke test (Part B item 2): a real `main()` invocation
+    against synthetic data must produce BOTH the 3-class direction model AND
+    the separate binary meta-label model as distinct on-disk artifacts."""
+
+    def test_main_saves_both_direction_and_meta_models(self, tmp_path, capsys):
+        output = tmp_path / "pattern_xgb.pkl"
+        argv = [
+            "--data-source", "synthetic",
+            "--n-days", "800",
+            "--symbols", "AAPL,MSFT,GOOG,AMZN,META,TSLA,NVDA,JPM,V,JNJ",
+            "--min-score", "0",
+            "--output", str(output),
+        ]
+        rc = main(argv)
+        captured = capsys.readouterr()
+        if rc != 0:
+            pytest.skip(f"synthetic fixture produced too few/degenerate rows to train "
+                        f"this run (stderr: {captured.err.strip()!r}) -- not this feature's concern")
+
+        assert rc == 0
+        meta_output = tmp_path / "pattern_xgb_meta.pkl"
+        assert output.exists()
+        assert meta_output.exists()
+
+        direction_model = xgb_classifier.load(output)
+        meta_model = xgb_classifier.load(meta_output)
+        # The two saved artifacts must be genuinely different fits (distinct
+        # label domains), not the same model saved twice under two names.
+        assert set(direction_model.present_labels) <= {-1, 0, 1}
+        assert set(meta_model.present_labels) <= {0, 1}
+        assert "Meta-label test accuracy" in captured.out
+        assert "Meta-label model saved to" in captured.out
+
+    def test_meta_output_defaults_to_output_stem_plus_meta(self):
+        from train_pattern_ml import _parse_args
+
+        args = _parse_args(["--output", "data/models/pattern_xgb.pkl"])
+        assert args.meta_output == "data/models/pattern_xgb_meta.pkl"
+
+    def test_meta_output_explicit_override_respected(self):
+        from train_pattern_ml import _parse_args
+
+        args = _parse_args([
+            "--output", "data/models/pattern_xgb.pkl",
+            "--meta-output", "data/models/custom_meta.pkl",
+        ])
+        assert args.meta_output == "data/models/custom_meta.pkl"

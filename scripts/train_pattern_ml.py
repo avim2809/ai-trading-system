@@ -287,6 +287,33 @@ def _safe_multiclass_auc(model, X_test, y_test) -> float | None:
         return None
 
 
+# xgb_classifier.py is a deliberately thin, label-agnostic wrapper (see its
+# own module docstring) whose predict_proba/predict_label nonetheless remap
+# every fit's present_labels back onto the FIXED, hardcoded 3-slot layout
+# `xgb_classifier.LABELS = (-1, 0, 1)` -- not a bug for a binary {0, 1} fit
+# specifically (2026-09-27, Part B item 2's meta-label model): both 0 and 1
+# are themselves members of that fixed tuple, at indices 1 and 2
+# respectively, so predict_proba's column 2 reliably holds P(label==1) for
+# ANY model fit on a subset of {-1, 0, 1} that includes 1 -- column 0
+# ("-1"/stop) simply comes back all-zero for a fit that never saw -1, which
+# argmax-based predict_label already handles correctly (verified: it can
+# only ever emit 0 or 1 back out, never a spurious -1). This helper makes
+# that reliance explicit and documented rather than a silent assumption
+# baked into inline indexing at each call site below.
+def _meta_p_act(model, X) -> np.ndarray:
+    return xgb_classifier.predict_proba(model, X)[:, xgb_classifier._LABEL_TO_INDEX[1]]
+
+
+def _safe_binary_auc(p_act: np.ndarray, y_test: np.ndarray) -> float | None:
+    if len(set(y_test.tolist())) < 2:
+        return None
+    try:
+        return float(roc_auc_score(y_test, p_act))
+    except ValueError as exc:
+        log.warning("Meta-label AUC computation failed (%s) -- reporting n/a", exc)
+        return None
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -333,11 +360,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "randomness.",
     )
     parser.add_argument("--output", default="data/models/pattern_xgb.pkl")
+    parser.add_argument(
+        "--meta-output", default=None,
+        help="Path for the SEPARATE binary meta-labeling model (Part B item 2 -- see "
+             "firm.patterns.ml.labeling.label_meta_binary / "
+             "firm.patterns.ml.xgb_inference.score_pattern_meta_confirmation). Defaults "
+             "to --output with a '_meta' suffix inserted before the extension (e.g. "
+             "pattern_xgb.pkl -> pattern_xgb_meta.pkl).",
+    )
     args = parser.parse_args(argv)
     if args.symbols:
         args.symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     if args.embargo_bars is None:
         args.embargo_bars = args.timeout_bars
+    if args.meta_output is None:
+        out = Path(args.output)
+        args.meta_output = str(out.with_name(out.stem + "_meta" + out.suffix))
     return args
 
 
@@ -407,6 +445,44 @@ def main(argv: list[str] | None = None) -> int:
 
     xgb_classifier.save(model, args.output)
     print(f"Model saved to {args.output}")
+
+    # Part B item 2 (2026-09-27): a SEPARATE binary act/no-act meta-labeling
+    # model, trained on its own target (target-hit vs. stop-hit-or-timeout
+    # collapsed together -- see label_meta_binary's docstring for why this
+    # must be a distinct model, not the 3-class model's own p_target reused).
+    # Reuses the SAME time-ordered train/test rows and features as the
+    # direction model above -- only the label differs -- so there is no
+    # second scan/build_dataset pass.
+    y_meta_train = (y_train == 1).astype(int)
+    y_meta_test = (y_test == 1).astype(int)
+    print(
+        f"\nMeta-label counts (act=1 / dont-act=0): "
+        f"train={pd.Series(y_meta_train).value_counts().to_dict()} "
+        f"test={pd.Series(y_meta_test).value_counts().to_dict()}"
+    )
+    if len(set(y_meta_train.tolist())) < 2:
+        print(
+            "WARNING: meta-label train split has only one distinct class -- the fitted "
+            "meta model will be degenerate (always predicts that class; see "
+            "xgb_classifier.train's own warning). Proceeding anyway (a real, if "
+            "uninformative, model is still saved) rather than aborting, since the "
+            "3-class direction model above already trained successfully.",
+            file=sys.stderr,
+        )
+
+    meta_model = xgb_classifier.train(X_train, y_meta_train)
+    meta_train_p_act = _meta_p_act(meta_model, X_train)
+    meta_test_p_act = _meta_p_act(meta_model, X_test)
+    meta_train_acc = accuracy_score(y_meta_train, (meta_train_p_act >= 0.5).astype(int))
+    meta_test_acc = accuracy_score(y_meta_test, (meta_test_p_act >= 0.5).astype(int))
+    print(f"Meta-label train accuracy: {meta_train_acc:.3f} (n={len(y_meta_train)})")
+    print(f"Meta-label test accuracy:  {meta_test_acc:.3f} (n={len(y_meta_test)})")
+
+    meta_auc = _safe_binary_auc(meta_test_p_act, y_meta_test)
+    print(f"Meta-label test AUC: {meta_auc:.3f}" if meta_auc is not None else "Meta-label test AUC: n/a (test split lacks class diversity)")
+
+    xgb_classifier.save(meta_model, args.meta_output)
+    print(f"Meta-label model saved to {args.meta_output}")
 
     # Part A (2026-09-27 false-positive-rate fix): persist per-pattern
     # historical sample counts alongside the model, so
