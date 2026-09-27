@@ -1629,18 +1629,74 @@ missing every piece that makes it statistically honest:
    training), verified actually populated for real rows, not dead
    infrastructure.
 
-**Items 7-9** (evaluate the strategy's own isolated edge on true
-out-of-sample data before any portfolio-level re-audit; retrain both
-models against real cached data with every fix above; gate any re-enable
-through the existing fail-closed rollout gate plus a real live shadow
-period) were in progress as of this writing — update this section with
-the real result once that lands, honestly, whichever way the evidence
-points (leave-off-with-evidence is an acceptable outcome here, same as
-§9.9's conclusion was).
+**Items 7-8 — retrain + isolated evaluation (done, commits `eaf211a`/`c4f70de`,
+full findings in `docs/pattern_ml_isolated_evaluation_2026_09.md`).**
+Retrained both models against real cached data (25-symbol live universe,
+2010-2026, 1,849 confirmed matches, all Part B fixes applied). The
+classifier itself is genuinely good in isolation: Purged 5-fold CV gives
+PR-AUC ~0.83-0.84 (vs. 0.606 base rate) and Brier ~0.185 (beats both the
+uninformative-0.5 and always-base-rate baselines) for both models. But the
+**primary go/no-go signal** — pattern_recognition's own standalone
+walk-forward Sharpe, run alone with full capital/risk budget (reusing
+`validate_pattern_cnn_walkforward.py`'s harness) — still fails: PBO 0.534
+(need <0.50), Deflated Sharpe ≈0, XGBoost candidate won only 3/8 fold
+selections (need ≥75% consistency). Improved from the diluted portfolio
+test's PBO 0.714, but not over the line. **Recommendation: leave
+`xgb_confirmation_enabled`/`cnn_scoring_enabled` off in both live
+configs** — the plan's own pre-registered honest, acceptable outcome (a
+classifier that ranks well doesn't automatically mean acting on it beats
+not acting, once real frictions and sparse signal frequency are in the
+loop). No config file touched. Separately closed the meta-model wiring gap
+flagged in item 2 (`calibrated_probability` now sources from the meta
+model, gated behind its own independent, still-off-by-default
+`xgb_meta_confirmation_enabled` knob, now that a real trained artifact
+exists) — zero live behavior change either way, both flags still off.
 
-**Net engineering scope**: ~200 new/updated tests across 15 files, every
+**Item 9** (a real live paper-trading shadow period accumulating enough
+attributed days, then gating any re-enable through the existing fail-
+closed rollout gate) is explicitly **out of scope for a single session** —
+requires real elapsed calendar days. Confirmed the gate structurally
+cannot pass today regardless of backtest verdict (zero live-attributed
+days for a same-day retrain). Left for a human to revisit later if new
+evidence (e.g. a longer/cross-validated Sharpe re-test) changes the
+picture.
+
+**Net engineering scope**: ~230 new/updated tests across 16 files, every
 commit landed with a full green run of the pattern/ML-adjacent suite
-(final count 571 passed, 6 skipped) plus the full repo suite checked
-separately. No config file changed — every new knob in
-`pattern_recognition.py` defaults off, matching this file's own
+(final count 571+ passed, 6 skipped) plus the full repo suite checked
+separately. No config file changed anywhere in Part A or B — every new
+knob in `pattern_recognition.py` defaults off, matching this file's own
 established convention throughout.
+
+## 11. 2026-09-27 Part D1 — ensemble redundancy audit (inconclusive, two follow-ups)
+
+Ran in parallel with Part B, per the plan's "Highest priority" ranking for
+broader P&L levers independent of pattern_recognition. Full findings in
+`docs/ensemble_redundancy_audit_2026_09.md`; summary:
+
+- A prior, uncommitted "Phase 2" correlation finding (momentum↔event_driven
+  = 0.74) does **not replicate** in a fresh measurement against the real
+  current 11-strategy roster (-0.44, opposite sign, different roster/window)
+  — treated as refuted, not glossed over.
+- Real redundant cluster found instead: `multi_factor`↔`seasonality` = 0.72
+  (highest in the matrix), `seasonality`↔`regime_hmm` = 0.53 — `multi_factor`
+  is the cluster's clear standout (Sharpe 0.80), the other two are
+  flat/negative (0.06 / -0.55).
+- `signal_combination: optimal` empirically parks 54.3% of its weight on
+  `sentiment` (likely a data-coverage artifact — its cache only starts
+  2025-11-17) while starving `multi_factor` (this window's best standalone
+  Sharpe) of weight (1.4%, smallest of all 11) — a genuine mechanism-level
+  blind spot (inverse-covariance can't distinguish "genuinely low-risk"
+  from "recently started"), independent of the redundancy question.
+- Full-vs-8-strategy-leaner-subset walk-forward: genuinely mixed, honestly
+  reported (leaner subset selected 2/3 folds, both strongly positive OOS;
+  full roster's one selected fold strongly negative OOS) but the formal
+  PBO gate still fails (0.705, n=3 folds, no cross-candidate counterfactual
+  — too thin a sample to act on alone).
+
+**Recommendation: inconclusive on strategy removal — no config change on
+this evidence.** Two concrete, separately-actionable follow-ups instead:
+(a) a more surgical "drop `regime_hmm` + `seasonality` only" re-test, (b)
+fix `optimal`'s history-length blind spot (arguably the more urgent
+finding) before further redundancy work, since it distorts every
+downstream weight regardless of roster.
