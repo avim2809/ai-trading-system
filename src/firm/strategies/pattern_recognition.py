@@ -403,6 +403,29 @@ class PatternRecognitionStrategy(BaseStrategy):
         cnn_available = bool(p["cnn_scoring_enabled"]) and cnn_inference.is_available()
         xgb_available = xgb_enabled and xgb_inference.is_available()
 
+        # Market-proxy close series, date-keyed, built ONCE per generate()
+        # call (Part B item 6, 2026-09-27) -- only when xgb_available,
+        # since this feeds build_features' market_ohlcv argument, which
+        # only matters inside the xgb_available branch below; skipping it
+        # otherwise avoids the pivot/mean cost on the (default) path where
+        # xgb_confirmation_enabled is off. Equal-weight average of
+        # adj_close across the whole scanned universe, same convention as
+        # firm.regime.detector.MarketRegimeDetector._market_proxy's own
+        # universe-average fallback (no single benchmark_symbol config
+        # here -- this strategy has no equivalent knob, and an equal-weight
+        # proxy needs no extra config to already be point-in-time correct).
+        market_proxy_by_date = None
+        if xgb_available:
+            try:
+                market_proxy_by_date = (
+                    prices_df.pivot_table(index="date", columns="symbol", values="adj_close")
+                    .mean(axis=1)
+                    .sort_index()
+                )
+            except Exception:
+                log.debug("pattern_recognition: market-proxy construction failed", exc_info=True)
+                market_proxy_by_date = None
+
         cnn_calibration = None
         cnn_temperature = 1.0
         if p["cnn_calibration_path"]:
@@ -543,7 +566,30 @@ class PatternRecognitionStrategy(BaseStrategy):
             calibrated_probability = None
             xgb_p_target = None
             if xgb_available:
-                features = build_features(best, ohlcv)
+                # Market-proxy window aligned to THIS symbol's own dates
+                # (Part B item 6, 2026-09-27) -- reindexing the shared,
+                # once-per-cycle date-keyed proxy onto sym_df["date"]
+                # rather than assuming every symbol shares one common
+                # length/date range (a newly-listed symbol, or one with a
+                # gap, would otherwise silently misalign). None (fail-soft)
+                # if any date in this symbol's own window isn't present in
+                # the proxy -- build_features' own market_ohlcv contract
+                # requires exact positional/date alignment, never a
+                # best-effort partial one.
+                market_ohlcv = None
+                if market_proxy_by_date is not None:
+                    try:
+                        aligned = market_proxy_by_date.reindex(sym_df["date"].to_numpy())
+                        if not aligned.isna().any():
+                            market_ohlcv = pd.DataFrame({"close": aligned.to_numpy()})
+                    except Exception:
+                        log.debug(
+                            "pattern_recognition: market-proxy alignment failed for %s",
+                            symbol, exc_info=True,
+                        )
+                        market_ohlcv = None
+
+                features = build_features(best, ohlcv, market_ohlcv=market_ohlcv)
                 xgb_result = xgb_inference.score_pattern_confirmation(
                     np.fromiter(features.values(), dtype=np.float32, count=len(features)),
                     apply_calibration=xgb_calibration,

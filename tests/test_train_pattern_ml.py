@@ -108,6 +108,46 @@ class TestBuildDatasetSampleWeight:
         assert "sample_weight" in meta.columns
         assert "exit_date" in meta.columns
 
+
+class TestBuildDatasetMarketContext:
+    """Part B item 6 (2026-09-27): build_dataset now aligns and feeds a
+    market-proxy window into build_features -- not just infrastructure
+    sitting unused (same bar Part A item 6's regime discount was held to)."""
+
+    def test_market_context_is_actually_populated_for_some_rows(self):
+        panel = _panel(["AAPL", "MSFT", "NVDA"], n_days=500)
+        X, y, meta = build_dataset(
+            panel, zigzag_pct=0.03, min_score=0.0, confirm_lookback_bars=3,
+            stop_atr_floor=1.5, timeout_bars=20, min_window_bars=60, step_bars=10,
+        )
+        if X.empty:
+            pytest.skip("fixture produced zero confirmed matches -- nothing to check")
+
+        assert "market_context_available" in X.columns
+        # Not every row necessarily clears the regime-feature rolling
+        # warmup this early in a symbol's own window, but SOME real,
+        # multi-symbol run must actually engage the market-context path --
+        # otherwise this is silently dead wiring.
+        assert (X["market_context_available"] == 1.0).any()
+
+    def test_single_symbol_panel_has_zero_relative_strength_symbol_is_its_own_market(self):
+        # With exactly one symbol, the equal-weight market proxy IS that
+        # symbol's own close series -> symbol return == market return ->
+        # relative_strength must be exactly 0 for every populated row.
+        panel = _panel(["AAPL"], n_days=500)
+        X, y, meta = build_dataset(
+            panel, zigzag_pct=0.03, min_score=0.0, confirm_lookback_bars=3,
+            stop_atr_floor=1.5, timeout_bars=20, min_window_bars=60, step_bars=10,
+        )
+        if X.empty:
+            pytest.skip("fixture produced zero confirmed matches -- nothing to check")
+
+        available = X[X["market_context_available"] == 1.0]
+        if available.empty:
+            pytest.skip("no row cleared market-context availability in this fixture")
+        np.testing.assert_allclose(available["relative_strength"].to_numpy(), 0.0, atol=1e-9)
+        np.testing.assert_allclose(available["market_return_pct"].to_numpy(), available["pre_pattern_return"].to_numpy(), atol=1e-9)
+
     def test_exit_date_is_on_or_after_confirm_date(self):
         panel = _panel(["AAPL", "MSFT"], n_days=400)
         X, y, meta = build_dataset(

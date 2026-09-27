@@ -246,9 +246,10 @@ def score_pattern_confirmation(
             DataFrame column order for a single row), which is the
             authoritative source of truth this function defers to rather
             than re-deriving/hardcoding feature names itself. As of this
-            writing (post Part B item 5, 2026-09-27 -- ``entry``/``stop``/
-            ``target``/``confirm_index`` removed, ``bars_since_confirm``
-            added, see that function's docstring) that order is:
+            writing (post Part B items 5-6, 2026-09-27 -- ``entry``/``stop``/
+            ``target``/``confirm_index`` removed, ``bars_since_confirm``/
+            ``dollar_volume_adv_log``/market-context columns added, see
+            that function's docstring) that order is:
             ``direction_sign, fit_quality, geometry_tolerance_used,
             volume_ratio, volume_ratio_missing, duration_bars,
             follow_through_atr, risk_reward, quality_score, num_pivots,
@@ -259,8 +260,11 @@ def score_pattern_confirmation(
             pattern_<name>`` (one column per entry of
             ``firm.patterns.ml.feature_engineering.PATTERN_NAMES``, in that
             tuple's order) ``, pre_pattern_return, pre_pattern_volatility,
-            atr_pct, bars_since_confirm, ohlcv_context_available`` -- 44
-            columns total. **The on-disk ``data/models/pattern_xgb.onnx``
+            atr_pct, bars_since_confirm, dollar_volume_adv_log,
+            ohlcv_context_available, market_return_pct, relative_strength,
+            regime_log_ret, regime_log_ret_5d, regime_atr_pct,
+            regime_vol_spike, market_context_available`` -- 52 columns
+            total. **The on-disk ``data/models/pattern_xgb.onnx``
             artifact as of this writing still expects the OLD 47-column
             layout** (trained before this schema change) and is therefore
             stale: :func:`score_pattern_confirmation` will detect the

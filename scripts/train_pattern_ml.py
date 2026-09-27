@@ -167,6 +167,21 @@ def build_dataset(
         empty_meta["exit_date"] = pd.Series(dtype="datetime64[ns]")
         return pd.DataFrame(), np.array([], dtype=int), empty_meta
 
+    # Market-proxy close series, date-keyed, built ONCE for the whole panel
+    # (Part B item 6, 2026-09-27) -- equal-weight average of adj_close
+    # across every symbol, mirroring
+    # firm.strategies.pattern_recognition.generate()'s own construction
+    # (and firm.regime.detector.MarketRegimeDetector._market_proxy's
+    # universe-average fallback) so training-time and live-inference-time
+    # market context mean the same thing.
+    try:
+        market_proxy_by_date = (
+            panel.pivot_table(index="date", columns="symbol", values="adj_close").mean(axis=1).sort_index()
+        )
+    except Exception:
+        log.exception("build_dataset: market-proxy construction failed -- market-context features will be unavailable")
+        market_proxy_by_date = None
+
     for symbol, sym_df in panel.groupby("symbol"):
         sym_df = sym_df.sort_values("date").reset_index(drop=True)
         try:
@@ -175,12 +190,29 @@ def build_dataset(
             log.exception("build_dataset: failed to build adjusted OHLC for %s", symbol)
             continue
 
+        # Aligned to this symbol's FULL date range once; sliced per-cutoff
+        # below (same [:cutoff] the symbol's own `window` is sliced to) --
+        # None (fail-soft) if any date in this symbol's own series isn't
+        # present in the market proxy (build_features' market_ohlcv
+        # contract requires exact alignment, never a best-effort partial
+        # one -- see that function's own docstring).
+        market_ohlcv_full = None
+        if market_proxy_by_date is not None:
+            try:
+                aligned = market_proxy_by_date.reindex(sym_df["date"].to_numpy())
+                if not aligned.isna().any():
+                    market_ohlcv_full = pd.DataFrame({"close": aligned.to_numpy()})
+            except Exception:
+                log.debug("build_dataset: market-proxy alignment failed for %s", symbol, exc_info=True)
+                market_ohlcv_full = None
+
         n = len(ohlcv)
         if n < min_window_bars:
             continue
         seen_confirm_indices: set[int] = set()
         for cutoff in range(min_window_bars, n + 1, step_bars):
             window = ohlcv.iloc[:cutoff]
+            market_window = market_ohlcv_full.iloc[:cutoff] if market_ohlcv_full is not None else None
             try:
                 matches = scan_symbol(
                     window,
@@ -206,7 +238,7 @@ def build_dataset(
                 except ValueError:
                     log.exception("build_dataset: labeling failed for %s/%s", symbol, match.pattern)
                     continue
-                feature_rows.append(build_features(match, window))
+                feature_rows.append(build_features(match, window, market_ohlcv=market_window))
                 labels.append(label)
                 meta_rows.append({
                     "symbol": symbol,

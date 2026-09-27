@@ -755,6 +755,48 @@ def test_pattern_recognition_xgb_ensemble_blends_and_gates_on_disagreement(monke
     assert sig.score == pytest.approx(expected, abs=1e-6)  # bull flag -> long -> + sign
 
 
+def test_pattern_recognition_xgb_ensemble_passes_aligned_market_context_to_build_features(monkeypatch):
+    """Part B item 6 (2026-09-27): when xgb_confirmation_enabled, generate()
+    must build a real, positionally-aligned market_ohlcv and pass it to
+    build_features -- not leave the new market-context feature block
+    permanently unused (the same "not a decorative modifier" bar Part A
+    item 6 held the regime discount to)."""
+    from firm.strategies import pattern_recognition as pr_module
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference, "score_pattern_confirmation", lambda features, **kwargs: (0.1, 0.1, 0.8),
+    )
+    captured_market_ohlcv = {}
+    real_build_features = pr_module.build_features
+
+    def _capturing_build_features(match, ohlcv, *, market_ohlcv=None, **kwargs):
+        captured_market_ohlcv[match.direction] = market_ohlcv  # unique enough per call here
+        return real_build_features(match, ohlcv, market_ohlcv=market_ohlcv, **kwargs)
+
+    monkeypatch.setattr(pr_module, "build_features", _capturing_build_features)
+
+    # Same anchors/date range for both symbols -> dates align exactly,
+    # so alignment must succeed (not silently fall back to None).
+    prices_df = pd.concat([
+        _build_prices_df("AAA", _BULL_FLAG_ANCHORS, 31, spike_at=30),
+        _build_prices_df("BBB", _BULL_FLAG_ANCHORS, 31, spike_at=30),
+    ], ignore_index=True)
+    pit_view = _FakePitView(prices_df, ["AAA", "BBB"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(params={"xgb_confirmation_enabled": True}).generate(pit_view)
+
+    assert len(signals) == 2
+    assert len(captured_market_ohlcv) == 1  # both AAA/BBB confirm "long" (same anchors) -> 1 dict key
+    market_ohlcv = next(iter(captured_market_ohlcv.values()))
+    assert market_ohlcv is not None
+    assert "close" in market_ohlcv.columns
+    # AAA and BBB are IDENTICAL price series here -> the equal-weight
+    # market proxy must equal each one's own close exactly.
+    aaa_close = prices_df[prices_df["symbol"] == "AAA"].sort_values("date")["adj_close"].to_numpy()
+    np.testing.assert_allclose(market_ohlcv["close"].to_numpy(), aaa_close)
+
+
 def test_pattern_recognition_xgb_ensemble_populates_calibrated_probability_when_calibration_configured(monkeypatch, tmp_path):
     from firm.patterns.ml.calibration import save_calibration
     from firm.strategies import pattern_recognition as pr_module

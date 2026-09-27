@@ -312,6 +312,137 @@ class TestBuildFeatures:
         assert small_match.confirm_index != large_match.confirm_index
 
 
+class TestDollarVolumeAdv:
+    """Part B item 6 (2026-09-27): liquidity/tradability feature, computed
+    purely from the symbol's own ohlcv -- no market_ohlcv needed."""
+
+    def test_zero_when_ohlcv_unavailable(self):
+        feats = build_features(_make_match(), None)
+        assert feats["dollar_volume_adv_log"] == 0.0
+
+    def test_higher_dollar_volume_gets_a_higher_log_feature(self):
+        closes = 100.0 + np.arange(30, dtype=float)
+        low_volume_ohlcv = pd.DataFrame({
+            "high": closes + 0.5, "low": closes - 0.5, "close": closes,
+            "volume": np.full(30, 1_000.0),
+        })
+        high_volume_ohlcv = pd.DataFrame({
+            "high": closes + 0.5, "low": closes - 0.5, "close": closes,
+            "volume": np.full(30, 1_000_000.0),
+        })
+        match = _make_match(confirm_index=25)
+        low_feats = build_features(match, low_volume_ohlcv)
+        high_feats = build_features(match, high_volume_ohlcv)
+        assert high_feats["dollar_volume_adv_log"] > low_feats["dollar_volume_adv_log"]
+
+    def test_is_finite_and_non_negative_for_realistic_inputs(self):
+        closes = 100.0 + np.arange(30, dtype=float)
+        ohlcv = pd.DataFrame({
+            "high": closes + 0.5, "low": closes - 0.5, "close": closes,
+            "volume": np.full(30, 5_000_000.0),
+        })
+        feats = build_features(_make_match(confirm_index=25), ohlcv)
+        assert np.isfinite(feats["dollar_volume_adv_log"])
+        assert feats["dollar_volume_adv_log"] >= 0.0
+
+
+class TestMarketContextFeatures:
+    """Part B item 6 (2026-09-27): cross-sectional/regime features derived
+    from an optional, positionally-aligned market-proxy OHLCV window."""
+
+    def _aligned_frames(self, n=60, symbol_drift=1.0, market_drift=0.5, seed=0):
+        rng = np.random.RandomState(seed)
+        symbol_close = 100.0 + symbol_drift * np.arange(n) + rng.normal(0, 0.1, n)
+        market_close = 100.0 + market_drift * np.arange(n) + rng.normal(0, 0.1, n)
+        symbol_ohlcv = pd.DataFrame({
+            "high": symbol_close + 0.5, "low": symbol_close - 0.5, "close": symbol_close,
+            "volume": np.full(n, 1_000_000.0),
+        })
+        market_ohlcv = pd.DataFrame({
+            "high": market_close + 0.5, "low": market_close - 0.5, "close": market_close,
+            "volume": np.full(n, 2_000_000.0),
+        })
+        return symbol_ohlcv, market_ohlcv
+
+    def test_zero_and_flagged_when_market_ohlcv_absent(self):
+        symbol_ohlcv, _ = self._aligned_frames()
+        feats = build_features(_make_match(confirm_index=40), symbol_ohlcv, market_ohlcv=None)
+        assert feats["market_context_available"] == 0.0
+        assert feats["market_return_pct"] == 0.0
+        assert feats["relative_strength"] == 0.0
+        assert feats["regime_log_ret"] == 0.0
+
+    def test_zero_and_flagged_when_lengths_mismatch(self):
+        symbol_ohlcv, market_ohlcv = self._aligned_frames(n=60)
+        mismatched_market = market_ohlcv.iloc[:50]
+        feats = build_features(_make_match(confirm_index=40), symbol_ohlcv, market_ohlcv=mismatched_market)
+        assert feats["market_context_available"] == 0.0
+
+    def test_zero_when_symbol_ohlcv_itself_is_none(self):
+        _symbol_ohlcv, market_ohlcv = self._aligned_frames()
+        feats = build_features(_make_match(confirm_index=40), None, market_ohlcv=market_ohlcv)
+        assert feats["market_context_available"] == 0.0
+
+    def test_available_and_populated_when_properly_aligned(self):
+        symbol_ohlcv, market_ohlcv = self._aligned_frames(n=60)
+        feats = build_features(_make_match(confirm_index=50), symbol_ohlcv, market_ohlcv=market_ohlcv)
+        assert feats["market_context_available"] == 1.0
+        assert np.isfinite(feats["market_return_pct"])
+        assert np.isfinite(feats["relative_strength"])
+        assert np.isfinite(feats["regime_log_ret"])
+        assert np.isfinite(feats["regime_atr_pct"])
+        assert np.isfinite(feats["regime_vol_spike"])
+
+    def test_relative_strength_is_symbol_return_minus_market_return(self):
+        symbol_ohlcv, market_ohlcv = self._aligned_frames(n=60, symbol_drift=2.0, market_drift=0.2, seed=1)
+        feats = build_features(
+            _make_match(confirm_index=50), symbol_ohlcv, market_ohlcv=market_ohlcv, momentum_lookback=20,
+        )
+        expected = feats["market_return_pct"]
+        symbol_close = symbol_ohlcv["close"].to_numpy()
+        symbol_return = symbol_close[50] / symbol_close[30] - 1.0
+        assert feats["relative_strength"] == pytest.approx(symbol_return - expected, rel=1e-6)
+
+    def test_strongly_outperforming_symbol_has_positive_relative_strength(self):
+        # Symbol drifting up fast, market nearly flat -> clearly positive
+        # relative strength, not just "some nonzero number".
+        symbol_ohlcv, market_ohlcv = self._aligned_frames(n=60, symbol_drift=3.0, market_drift=0.01, seed=2)
+        feats = build_features(_make_match(confirm_index=50), symbol_ohlcv, market_ohlcv=market_ohlcv)
+        assert feats["relative_strength"] > 0.0
+
+    def test_regime_features_unavailable_before_rolling_warmup_but_market_return_still_reported(self):
+        # atr_14/vol_spike need >=~20 bars of warmup (compute_regime_features
+        # drops incomplete rolling rows) -- confirm_index=10 is too early
+        # for the regime block, but market_return_pct only needs `start`.
+        symbol_ohlcv, market_ohlcv = self._aligned_frames(n=60)
+        feats = build_features(_make_match(confirm_index=10), symbol_ohlcv, market_ohlcv=market_ohlcv)
+        assert feats["market_context_available"] == 1.0
+        assert feats["regime_log_ret"] == 0.0
+        assert feats["regime_atr_pct"] == 0.0
+        # market_return_pct itself needs no warmup -- start = max(0, 10-20) = 0.
+        market_close = market_ohlcv["close"].to_numpy()
+        expected = market_close[10] / market_close[0] - 1.0
+        assert feats["market_return_pct"] == pytest.approx(expected, rel=1e-6)
+
+    def test_out_of_range_confirm_index_is_safe(self):
+        symbol_ohlcv, market_ohlcv = self._aligned_frames(n=60)
+        feats = build_features(_make_match(confirm_index=999), symbol_ohlcv, market_ohlcv=market_ohlcv)
+        assert feats["market_context_available"] == 0.0
+
+    def test_only_depends_on_data_up_to_confirm_index_no_lookahead(self):
+        # Point-in-time correctness: truncating market_ohlcv AFTER
+        # confirm_index must not change the result at all.
+        symbol_ohlcv, market_ohlcv = self._aligned_frames(n=60, seed=3)
+        match = _make_match(confirm_index=40)
+        full = build_features(match, symbol_ohlcv, market_ohlcv=market_ohlcv)
+        truncated_symbol = symbol_ohlcv.iloc[:41].reset_index(drop=True)
+        truncated_market = market_ohlcv.iloc[:41].reset_index(drop=True)
+        truncated = build_features(match, truncated_symbol, market_ohlcv=truncated_market)
+        assert full["market_return_pct"] == pytest.approx(truncated["market_return_pct"])
+        assert full["relative_strength"] == pytest.approx(truncated["relative_strength"])
+        assert full["regime_log_ret"] == pytest.approx(truncated["regime_log_ret"])
+
+
 # ---------------------------------------------------------------------------
 # label_triple_barrier
 # ---------------------------------------------------------------------------

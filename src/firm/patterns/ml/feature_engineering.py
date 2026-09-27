@@ -24,6 +24,7 @@ import pandas as pd
 
 from firm.patterns._indicators import atr14
 from firm.patterns.match import PatternMatch
+from firm.regime.features import compute_regime_features
 
 log = logging.getLogger(__name__)
 
@@ -99,6 +100,10 @@ def _ohlcv_context_features(
         # by ohlcv_context_available, so that's consistent with every other
         # zero-filled field here.
         "bars_since_confirm": 0.0,
+        # Liquidity/tradability proxy (Part B item 6, 2026-09-27) --
+        # log1p(trailing average dollar volume), log-transformed since raw
+        # dollar volume spans many orders of magnitude ($10M vs. $10B ADV).
+        "dollar_volume_adv_log": 0.0,
         "ohlcv_context_available": 0.0,
     }
     if ohlcv is None or len(ohlcv) == 0:
@@ -110,6 +115,7 @@ def _ohlcv_context_features(
     close = ohlcv["close"].to_numpy(dtype=float)
     high = ohlcv["high"].to_numpy(dtype=float)
     low = ohlcv["low"].to_numpy(dtype=float)
+    volume = ohlcv["volume"].to_numpy(dtype=float)
 
     start = max(0, idx - momentum_lookback)
     pre_pattern_return = float(close[idx] / close[start] - 1.0) if close[start] else 0.0
@@ -125,6 +131,10 @@ def _ohlcv_context_features(
     current_atr = float(atr[-1]) if len(atr) and not np.isnan(atr[-1]) else 0.0
     atr_pct = float(current_atr / close[idx]) if close[idx] else 0.0
 
+    dollar_volume_window = close[start : idx + 1] * volume[start : idx + 1]
+    avg_dollar_volume = float(np.mean(dollar_volume_window)) if len(dollar_volume_window) else 0.0
+    dollar_volume_adv_log = float(np.log1p(max(avg_dollar_volume, 0.0)))
+
     return {
         "pre_pattern_return": pre_pattern_return,
         "pre_pattern_volatility": pre_pattern_volatility,
@@ -137,7 +147,98 @@ def _ohlcv_context_features(
         # meta["bars_since_confirm"], so training-time and live-inference-
         # time features mean exactly the same thing.
         "bars_since_confirm": float(len(ohlcv) - 1 - idx),
+        "dollar_volume_adv_log": dollar_volume_adv_log,
         "ohlcv_context_available": 1.0,
+    }
+
+
+def _market_context_features(
+    match: PatternMatch,
+    ohlcv: pd.DataFrame | None,
+    market_ohlcv: pd.DataFrame | None,
+    momentum_lookback: int,
+) -> dict[str, float]:
+    """Optional cross-sectional/regime features (Part B item 6, 2026-09-27)
+    derived from a MARKET-PROXY OHLCV window (e.g. an equal-weight universe
+    average, or a benchmark symbol) -- positionally aligned to ``ohlcv``
+    (same length, row *i* = the same calendar bar in both; the caller's
+    responsibility to align, mirroring how ``ohlcv`` itself is already keyed
+    positionally by ``match.confirm_index``). Returns a zero-filled block
+    (plus ``market_context_available=0.0``) when ``market_ohlcv`` is
+    absent, mismatched in length, or too short to look back into -- same
+    fail-soft convention as :func:`_ohlcv_context_features`.
+
+    Reuses :func:`firm.regime.features.compute_regime_features` directly --
+    the cheap, pure, already-tested stationary-feature primitive an HMM
+    would otherwise be fit on -- rather than
+    :class:`firm.regime.detector.MarketRegimeDetector`'s full HMM fit/
+    classify pipeline: refitting an HMM per confirmed match would be
+    needlessly expensive, and feeding the model these raw, continuous
+    values lets gradient boosting learn its own regime structure, rather
+    than hand-collapsing everything into a discrete Bull/Chop/Bear label
+    the way ``PatternRecognitionStrategy``'s OWN regime-aware confidence
+    discount (Part A item 6) already does for a different purpose (a
+    hand-tuned rule-based discount at scan time, not a learned feature).
+    """
+    zeros = {
+        "market_return_pct": 0.0,
+        "relative_strength": 0.0,
+        "regime_log_ret": 0.0,
+        "regime_log_ret_5d": 0.0,
+        "regime_atr_pct": 0.0,
+        "regime_vol_spike": 0.0,
+        "market_context_available": 0.0,
+    }
+    if ohlcv is None or market_ohlcv is None or len(ohlcv) == 0 or len(market_ohlcv) == 0:
+        return zeros
+    if len(market_ohlcv) != len(ohlcv):
+        log.debug(
+            "feature_engineering: market_ohlcv length (%d) != ohlcv length (%d) -- "
+            "market-context features unavailable for this match (caller must "
+            "positionally align the two; see build_features' docstring)",
+            len(market_ohlcv), len(ohlcv),
+        )
+        return zeros
+    idx = match.confirm_index
+    if idx < 0 or idx >= len(market_ohlcv):
+        return zeros
+
+    market_close = market_ohlcv["close"].to_numpy(dtype=float)
+    start = max(0, idx - momentum_lookback)
+    market_return_pct = float(market_close[idx] / market_close[start] - 1.0) if market_close[start] else 0.0
+
+    symbol_close = ohlcv["close"].to_numpy(dtype=float)
+    symbol_return_pct = float(symbol_close[idx] / symbol_close[start] - 1.0) if symbol_close[start] else 0.0
+    relative_strength = symbol_return_pct - market_return_pct
+
+    regime_feats = compute_regime_features(market_ohlcv.iloc[: idx + 1])
+    if idx not in regime_feats.index:
+        # Regime features need a rolling warmup (ATR-14/vol-MA-20) the
+        # market-proxy window hasn't cleared yet at this point in time --
+        # market_return_pct/relative_strength above only need `start`, so
+        # they're still reported; the regime block alone falls back to 0.0.
+        return {
+            "market_return_pct": market_return_pct,
+            "relative_strength": relative_strength,
+            "regime_log_ret": 0.0,
+            "regime_log_ret_5d": 0.0,
+            "regime_atr_pct": 0.0,
+            "regime_vol_spike": 0.0,
+            "market_context_available": 1.0,
+        }
+
+    row = regime_feats.loc[idx]
+    market_close_at_idx = market_close[idx]
+    regime_atr_pct = float(row["atr_14"] / market_close_at_idx) if market_close_at_idx else 0.0
+
+    return {
+        "market_return_pct": market_return_pct,
+        "relative_strength": relative_strength,
+        "regime_log_ret": float(row["log_ret"]),
+        "regime_log_ret_5d": float(row["log_ret_5d"]),
+        "regime_atr_pct": regime_atr_pct,
+        "regime_vol_spike": float(row["vol_spike"]),
+        "market_context_available": 1.0,
     }
 
 
@@ -146,6 +247,7 @@ def build_features(
     ohlcv: pd.DataFrame | None = None,
     *,
     momentum_lookback: int = 20,
+    market_ohlcv: pd.DataFrame | None = None,
 ) -> dict[str, float]:
     """Flatten one confirmed :class:`PatternMatch` into an all-numeric,
     all-finite feature dict for XGBoost.
@@ -190,6 +292,19 @@ def build_features(
     ``ohlcv_context_available=0.0``), which is what keeps this a pure,
     single-argument-testable function rather than one that requires network/
     disk access to unit test.
+
+    ``market_ohlcv`` (Part B item 6, 2026-09-27) is an OPTIONAL market-proxy
+    OHLCV window (e.g. an equal-weight universe average, or a benchmark
+    symbol) that must be POSITIONALLY ALIGNED to ``ohlcv`` -- same length,
+    row *i* is the same calendar bar in both. This is the caller's
+    responsibility (both ``firm.strategies.pattern_recognition`` and
+    ``scripts/train_pattern_ml.py`` build it by reindexing a date-keyed
+    market-proxy series onto the symbol's own date range before calling
+    this function) -- see :func:`_market_context_features`'s own docstring
+    for the fail-soft contract (zeroed + flagged when absent/mismatched/too
+    short, same convention as every other optional block here) and for why
+    this reuses ``firm.regime.features.compute_regime_features`` directly
+    rather than a full HMM regime fit.
 
     Every value is a plain Python ``float`` (0.0/1.0 for the one-hot/flag
     columns) -- no NaN is ever emitted: a missing ``volume_ratio`` (e.g. not
@@ -244,6 +359,7 @@ def build_features(
         features[f"pattern_{name}"] = 1.0 if name == match.pattern else 0.0
 
     features.update(_ohlcv_context_features(match, ohlcv, momentum_lookback))
+    features.update(_market_context_features(match, ohlcv, market_ohlcv, momentum_lookback))
     return features
 
 
