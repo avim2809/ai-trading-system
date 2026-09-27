@@ -55,12 +55,24 @@ Portfolio construction approach:
     itself only emits a directional conviction score, not position sizing.
 
 Risk notes:
-    Pattern detection has no notion of market regime by itself (no strategy
-    reaches into another's output in this codebase — regime blending already
-    happens downstream, in agents/research/_regime_weights.py, exactly as it
-    does for every other strategy including regime_hmm). A confirmed pattern
-    in a strongly adverse regime will still fire here at full score; regime
-    context should be layered on afterward, not inside this strategy.
+    Pattern detection originally had no notion of market regime by itself
+    (no strategy reaches into another's output in this codebase — regime
+    blending already happens downstream, in agents/research/_regime_weights.py,
+    exactly as it does for every other strategy including regime_hmm, and
+    still does). As of Part A item 6 (2026-09-27) this strategy additionally
+    builds its own MarketRegimeDetector instance the same way RiskAgent's
+    regime_overlay does (strategies never receive ctx.market_regime, so this
+    is a second, independent detector call, not a shared one) and applies a
+    direction-aware confidence discount: a pattern whose direction conflicts
+    with the labelled regime (e.g. a long pattern confirming in a Bear
+    regime), or any pattern confirming in Chop, is discounted rather than
+    fired at full score regardless of regime — gated by
+    regime_discount_enabled (off by default, pending its own walk-forward
+    re-validation, same convention as every other knob here). The downstream
+    per-strategy score multiplier in _regime_weights.py is unaffected and
+    still applies afterward on top of this — the two are complementary
+    (this one touches quality_fraction/confidence at the point of
+    detection; that one touches score post-hoc across all strategies).
     Enabled in both config/live.yaml and config/live_alpaca.yaml's
     strategies.enabled list since 2026-09-09 (see docs/pattern_recognition_plan.md
     §8 for the CNN/XGBoost-ensemble rollout and rollback history — the
@@ -95,6 +107,48 @@ log = logging.getLogger(__name__)
 #: relative per-instance path.
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_SAMPLE_COUNTS_PATH = _PROJECT_ROOT / "data" / "models" / sample_size.DEFAULT_SAMPLE_COUNTS_FILENAME
+
+
+def _regime_confidence_discount(
+    regime_state,
+    direction: str,
+    *,
+    chop_discount: float,
+    misaligned_discount: float,
+    min_separation: float,
+    separation_damping_floor: float,
+) -> float:
+    """Direction-aware regime confidence discount (Part A item 6).
+
+    A confirmed long pattern in an HMM-labelled Bear regime (or a short
+    pattern in a Bull regime) is directionally misaligned with the
+    prevailing market state and gets discounted; Chop gets a universal
+    discount regardless of direction (breakout-style patterns are prone to
+    whipsaw in range-bound markets). Bull/Bear discounts are themselves
+    damped toward 1.0 (no-op) when ``RegimeState.separation`` indicates the
+    label was assigned by a thin, noise-level margin -- same idiom as
+    ``firm.strategies.regime_hmm``'s own separation-based damping. Chop's
+    separation is always ``inf`` by convention (see ``RegimeState``'s own
+    docstring), so its discount is never damped.
+    """
+    from firm.regime.model import BEAR, BULL, CHOP
+
+    if regime_state.label == CHOP:
+        return max(0.0, min(1.0, chop_discount))
+
+    aligned = (regime_state.label == BULL and direction == "long") or (
+        regime_state.label == BEAR and direction == "short"
+    )
+    if aligned:
+        return 1.0
+
+    misaligned_discount = max(0.0, min(1.0, misaligned_discount))
+    if min_separation <= 0:
+        return misaligned_discount
+    damping = max(
+        separation_damping_floor, min(1.0, regime_state.separation / min_separation)
+    )
+    return 1.0 + (misaligned_discount - 1.0) * damping
 
 
 def _adjusted_ohlc(sym_df: pd.DataFrame) -> pd.DataFrame:
@@ -220,10 +274,52 @@ class PatternRecognitionStrategy(BaseStrategy):
         "sample_size_discount_enabled": False,
         "min_reliable_samples": sample_size.DEFAULT_MIN_RELIABLE_SAMPLES,
         "sample_counts_path": None,
+        # Market-regime-aware confidence discount (Part A item 6 -- see
+        # firm.regime.detector.MarketRegimeDetector / firm.regime.model.
+        # RegimeState). Already used by RiskAgent's regime_overlay and by
+        # agents/research/_regime_weights.py's per-strategy score
+        # multiplier, but neither reaches into a strategy's own
+        # confidence -- strategies never receive ctx.market_regime (see
+        # every analyst call site: technical.py/sentiment.py/fundamental.py
+        # all call strat.generate(pit_view), never passing ctx), so this
+        # strategy builds its own detector instance the same way
+        # RiskAgent._detect_regime does. Off by default, same convention
+        # as every other knob here; needs its own walk-forward
+        # re-validation before flipping true in config/live.yaml.
+        "regime_discount_enabled": False,
+        "regime_n_states": 3,
+        "regime_lookback_days": 504,
+        "regime_retrain_frequency": 21,
+        "regime_benchmark_symbol": None,
+        # Chop: a universal (direction-agnostic) discount -- breakout-style
+        # patterns (most of the 9 detector families here) are prone to
+        # whipsaw in range-bound/mean-reverting markets.
+        "regime_chop_discount": 0.85,
+        # Bull/Bear: applied only when the pattern's own direction
+        # conflicts with the labelled regime (e.g. a long pattern
+        # confirming in a Bear regime) -- an aligned pattern (long-in-Bull,
+        # short-in-Bear) is left at full confidence, matching the intuition
+        # that a pattern fighting the prevailing trend is weaker evidence
+        # than one riding it.
+        "regime_misaligned_discount": 0.7,
+        # Bull/Bear discounts are damped toward 1.0 (no-op) when
+        # RegimeState.separation shows the label was assigned by a thin,
+        # noise-level margin -- same idiom as firm.strategies.regime_hmm's
+        # own separation-based damping (min_state_separation /
+        # separation_damping_floor there). Chop's separation is always inf
+        # by convention (see RegimeState's own docstring), so its discount
+        # is never damped.
+        "regime_min_separation": 0.5,
+        "regime_separation_damping_floor": 0.15,
     }
 
     def __init__(self, params: dict | None = None):
         super().__init__("pattern_recognition", params)
+        # Lazily constructed on first use with a regime-discount-enabled
+        # generate() call -- same pattern as RiskAgent._regime_detector
+        # (retrain cadence lives on the detector instance itself, so it
+        # must persist across generate() calls, not be rebuilt each cycle).
+        self._regime_detector = None
 
     def generate(self, pit_view: PitView) -> list[Signal]:
         p = {**self.default_params, **(self.params or {})}
@@ -264,6 +360,32 @@ class PatternRecognitionStrategy(BaseStrategy):
         # not per-symbol -- fail-soft to None (no discount) if missing/corrupt,
         # same convention as firm.patterns.ml.calibration.load_calibration.
         sample_counts = sample_size.load_sample_counts(sample_counts_path) if sample_discount_enabled else None
+
+        regime_discount_enabled = bool(p["regime_discount_enabled"])
+        regime_chop_discount = float(p["regime_chop_discount"])
+        regime_misaligned_discount = float(p["regime_misaligned_discount"])
+        regime_min_separation = float(p["regime_min_separation"])
+        regime_separation_damping_floor = float(p["regime_separation_damping_floor"])
+        # Detected once per generate() call (a single market-wide read, not
+        # per-symbol) -- same cadence as RiskAgent._detect_regime. Fail-soft
+        # to None (no discount applied below) on missing history, missing
+        # hmmlearn, or any fit/decode failure -- never a hard failure.
+        regime_state = None
+        if regime_discount_enabled:
+            if self._regime_detector is None:
+                from firm.regime.detector import MarketRegimeDetector
+
+                self._regime_detector = MarketRegimeDetector(
+                    n_states=int(p["regime_n_states"]),
+                    lookback_days=int(p["regime_lookback_days"]),
+                    retrain_frequency=int(p["regime_retrain_frequency"]),
+                    benchmark_symbol=p["regime_benchmark_symbol"],
+                )
+            try:
+                regime_state = self._regime_detector.detect(pit_view)
+            except Exception:
+                log.debug("pattern_recognition: regime detection failed", exc_info=True)
+                regime_state = None
 
         universe = pit_view.universe
         if not universe:
@@ -320,13 +442,17 @@ class PatternRecognitionStrategy(BaseStrategy):
 
         log.info(
             "pattern_recognition: quality scoring mode=%s, xgb_confirmation=%s, "
-            "zigzag=%s, retest_modifier=%s, confluence_modifier=%s, significance_test=%s",
+            "zigzag=%s, retest_modifier=%s, confluence_modifier=%s, significance_test=%s, "
+            "regime_discount=%s",
             "cnn" if cnn_available else "rule_based",
             "on" if xgb_available else "off",
             f"atr(mult={zigzag_atr_mult})" if zigzag_atr_mult else f"fixed(pct={zigzag_pct})",
             "on" if retest_enabled else "off",
             "on" if confluence_enabled else "off",
             "on" if significance_enabled else "off",
+            f"on(regime={regime_state.label})" if regime_discount_enabled and regime_state else (
+                "on(unavailable)" if regime_discount_enabled else "off"
+            ),
         )
 
         signals: list[Signal] = []
@@ -466,6 +592,19 @@ class PatternRecognitionStrategy(BaseStrategy):
                 )
                 quality_fraction = float(np.clip(quality_fraction * sample_size_discount, 0.0, 1.0))
 
+            regime_discount = 1.0
+            regime_label = None
+            if regime_discount_enabled and regime_state is not None:
+                regime_label = regime_state.label
+                regime_discount = _regime_confidence_discount(
+                    regime_state, best.direction,
+                    chop_discount=regime_chop_discount,
+                    misaligned_discount=regime_misaligned_discount,
+                    min_separation=regime_min_separation,
+                    separation_damping_floor=regime_separation_damping_floor,
+                )
+                quality_fraction = float(np.clip(quality_fraction * regime_discount, 0.0, 1.0))
+
             signals.append(
                 Signal(
                     symbol=str(symbol),
@@ -503,6 +642,11 @@ class PatternRecognitionStrategy(BaseStrategy):
                         # 1.0 (no-op) whenever sample_size_discount_enabled
                         # is False (the default) -- never a placeholder.
                         "sample_size_discount": sample_size_discount,
+                        # 1.0/None (no-op) whenever regime_discount_enabled
+                        # is False, or regime detection was unavailable
+                        # this cycle -- never a placeholder value.
+                        "regime_discount": regime_discount,
+                        "regime_label": regime_label,
                     },
                 )
             )

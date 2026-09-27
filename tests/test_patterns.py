@@ -1074,3 +1074,229 @@ def test_pattern_recognition_sample_discount_well_represented_pattern_unaffected
 
     assert signals[0].meta["sample_size_discount"] == 1.0
 
+
+# ---------------------------------------------------------------------------
+# Market-regime-aware confidence discount (Part A item 6)
+# ---------------------------------------------------------------------------
+
+class _FakeRegimeState:
+    """Stand-in for firm.regime.model.RegimeState -- only the two fields
+    _regime_confidence_discount actually reads."""
+
+    def __init__(self, label: str, separation: float = float("inf")):
+        self.label = label
+        self.separation = separation
+
+
+class _FakeRegimeDetector:
+    """Stand-in for firm.regime.detector.MarketRegimeDetector -- pre-set on
+    the strategy instance's ``_regime_detector`` attribute so generate()'s
+    lazy-init branch (``if self._regime_detector is None``) is skipped and
+    detection is fully deterministic, without needing 120+ bars of real
+    history or a real HMM fit (this is the same monkeypatch-the-collaborator
+    idiom used for cnn_inference/xgb_inference elsewhere in this file)."""
+
+    def __init__(self, state):
+        self._state = state
+
+    def detect(self, pit_view):
+        return self._state
+
+
+class TestRegimeConfidenceDiscount:
+    """Pure unit tests for _regime_confidence_discount -- exhaustive over
+    the aligned/misaligned/Chop branches and the separation-based damping,
+    independent of any real HMM fit."""
+
+    def test_long_pattern_in_bull_regime_is_aligned_no_discount(self):
+        from firm.strategies.pattern_recognition import _regime_confidence_discount
+
+        state = _FakeRegimeState("Bull", separation=float("inf"))
+        discount = _regime_confidence_discount(
+            state, "long", chop_discount=0.85, misaligned_discount=0.7,
+            min_separation=0.5, separation_damping_floor=0.15,
+        )
+        assert discount == 1.0
+
+    def test_short_pattern_in_bear_regime_is_aligned_no_discount(self):
+        from firm.strategies.pattern_recognition import _regime_confidence_discount
+
+        state = _FakeRegimeState("Bear", separation=float("inf"))
+        discount = _regime_confidence_discount(
+            state, "short", chop_discount=0.85, misaligned_discount=0.7,
+            min_separation=0.5, separation_damping_floor=0.15,
+        )
+        assert discount == 1.0
+
+    def test_long_pattern_in_bear_regime_is_misaligned_full_discount_at_full_separation(self):
+        from firm.strategies.pattern_recognition import _regime_confidence_discount
+
+        state = _FakeRegimeState("Bear", separation=10.0)  # far above threshold
+        discount = _regime_confidence_discount(
+            state, "long", chop_discount=0.85, misaligned_discount=0.7,
+            min_separation=0.5, separation_damping_floor=0.15,
+        )
+        assert discount == pytest.approx(0.7)
+
+    def test_short_pattern_in_bull_regime_is_misaligned_full_discount_at_full_separation(self):
+        from firm.strategies.pattern_recognition import _regime_confidence_discount
+
+        state = _FakeRegimeState("Bull", separation=10.0)
+        discount = _regime_confidence_discount(
+            state, "short", chop_discount=0.85, misaligned_discount=0.7,
+            min_separation=0.5, separation_damping_floor=0.15,
+        )
+        assert discount == pytest.approx(0.7)
+
+    def test_chop_discount_applies_regardless_of_direction(self):
+        from firm.strategies.pattern_recognition import _regime_confidence_discount
+
+        for direction in ("long", "short"):
+            state = _FakeRegimeState("Chop", separation=float("inf"))
+            discount = _regime_confidence_discount(
+                state, direction, chop_discount=0.85, misaligned_discount=0.7,
+                min_separation=0.5, separation_damping_floor=0.15,
+            )
+            assert discount == pytest.approx(0.85)
+
+    def test_thin_separation_damps_misaligned_discount_toward_floor(self):
+        from firm.strategies.pattern_recognition import _regime_confidence_discount
+
+        # separation == 0 -> damping clamps to separation_damping_floor
+        state = _FakeRegimeState("Bear", separation=0.0)
+        discount = _regime_confidence_discount(
+            state, "long", chop_discount=0.85, misaligned_discount=0.7,
+            min_separation=0.5, separation_damping_floor=0.15,
+        )
+        # damping=0.15 -> discount = 1 + (0.7-1)*0.15 = 0.955
+        assert discount == pytest.approx(1.0 + (0.7 - 1.0) * 0.15)
+
+    def test_infinite_separation_is_never_damped(self):
+        from firm.strategies.pattern_recognition import _regime_confidence_discount
+
+        state = _FakeRegimeState("Bear", separation=float("inf"))
+        discount = _regime_confidence_discount(
+            state, "long", chop_discount=0.85, misaligned_discount=0.7,
+            min_separation=0.5, separation_damping_floor=0.15,
+        )
+        assert discount == pytest.approx(0.7)
+
+    def test_zero_min_separation_is_a_no_op_not_divide_by_zero(self):
+        from firm.strategies.pattern_recognition import _regime_confidence_discount
+
+        state = _FakeRegimeState("Bear", separation=0.0)
+        discount = _regime_confidence_discount(
+            state, "long", chop_discount=0.85, misaligned_discount=0.7,
+            min_separation=0.0, separation_damping_floor=0.15,
+        )
+        assert discount == pytest.approx(0.7)
+
+    def test_misaligned_discount_is_clipped_to_valid_range(self):
+        from firm.strategies.pattern_recognition import _regime_confidence_discount
+
+        state = _FakeRegimeState("Bear", separation=10.0)
+        discount = _regime_confidence_discount(
+            state, "long", chop_discount=0.85, misaligned_discount=1.5,
+            min_separation=0.5, separation_damping_floor=0.15,
+        )
+        assert discount == 1.0
+
+
+def test_pattern_recognition_regime_discount_off_by_default_leaves_meta_at_one():
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy().generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["regime_discount"] == 1.0
+    assert signals[0].meta["regime_label"] is None
+
+
+def test_pattern_recognition_regime_discount_unavailable_is_a_no_op():
+    # min_data_points defaults to 120; this fixture only has 31 bars, so the
+    # real MarketRegimeDetector.detect() returns None (insufficient history)
+    # -- exercising the actual fail-soft path, not a mock.
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={"regime_discount_enabled": True},
+    ).generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["regime_discount"] == 1.0
+    assert signals[0].meta["regime_label"] is None
+
+
+def test_pattern_recognition_regime_discount_shrinks_misaligned_pattern():
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    baseline = PatternRecognitionStrategy().generate(pit_view)
+    assert len(baseline) == 1 and baseline[0].meta["direction"] == "long"
+
+    strategy = PatternRecognitionStrategy(
+        params={"regime_discount_enabled": True, "regime_misaligned_discount": 0.7},
+    )
+    strategy._regime_detector = _FakeRegimeDetector(_FakeRegimeState("Bear", separation=10.0))
+    discounted = strategy.generate(pit_view)
+
+    assert len(discounted) == 1
+    assert discounted[0].meta["regime_label"] == "Bear"
+    assert discounted[0].meta["regime_discount"] == pytest.approx(0.7)
+    assert abs(discounted[0].confidence) == pytest.approx(baseline[0].confidence * 0.7)
+    assert abs(discounted[0].score) < abs(baseline[0].score)
+
+
+def test_pattern_recognition_regime_discount_leaves_aligned_pattern_unaffected():
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    baseline = PatternRecognitionStrategy().generate(pit_view)
+    assert len(baseline) == 1 and baseline[0].meta["direction"] == "long"
+
+    strategy = PatternRecognitionStrategy(params={"regime_discount_enabled": True})
+    strategy._regime_detector = _FakeRegimeDetector(_FakeRegimeState("Bull", separation=10.0))
+    aligned = strategy.generate(pit_view)
+
+    assert len(aligned) == 1
+    assert aligned[0].meta["regime_label"] == "Bull"
+    assert aligned[0].meta["regime_discount"] == 1.0
+    assert aligned[0].confidence == pytest.approx(baseline[0].confidence)
+
+
+def test_pattern_recognition_regime_discount_applies_chop_discount_regardless_of_direction():
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    baseline = PatternRecognitionStrategy().generate(pit_view)
+
+    strategy = PatternRecognitionStrategy(
+        params={"regime_discount_enabled": True, "regime_chop_discount": 0.85},
+    )
+    strategy._regime_detector = _FakeRegimeDetector(_FakeRegimeState("Chop"))
+    signals = strategy.generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["regime_label"] == "Chop"
+    assert signals[0].meta["regime_discount"] == pytest.approx(0.85)
+    assert abs(signals[0].confidence) == pytest.approx(baseline[0].confidence * 0.85)
+
+
+def test_pattern_recognition_regime_detection_failure_is_a_no_op(monkeypatch):
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    class _RaisingDetector:
+        def detect(self, pit_view):
+            raise RuntimeError("boom")
+
+    strategy = PatternRecognitionStrategy(params={"regime_discount_enabled": True})
+    strategy._regime_detector = _RaisingDetector()
+    signals = strategy.generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["regime_discount"] == 1.0
+    assert signals[0].meta["regime_label"] is None
+
