@@ -104,6 +104,9 @@ _EXPECTED_PATTERN_RECOGNITION_PARAMS = frozenset({
     "xgb_confirmation_enabled", "xgb_blend_weight", "xgb_agreement_gate",
     "xgb_agreement_gate_threshold", "xgb_agreement_gate_dampen",
     "cnn_calibration_path", "xgb_calibration_path",
+    "xgb_meta_confirmation_enabled", "xgb_meta_calibration_path",
+    # 2026-09-27, Workstream D harness (scripts/validate_pattern_ml_workstream_d.py):
+    "xgb_meta_min_confidence",
 })
 _NEW_PATTERN_RECOGNITION_PARAMS = (
     _KNOWN_PATTERN_RECOGNITION_PARAMS - _EXPECTED_PATTERN_RECOGNITION_PARAMS

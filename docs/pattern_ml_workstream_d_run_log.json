@@ -1,0 +1,12 @@
+{
+  "runs": [
+    {
+      "run_started_at": "2026-09-27T19:30:50.004511+00:00",
+      "run_finished_at": "2026-09-27T19:33:41.580586+00:00",
+      "dry_run": true,
+      "workstream_c_landed": false,
+      "bars_fingerprint": "29839aa6fd63d40d0af626eef7e31b18ebb8735028b51d95623ad5b4829ca916",
+      "overall_pass": false
+    }
+  ]
+}

@@ -264,6 +264,25 @@ class PatternRecognitionStrategy(BaseStrategy):
         # existence.
         "xgb_meta_confirmation_enabled": False,
         "xgb_meta_calibration_path": None,
+        # Meta-confidence HARD gate (Workstream D harness, 2026-09-27 --
+        # see docs/pattern_recognition_plan.md's Workstream D and
+        # scripts/validate_pattern_ml_workstream_d.py). None (default) is a
+        # full no-op. Unlike calibrated_probability's existing role (an
+        # input to TraderAgent._signal_calibrated_edge's Kelly sizing
+        # only -- a down-weight, never a drop), a float here is a genuine
+        # inclusion/exclusion threshold on the SEPARATE meta model's own raw
+        # P(act) (xgb_meta_p_act, not calibrated_probability -- independent
+        # of whether a calibration sidecar happens to be loaded): matches
+        # scored below it are dropped from this cycle's emitted signals
+        # entirely. This is the lever the plan's "finding a profitable
+        # subset of a zero-mean population is exactly a classifier's job"
+        # question needs -- down-weighting a losing subset can still leave
+        # it net-negative; dropping it is the only way to test whether
+        # trading ONLY the high-confidence subset is itself profitable.
+        # Only ever applies when xgb_meta_confirmation_enabled scored this
+        # match (a signal with no xgb_meta_p_act at all -- meta model off,
+        # or unavailable this cycle -- is never gated by this knob).
+        "xgb_meta_min_confidence": None,
         # Optional calibration sidecars (paths previously written by
         # firm.patterns.ml.calibration.save_calibration -- a JSON dict with
         # a "type" discriminator: "temperature" for the CNN's pre-softmax
@@ -368,6 +387,10 @@ class PatternRecognitionStrategy(BaseStrategy):
         xgb_gate_threshold = float(p["xgb_agreement_gate_threshold"])
         xgb_gate_dampen = float(p["xgb_agreement_gate_dampen"])
         xgb_meta_enabled = bool(p["xgb_meta_confirmation_enabled"])
+        xgb_meta_min_confidence = p["xgb_meta_min_confidence"]
+        xgb_meta_min_confidence = (
+            float(xgb_meta_min_confidence) if xgb_meta_min_confidence is not None else None
+        )
 
         significance_enabled = bool(p["significance_test_enabled"])
         significance_n_draws = int(p["significance_n_draws"])
@@ -815,6 +838,28 @@ class PatternRecognitionStrategy(BaseStrategy):
                         significance_max_p_value, n_rejected, int(has_p.sum()),
                     )
                 signals = [s for s, keep in zip(signals, accept) if keep]
+
+        # Meta-confidence hard gate (Workstream D harness, 2026-09-27 -- see
+        # xgb_meta_min_confidence's own docstring above for why this is a
+        # DROP, not a down-weight, and gates on xgb_meta_p_act specifically).
+        # None (default) is a full no-op -- every existing caller/test is
+        # unaffected.
+        n_meta_gated = 0
+        if xgb_meta_min_confidence is not None and signals:
+            kept = []
+            for s in signals:
+                conf = s.meta.get("xgb_meta_p_act")
+                if conf is not None and conf < xgb_meta_min_confidence:
+                    n_meta_gated += 1
+                    continue
+                kept.append(s)
+            signals = kept
+            if n_meta_gated:
+                log.debug(
+                    "pattern_recognition: meta-confidence gate (>=%.3f) dropped "
+                    "%d signal(s) this cycle",
+                    xgb_meta_min_confidence, n_meta_gated,
+                )
 
         log.info(
             "pattern_recognition: %d symbols scanned, %d signals (%d CNN-scored, "

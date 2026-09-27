@@ -104,6 +104,51 @@ class TestSharpeStats:
     def test_short_series_returns_zero(self):
         assert probabilistic_sharpe(np.array([0.1, 0.2])) == 0.0
 
+    def test_prior_trials_count_lowers_dsr(self):
+        """A bare ``prior_trials`` count (2026-09-27, Workstream D -- honest
+        cumulative cross-session deflation) must make DSR harder to pass,
+        even with no actual prior Sharpe values retained -- it inflates the
+        expected-maximum order statistic's N."""
+        rng = np.random.default_rng(9)
+        returns = rng.normal(0.0008, 0.01, size=400)
+        trials = rng.normal(0.05, 0.05, size=16)
+        dsr_no_prior = deflated_sharpe(returns, trials)
+        dsr_with_prior = deflated_sharpe(returns, trials, prior_trials=56)
+        assert dsr_with_prior <= dsr_no_prior + 1e-9
+        assert dsr_with_prior < dsr_no_prior  # strictly harder, not a no-op
+
+    def test_prior_trials_zero_is_noop(self):
+        """``prior_trials=0`` (the default) must reproduce the pre-existing
+        behaviour exactly -- every caller written before this parameter
+        existed is unaffected."""
+        rng = np.random.default_rng(10)
+        returns = rng.normal(0.0008, 0.01, size=400)
+        trials = rng.normal(0.05, 0.05, size=20)
+        assert deflated_sharpe(returns, trials, prior_trials=0) == deflated_sharpe(
+            returns, trials
+        )
+
+    def test_prior_trial_sharpes_widen_variance_and_lower_dsr(self):
+        """Real prior-session Sharpe values (``prior_trial_sharpes``), not
+        just a bare count, feed the same variance estimate as this run's own
+        trials -- a wide-spread prior history should deflate at least as
+        hard as ignoring it."""
+        rng = np.random.default_rng(11)
+        returns = rng.normal(0.001, 0.01, size=400)
+        trials = rng.normal(0.05, 0.01, size=10)  # tight cluster
+        wide_prior = rng.normal(0.05, 0.5, size=40)  # much wider spread
+        dsr_no_prior = deflated_sharpe(returns, trials)
+        dsr_with_prior = deflated_sharpe(returns, trials, prior_trial_sharpes=wide_prior)
+        assert dsr_with_prior <= dsr_no_prior + 1e-9
+
+    def test_prior_trials_and_prior_trial_sharpes_both_none_or_zero_is_noop(self):
+        rng = np.random.default_rng(12)
+        returns = rng.normal(0.001, 0.01, size=200)
+        trials = rng.normal(0.05, 0.05, size=8)
+        assert deflated_sharpe(
+            returns, trials, prior_trials=0, prior_trial_sharpes=None
+        ) == deflated_sharpe(returns, trials)
+
 
 class TestVerdict:
     def test_pass_when_both_good(self):
@@ -171,3 +216,35 @@ class TestWalkForward:
         many_result = walk_forward_overfitting(oos_folds, fold_trial_returns=many_trials)
         few_result = walk_forward_overfitting(oos_folds, fold_trial_returns=few_trials)
         assert many_result["deflated_sharpe"] <= few_result["deflated_sharpe"] + 1e-9
+
+    def test_prior_trials_threads_through_to_dsr(self):
+        """``walk_forward_overfitting``'s ``prior_trials`` must reach
+        ``deflated_sharpe`` (2026-09-27, Workstream D) -- the whole point of
+        this parameter is a fresh run honestly deflating against every
+        earlier session's trial count for this same strategy/layer, not just
+        this run's own grid."""
+        rng = np.random.default_rng(13)
+        oos_folds = [rng.normal(0.001, 0.01, size=40) for _ in range(4)]
+        trial_returns = [
+            [rng.normal(0.0005, 0.01, size=60) for _ in range(2)] for _ in range(4)
+        ]
+        no_prior = walk_forward_overfitting(oos_folds, fold_trial_returns=trial_returns)
+        with_prior = walk_forward_overfitting(
+            oos_folds, fold_trial_returns=trial_returns, prior_trials=56,
+        )
+        assert with_prior["deflated_sharpe"] <= no_prior["deflated_sharpe"] + 1e-9
+        assert with_prior["prior_trials"] == 56
+        assert with_prior["this_run_trials"] == 8  # 4 folds x 2 candidates
+
+    def test_prior_trials_default_is_noop(self):
+        rng = np.random.default_rng(14)
+        oos_folds = [rng.normal(0.001, 0.01, size=40) for _ in range(4)]
+        trial_returns = [
+            [rng.normal(0.0005, 0.01, size=60) for _ in range(3)] for _ in range(4)
+        ]
+        default = walk_forward_overfitting(oos_folds, fold_trial_returns=trial_returns)
+        explicit_zero = walk_forward_overfitting(
+            oos_folds, fold_trial_returns=trial_returns, prior_trials=0,
+        )
+        assert default["deflated_sharpe"] == explicit_zero["deflated_sharpe"]
+        assert "prior_trials" not in default

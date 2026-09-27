@@ -87,7 +87,21 @@ def test_zigzag_ignores_moves_below_threshold():
 # ---------------------------------------------------------------------------
 
 def test_head_and_shoulders_top():
-    anchors = [(0, 100.0), (10, 130.0), (20, 110.0), (30, 140.0), (40, 112.0), (50, 131.0), (70, 100.0)]
+    # 2026-09-27 (find_confirmation edge-trigger fix, Workstream C): the tail
+    # used to run straight from the right shoulder (50, 131.0) to the final
+    # bar (70, 100.0) — under the old is-beyond confirmation test that
+    # crossed the neckline once around bar ~61 and just stayed "confirmed"
+    # (i.e. still beyond) all the way to bar 70, which is what made the old
+    # test pass on a phantom "today" confirmation. Now confirmation requires
+    # an actual close[i-1]-inside -> close[i]-beyond transition, so the
+    # fixture holds just above the neckline (67, 116.0) through the last
+    # quiet bars and only breaks through in the final 3-bar confirm window,
+    # landing the genuine crossing at bar 68 (verified against the real
+    # detector, not hand-derived).
+    anchors = [
+        (0, 100.0), (10, 130.0), (20, 110.0), (30, 140.0), (40, 112.0), (50, 131.0),
+        (67, 116.0), (70, 100.0),
+    ]
     high, low, close, volume = _ohlcv(anchors, 71)
     volume = _spike(volume, 70)
     pivots = zigzag_pivots(high, low, pct=0.03)
@@ -95,12 +109,19 @@ def test_head_and_shoulders_top():
     assert matches
     match = matches[0]
     assert (match.pattern, match.direction) == ("head_shoulders_top", "short")
-    assert match.confirm_index == 70
+    assert match.confirm_index == 68
     assert match.stop > match.entry > match.target
 
 
 def test_inverse_head_and_shoulders():
-    anchors = [(0, 100.0), (10, 70.0), (20, 90.0), (30, 60.0), (40, 88.0), (50, 70.0), (70, 100.0)]
+    # Mirrors test_head_and_shoulders_top's 2026-09-27 fix: hold just below
+    # the neckline (67, 85.0) so the genuine upward crossing lands inside
+    # the last 3-bar confirm window instead of having already happened
+    # bars ago.
+    anchors = [
+        (0, 100.0), (10, 70.0), (20, 90.0), (30, 60.0), (40, 88.0), (50, 70.0),
+        (67, 85.0), (70, 100.0),
+    ]
     high, low, close, volume = _ohlcv(anchors, 71)
     volume = _spike(volume, 70)
     pivots = zigzag_pivots(high, low, pct=0.03)
@@ -112,9 +133,12 @@ def test_inverse_head_and_shoulders():
 
 
 def test_double_top():
-    anchors = [(0, 90.0), (10, 120.0), (20, 100.0), (30, 121.0), (45, 85.0)]
-    high, low, close, volume = _ohlcv(anchors, 46)
-    volume = _spike(volume, 45)
+    # 2026-09-27: breakout moved from 15 bars past the last peak (45) to 3
+    # (33) so the genuine level-crossing (not just "still past it") falls
+    # inside find_confirmation's 3-bar lookback window.
+    anchors = [(0, 90.0), (10, 120.0), (20, 100.0), (30, 121.0), (33, 85.0)]
+    high, low, close, volume = _ohlcv(anchors, 34)
+    volume = _spike(volume, 33)
     pivots = zigzag_pivots(high, low, pct=0.03)
     matches = detect_double_top(high, low, close, volume, pivots)
     assert matches
@@ -123,9 +147,10 @@ def test_double_top():
 
 
 def test_double_bottom():
-    anchors = [(0, 120.0), (10, 90.0), (20, 110.0), (30, 89.0), (45, 130.0)]
-    high, low, close, volume = _ohlcv(anchors, 46)
-    volume = _spike(volume, 45)
+    # 2026-09-27: same shrink as test_double_top, mirrored.
+    anchors = [(0, 120.0), (10, 90.0), (20, 110.0), (30, 89.0), (33, 130.0)]
+    high, low, close, volume = _ohlcv(anchors, 34)
+    volume = _spike(volume, 33)
     pivots = zigzag_pivots(high, low, pct=0.03)
     matches = detect_double_bottom(high, low, close, volume, pivots)
     assert matches
@@ -134,9 +159,11 @@ def test_double_bottom():
 
 
 def test_triple_top():
-    anchors = [(0, 90.0), (8, 120.0), (16, 102.0), (24, 121.0), (32, 103.0), (40, 120.0), (55, 90.0)]
-    high, low, close, volume = _ohlcv(anchors, 56)
-    volume = _spike(volume, 55)
+    # 2026-09-27: breakout shrunk from 15 bars past the last peak (40) to 2
+    # (42) for the same reason as test_double_top above.
+    anchors = [(0, 90.0), (8, 120.0), (16, 102.0), (24, 121.0), (32, 103.0), (40, 120.0), (42, 90.0)]
+    high, low, close, volume = _ohlcv(anchors, 43)
+    volume = _spike(volume, 42)
     pivots = zigzag_pivots(high, low, pct=0.03)
     matches = detect_triple_top(high, low, close, volume, pivots)
     assert matches
@@ -145,9 +172,10 @@ def test_triple_top():
 
 
 def test_triple_bottom():
-    anchors = [(0, 130.0), (8, 100.0), (16, 118.0), (24, 99.0), (32, 117.0), (40, 100.0), (55, 125.0)]
-    high, low, close, volume = _ohlcv(anchors, 56)
-    volume = _spike(volume, 55)
+    # 2026-09-27: same shrink as test_triple_top, mirrored.
+    anchors = [(0, 130.0), (8, 100.0), (16, 118.0), (24, 99.0), (32, 117.0), (40, 100.0), (42, 130.0)]
+    high, low, close, volume = _ohlcv(anchors, 43)
+    volume = _spike(volume, 42)
     pivots = zigzag_pivots(high, low, pct=0.03)
     matches = detect_triple_bottom(high, low, close, volume, pivots)
     assert matches
@@ -160,8 +188,11 @@ def test_triple_bottom():
 # ---------------------------------------------------------------------------
 
 def test_ascending_triangle():
-    anchors = [(0, 100.0), (6, 120.0), (12, 108.0), (18, 120.5), (24, 113.0), (30, 125.0)]
-    high, low, close, volume = _ohlcv(anchors, 31)
+    # 2026-09-27: breakout shrunk from 6 bars past the last pivot (30) to 3
+    # (27) so find_confirmation's genuine crossing (not just "still past
+    # it") falls inside the 3-bar lookback window.
+    anchors = [(0, 100.0), (6, 120.0), (12, 108.0), (18, 120.5), (24, 113.0), (27, 125.0)]
+    high, low, close, volume = _ohlcv(anchors, 28)
     pivots = zigzag_pivots(high, low, pct=0.03)
     matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
     assert matches
@@ -173,8 +204,11 @@ def test_descending_triangle():
     # Trough2 needs its own confirming bounce (Peak3) before the real
     # breakdown, else it never registers as a confirmed pivot at all (a
     # continued decline straight through it doesn't "reverse" away from it).
-    anchors = [(0, 100.0), (6, 120.0), (12, 105.0), (18, 113.0), (24, 106.0), (27, 110.0), (33, 95.0)]
-    high, low, close, volume = _ohlcv(anchors, 34)
+    # 2026-09-27: breakout shrunk from 6 bars past Peak3 (27) to 3 (30) --
+    # same find_confirmation lookback-window reasoning as the reversal
+    # fixtures above.
+    anchors = [(0, 100.0), (6, 120.0), (12, 105.0), (18, 113.0), (24, 106.0), (27, 110.0), (30, 95.0)]
+    high, low, close, volume = _ohlcv(anchors, 31)
     pivots = zigzag_pivots(high, low, pct=0.03)
     matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
     assert matches
@@ -183,8 +217,10 @@ def test_descending_triangle():
 
 
 def test_symmetrical_triangle():
-    anchors = [(0, 100.0), (6, 130.0), (12, 100.0), (18, 120.0), (24, 108.0), (30, 115.0)]
-    high, low, close, volume = _ohlcv(anchors, 31)
+    # 2026-09-27: breakout shrunk from 6 bars past the last pivot (24) to 3
+    # (27) -- find_confirmation lookback-window reasoning as above.
+    anchors = [(0, 100.0), (6, 130.0), (12, 100.0), (18, 120.0), (24, 108.0), (27, 115.0)]
+    high, low, close, volume = _ohlcv(anchors, 28)
     pivots = zigzag_pivots(high, low, pct=0.03)
     matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
     assert matches
@@ -194,8 +230,10 @@ def test_symmetrical_triangle():
 
 def test_rising_wedge():
     # Same confirming-bounce requirement as descending_triangle above.
-    anchors = [(0, 100.0), (6, 110.0), (12, 100.0), (18, 118.0), (24, 112.0), (27, 116.0), (33, 100.0)]
-    high, low, close, volume = _ohlcv(anchors, 34)
+    # 2026-09-27: breakout shrunk from 6 bars past Peak3 (27) to 3 (30) --
+    # same find_confirmation lookback-window reasoning as above.
+    anchors = [(0, 100.0), (6, 110.0), (12, 100.0), (18, 118.0), (24, 112.0), (27, 116.0), (30, 100.0)]
+    high, low, close, volume = _ohlcv(anchors, 31)
     pivots = zigzag_pivots(high, low, pct=0.03)
     matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
     assert matches
@@ -204,8 +242,10 @@ def test_rising_wedge():
 
 
 def test_falling_wedge():
-    anchors = [(0, 100.0), (6, 130.0), (12, 110.0), (18, 118.0), (24, 104.0), (30, 115.0)]
-    high, low, close, volume = _ohlcv(anchors, 31)
+    # 2026-09-27: breakout shrunk from 6 bars past the last pivot (24) to 3
+    # (27) -- find_confirmation lookback-window reasoning as above.
+    anchors = [(0, 100.0), (6, 130.0), (12, 110.0), (18, 118.0), (24, 104.0), (27, 115.0)]
+    high, low, close, volume = _ohlcv(anchors, 28)
     pivots = zigzag_pivots(high, low, pct=0.03)
     matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
     assert matches
@@ -214,8 +254,10 @@ def test_falling_wedge():
 
 
 def test_rectangle():
-    anchors = [(0, 100.0), (6, 120.0), (12, 100.0), (18, 120.3), (24, 99.7), (30, 125.0)]
-    high, low, close, volume = _ohlcv(anchors, 31)
+    # 2026-09-27: breakout shrunk from 6 bars past the last pivot (24) to 3
+    # (27) -- find_confirmation lookback-window reasoning as above.
+    anchors = [(0, 100.0), (6, 120.0), (12, 100.0), (18, 120.3), (24, 99.7), (27, 125.0)]
+    high, low, close, volume = _ohlcv(anchors, 28)
     pivots = zigzag_pivots(high, low, pct=0.03)
     matches = detect_triangle_wedge_rectangle(high, low, close, volume, pivots)
     assert matches
@@ -234,9 +276,20 @@ def test_bull_flag():
     # breakout eventually confirms the consolidation's own trough as the
     # newest pivot, the detector's pole-pair search needs an earlier,
     # already-confirmed pivot to fall back to for the *real* flagpole.
+    #
+    # 2026-09-27 (find_confirmation edge-trigger fix): the consolidation
+    # used to sit right against the upper trendline (116-119) and the final
+    # breakout ramp spanned 4 bars (26 -> 30) -- the genuine crossing landed
+    # around bar 26/27, one to two bars *before* the 3-bar confirm window
+    # (fit_end=n-3=28), so it went undetected once "still past the level"
+    # stopped counting as confirmation. The consolidation now sits further
+    # below the eventual breakout (112-118) with an added flat hold bar
+    # (27) right at the fit boundary, so the upper trendline stays low and
+    # the whole crossing happens inside bars 28-30 (verified against the
+    # real detector).
     anchors = [
-        (0, 100.0), (4, 90.0), (10, 120.0), (14, 117.0), (18, 119.0),
-        (22, 116.0), (26, 118.0), (30, 130.0),
+        (0, 100.0), (4, 90.0), (10, 120.0), (14, 116.0), (18, 118.0),
+        (22, 114.0), (26, 112.0), (27, 112.0), (30, 140.0),
     ]
     high, low, close, volume = _ohlcv(anchors, 31)
     pivots = zigzag_pivots(high, low, pct=0.03)
@@ -248,9 +301,10 @@ def test_bull_flag():
 
 
 def test_bear_flag():
+    # 2026-09-27: mirrors test_bull_flag's fix above.
     anchors = [
-        (0, 100.0), (4, 110.0), (10, 80.0), (14, 83.0), (18, 81.0),
-        (22, 84.0), (26, 82.0), (30, 70.0),
+        (0, 100.0), (4, 110.0), (10, 80.0), (14, 84.0), (18, 82.0),
+        (22, 86.0), (26, 88.0), (27, 88.0), (30, 60.0),
     ]
     high, low, close, volume = _ohlcv(anchors, 31)
     pivots = zigzag_pivots(high, low, pct=0.03)
@@ -381,9 +435,16 @@ def test_double_top_collects_all_valid_windows_best_quality_first():
     # returned only the first (lower-quality, most-recent) window it found;
     # now it returns both, and scan_symbol's quality-score sort must put
     # the tighter one first regardless of which window was tried first.
+    #
+    # 2026-09-27 (find_confirmation edge-trigger fix): added a flat hold bar
+    # (33, 118.0) before the final breakdown -- the old single 6-bar ramp
+    # (30 -> 36) crossed both windows' levels (95.0 / 100.0) well before the
+    # 3-bar confirm window, so neither window's now-genuine crossing test
+    # found anything. Verified both windows still confirm (at their own,
+    # possibly different, crossing bars) and the quality ordering holds.
     anchors = [
         (0, 100.0), (6, 120.0), (12, 100.0), (18, 120.5),
-        (24, 95.0), (30, 118.0), (36, 85.0),
+        (24, 95.0), (30, 118.0), (33, 118.0), (36, 80.0),
     ]
     df = _frame(anchors, 37, spike_at=36)
     matches = scan_symbol(df, min_score=0.0, zigzag_pct=0.03, enabled_patterns={"double_top"})
@@ -398,8 +459,13 @@ def test_double_top_collects_all_valid_windows_best_quality_first():
 # ---------------------------------------------------------------------------
 
 def test_scan_symbol_filters_by_min_score_and_sorts_best_first():
+    # 2026-09-27: same hold-then-break fix as test_head_and_shoulders_top
+    # (the anchors are otherwise identical) -- see that test's comment.
     df = _frame(
-        [(0, 100.0), (10, 130.0), (20, 110.0), (30, 140.0), (40, 112.0), (50, 131.0), (70, 100.0)],
+        [
+            (0, 100.0), (10, 130.0), (20, 110.0), (30, 140.0), (40, 112.0), (50, 131.0),
+            (67, 116.0), (70, 100.0),
+        ],
         71,
         spike_at=70,
     )
@@ -420,7 +486,13 @@ def test_scan_symbol_filters_by_min_score_and_sorts_best_first():
 # test_extrema.py/test_confirmation.py/test_confluence.py).
 # ---------------------------------------------------------------------------
 
-_DOUBLE_TOP_ANCHORS = [(0, 90.0), (10, 120.0), (20, 100.0), (30, 121.0), (45, 85.0)]
+# 2026-09-27 (find_confirmation edge-trigger fix): added a hold bar (42,
+# 105.0) that keeps price above the neckline (100.0) until the final 3-bar
+# confirm window (n=46, lookback=3 -> bars 43-45) -- the old single 15-bar
+# ramp (30 -> 45) crossed the neckline around bar 39, well before "today",
+# so it no longer counts as confirmed under the corrected, genuinely-
+# crossing-based test.
+_DOUBLE_TOP_ANCHORS = [(0, 90.0), (10, 120.0), (20, 100.0), (30, 121.0), (42, 105.0), (45, 85.0)]
 
 
 def test_scan_symbol_zigzag_atr_mult_changes_pivot_detection():
@@ -548,9 +620,16 @@ def test_pattern_recognition_strategy_emits_signal_for_confirmed_pattern():
     # filtered out by min_risk_reward (1.5 default) rather than a fixture or
     # wiring bug. A flag's target (flagpole height) vs. its much tighter
     # consolidation-range stop clears that bar comfortably instead.
+    #
+    # 2026-09-27: same find_confirmation edge-trigger fix as test_bull_flag
+    # above, but tuned to also clear min_score=60 through the *full* scorer
+    # pipeline (test_bull_flag calls detect_flag_pennant directly, bypassing
+    # scoring entirely, so its simpler fixture doesn't need this) --
+    # identical anchors to _BULL_FLAG_ANCHORS below, see that constant's
+    # comment for the quality-score tuning rationale.
     anchors = [
-        (0, 100.0), (4, 90.0), (10, 120.0), (14, 117.0), (18, 119.0),
-        (22, 116.0), (26, 118.0), (30, 130.0),
+        (0, 100.0), (4, 90.0), (10, 150.0), (14, 144.0), (18, 147.0),
+        (22, 141.0), (26, 135.0), (29, 135.0), (30, 180.0),
     ]
     prices_df = _build_prices_df("AAPL", anchors, 31, spike_at=30)
     pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
@@ -608,9 +687,23 @@ def test_pattern_recognition_is_registered():
 # scoring module itself.
 # ---------------------------------------------------------------------------
 
+# 2026-09-27 (find_confirmation edge-trigger fix): the old consolidation
+# (116-119) sat right against the upper trendline and the final breakout
+# ramp (26 -> 30) crossed it a bar or two *before* the 3-bar confirm window,
+# so it went undetected once "still past the level" stopped counting.
+# Reshaped so bars 26-29 hold flat comfortably below the trendline (its
+# extrapolated value at 28/29 is ~137/136) and only bar 30 breaks through --
+# a genuine crossing landing on the fixture's own last bar (matching every
+# call site's `spike_at=30` unchanged). Also scaled up (flagpole 90->150
+# instead of 90->120, tighter consolidation) so the *full* scorer pipeline
+# (not just detect_flag_pennant's raw candidate) clears min_score=60 --
+# every downstream test here goes through PatternRecognitionStrategy /
+# scan_symbol, unlike test_bull_flag's direct detect_flag_pennant call.
+# Verified against the real detector + scorer, not hand-derived:
+# quality_score ~= 69.9, confirm_index == 30, single unambiguous match.
 _BULL_FLAG_ANCHORS = [
-    (0, 100.0), (4, 90.0), (10, 120.0), (14, 117.0), (18, 119.0),
-    (22, 116.0), (26, 118.0), (30, 130.0),
+    (0, 100.0), (4, 90.0), (10, 150.0), (14, 144.0), (18, 147.0),
+    (22, 141.0), (26, 135.0), (29, 135.0), (30, 180.0),
 ]
 
 
@@ -1076,6 +1169,92 @@ def test_pattern_recognition_xgb_meta_features_built_even_when_3class_disabled(m
 
     assert captured.get("called") is True
     assert signals[0].meta["xgb_meta_p_act"] == pytest.approx(0.9)
+
+
+# ---------------------------------------------------------------------------
+# Meta-confidence hard gate (Workstream D harness, 2026-09-27 -- see
+# xgb_meta_min_confidence's own docstring in default_params). Unlike
+# calibrated_probability (a down-weight input to Kelly sizing only), this
+# knob DROPS a match from the emitted signal set entirely.
+# ---------------------------------------------------------------------------
+
+def test_pattern_recognition_meta_min_confidence_none_is_noop(monkeypatch):
+    """Default (None) must not drop anything, even with the meta model on
+    and scoring low -- every existing caller/test is unaffected."""
+    from firm.strategies import pattern_recognition as pr_module
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_meta_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference, "score_pattern_meta_confirmation", lambda features, **kwargs: 0.1,
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={"xgb_meta_confirmation_enabled": True, "xgb_meta_min_confidence": None},
+    ).generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["xgb_meta_p_act"] == pytest.approx(0.1)
+
+
+def test_pattern_recognition_meta_min_confidence_drops_below_threshold(monkeypatch):
+    """A match scored below the threshold must be DROPPED, not merely
+    down-weighted -- this is the lever that lets a walk-forward test whether
+    trading only a high-confidence subset is itself profitable."""
+    from firm.strategies import pattern_recognition as pr_module
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_meta_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference, "score_pattern_meta_confirmation", lambda features, **kwargs: 0.40,
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={"xgb_meta_confirmation_enabled": True, "xgb_meta_min_confidence": 0.60},
+    ).generate(pit_view)
+
+    assert signals == []
+
+
+def test_pattern_recognition_meta_min_confidence_keeps_above_threshold(monkeypatch):
+    """A match scored at or above the threshold passes through unchanged."""
+    from firm.strategies import pattern_recognition as pr_module
+
+    monkeypatch.setattr(pr_module.xgb_inference, "is_meta_available", lambda: True)
+    monkeypatch.setattr(
+        pr_module.xgb_inference, "score_pattern_meta_confirmation", lambda features, **kwargs: 0.80,
+    )
+
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    signals = PatternRecognitionStrategy(
+        params={"xgb_meta_confirmation_enabled": True, "xgb_meta_min_confidence": 0.60},
+    ).generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["xgb_meta_p_act"] == pytest.approx(0.80)
+
+
+def test_pattern_recognition_meta_min_confidence_never_gates_without_meta_score(monkeypatch):
+    """A signal with no xgb_meta_p_act at all (meta model off/unavailable)
+    must never be gated by this knob -- it only ever applies to matches the
+    meta model actually scored."""
+    prices_df = _build_prices_df("AAPL", _BULL_FLAG_ANCHORS, 31, spike_at=30)
+    pit_view = _FakePitView(prices_df, ["AAPL"], datetime(2024, 3, 1))
+
+    # xgb_meta_confirmation_enabled left at its False default -- meta never
+    # scores anything -- but the gate threshold is set anyway.
+    signals = PatternRecognitionStrategy(
+        params={"xgb_meta_min_confidence": 0.99},
+    ).generate(pit_view)
+
+    assert len(signals) == 1
+    assert signals[0].meta["xgb_meta_p_act"] is None
 
 
 def test_pattern_recognition_xgb_ensemble_off_by_default_leaves_meta_none():

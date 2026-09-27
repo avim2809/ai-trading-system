@@ -670,6 +670,51 @@ class TestExperimentRunner:
         assert "pbo" in of
         assert of["pbo_n_folds"] == 2
 
+    def test_aggregate_walk_forward_prior_trials_deflates_harder(self, tmp_path):
+        """``prior_trials`` (2026-09-27, Workstream D -- honest cumulative
+        cross-session deflation) must thread all the way from
+        ``aggregate_walk_forward`` through ``_walk_forward_overfitting`` to
+        ``firm.eval.overfitting.deflated_sharpe``, making DSR harder to pass
+        than the same run with no prior trials recorded."""
+        from datetime import datetime
+
+        runs = []
+        for i in range(4):
+            art = tmp_path / f"fold{i}"
+            art.mkdir()
+            nav = [100_000.0]
+            for _ in range(40):
+                nav.append(nav[-1] * (1 + 0.001))
+            (art / "equity.json").write_text(
+                json.dumps({"dates": [], "values": nav}), encoding="utf-8"
+            )
+            rng = np.random.default_rng(i)
+            (art / "walk_forward_selection.json").write_text(
+                json.dumps({
+                    "selection_metric": "sharpe_ratio",
+                    "selected_index": 0,
+                    "trials": [],
+                    "train_returns_by_trial": [
+                        rng.normal(0.0005, 0.01, size=30).tolist() for _ in range(2)
+                    ],
+                }),
+                encoding="utf-8",
+            )
+            runs.append(
+                ExperimentRun(
+                    run_id=f"r{i}", config={}, config_hash="x",
+                    start_time=datetime.now(), status="completed",
+                    metrics={"sharpe_ratio": 1.0}, artifacts_dir=str(art),
+                )
+            )
+
+        agg_no_prior = ExperimentRunner.aggregate_walk_forward(runs)
+        agg_with_prior = ExperimentRunner.aggregate_walk_forward(runs, prior_trials=56)
+        dsr_no_prior = agg_no_prior["overfitting"]["deflated_sharpe"]
+        dsr_with_prior = agg_with_prior["overfitting"]["deflated_sharpe"]
+        assert dsr_with_prior <= dsr_no_prior + 1e-9
+        assert agg_with_prior["overfitting"]["prior_trials"] == 56
+
     def test_in_sample_oos_config_splitting(self, tmp_runs_dir, sample_config):
         runner = ExperimentRunner(registry=RunRegistry(base_dir=tmp_runs_dir))
         is_run, oos_run = runner.run_in_sample_oos(

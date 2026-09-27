@@ -428,7 +428,10 @@ class ExperimentRunner:
 
     @staticmethod
     def aggregate_walk_forward(
-        runs: list[ExperimentRun], embargo_pct: float = 0.0
+        runs: list[ExperimentRun],
+        embargo_pct: float = 0.0,
+        prior_trials: int = 0,
+        prior_trial_sharpes: list[float] | None = None,
     ) -> dict[str, Any]:
         """Summarize out-of-sample metrics across walk-forward folds.
 
@@ -440,6 +443,12 @@ class ExperimentRunner:
         ``embargo_pct`` (default 0.0 = original behaviour) is forwarded to
         the per-fold PBO computation — see
         :func:`firm.eval.overfitting.cscv_pbo`.
+
+        ``prior_trials``/``prior_trial_sharpes`` (both default to a no-op)
+        are forwarded to :func:`firm.eval.overfitting.deflated_sharpe` (via
+        :meth:`_walk_forward_overfitting`) so DSR can be deflated by trials
+        run in prior sessions against this same strategy/layer, not just
+        this run's own grid — see that function's docstring.
         """
         completed = [r for r in runs if r.status == "completed" and r.metrics]
         fold_ids = [r.run_id for r in runs]
@@ -477,7 +486,8 @@ class ExperimentRunner:
 
         # Formal overfitting read (PBO / Deflated Sharpe) across the OOS folds.
         overfitting = ExperimentRunner._walk_forward_overfitting(
-            completed, embargo_pct=embargo_pct
+            completed, embargo_pct=embargo_pct,
+            prior_trials=prior_trials, prior_trial_sharpes=prior_trial_sharpes,
         )
         if overfitting:
             result["overfitting"] = overfitting
@@ -485,7 +495,10 @@ class ExperimentRunner:
 
     @staticmethod
     def _walk_forward_overfitting(
-        runs: list[ExperimentRun], embargo_pct: float = 0.0
+        runs: list[ExperimentRun],
+        embargo_pct: float = 0.0,
+        prior_trials: int = 0,
+        prior_trial_sharpes: list[float] | None = None,
     ) -> dict[str, Any]:
         """Load each fold's OOS returns and run the Bailey/LdP overfitting checks.
 
@@ -558,6 +571,12 @@ class ExperimentRunner:
                 or None
             ),
             embargo_pct=embargo_pct,
+            prior_trials=prior_trials,
+            prior_trial_sharpes=(
+                np.asarray(prior_trial_sharpes, dtype=float)
+                if prior_trial_sharpes is not None
+                else None
+            ),
         )
 
     @staticmethod

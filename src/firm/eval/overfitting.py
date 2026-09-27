@@ -190,17 +190,51 @@ def probabilistic_sharpe(returns: np.ndarray, sr_benchmark: float = 0.0) -> floa
     return _norm_cdf((sr - sr_benchmark) * math.sqrt(n - 1) / denom)
 
 
-def deflated_sharpe(returns: np.ndarray, trial_sharpes: np.ndarray) -> float:
+def deflated_sharpe(
+    returns: np.ndarray,
+    trial_sharpes: np.ndarray,
+    prior_trials: int = 0,
+    prior_trial_sharpes: np.ndarray | None = None,
+) -> float:
     """Deflated Sharpe Ratio: PSR against a trials-aware benchmark.
 
-    ``trial_sharpes`` is the Sharpe of every configuration that was tried. The
-    more trials (and the wider their spread), the higher the benchmark and the
-    harder the DSR is to pass — that is the point.
+    ``trial_sharpes`` is the Sharpe of every configuration tried *in this run*.
+    The more trials (and the wider their spread), the higher the benchmark and
+    the harder the DSR is to pass — that is the point.
+
+    Two ways to make the deflation honestly account for trials run in
+    *earlier* sessions against this same strategy/layer (added 2026-09-27,
+    Workstream D of ``docs/pattern_recognition_plan.md`` — see
+    ``firm.experiments.runner.walk_forward_overfitting``'s docstring for why
+    this matters: without it, every fresh evaluation round of a repeatedly
+    re-tested layer starts the trial count back at zero, silently
+    understating how much data-snooping has actually occurred across the
+    layer's whole test history):
+
+    - ``prior_trial_sharpes``: the actual per-trial Sharpe values from prior
+      sessions, when known. These are folded directly into the same variance
+      estimate as ``trial_sharpes`` — the more informative option, since the
+      expected-maximum-Sharpe-under-the-null term is sensitive to the spread
+      of trial Sharpes, not just their count.
+    - ``prior_trials``: a bare trial *count* from prior sessions whose actual
+      per-trial Sharpe values were not retained (e.g. only the grid size and
+      fold count are known, not each candidate's realised Sharpe). This only
+      inflates ``n_trials`` for the expected-maximum order-statistic term; it
+      reuses *this* run's trial variance as the best available estimate for
+      those untracked trials, which is a conservative (harder-to-pass, not
+      easier) approximation — the alternative of ignoring them entirely
+      would understate the true deflation.
+
+    Both default to 0/None (a no-op), so every existing caller is unaffected.
     """
     trials = np.asarray(trial_sharpes, dtype=float)
     trials = trials[np.isfinite(trials)]
-    n_trials = max(len(trials), 1)
-    var_sr = float(np.var(trials, ddof=1)) if n_trials > 1 else 0.0
+    if prior_trial_sharpes is not None:
+        prior = np.asarray(prior_trial_sharpes, dtype=float)
+        prior = prior[np.isfinite(prior)]
+        trials = np.concatenate([trials, prior])
+    n_trials = max(len(trials), 1) + max(int(prior_trials), 0)
+    var_sr = float(np.var(trials, ddof=1)) if len(trials) > 1 else 0.0
     if var_sr <= 0 or n_trials < 2:
         return probabilistic_sharpe(returns, 0.0)
     sr_star = math.sqrt(var_sr) * (
@@ -271,6 +305,8 @@ def walk_forward_overfitting(
     fold_returns: list[np.ndarray],
     fold_trial_returns: list[list[np.ndarray]] | None = None,
     embargo_pct: float = 0.0,
+    prior_trials: int = 0,
+    prior_trial_sharpes: np.ndarray | None = None,
 ) -> dict:
     """Overfitting read across walk-forward out-of-sample folds.
 
@@ -304,6 +340,15 @@ def walk_forward_overfitting(
     ``embargo_pct`` is forwarded to :func:`cscv_pbo` for every fold's PBO
     computation — see its docstring. ``0.0`` (default) is the original,
     unpurged CSCV split.
+
+    ``prior_trials``/``prior_trial_sharpes`` (both default to a no-op) are
+    forwarded to :func:`deflated_sharpe` so a fresh walk-forward run can
+    honestly deflate against every *prior session's* trial count for this
+    same strategy/layer, not just the trials in this run's own
+    ``fold_trial_returns`` grid — see that function's docstring for the
+    distinction between the two, and
+    ``docs/pattern_ml_trial_history.json``/``scripts/validate_pattern_ml_workstream_d.py``
+    for where the cumulative count is tracked and supplied.
 
     Returns an empty dict when there is not enough OOS data to say anything.
     """
@@ -353,9 +398,15 @@ def walk_forward_overfitting(
         "n_folds": len(series),
         "probabilistic_sharpe": probabilistic_sharpe(pooled, 0.0),
         "deflated_sharpe": deflated_sharpe(
-            pooled, np.array(trial_sharpes, dtype=float)
+            pooled, np.array(trial_sharpes, dtype=float),
+            prior_trials=prior_trials, prior_trial_sharpes=prior_trial_sharpes,
         ),
     }
+    if prior_trials or prior_trial_sharpes is not None:
+        result["prior_trials"] = int(prior_trials) + (
+            len(prior_trial_sharpes) if prior_trial_sharpes is not None else 0
+        )
+        result["this_run_trials"] = len(trial_sharpes)
     if fold_pbos:
         result["pbo"] = float(np.mean(fold_pbos))
         result["pbo_n_folds"] = len(fold_pbos)
