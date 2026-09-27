@@ -7,6 +7,22 @@
       "workstream_c_landed": false,
       "bars_fingerprint": "29839aa6fd63d40d0af626eef7e31b18ebb8735028b51d95623ad5b4829ca916",
       "overall_pass": false
+    },
+    {
+      "run_started_at": "2026-09-27T20:00:31.491486+00:00",
+      "run_finished_at": "2026-09-27T20:29:24.061016+00:00",
+      "dry_run": true,
+      "workstream_c_landed": false,
+      "bars_fingerprint": "29839aa6fd63d40d0af626eef7e31b18ebb8735028b51d95623ad5b4829ca916",
+      "overall_pass": false
+    },
+    {
+      "run_started_at": "2026-09-27T20:06:55.111424+00:00",
+      "run_finished_at": "2026-09-27T21:16:26.124938+00:00",
+      "dry_run": false,
+      "workstream_c_landed": true,
+      "bars_fingerprint": "29839aa6fd63d40d0af626eef7e31b18ebb8735028b51d95623ad5b4829ca916",
+      "overall_pass": false
     }
   ]
 }

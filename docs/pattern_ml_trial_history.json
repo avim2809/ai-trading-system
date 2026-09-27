@@ -21,7 +21,10 @@
       "source": "docs/pattern_recognition_plan.md section 8.2 (scripts/validate_pattern_cnn_walkforward.py, first run)",
       "n_folds": 8,
       "n_candidates": 2,
-      "candidates": ["cnn_scoring_enabled=false (rule-based baseline)", "cnn_scoring_enabled=true"],
+      "candidates": [
+        "cnn_scoring_enabled=false (rule-based baseline)",
+        "cnn_scoring_enabled=true"
+      ],
       "n_trials": 16,
       "reported_pbo": 0.446,
       "reported_deflated_sharpe": 2.8e-06,
@@ -32,7 +35,11 @@
       "source": "docs/pattern_recognition_plan.md section 9.9; data/models/pattern_recognition.walkforward_audit.json",
       "n_folds": 8,
       "n_candidates": 3,
-      "candidates": ["cnn_scoring_enabled=false", "cnn_scoring_enabled=true", "xgb_confirmation_enabled=true"],
+      "candidates": [
+        "cnn_scoring_enabled=false",
+        "cnn_scoring_enabled=true",
+        "xgb_confirmation_enabled=true"
+      ],
       "n_trials": 24,
       "reported_pbo": 0.714,
       "reported_deflated_sharpe": 1.51e-05,
@@ -43,12 +50,33 @@
       "source": "docs/pattern_ml_isolated_evaluation_2026_09.md section 3 (isolated single-strategy walk-forward, retrained models)",
       "n_folds": 8,
       "n_candidates": 2,
-      "candidates": ["xgb_confirmation_enabled=false (rule-based baseline)", "xgb_confirmation_enabled=true"],
+      "candidates": [
+        "xgb_confirmation_enabled=false (rule-based baseline)",
+        "xgb_confirmation_enabled=true"
+      ],
       "n_trials": 16,
       "reported_pbo": 0.534,
       "reported_deflated_sharpe": 3.4e-05,
       "verdict": "fail"
+    },
+    {
+      "date": "2026-09-27",
+      "source": "scripts/validate_pattern_ml_workstream_d.py (Workstream D pre-registered evaluation)",
+      "n_folds": 8,
+      "n_candidates": 6,
+      "candidates": [
+        "{\"strategy_params\": {\"pattern_recognition\": {\"xgb_confirmation_enabled\": false, \"xgb_meta_confirmation_enabled\": false}}}",
+        "{\"strategy_params\": {\"pattern_recognition\": {\"xgb_confirmation_enabled\": true, \"xgb_meta_confirmation_enabled\": false}}}",
+        "{\"strategy_params\": {\"pattern_recognition\": {\"xgb_confirmation_enabled\": false, \"xgb_meta_confirmation_enabled\": true, \"xgb_meta_min_confidence\": null}}}",
+        "{\"strategy_params\": {\"pattern_recognition\": {\"xgb_confirmation_enabled\": false, \"xgb_meta_confirmation_enabled\": true, \"xgb_meta_min_confidence\": 0.5}}}",
+        "{\"strategy_params\": {\"pattern_recognition\": {\"xgb_confirmation_enabled\": false, \"xgb_meta_confirmation_enabled\": true, \"xgb_meta_min_confidence\": 0.75}}}",
+        "{\"strategy_params\": {\"pattern_recognition\": {\"xgb_confirmation_enabled\": false, \"xgb_meta_confirmation_enabled\": true, \"xgb_meta_min_confidence\": 0.75}}, \"zscore_demean\": false}"
+      ],
+      "n_trials": 48,
+      "reported_pbo": 0.34464285714285714,
+      "reported_deflated_sharpe": 0.00029241703851828893,
+      "verdict": "fail"
     }
   ],
-  "cumulative_trials_through_last_entry": 56
+  "cumulative_trials_through_last_entry": 104
 }
