@@ -5,6 +5,7 @@ See each fixture's docstring for what it guards against.
 
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -40,4 +41,28 @@ def _no_real_pipeline_warmup(request):
         patch("firm.live.pipeline_warmup._warm_hmm"),
         patch("firm.live.pipeline_warmup._warm_rag_imports"),
     ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _isolated_execution_audit(tmp_path):
+    """Keep tests out of the live instance's real execution audit log.
+
+    ``firm.live.execution_safety.audit_path`` defaults to
+    ``$FIRM_DATA_DIR/execution_audit.jsonl`` -- i.e. ``data/`` in this
+    checkout, which is the running IBKR instance's own immutable decision
+    log. Only a handful of tests redirected it, so the suite had appended
+    ~9k fixture records (``broker_type`` "" and fake ``alpaca_paper``
+    orders) into production's audit trail (found 2026-09-28). Tests that
+    set ``FIRM_EXECUTION_AUDIT`` themselves still win (their setenv runs
+    after this fixture).
+
+    Deliberately does NOT request ``monkeypatch``: an autouse conftest
+    fixture that does forces monkeypatch to be set up before -- and so torn
+    down after -- every module-level autouse fixture, which broke modules
+    whose own teardown relies on a test's ``monkeypatch.setattr`` already
+    being undone (tests/test_xgb_inference.py's ``reset_cache()`` called
+    ``.cache_clear()`` on a still-patched lambda: 22 errors).
+    """
+    with patch.dict(os.environ, {"FIRM_EXECUTION_AUDIT": str(tmp_path / "execution_audit.jsonl")}):
         yield

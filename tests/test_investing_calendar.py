@@ -14,10 +14,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from firm.data.investing.calendar import fetch_calendar
-from firm.data.investing.session import PageResponse
-from firm.data.providers.base import ProviderError
-from firm.live.news_guard import Event
+# bs4 ships in the optional `investing` extra (pyproject.toml); skip cleanly
+# without it, same convention as the alpaca/ib_async test modules.
+pytest.importorskip("bs4")
+
+from firm.data.investing.calendar import fetch_calendar  # noqa: E402
+from firm.data.investing.session import PageResponse  # noqa: E402
+from firm.data.providers.base import ProviderError  # noqa: E402
+from firm.live.news_guard import Event  # noqa: E402
 
 _SAMPLE_HTML = """
 <table>

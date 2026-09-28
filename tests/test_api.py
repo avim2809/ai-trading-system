@@ -220,18 +220,22 @@ class TestRuns:
         # be too tight under that contention (pre-existing flake, tracked as
         # fix-preexisting-test-failures). 240 * 0.5s = 120s gives real
         # headroom while still returning immediately once the run finishes.
-        terminal_statuses = {"completed", "failed"}
-        status = "pending"
-        for _ in range(240):
-            time.sleep(0.5)
-            detail = client.get(f"/api/runs/{run_id}").json()
-            status = detail["status"]
-            if status in terminal_statuses:
-                break
-
+        detail = self._wait_terminal(client, run_id)
+        status = detail["status"]
         assert status == "completed", f"Run ended with status={status}, notes={detail.get('notes')}"
         assert detail["metrics"]
         return run_id
+
+    @staticmethod
+    def _wait_terminal(client, run_id: str) -> dict:
+        terminal_statuses = {"completed", "failed"}
+        detail: dict = {}
+        for _ in range(240):
+            time.sleep(0.5)
+            detail = client.get(f"/api/runs/{run_id}").json()
+            if detail["status"] in terminal_statuses:
+                break
+        return detail
 
     def test_invalid_run_request_returns_422(self, client):
         """Regression: bad input is rejected up front, not run as a failed job."""
@@ -257,6 +261,14 @@ class TestRuns:
         r = client.post("/api/runs", json={
             "strategies": ["momentum"],
             "data_source": "synthetic",
+            # Short window + wait below: this test only checks config
+            # propagation. It used to launch a default-range (6-year) run and
+            # return without waiting; JobManager is a process-wide singleton
+            # that serialises runs, so that job (and the next test's) kept the
+            # lock and made later _launch_and_wait tests time out
+            # (test_report_after_completion / test_equity_after_completion).
+            "start_date": "2023-10-01",
+            "end_date": "2023-12-31",
             "spread_pct": 0.0009,
             "short_borrow_annual_pct": 0.05,
         })
@@ -266,10 +278,12 @@ class TestRuns:
         detail = client.get(f"/api/runs/{run_id}").json()
         assert detail["config"]["spread_pct"] == 0.0009
         assert detail["config"]["short_borrow_annual_pct"] == 0.05
+        self._wait_terminal(client, run_id)
 
     def test_cost_overrides_default_to_settings_yaml_values(self, client):
         r = client.post("/api/runs", json={
             "strategies": ["momentum"], "data_source": "synthetic",
+            "start_date": "2023-10-01", "end_date": "2023-12-31",  # see test above
         })
         assert r.status_code == 200
         run_id = r.json()["run_id"]
@@ -277,6 +291,7 @@ class TestRuns:
         detail = client.get(f"/api/runs/{run_id}").json()
         assert detail["config"]["spread_pct"] == 0.0002
         assert detail["config"]["short_borrow_annual_pct"] == 0.003
+        self._wait_terminal(client, run_id)
 
     def test_report_after_completion(self, client):
         run_id = self._launch_and_wait(client)
@@ -325,11 +340,13 @@ class TestRuns:
         r1 = client.post("/api/runs", json={
             "strategies": ["momentum"],
             "data_source": "synthetic",
+            "start_date": "2023-07-01", "end_date": "2023-12-31",  # short: don't hold JobManager's lock
             "seed": 1,
         })
         r2 = client.post("/api/runs", json={
             "strategies": ["trend"],
             "data_source": "synthetic",
+            "start_date": "2023-07-01", "end_date": "2023-12-31",  # short: don't hold JobManager's lock
             "seed": 2,
         })
         id1 = r1.json()["run_id"]
