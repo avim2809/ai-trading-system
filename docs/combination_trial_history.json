@@ -1,0 +1,19 @@
+{
+  "_about": "Cumulative trial ledger for the signal-combination / portfolio-construction layer (analyst combination -> allocation -> risk overlays). Feeds prior_trials into the Deflated Sharpe of any future test of this layer (scripts/run_combination_evaluation.py). Counting rule, fixed 2026-09-28 before any result of that run existed: every audit contributes its FULL candidate-grid size, baseline included, even when the baseline repeats across audits -- deliberately conservative (harder to pass), since per-trial Sharpes were mostly not retained. Separate from docs/pattern_ml_trial_history.json (pattern-recognition ML layer, 104 trials), which tests a different layer. Append; never edit past entries.",
+  "entries": [
+    {"date": "2026-07-26", "source": "docs/portfolio_construction_diagnosis.md", "n_trials": 2, "candidates": ["confidence", "optimal"]},
+    {"date": "2026-07-27", "source": "docs/portfolio_construction_diagnosis.md follow-up: regime_hmm separation fix A/B", "n_trials": 2, "candidates": ["fix off", "fix on"]},
+    {"date": "2026-07-27", "source": "docs/portfolio_construction_diagnosis.md follow-up: circuit breaker A/B", "n_trials": 2, "candidates": ["breaker off", "breaker on"]},
+    {"date": "2026-07-27", "source": "docs/formal_pbo_audit.md first audit", "n_trials": 3, "candidates": ["confidence/conviction_weighted", "optimal/conviction_weighted", "optimal/equal_weight"]},
+    {"date": "2026-08-23", "source": "docs/formal_pbo_audit.md turnover-fix", "n_trials": 2, "candidates": ["band 0/fraction 1", "band 0.05/fraction 0.7"]},
+    {"date": "2026-08-23", "source": "docs/remediation_progress.md #58 zscore_demean", "n_trials": 2, "candidates": ["demean true", "demean false"]},
+    {"date": "2026-08-23", "source": "docs/formal_pbo_audit.md concentration", "n_trials": 2, "candidates": ["10-strategy", "drop momentum+seasonality"]},
+    {"date": "2026-08-23", "source": "docs/formal_pbo_audit.md joint_optimizer v1", "n_trials": 4, "candidates": ["grid of 4"]},
+    {"date": "2026-08-24", "source": "docs/formal_pbo_audit.md joint_optimizer v2", "n_trials": 4, "candidates": ["grid of 4"]},
+    {"date": "2026-08-24", "source": "docs/formal_pbo_audit.md joint_optimizer v3", "n_trials": 4, "candidates": ["grid of 4"]},
+    {"date": "2026-08-24", "source": "docs/formal_pbo_audit.md PART 3 phase 1 stat_arb pairs", "n_trials": 5, "candidates": ["grid of 5"]},
+    {"date": "2026-08-25", "source": "docs/formal_pbo_audit.md PART 3 phase 3 seasonality overlay", "n_trials": 6, "candidates": ["grid of 6"]},
+    {"date": "2026-08-25", "source": "docs/formal_pbo_audit.md PART 3 phase 4 macro overlay", "n_trials": 7, "candidates": ["grid of 7"]},
+    {"date": "2026-09-27", "source": "docs/ensemble_redundancy_audit_2026_09.md D1 full vs lean roster", "n_trials": 2, "candidates": ["11-strategy", "8-strategy lean"]}
+  ]
+}
