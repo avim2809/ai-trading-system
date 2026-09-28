@@ -522,7 +522,7 @@ Implemented in [`src/firm/live/provider_utils.py`](../src/firm/live/provider_uti
 | `initial_capital` | `initial_capital` |
 | `risk.*` | Flattened into engine config (kill switch, exposure limits, `regime_overlay`, etc.) |
 | `news_guard` | Macro-event blackout gate (default OFF) |
-| `signal_combination` | Research combine method: `confidence` (default) or `optimal` |
+| `signal_combination` | Research combine method: `confidence` (default) or `optimal` (live on both instances); `optimal` also takes `estimator: legacy\|robust` (legacy default) |
 | `allocation_method` / `kelly_fraction` | `TraderAgent` sizing (`kelly` uses `kelly_fraction`) |
 
 Explicit API request fields override YAML when provided (non-null / non-empty).
@@ -533,6 +533,7 @@ Explicit API request fields override YAML when provided (non-null / non-empty).
 |------|--------|--------|
 | `news_guard.enabled` | `firm.live.news_guard` | Holds orders inside a high-impact economic-event window (FOMC/NFP/CPI); offline fallback in `src/firm/live/data/events.csv`. Fails **closed**: if the calendar can't be loaded at all (live fetch *and* the bundled CSV both fail), every order is held that cycle with a `critical` `news_guard_calendar_unavailable` alert rather than approved blind; landing on the bundled CSV after a live-fetch failure still succeeds but raises a `warning` `news_guard_stale_calendar` alert (age of the CSV included) since a static calendar can miss events added after it was last updated. |
 | `signal_combination.method: optimal` | `firm.agents.analysts` | Inverse-covariance signal weighting (down-weights correlated strategies) + effective-N; needs `ctx.strategy_returns` |
+| `signal_combination.estimator: robust` (+ `returns_source: attribution\|standalone`, `lookback_days`, `min_obs`) | `firm.agents.analysts.combine_signals_optimal_robust` | **Off by default (`legacy`).** Fixes legacy `optimal`'s permanent 0-weight lock-out of late-starting strategies (NaN→`corrcoef`→`pinv`), per-cycle cadence and unshrunk inverse. Pre-registered 2026-09-28 eval: FAIL, and no combination method beat a random-weights placebo OOS. See `docs/optimal_combination_fix_2026_09.md`. `method: random_weights` is a research placebo only. |
 | `strategy_circuit_breaker.enabled` | `firm.agents.research._circuit_breaker` | Damps a strategy's raw signal when its trailing realized Sharpe is persistently negative. **Disabled by default** — an A/B found the default thresholds net *hurt* portfolio Sharpe (see "Portfolio-construction diagnosis" below); opt in only for further calibration. |
 | `strategy_regime_weights.enabled` | `firm.agents.research._regime_weights` | Per-strategy score multipliers conditioned on Bull/Bear/Chop regime (detected once per cycle). **Disabled by default** — calibrate via `scripts/calibrate_strategy_regime_weights.py` before enabling live. |
 | `allocation_method: kelly` | `firm.agents.trader` | Fractional-Kelly sizing from per-name return history (`kelly_fraction`, default half-Kelly) |
@@ -1180,3 +1181,35 @@ on the simpler version first).
 - [regime_ensemble_scoping.md](regime_ensemble_scoping.md) — ensemble-HMM regime detector, A/B'd (shipped disabled: calms `regime_hmm`'s own noise but doesn't rescue `strategy_regime_weights`)
 - [pattern_recognition_plan.md](pattern_recognition_plan.md) — chart-pattern recognition (Strategy #13): 5 build phases + a follow-up pass (scheduled scan job, ONNX export, isolated CNN/PPO env)
 - [capital_sleeves_plan.md](capital_sleeves_plan.md) — per-strategy capital sleeves: design, an A/B-found-and-fixed rebalance-band bug, live cutover on Alpaca
+
+
+## 2026-09-28: combination-layer evaluation + live/backtest cadence fixes
+
+Full detail is in `docs/optimal_combination_fix_2026_09.md`.
+
+- **`optimal` lock-out.** Legacy `optimal` gives *exactly 0* weight, permanently, to any
+  strategy whose attribution history starts after a peer's. On live IBKR on 9/25
+  that was momentum, pattern_recognition and volatility_breakout. Alpaca (sleeved)
+  is unaffected: it uses one-strategy buckets.
+- **Robust estimator and evaluation.** A robust estimator shipped behind a flag,
+  off by default. The pre-registered 5-candidate walk-forward FAILED: every method
+  was negative OOS, the random-weights placebo was best, and PBO was 0.971. No
+  live config change.
+- **Standalone signal books.** `PerformanceAttribution.record_signals` /
+  `get_all_signal_returns` now record each strategy's standalone unit-gross
+  signal-book returns, persisted with attribution state. This is the right input
+  for any future per-strategy edge study.
+- **`MarketRegimeDetector.retrain_frequency` now counts new bars, not `detect()`
+  calls.** Live was refitting at least daily on IBKR, and several times per cycle
+  on sleeved Alpaca. Backtest cadence is unchanged, and tests prove it.
+- **Test suite isolation.** Tests no longer write into the live
+  `data/execution_audit.jsonl` (autouse fixture in `tests/conftest.py`). About 9k
+  historical fixture lines remain, identifiable by `broker_type` `""` or fake
+  `alpaca_paper` records in IBKR's file.
+- **Still open (not changed):**
+  - `rebalance_fraction` is applied per *cycle* live vs per *day* in backtest.
+  - IBKR's after-hours cycle uses a stale bar.
+  - Per-cycle inputs to the disabled circuit breaker, `hrp` and `joint_optimizer`.
+- **Operational rule.** Services import from the checkout itself. Never edit
+  tracked `src/` while a service is active: an uncommitted edit caused an
+  ImportError in IBKR cycle 109.

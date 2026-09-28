@@ -50,3 +50,7 @@ Only `full_auto` and `semi_auto` are valid. Anything else queues all orders.
 
 - Status: `GET /api/live/status` — watch `cycle_running_seconds` for stuck cycles
 - Two instances, two units: `:8000` IBKR (`deploy/ai-trading.service`, `config/live.yaml`, blended) and `:8001` Alpaca (`config/live_alpaca.yaml`, sleeved)
+
+## Editing code while services run (2026-09-28)
+- Both `firm-api` services import from this checkout. Never modify tracked `src/` while `ai-trading` / `ai-trading-alpaca` is active: modules are lazily imported mid-run, so an uncommitted edit can produce a mixed-version process (an ImportError failed IBKR cycle 109). Use a `git worktree`, or stop the services first.
+- `signal_combination.estimator` is `legacy` (default, live) or `robust` (off, see `docs/optimal_combination_fix_2026_09.md`). The Live Config / New Backtest pages preserve all `signal_combination` keys on save.

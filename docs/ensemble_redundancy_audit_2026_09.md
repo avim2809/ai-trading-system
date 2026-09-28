@@ -1,5 +1,20 @@
 # Ensemble redundancy audit (2026-09-27)
 
+> **Correction (2026-09-28) to §2 below — read `docs/optimal_combination_fix_2026_09.md`.**
+> The 54.3%-on-`sentiment` weight vector was computed with this audit's own
+> `fillna(0.0)` full-history proxy. The production path
+> (`combine_signals_optimal`) does not fill: a strategy whose attribution
+> history starts late gets **exactly 0 weight, permanently** (NaN → `corrcoef` →
+> `nan_to_num` → `pinv`). That is the opposite of the failure described here. The
+> "min-history floor" fix proposed in the Recommendation therefore targets a
+> failure mode that does not occur in production. The mechanism-level
+> conclusion ("optimal can't handle heterogeneous history") stands; the
+> direction of the distortion does not. The §1 correlation matrix used the
+> same attribution *contribution* series, which share positions across
+> strategies. Treat its redundancy readings (incl. the
+> multi_factor/seasonality/regime_hmm cluster) as provisional until they are
+> re-measured on standalone signal returns.
+
 **Status:** Complete. Part D1 of the approved research plan investigating
 whether the 13-(now 11-)strategy ensemble can be safely simplified.
 **Scope:** correlation/redundancy audit across the real currently-enabled

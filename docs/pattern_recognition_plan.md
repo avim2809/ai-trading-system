@@ -1700,3 +1700,11 @@ this evidence.** Two concrete, separately-actionable follow-ups instead:
 fix `optimal`'s history-length blind spot (arguably the more urgent
 finding) before further redundancy work, since it distorts every
 downstream weight regardless of roster.
+
+**2026-09-28 follow-up to (b):** §2 of the D1 audit had the direction of the
+`optimal` distortion wrong. In production, a late-starting strategy is *zeroed*,
+not over-weighted. A robust estimator was built and pre-registered-tested
+against legacy, `confidence` and a random-weights placebo: FAIL, with every method
+negative OOS and PBO 0.971. Follow-up (a), the roster re-test, should use
+standalone signal returns rather than attribution contributions. See
+`docs/optimal_combination_fix_2026_09.md`.
