@@ -32,6 +32,11 @@ class AgentContext:
             used by the optimal (inverse-covariance) signal combination to
             down-weight correlated/redundant strategies. ``None`` (the default)
             makes the researchers fall back to the confidence-weighted mean.
+        strategy_signal_returns: Optional ``{strategy_name: return_series}``
+            of each strategy's standalone unit-gross signal book (see
+            ``PerformanceAttribution.record_signals``) -- the
+            ``returns_source: standalone`` input for the robust ``optimal``
+            estimator. Independent of what the blended book traded.
         market_regime: Optional :class:`~firm.regime.model.RegimeState` from
             the market-level HMM detector, set by the orchestrator when
             ``strategy_regime_weights`` is enabled.
@@ -42,6 +47,7 @@ class AgentContext:
     portfolio: "PortfolioState | None" = None
     config: dict[str, Any] = field(default_factory=dict)
     strategy_returns: dict[str, Any] | None = None
+    strategy_signal_returns: dict[str, Any] | None = None
     market_regime: Any | None = None
 
 

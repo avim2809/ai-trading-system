@@ -2373,6 +2373,9 @@ class LiveTradingEngine:
                 strategy_returns = self._attribution.get_all_strategy_returns()
                 if strategy_returns:
                     context["strategy_returns"] = strategy_returns
+                signal_returns = self._attribution.get_all_signal_returns()
+                if signal_returns:
+                    context["strategy_signal_returns"] = signal_returns
             except Exception:
                 # Silent attribution corruption directly undermines
                 # per-strategy circuit breakers fed by

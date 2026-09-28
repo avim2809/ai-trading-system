@@ -140,6 +140,23 @@ class Orchestrator(Agent):
             )
 
     @staticmethod
+    def _record_signal_books(attribution: Any, bb: Blackboard) -> None:
+        """Feed this cycle's signals to attribution's standalone signal books.
+
+        Always recorded (cheap, no trading effect), so the
+        ``returns_source: standalone`` history exists whenever someone
+        switches to it -- same rationale as tracking attribution regardless
+        of combination method.
+        """
+        record = getattr(attribution, "record_signals", None)
+        if record is None:
+            return
+        try:
+            record([sig for ss in bb.signal_sets for sig in ss.signals])
+        except Exception:
+            log.warning("record_signals failed; standalone signal books not updated", exc_info=True)
+
+    @staticmethod
     def _check_sleeved_llm_cost_safety(cfg: dict[str, Any]) -> None:
         """Refuse construction rather than silently multiply LLM cost.
 
@@ -458,6 +475,7 @@ class Orchestrator(Agent):
             portfolio=portfolio,
             config=self.config,
             strategy_returns=context.get("strategy_returns"),
+            strategy_signal_returns=context.get("strategy_signal_returns"),
             market_regime=market_regime,
         )
 
@@ -465,6 +483,7 @@ class Orchestrator(Agent):
         self._run_analysts(ctx, bb)
 
         bb.signal_sets.sort(key=lambda ss: ss.domain)
+        self._record_signal_books(attribution, bb)
 
         if bb.errors:
             bb.degraded = True
@@ -1059,6 +1078,7 @@ class Orchestrator(Agent):
         ctx_kwargs: dict[str, Any] = dict(
             config=self.config,
             strategy_returns=context.get("strategy_returns"),
+            strategy_signal_returns=context.get("strategy_signal_returns"),
             market_regime=market_regime,
         )
 
@@ -1067,6 +1087,7 @@ class Orchestrator(Agent):
             bb,
         )
         bb.signal_sets.sort(key=lambda ss: ss.domain)
+        self._record_signal_books(attribution, bb)
 
         if bb.errors:
             bb.degraded = True

@@ -40,6 +40,10 @@ export default function NewBacktest() {
   const [allocationMethod, setAllocationMethod] = useState('conviction_weighted')
   const [kellyFraction, setKellyFraction] = useState(0.5)
   const [signalCombination, setSignalCombination] = useState('confidence')
+  // Every signal_combination key other than `method` (estimator, returns_source,
+  // lookback_days, ...) -- preserved on save so editing this page never silently
+  // drops e.g. `estimator: robust` back to the legacy optimal estimator.
+  const [signalCombinationExtra, setSignalCombinationExtra] = useState<Record<string, unknown>>({})
   const [circuitBreaker, setCircuitBreaker] = useState<StrategyCircuitBreakerConfig>({
     enabled: false,
     lookback_days: 60,
@@ -75,6 +79,10 @@ export default function NewBacktest() {
     if (defaults.allocation_method) setAllocationMethod(defaults.allocation_method)
     if (typeof defaults.kelly_fraction === 'number') setKellyFraction(defaults.kelly_fraction)
     if (defaults.signal_combination?.method) setSignalCombination(defaults.signal_combination.method)
+    if (defaults.signal_combination) {
+      const { method: _m, ...rest } = defaults.signal_combination
+      setSignalCombinationExtra(rest)
+    }
     if (defaults.strategy_circuit_breaker) {
       setCircuitBreaker((prev) => ({ ...prev, ...defaults.strategy_circuit_breaker }))
     }
@@ -107,7 +115,7 @@ export default function NewBacktest() {
       regime_overlay: regime,
       allocation_method: allocationMethod,
       kelly_fraction: kellyFraction,
-      signal_combination: { method: signalCombination },
+      signal_combination: { ...signalCombinationExtra, method: signalCombination },
       strategy_circuit_breaker: circuitBreaker,
       strategy_regime_weights: (() => {
         if (!regimeWeights.enabled) return { ...regimeWeights, enabled: false }
@@ -384,6 +392,32 @@ export default function NewBacktest() {
                 <option value="hrp">HRP (hierarchical risk parity, experimental)</option>
               </select>
             </div>
+            {signalCombination === 'optimal' && (
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Optimal estimator</label>
+                <select
+                  value={String(signalCombinationExtra.estimator ?? 'legacy')}
+                  onChange={(e) => setSignalCombinationExtra((prev) => ({ ...prev, estimator: e.target.value }))}
+                  className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                >
+                  <option value="legacy">Legacy (live default)</option>
+                  <option value="robust">Robust (experimental, see docs/optimal_combination_fix_2026_09.md)</option>
+                </select>
+              </div>
+            )}
+            {signalCombination === 'optimal' && signalCombinationExtra.estimator === 'robust' && (
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Robust returns source</label>
+                <select
+                  value={String(signalCombinationExtra.returns_source ?? 'attribution')}
+                  onChange={(e) => setSignalCombinationExtra((prev) => ({ ...prev, returns_source: e.target.value }))}
+                  className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-lg text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 text-sm"
+                >
+                  <option value="attribution">Attribution (blended-book share)</option>
+                  <option value="standalone">Standalone signal books</option>
+                </select>
+              </div>
+            )}
           </div>
           <p className="mt-1 text-xs text-slate-500">
             Kelly sizes positions by edge/odds; optimal combination blends each strategy's signal by

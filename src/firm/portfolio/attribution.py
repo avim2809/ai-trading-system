@@ -10,6 +10,7 @@ from collections import defaultdict
 from datetime import datetime
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from firm.eval.metrics import compute_all_metrics
@@ -25,6 +26,12 @@ class PerformanceAttribution:
         self._strategy_holdings: dict[str, dict[str, float]] = defaultdict(dict)
         self._prev_prices: dict[str, float] = {}
         self._factor_exposures: dict[str, dict[str, float]] = {}
+        # Standalone, unit-gross "signal books" per strategy (see
+        # record_signals) and their realised return series -- independent of
+        # what the blended book actually traded, unlike _strategy_returns.
+        self._signal_books: dict[str, dict[str, float]] = {}
+        self._signal_returns: dict[str, list[float]] = defaultdict(list)
+        self._signal_dates: dict[str, list[datetime]] = defaultdict(list)
 
     # ------------------------------------------------------------------
     # Recording
@@ -105,7 +112,43 @@ class PerformanceAttribution:
             self._strategy_returns[strategy].append(daily_return)
             self._strategy_dates[strategy].append(date)
 
+        for strategy, book in self._signal_books.items():
+            ret = 0.0
+            for sym, w in book.items():
+                prev = self._prev_prices.get(sym)
+                curr = prices.get(sym)
+                if prev is not None and curr is not None and prev != 0:
+                    ret += w * (curr / prev - 1.0)
+            self._signal_returns[strategy].append(ret)
+            self._signal_dates[strategy].append(date)
+
         self._prev_prices = dict(prices)
+
+    def record_signals(self, signals: list[Any]) -> None:
+        """Set each strategy's standalone signal book from this cycle's signals.
+
+        Each strategy's book is its ``score * confidence`` per symbol scaled
+        to unit gross exposure -- what that strategy alone would hold with
+        one unit of capital. :meth:`update_daily` marks these books to market
+        on the next call, so every strategy gets its own return stream from
+        its first signal onward, whether or not the blended book traded it.
+        This is the ``returns_source: standalone`` input for
+        ``signal_combination.estimator: robust``. A strategy that stops
+        signalling keeps its series but holds a flat (empty) book.
+        """
+        raw: dict[str, dict[str, float]] = {}
+        for sig in signals or []:
+            w = float(getattr(sig, "score", 0.0)) * float(getattr(sig, "confidence", 1.0))
+            if not np.isfinite(w):
+                continue
+            bucket = raw.setdefault(sig.strategy, {})
+            bucket[sig.symbol] = bucket.get(sig.symbol, 0.0) + w
+        for strategy in set(self._signal_books) | set(raw):
+            book = raw.get(strategy, {})
+            gross = sum(abs(v) for v in book.values())
+            self._signal_books[strategy] = (
+                {sym: v / gross for sym, v in book.items()} if gross > 0 else {}
+            )
 
     # ------------------------------------------------------------------
     # Queries
@@ -143,6 +186,15 @@ class PerformanceAttribution:
             series = self.get_strategy_returns(strategy)
             if len(series.dropna()) >= min_points:
                 out[strategy] = series
+        return out
+
+    def get_all_signal_returns(self, min_points: int = 2) -> dict[str, pd.Series]:
+        """``{strategy: standalone signal-book return series}`` (see :meth:`record_signals`)."""
+        out: dict[str, pd.Series] = {}
+        for strategy, values in self._signal_returns.items():
+            dates = self._signal_dates.get(strategy, [])
+            if len(values) >= min_points and dates:
+                out[strategy] = pd.Series(values, index=pd.DatetimeIndex(dates), name=strategy)
         return out
 
     def get_all_daily_strategy_returns(self) -> dict[str, pd.Series]:
@@ -270,6 +322,11 @@ class PerformanceAttribution:
             "factor_exposures": {
                 k: dict(v) for k, v in self._factor_exposures.items()
             },
+            "signal_books": {k: dict(v) for k, v in self._signal_books.items()},
+            "signal_returns": {k: list(v) for k, v in self._signal_returns.items()},
+            "signal_dates": {
+                k: [d.isoformat() for d in v] for k, v in self._signal_dates.items()
+            },
         }
 
     def restore_state(self, state: dict[str, Any]) -> None:
@@ -299,3 +356,16 @@ class PerformanceAttribution:
         self._factor_exposures = {
             k: dict(v) for k, v in (state.get("factor_exposures") or {}).items()
         }
+        self._signal_books = {
+            k: dict(v) for k, v in (state.get("signal_books") or {}).items()
+        }
+        self._signal_returns = defaultdict(
+            list, {k: list(v) for k, v in (state.get("signal_returns") or {}).items()},
+        )
+        self._signal_dates = defaultdict(
+            list,
+            {
+                k: [datetime.fromisoformat(d) for d in v]
+                for k, v in (state.get("signal_dates") or {}).items()
+            },
+        )

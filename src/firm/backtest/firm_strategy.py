@@ -205,6 +205,7 @@ class FirmStrategy(bt.Strategy):
         # active. Early bars have thin history and both degrade gracefully.
         if self.p.attribution is not None:
             context["strategy_returns"] = self.p.attribution.get_all_strategy_returns()
+            context["strategy_signal_returns"] = self.p.attribution.get_all_signal_returns()
 
         try:
             orders, blackboard = self.p.orchestrator.step(context)

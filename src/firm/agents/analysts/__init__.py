@@ -429,3 +429,179 @@ def combine_signals_optimal(
         "confidence-weighted mean", n_optimal, n_fallback,
     )
     return combined
+
+
+# ---------------------------------------------------------------------------
+# Robust optimal combination (signal_combination.estimator: "robust")
+# ---------------------------------------------------------------------------
+#
+# The legacy path above (``estimator: "legacy"``, still the default) has three
+# confirmed defects, found 2026-09-28 (docs/optimal_combination_fix_2026_09.md):
+#
+# 1. Ragged-start lock-out. Attribution series begin at a strategy's first
+#    attributed fill and are never truncated, so a strategy that started
+#    later than a peer has leading NaNs in the per-symbol frame. ``np.corrcoef``
+#    turns that into an all-NaN row, ``nan_to_num`` zeroes it (diagonal
+#    included) and ``pinv`` assigns the strategy exactly 0 weight -- forever.
+#    Live IBKR on 2026-09-25: momentum/pattern_recognition/volatility_breakout
+#    all at 0.
+# 2. No lookback and no cadence normalisation -- live feeds per-cycle points
+#    (~7/day), backtest daily points, over unbounded history.
+# 3. Unshrunk sample covariance of ~11 strategies inverted via ``pinv``, then
+#    negative weights clipped: in a 2024-Q1 backtest mean_reversion was
+#    clipped to 0 on 89% of calls, regime_hmm 50%, momentum 40%.
+
+def _daily_compound(frame: pd.DataFrame) -> pd.DataFrame:
+    """Compound (possibly intraday, per-cycle) returns to one row per date.
+
+    ``min_count=1`` keeps a date on which a strategy had no observation as
+    NaN (not started yet), instead of silently turning it into a 0 return.
+    """
+    if frame.empty:
+        return frame
+    idx = pd.DatetimeIndex(frame.index)
+    return (1.0 + frame).groupby(idx.normalize()).prod(min_count=1) - 1.0
+
+
+def robust_optimal_signal_weights(
+    daily_returns: pd.DataFrame,
+    *,
+    min_obs: int = 20,
+    lookback_days: int = 126,
+) -> tuple[pd.Series, float]:
+    """Inverse-covariance weights that never lock out a strategy for missing history.
+
+    *daily_returns* is a ``dates x strategies`` frame (NaN = no observation
+    yet). Over the trailing *lookback_days* rows:
+
+    - a strategy with fewer than *min_obs* observations, or zero variance, is
+      *immature* and gets the neutral equal share ``1/n`` -- never 0;
+    - the *mature* strategies share the remaining ``|mature|/n`` mass in
+      proportion to ``Σ⁻¹·1`` (negatives clipped, no sign flips), where ``Σ``
+      is the Ledoit-Wolf-shrunk covariance over the rows on which every
+      mature strategy has an observation.
+
+    Degrades to equal weights when fewer than two strategies are mature or
+    the common window is too short. Returns ``(weights, effective_n)``,
+    L1-normalised like :func:`optimal_signal_weights`.
+    """
+    from sklearn.covariance import LedoitWolf
+
+    cols = list(daily_returns.columns)
+    n = len(cols)
+    if n == 0:
+        return pd.Series(dtype=float), 0.0
+    equal = pd.Series(1.0 / n, index=cols, name="weight")
+    if n == 1:
+        return equal, 1.0
+
+    window = daily_returns.astype(float).iloc[-lookback_days:]
+    counts = window.notna().sum()
+    std = window.std(ddof=1)
+    mature = [
+        c for c in cols
+        if counts[c] >= min_obs and np.isfinite(std[c]) and std[c] > 0
+    ]
+    if len(mature) < 2:
+        return equal, float(n)
+    complete = window[mature].dropna()
+    if len(complete) < min_obs:
+        return equal, float(n)
+
+    cov = LedoitWolf().fit(complete.to_numpy()).covariance_
+    try:
+        raw = np.linalg.solve(cov, np.ones(len(mature)))
+    except np.linalg.LinAlgError:
+        raw = np.linalg.pinv(cov) @ np.ones(len(mature))
+    raw = np.clip(raw, 0.0, None)
+    total = float(raw.sum())
+    if total <= 0 or not np.isfinite(total):
+        return equal, float(n)
+
+    weights = equal.copy()
+    mature_mass = len(mature) / n
+    for c, r in zip(mature, raw):
+        weights[c] = mature_mass * r / total
+    w2 = float((weights.to_numpy() ** 2).sum())
+    return weights, (1.0 / w2 if w2 > 0 else 0.0)
+
+
+def combine_signals_optimal_robust(
+    signals: list[Signal],
+    strategy_returns: dict[str, pd.Series] | None = None,
+    *,
+    min_obs: int = 20,
+    lookback_days: int = 126,
+) -> dict[str, float]:
+    """Per-symbol combination using :func:`robust_optimal_signal_weights`.
+
+    Same contract as :func:`combine_signals_optimal` (``{symbol: score}``,
+    ``score = Σ wᵢ·scoreᵢ``), but every contributing strategy participates:
+    one with no or thin history gets the neutral equal share instead of 0.
+    The return frame is compounded to daily once per call, so live's
+    per-cycle history and the backtest's daily history mean the same thing.
+    """
+    strategy_returns = strategy_returns or {}
+    buckets: dict[str, list[Signal]] = {}
+    for s in signals:
+        buckets.setdefault(s.symbol, []).append(s)
+
+    usable = {k: v for k, v in strategy_returns.items() if len(v.dropna()) >= 1}
+    daily = (
+        _daily_compound(pd.DataFrame(usable).sort_index())
+        if usable else pd.DataFrame()
+    )
+
+    combined: dict[str, float] = {}
+    n_weighted = 0
+    for sym, sigs in buckets.items():
+        strats = list(dict.fromkeys(s.strategy for s in sigs))
+        frame = daily.reindex(columns=strats) if not daily.empty else pd.DataFrame(columns=strats)
+        weights, _ = robust_optimal_signal_weights(
+            frame, min_obs=min_obs, lookback_days=lookback_days,
+        )
+        combined[sym] = float(sum(float(weights.get(s.strategy, 0.0)) * s.score for s in sigs))
+        n_weighted += 1
+    log.debug(
+        "combine_signals_optimal_robust: %d symbols weighted over %d strategies "
+        "with history (lookback=%d, min_obs=%d)",
+        n_weighted, len(usable), lookback_days, min_obs,
+    )
+    return combined
+
+
+def combine_signals_random_weights(
+    signals: list[Signal],
+    *,
+    seed: int,
+    asof: Any,
+) -> dict[str, float]:
+    """RESEARCH CONTROL ONLY -- never a live setting.
+
+    Placebo for the combination layer: one uninformed weight per strategy,
+    drawn from Exp(1) (i.e. a flat Dirichlet once normalised over each
+    symbol's contributing strategies) and redrawn once per calendar month,
+    deterministically seeded by ``(seed, year-month, strategy)``. Monthly,
+    per-strategy redraws keep its turnover comparable to a slowly-evolving
+    trailing-window estimator -- a per-day/per-symbol draw would be
+    penalised by churn rather than by lack of information. A weighting
+    scheme that cannot beat this is not extracting information from
+    strategy history.
+    """
+    import zlib
+
+    month = pd.Timestamp(asof).strftime("%Y-%m") if asof is not None else ""
+
+    def _w(strategy: str) -> float:
+        key = zlib.crc32(f"{seed}|{month}|{strategy}".encode())
+        return float(np.random.default_rng(key).exponential(1.0))
+
+    buckets: dict[str, list[Signal]] = {}
+    for s in signals:
+        buckets.setdefault(s.symbol, []).append(s)
+    combined: dict[str, float] = {}
+    for sym, sigs in buckets.items():
+        raw = [_w(s.strategy) for s in sigs]
+        total = sum(raw)
+        combined[sym] = float(sum(r / total * s.score for r, s in zip(raw, sigs)))
+    return combined

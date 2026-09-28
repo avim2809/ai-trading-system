@@ -14,6 +14,8 @@ from firm.agents.analysts import (
     combine_signals_by_symbol,
     combine_signals_hrp,
     combine_signals_optimal,
+    combine_signals_optimal_robust,
+    combine_signals_random_weights,
 )
 from firm.agents.research._circuit_breaker import apply_circuit_breaker
 from firm.agents.research._regime_weights import apply_strategy_regime_weights
@@ -69,6 +71,40 @@ def net_scores_for_blackboard(
 
     combo = cfg.get("signal_combination") or {}
     method = combo.get("method", "confidence")
+    estimator = combo.get("estimator", "legacy")
+
+    if method == "optimal" and estimator == "robust":
+        # Opt-in fix for the legacy path's lock-out/cadence/unshrunk-inverse
+        # defects (see combine_signals_optimal_robust). Needs no history to
+        # run: strategies without it get the neutral equal share.
+        source = combo.get("returns_source", "attribution")
+        if source == "standalone":
+            returns = getattr(ctx, "strategy_signal_returns", None)
+        elif source == "attribution":
+            returns = strategy_returns
+        else:
+            raise ValueError(
+                f"signal_combination.returns_source must be 'attribution' or "
+                f"'standalone', got {source!r}"
+            )
+        log.debug(
+            "net_scores: robust optimal combination (returns_source=%s) over %d signals",
+            source, len(signals),
+        )
+        return combine_signals_optimal_robust(
+            signals, returns,
+            min_obs=int(combo.get("min_obs", 20)),
+            lookback_days=int(combo.get("lookback_days", 126)),
+        )
+    if method == "optimal" and estimator != "legacy":
+        raise ValueError(
+            f"signal_combination.estimator must be 'legacy' or 'robust', got {estimator!r}"
+        )
+    if method == "random_weights":
+        log.debug("net_scores: RESEARCH placebo random_weights over %d signals", len(signals))
+        return combine_signals_random_weights(
+            signals, seed=int(combo.get("seed", 0)), asof=getattr(ctx, "now", None),
+        )
 
     if method == "optimal" and strategy_returns:
         log.debug(

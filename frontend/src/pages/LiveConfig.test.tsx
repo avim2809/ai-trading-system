@@ -105,4 +105,31 @@ describe('LiveConfig', () => {
     await waitFor(() => expect(liveConfigSaved).toBe(true))
     expect(llmConfigSaved).toBe(true)
   })
+
+  it('saving preserves signal_combination keys other than method', async () => {
+    // Regression (2026-09-28): the page used to send {method} only, silently
+    // dropping e.g. estimator: robust back to the legacy optimal estimator
+    // whenever the page was saved for any unrelated reason.
+    const { mockLiveConfig } = await import('../test/mockData')
+    let saved: Record<string, unknown> | null = null
+    server.use(
+      http.get('http://localhost/api/live/config', () => HttpResponse.json({
+        ...mockLiveConfig,
+        signal_combination: { method: 'optimal', estimator: 'robust', returns_source: 'standalone', lookback_days: 126 },
+      })),
+      http.put('http://localhost/api/live/config', async ({ request }) => {
+        saved = (await request.json()) as Record<string, unknown>
+        return HttpResponse.json({ status: 'updated' })
+      }),
+    )
+    const user = userEvent.setup()
+    renderWithProviders(<LiveConfig />)
+    await waitFor(() => expect(screen.getByText('Optimal estimator')).toBeInTheDocument())
+    expect(screen.getByText('Robust returns source')).toBeInTheDocument()
+    await user.click(screen.getByText('Save Configuration'))
+    await waitFor(() => expect(saved).not.toBeNull())
+    expect(saved!.signal_combination).toEqual({
+      method: 'optimal', estimator: 'robust', returns_source: 'standalone', lookback_days: 126,
+    })
+  })
 })
