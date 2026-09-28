@@ -1,6 +1,6 @@
 ---
 name: project-optimal-combination-lockout-sep28
-description: "9/28: optimal combination zeroes late-start/no-history strategies (NaN->corrcoef->0) in the real code path; D1's sentiment-54% was a proxy artifact. Robust estimator built OFF by default; pre-registered 5-candidate eval run; WS1 cadence sweep fixed regime refit + test audit-log pollution"
+description: "9/28 DONE (commits 8688512..d44e726): eval FAIL, all combination methods negative OOS, placebo best, PBO 0.971; optimal combination zeroes late-start/no-history strategies (NaN->corrcoef->0) in the real code path; D1's sentiment-54% was a proxy artifact. Robust estimator built OFF by default; pre-registered 5-candidate eval run; WS1 cadence sweep fixed regime refit + test audit-log pollution"
 metadata:
   node_type: memory
   type: project
@@ -39,3 +39,19 @@ Session 2026-09-28. Full write-up is in `docs/optimal_combination_fix_2026_09.md
 **Own bug caught:** my helper insertion stripped `@staticmethod` from `_check_sleeved_llm_cost_safety`. That would have crashed Alpaca at its next restart. The sleeved API tests caught it and it's fixed, never committed. Lesson: the full suite must pass before any commit, even for "additive" edits.
 
 Related: [[project_pattern_fpr_and_metalabeling_sep27]], [[feedback_production_incident_priority]], [[feedback_verify_before_trusting_a_heuristic]].
+
+**Final outcome (2026-09-28, evening):**
+- Pre-registered evaluation: **FAIL** (both primaries pass only 1/6 bars).
+- OOS Sharpe: C0 legacy -0.69, C1 -0.54, C2 -0.52, confidence -0.32, **random placebo -0.23 (best)**.
+- PBO 0.971; every paired CI is about ±1.1 Sharpe.
+- Independently reproduced to floating-point precision.
+- Conclusion: the combination method is not where the edge is. No live config change. `estimator: robust` is shipped but off.
+- Next lever: per-strategy standalone OOS edge, using `get_all_signal_returns`.
+- Ledger `docs/combination_trial_history.json` now holds 52 trials.
+- Test fixes committed:
+  - audit-log isolation;
+  - TestRuns job-lock leak (pre-existing);
+  - bs4 importorskip (pre-existing since the 9/22 venv rebuild; beautifulsoup4 installed into the venv).
+- Final gates: backend 2817 passed / 0 failed; frontend 141/141; dist rebuilt.
+- Both services restarted 16:56 UTC. Healthy, brokers connected, running `signal_combination {method: optimal}` (legacy).
+- Not pushed; the user never asked.
