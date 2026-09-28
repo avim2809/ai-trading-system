@@ -12,6 +12,7 @@ so the detector inherits the no-look-ahead guarantee of the point-in-time store.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import pandas as pd
 
@@ -55,6 +56,14 @@ class MarketRegimeDetector:
         self.ensemble_seeds = ensemble_seeds
         self._model: GaussianRegimeModel | EnsembleRegimeModel | None = None
         self._bars_since_fit = 0
+        # Last bar the detector has seen. ``retrain_frequency`` counts *new
+        # bars*, not detect() calls: live runs ~7 cycles per trading day on
+        # the same completed-bar panel, and the sleeved orchestrator calls
+        # RiskAgent once per sleeve per cycle, so counting calls turned
+        # "refit every 5 bars" into refits at least daily on IBKR and several
+        # times per cycle on Alpaca. A backtest (one call per new bar) is
+        # unaffected.
+        self._last_bar: Any = None
         self._warned_unavailable = False
 
     def _market_proxy(self, pit_view) -> pd.DataFrame:
@@ -83,6 +92,18 @@ class MarketRegimeDetector:
         proxy = pivot.mean(axis=1).dropna()
         return pd.DataFrame({"date": proxy.index, "close": proxy.values})
 
+    @staticmethod
+    def _bar_key(proxy: pd.DataFrame, features: pd.DataFrame) -> Any:
+        """Identity of the newest bar: its date when available, else the row count."""
+        if "date" in proxy.columns and len(proxy):
+            return pd.Timestamp(proxy["date"].iloc[-1])
+        return len(features)
+
+    def _fit_model(self, X) -> "GaussianRegimeModel | EnsembleRegimeModel":
+        if self.ensemble:
+            return EnsembleRegimeModel(n_states=self.n_states, seeds=self.ensemble_seeds).fit(X)
+        return GaussianRegimeModel(n_states=self.n_states, random_state=self.random_state).fit(X)
+
     def detect(self, pit_view) -> RegimeState | None:
         """Return the current :class:`RegimeState`, or ``None`` if unavailable.
 
@@ -98,19 +119,15 @@ class MarketRegimeDetector:
             return None
 
         X = features.values
+        bar = self._bar_key(proxy, features)
+        if bar != self._last_bar:
+            if self._last_bar is not None:
+                self._bars_since_fit += 1
+            self._last_bar = bar
         needs_fit = self._model is None or self._bars_since_fit >= self.retrain_frequency
         if needs_fit:
             try:
-                model: GaussianRegimeModel | EnsembleRegimeModel
-                if self.ensemble:
-                    model = EnsembleRegimeModel(
-                        n_states=self.n_states, seeds=self.ensemble_seeds
-                    ).fit(X)
-                else:
-                    model = GaussianRegimeModel(
-                        n_states=self.n_states, random_state=self.random_state
-                    ).fit(X)
-                self._model = model
+                self._model = self._fit_model(X)
                 self._bars_since_fit = 0
             except RegimeUnavailable as exc:
                 if not self._warned_unavailable:
@@ -124,7 +141,6 @@ class MarketRegimeDetector:
                 if self._model is None:
                     return None
 
-        self._bars_since_fit += 1
         try:
             return self._model.classify(X)
         except Exception:
