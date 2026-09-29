@@ -55,3 +55,4 @@ Related: [[project_pattern_fpr_and_metalabeling_sep27]], [[feedback_production_i
 - Final gates: backend 2817 passed / 0 failed; frontend 141/141; dist rebuilt.
 - Both services restarted 16:56 UTC. Healthy, brokers connected, running `signal_combination {method: optimal}` (legacy).
 - Not pushed; the user never asked.
+- 9/29: while verifying the rebalance fix, found and fixed a pre-existing Alpaca retry loop. A 0.43-share LLY order was dropped silently at DEBUG; the retry predicate inferred a 'news guard hold' from generated>0 with nothing routed, and re-ran the pipeline every 30 minutes. Now: explicit CycleResult.orders_news_held and orders_dust_skipped, with dust filtered at INFO. Also: records with cycle_id=None in cycle_history are manual operator actions (flatten etc.), by design. And git push is blocked by the auto-mode classifier; the user must push.

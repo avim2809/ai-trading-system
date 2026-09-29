@@ -276,12 +276,18 @@ def cycle_had_no_trading_outcome(summary: dict[str, Any]) -> bool:
         return False
     if summary.get("error"):
         return True
-    return (
-        summary.get("orders_generated", 0) > 0
-        and summary.get("orders_submitted", 0) == 0
+    nothing_routed = (
+        summary.get("orders_submitted", 0) == 0
         and summary.get("orders_queued", 0) == 0
         and summary.get("orders_failed", 0) == 0
     )
+    if "orders_news_held" in summary:
+        # Recorded explicitly since 2026-09-29: only a real news-guard hold
+        # counts. An all-dust cycle (every order under one share) has the same
+        # generated>0/nothing-routed shape but will never clear by retrying.
+        return (summary.get("orders_news_held") or 0) > 0 and nothing_routed
+    # Older summaries without the counter: previous inference, unchanged.
+    return summary.get("orders_generated", 0) > 0 and nothing_routed
 
 
 def maybe_retry_lost_cycle(

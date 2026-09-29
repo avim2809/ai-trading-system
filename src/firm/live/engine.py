@@ -83,6 +83,14 @@ class CycleResult:
     orders_submitted: int = 0
     orders_queued: int = 0
     orders_failed: int = 0
+    # Explicit outcome counters (2026-09-29). Before these existed, the
+    # lost-cycle retry (firm.live.scheduler.cycle_had_no_trading_outcome)
+    # *inferred* a news-guard hold from "generated > 0 but nothing
+    # submitted/queued/failed" -- which a sub-one-share order also produces,
+    # so one 0.43-share LLY order re-ran the whole pipeline every 30 minutes
+    # for a day, logged as "held entirely by the news guard".
+    orders_news_held: int = 0
+    orders_dust_skipped: int = 0
     approval_ids: list[str] = field(default_factory=list)
     order_statuses: list[dict[str, Any]] = field(default_factory=list)
     failed_orders: list[dict[str, Any]] = field(default_factory=list)
@@ -407,6 +415,8 @@ class LiveTradingEngine:
                     "orders_submitted": result.orders_submitted,
                     "orders_queued": result.orders_queued,
                     "orders_failed": result.orders_failed,
+                    "orders_news_held": result.orders_news_held,
+                    "orders_dust_skipped": result.orders_dust_skipped,
                     "skipped": result.skipped,
                     "error": result.error,
                 }
@@ -657,6 +667,8 @@ class LiveTradingEngine:
             "orders_submitted": result.orders_submitted,
             "orders_queued": result.orders_queued,
             "orders_failed": result.orders_failed,
+            "orders_news_held": result.orders_news_held,
+            "orders_dust_skipped": result.orders_dust_skipped,
             "skipped": result.skipped,
             "error": result.error,
             "cycle_type": result.cycle_type,
@@ -1092,6 +1104,15 @@ class LiveTradingEngine:
             except Exception:
                 log.warning("Alert callback failed", exc_info=True)
         return alert
+
+    @staticmethod
+    def _order_qty(o: dict[str, Any]) -> float:
+        return float(o.get("quantity", abs(o.get("shares", 0))))
+
+    @classmethod
+    def _is_dust_order(cls, o: dict[str, Any]) -> bool:
+        """True when the order rounds to 0 whole shares (see _execute_orders)."""
+        return int(round(abs(cls._order_qty(o)))) <= 0
 
     def _apply_news_guard(
         self, orders: list[dict[str, Any]], now: datetime, result: CycleResult
@@ -2423,12 +2444,37 @@ class LiveTradingEngine:
                 )
                 return
 
+            n_before_guard = len(orders)
             orders = self._apply_news_guard(orders, now, result)
+            result.orders_news_held = n_before_guard - len(orders)
             if not orders:
                 log.info(
                     "Cycle %d: all orders held by news-guard", self._cycle_count
                 )
                 return
+
+            # Orders under one whole share can't be submitted (the broker
+            # path rounds to integer shares), so drop them here, visibly and
+            # counted, instead of deep inside _execute_orders at DEBUG where
+            # the cycle looked like a lost one to the retry scheduler.
+            dust = [o for o in orders if self._is_dust_order(o)]
+            if dust:
+                orders = [o for o in orders if not self._is_dust_order(o)]
+                result.orders_dust_skipped = len(dust)
+                log.info(
+                    "Cycle %d: skipping %d order(s) under one share: %s",
+                    self._cycle_count, len(dust),
+                    ", ".join(
+                        f"{o.get('side')} {o.get('symbol')} {self._order_qty(o):.3f}"
+                        for o in dust
+                    ),
+                )
+                if not orders:
+                    log.info(
+                        "Cycle %d: nothing to submit -- every order was under one share",
+                        self._cycle_count,
+                    )
+                    return
 
             alerts_before = len(self._alerts)
             force_manual, orders = self._check_daily_limits(now, orders, prices)
@@ -3207,7 +3253,7 @@ class LiveTradingEngine:
                 )
                 continue
 
-            raw_qty = float(o.get("quantity", abs(o.get("shares", 0))))
+            raw_qty = self._order_qty(o)
             share_qty = int(round(abs(raw_qty)))
             if share_qty <= 0:
                 log.debug(

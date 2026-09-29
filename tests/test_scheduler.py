@@ -353,6 +353,25 @@ class TestCycleHadNoTradingOutcome:
         summary = _successful_cycle()
         assert cycle_had_no_trading_outcome(summary) is False
 
+    def test_explicit_news_guard_counter_true_only_when_orders_were_held(self):
+        summary = _blocked_cycle()
+        summary["orders_news_held"] = summary["orders_generated"]
+        assert cycle_had_no_trading_outcome(summary) is True
+
+    def test_all_dust_cycle_is_not_a_lost_cycle(self):
+        """Regression (2026-09-29): same generated>0/nothing-routed shape as
+        a news-guard hold, but retrying can never help -- the order is under
+        one share."""
+        summary = _blocked_cycle()
+        summary["orders_news_held"] = 0
+        summary["orders_dust_skipped"] = summary["orders_generated"]
+        assert cycle_had_no_trading_outcome(summary) is False
+
+    def test_errored_cycle_still_retried_with_explicit_counters(self):
+        summary = _errored_cycle()
+        summary["orders_news_held"] = 0
+        assert cycle_had_no_trading_outcome(summary) is True
+
     def test_false_when_some_orders_queued_for_approval(self):
         summary = _blocked_cycle()
         summary["orders_queued"] = 2

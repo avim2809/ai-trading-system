@@ -254,6 +254,24 @@ claims that survived verification are listed as confirmed.
 | 4 | `strategy_circuit_breaker`, `hrp`, and `joint_optimizer`'s `_book_nav_history` all consume per-cycle series with `sqrt(252)` annualisation. | all **disabled** | none today | Documented. Must be fixed before any of them is enabled. `hrp` could reuse `_daily_compound`. |
 | 5 | **Test suite polluted the live IBKR audit log.** `execution_safety.audit_path()` defaults to `data/execution_audit.jsonl` and only `test_live_engine.py` redirected it. `data/execution_audit.jsonl` holds 8,099 `broker_type=""` fixture records plus 870 fake `alpaca_paper` ones (e.g. AAPL qty 1, cycle 1, absent from Alpaca's own file). This session's runs added 2. | — | Audit-trail integrity: real IBKR submissions are 571 of ~18.9k lines. | **Fixed**: autouse `_isolated_execution_audit` fixture in `tests/conftest.py`, verified (a 37-test API run added 0 lines). Existing contaminated lines left in place, since the log is append-only by design. They are identifiable by `broker_type` in `{"", "alpaca_paper"}` inside IBKR's file. |
 
+**Found 2026-09-29 while verifying the rebalance fix on live cycles: a sub-share order drove a retry loop
+(pre-existing, fixed).**
+- **Symptom:** on Alpaca, one ~0.43-share LLY sell from the final netted pass was generated every cycle
+  (from `execution_audit.jsonl`: cycles 99–111).
+- **Mechanism:** `_execute_orders` rounds to whole shares and skipped it at DEBUG, counting it nowhere.
+  The cycle then read "generated 1, submitted/queued/failed 0". The lost-cycle retry
+  (`scheduler.cycle_had_no_trading_outcome`) *inferred* a news-guard hold from exactly that shape, logged
+  "held entirely by the news guard", and re-ran the full pipeline every 30 minutes. That was 7 extra
+  cycles that day. No "all orders held by news-guard" line was ever logged, so the guard never held anything.
+- **Not caused by the rebalance fix:** the old per-cycle code would have produced the same fraction × gap
+  order every cycle.
+- **Fix:**
+  - `CycleResult` now records `orders_news_held` and `orders_dust_skipped`, persisted in cycle summaries.
+  - Orders under one share are filtered out before routing, logged at INFO.
+  - The retry predicate trusts the explicit counter when present and falls back to the old inference
+    for older summaries.
+- **Tests:** 3 regression tests fail on the old code; the existing predicate tests pass on both.
+
 Test-infrastructure fixes found on the way to a green suite:
 
 - **`tests/test_api.py::TestRuns` timeouts: pre-existing, fixed.** `test_cost_overrides_*` and

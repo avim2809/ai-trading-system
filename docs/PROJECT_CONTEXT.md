@@ -1207,6 +1207,7 @@ Full detail is in `docs/optimal_combination_fix_2026_09.md`.
   historical fixture lines remain, identifiable by `broker_type` `""` or fake
   `alpaca_paper` records in IBKR's file.
 - **`rebalance_fraction` now applies per trading day live** (fixed 2026-09-29): after a symbol's first order of the day, later same-day cycles only trade toward the day's anchored fractional target (`ExecutionAgent._day_anchor`). Backtest cadence is unchanged.
+- **Lost-cycle retry uses explicit outcome counters** (fixed 2026-09-29): `CycleResult.orders_news_held` / `orders_dust_skipped`. A sub-one-share order is dropped visibly before routing and no longer masquerades as a news-guard hold that re-runs the pipeline every 30 minutes.
 - **Still open (not changed):**
   - IBKR's after-hours cycle uses a stale bar.
   - Per-cycle inputs to the disabled circuit breaker, `hrp` and `joint_optimizer`.

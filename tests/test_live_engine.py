@@ -665,6 +665,52 @@ class TestLiveTradingEngine:
         assert result.error is None
 
     @patch("firm.live.engine.build_orchestrator")
+    def test_run_cycle_counts_sub_share_orders_instead_of_dropping_silently(
+        self, mock_build, engine_components,
+    ):
+        """Regression (2026-09-29): a 0.43-share LLY order used to vanish at
+        DEBUG inside _execute_orders, leaving generated=1 with nothing
+        submitted/queued/failed -- which the lost-cycle retry read as a
+        news-guard hold and re-ran every 30 minutes all day."""
+        from firm.live.scheduler import cycle_had_no_trading_outcome
+
+        broker, feed, queue, config = engine_components
+        orders = [{"symbol": "AAPL", "side": "sell", "quantity": 0.43, "price": 150.0,
+                   "strategy": "regime_hmm"}]
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (orders, _make_blackboard())
+        mock_build.return_value = mock_orch
+        engine = self._make_engine(broker, feed, queue, config, approval_mode="full_auto")
+        engine.start()
+
+        result = engine.run_cycle()
+        assert result.error is None
+        assert result.orders_generated == 1
+        assert result.orders_dust_skipped == 1
+        assert result.orders_news_held == 0
+        assert result.orders_submitted == 0
+        summary = engine.cycles_today()[-1]
+        assert summary["orders_dust_skipped"] == 1
+        assert cycle_had_no_trading_outcome(summary) is False
+
+    @patch("firm.live.engine.build_orchestrator")
+    def test_run_cycle_submits_whole_share_orders_alongside_dust(self, mock_build, engine_components):
+        broker, feed, queue, config = engine_components
+        orders = _make_orders() + [
+            {"symbol": "AAPL", "side": "sell", "quantity": 0.2, "price": 150.0, "strategy": "trend"},
+        ]
+        mock_orch = MagicMock()
+        mock_orch.step.return_value = (orders, _make_blackboard())
+        mock_build.return_value = mock_orch
+        engine = self._make_engine(broker, feed, queue, config, approval_mode="full_auto")
+        engine.start()
+
+        result = engine.run_cycle()
+        assert result.orders_generated == 3
+        assert result.orders_submitted == 2
+        assert result.orders_dust_skipped == 1
+
+    @patch("firm.live.engine.build_orchestrator")
     def test_run_cycle_forwards_cycle_type_to_orchestrator_step(self, mock_build, engine_components):
         """cycle_type ("open"/"close"/"intraday"/None), set by
         TradingScheduler for the "hourly_market_hours" composite schedule
