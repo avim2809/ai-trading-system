@@ -1206,8 +1206,8 @@ Full detail is in `docs/optimal_combination_fix_2026_09.md`.
   `data/execution_audit.jsonl` (autouse fixture in `tests/conftest.py`). About 9k
   historical fixture lines remain, identifiable by `broker_type` `""` or fake
   `alpaca_paper` records in IBKR's file.
+- **`rebalance_fraction` now applies per trading day live** (fixed 2026-09-29): after a symbol's first order of the day, later same-day cycles only trade toward the day's anchored fractional target (`ExecutionAgent._day_anchor`). Backtest cadence is unchanged.
 - **Still open (not changed):**
-  - `rebalance_fraction` is applied per *cycle* live vs per *day* in backtest.
   - IBKR's after-hours cycle uses a stale bar.
   - Per-cycle inputs to the disabled circuit breaker, `hrp` and `joint_optimizer`.
 - **Operational rule.** Services import from the checkout itself. Never edit

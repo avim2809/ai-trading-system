@@ -19,7 +19,9 @@ caller supplies both the config and the broker.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from firm.agents._liquidity import estimate_adv_dollars, market_impact_pct
 from firm.agents.base import Agent, AgentContext
@@ -117,6 +119,24 @@ class ExecutionAgent(Agent):
         # just under the band forever now gets swept once it decays that far.
         self.close_dust_fraction: float = float(cfg.get("close_dust_fraction", 0.2))
 
+        # Per-trading-day anchor for rebalance_fraction (2026-09-28 fix, see
+        # docs/optimal_combination_fix_2026_09.md section 6). The fraction was
+        # validated in daily-cadence backtests (one call per day: "close 70%
+        # of today's gap"). Live runs ~7 cycles per trading day on the same
+        # completed-bar panel, so re-applying it every cycle closed ~97% of
+        # the gap within 3 cycles -- hours instead of the multi-day glide the
+        # backtest measured. {(book_key, symbol): (trading_day, weight before
+        # that day's first order)}. After a symbol's first order of the day,
+        # later same-day cycles only trade toward
+        # anchor + fraction * (target - anchor): nothing further for a stable
+        # target, a retry if the first order didn't fill, and a damped
+        # response to a real intraday target change. In a backtest every call
+        # is a new day, so behaviour is byte-identical. In-memory only: a
+        # restart or orchestrator rebuild mid-day allows at most one extra
+        # fractional step that day.
+        self._day_anchor: dict[tuple[str, str], tuple[str, float]] = {}
+        self._market_tz = ZoneInfo(str(cfg.get("market_timezone", "US/Eastern")))
+
         # Broker-resident protective stops (off by default). Keyed by
         # strategy name, mirroring the spirit of RiskAgent's
         # ``stop_loss_overlay`` config (also opt-in, also per-strategy) but
@@ -164,6 +184,15 @@ class ExecutionAgent(Agent):
             cfg.get("extended_hours_limit_tolerance_pct", 0.005)
         )
 
+    def _trading_day(self, now: Any) -> str:
+        """Trading-session calendar date of *now* (naive timestamps are UTC)."""
+        if now is None:
+            return ""
+        ts = now if isinstance(now, datetime) else datetime.fromisoformat(str(now))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts.astimezone(self._market_tz).strftime("%Y-%m-%d")
+
     def run(self, ctx: AgentContext, **inputs: Any) -> ExecutionReport:
         decision: RiskDecision = inputs["decision"]
         portfolio = inputs.get("portfolio")
@@ -177,6 +206,10 @@ class ExecutionAgent(Agent):
         # one only sees protective orders fire if protective_orders_cfg is
         # also non-empty.
         broker = inputs.get("broker")
+        # Identifies whose book this is, so per-day anchors never collide
+        # when one ExecutionAgent is shared across sleeves.
+        book_key = str(inputs.get("book_key", "main"))
+        day_key = self._trading_day(getattr(ctx, "now", None))
         # Set by Orchestrator only for a cycle gate-verified to genuinely be
         # running inside a configured premarket/afterhours window (see
         # Orchestrator.step / _step_impl) -- never a blanket config toggle
@@ -288,7 +321,19 @@ class ExecutionAgent(Agent):
             # entirely for a forced full close -- the whole point is to
             # reach flat in one shot, not decay toward it.
             if self.rebalance_fraction < 1.0 and not forced_full_close:
-                diff_w *= self.rebalance_fraction
+                anchor = self._day_anchor.get((book_key, sym))
+                if anchor is not None and anchor[0] == day_key:
+                    # Already rebalanced this symbol today: aim for the
+                    # day's fractional target from the start-of-day weight,
+                    # not a fresh fraction of whatever gap is left.
+                    anchor_w = anchor[1]
+                    diff_w = anchor_w + self.rebalance_fraction * (target_w - anchor_w) - current_w
+                    min_trade = max(self.rebalance_band_pct * self.close_dust_fraction, 1e-6)
+                    if abs(diff_w) < min_trade:
+                        continue
+                else:
+                    diff_w *= self.rebalance_fraction
+                    self._day_anchor[(book_key, sym)] = (day_key, current_w)
 
             dollar_amount = diff_w * nav
             quantity = abs(dollar_amount / price)

@@ -1188,6 +1188,7 @@ class Orchestrator(Agent):
                 sleeve_report = self.execution.run(
                     sleeve_ctx, decision=decision, portfolio=sleeve_portfolio, prices=prices,
                     per_strategy={strategy: decision.adjusted_targets}, attribution=None,
+                    book_key=f"sleeve:{strategy}",
                 )
             except Exception:
                 log.warning("Sleeve %s execution failed", strategy, exc_info=True)

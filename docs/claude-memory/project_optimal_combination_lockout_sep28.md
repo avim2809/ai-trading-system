@@ -32,7 +32,7 @@ Session 2026-09-28. Full write-up is in `docs/optimal_combination_fix_2026_09.md
 **WS1 cadence sweep (verified against live logs):**
 - Fixed: `regime_overlay.retrain_frequency` counted calls, not bars. Alpaca called it 5–9×/cycle. Tests prove backtest cadence unchanged. Takes effect at the next restart; no restart done.
 - Fixed: tests wrote into the live `data/execution_audit.jsonl` (~9k fixture records). Autouse conftest fixture added.
-- Not changed (user decision): `rebalance_fraction` 0.7 is applied per cycle live vs per day in backtest.
+- FIXED 9/29 (user asked): `rebalance_fraction` 0.7 was applied per cycle live vs per day in backtest. Now `ExecutionAgent._day_anchor` anchors (book, symbol) at the first order of the ET trading day; later same-day cycles trade only toward anchor + f·(target − anchor), above the dust floor. Backtest unchanged (tests prove it). Branch fix/rebalance-fraction-daily.
 - Low impact: IBKR's afterhours cycle trades on a stale bar.
 - Dormant per-cycle feeds: circuit breaker, hrp, joint_optimizer.
 
