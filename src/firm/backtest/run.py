@@ -92,6 +92,12 @@ def execute_backtest(config: dict) -> BacktestReport:
         dates = pd.to_datetime(prices_df["date"])
         mask = (dates >= load_start) & (dates <= pd.Timestamp(end_date))
         prices_df = prices_df[mask]
+        # The cache's OHLC is raw (split-unadjusted); live providers serve
+        # adjusted bars. Adjust once here so the PIT panel strategies read and
+        # the broker feed agree with live (see total_return_adjust_panel).
+        from firm.backtest.datafeeds import total_return_adjust_panel
+
+        prices_df = total_return_adjust_panel(prices_df)
 
     pit_store = PointInTimeDataStore()
     fund_df = None

@@ -114,6 +114,69 @@ class TestLoadFeeds:
         assert feeds == {}
 
 
+def _split_prices(split_day: int = 15, ratio: int = 10, days: int = 30) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(raw, equivalent-adjusted) frames for one symbol with a ``ratio``:1 split.
+
+    Raw closes drop by ``ratio`` on ``split_day`` (the cache's convention);
+    ``adj_close`` is continuous (back-adjusted). The second frame is the same
+    economic path with close == adj_close everywhere.
+    """
+    df = _synthetic_prices(["NVDA"], days=days, seed=11)
+    df["volume"] = df["volume"].astype(float)
+    adj = df.copy()
+    raw = df.copy()
+    pre = raw.index < split_day
+    for col in ("open", "high", "low", "close"):
+        raw.loc[pre, col] = raw.loc[pre, col] * ratio
+    raw.loc[pre, "volume"] = raw.loc[pre, "volume"] / ratio
+    return raw, adj
+
+
+class TestSplitAdjustedFeed:
+    """Found 2026-09-29: raw split closes produced fake -90% P&L days."""
+
+    def test_feed_close_has_no_split_jump(self):
+        raw, adj = _split_prices()
+        feed_df = dataframe_to_feed(raw, "NVDA").p.dataname
+        rets = feed_df["close"].pct_change().dropna()
+        assert rets.abs().max() < 0.2
+        assert feed_df["close"].to_numpy() == pytest.approx(adj["adj_close"].to_numpy())
+        # Dollar volume is preserved.
+        assert (feed_df["close"] * feed_df["volume"]).to_numpy() == pytest.approx(
+            (raw["close"] * raw["volume"]).to_numpy())
+
+    def test_holding_through_split_matches_unsplit_path(self):
+        raw, adj = _split_prices()
+        values = []
+        for df in (raw, adj):
+            engine = BacktestEngine({"initial_capital": 1_000_000, "commission_pct": 0.0,
+                                     "slippage_pct": 0.0, "rebalance_frequency": "daily"})
+            orch = _buy_once_orchestrator("NVDA", 1000, float(adj.iloc[0]["close"]))
+            engine.setup(df, _make_pit_store(df), orch, ["NVDA"])
+            engine.run()
+            values.append(engine.get_results()["final_value"])
+        assert values[0] == pytest.approx(values[1])
+
+    def test_panel_adjustment_matches_feed_and_keeps_columns(self):
+        from firm.backtest.datafeeds import total_return_adjust_panel
+
+        raw, adj = _split_prices()
+        other = _synthetic_prices(["AAPL"], days=30, seed=3)
+        panel = pd.concat([raw, other], ignore_index=True)
+        out = total_return_adjust_panel(panel)
+        assert list(out.columns) == list(panel.columns)
+        nv = out[out.symbol == "NVDA"].sort_values("date")
+        assert nv["close"].to_numpy() == pytest.approx(adj["adj_close"].to_numpy())
+        assert nv["high"].to_numpy() == pytest.approx(adj["high"].to_numpy())
+        aa = out[out.symbol == "AAPL"].sort_values("date")
+        assert aa["close"].to_numpy() == pytest.approx(other.sort_values("date")["close"].to_numpy())
+
+    def test_missing_adj_close_leaves_feed_raw(self):
+        raw, _ = _split_prices()
+        feed_df = dataframe_to_feed(raw.drop(columns=["adj_close"]), "NVDA").p.dataname
+        assert feed_df["close"].to_numpy() == pytest.approx(raw["close"].to_numpy())
+
+
 # ======================================================================
 # 2. commissions.py
 # ======================================================================

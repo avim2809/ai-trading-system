@@ -45,6 +45,31 @@ def _no_real_pipeline_warmup(request):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_fundamentals_refresh(request):
+    """Stop tests from starting the real background fundamentals refresh.
+
+    ``POST /api/live/start`` calls ``maybe_refresh_fundamentals_cache_on_start``,
+    which spawns a thread that fetches real vendor fundamentals (FMP /
+    AlphaVantage, real API keys from ``.env``) and merges them into
+    ``settings.data.cache_dir`` whenever that cache looks stale. Found
+    2026-09-29 running the suite from a fresh git worktree (no ``data/cache``,
+    so always "stale"): the API tests made real AlphaVantage calls (one got an
+    HTTP 503), and the leaked threads then called
+    ``test_refresh_fundamentals_cache_writes_parquet``'s patched
+    ``ParquetCache.put`` 31 times, failing it. From the live checkout the same
+    thread would write into the running instances' real ``data/cache`` whenever
+    that cache ages past its refresh window. Excluded for
+    test_fundamentals_refresh.py, which exercises this code directly and
+    patches ``_refresh_in_background`` itself where needed.
+    """
+    if request.module.__name__ == "tests.test_fundamentals_refresh":
+        yield
+        return
+    with patch("firm.live.fundamentals_refresh._refresh_in_background"):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _isolated_execution_audit(tmp_path):
     """Keep tests out of the live instance's real execution audit log.
 
