@@ -1,0 +1,38 @@
+{
+  "family": "standalone_strategy",
+  "entries": [
+    {
+      "date": "2026-09-30",
+      "fingerprint": "1d54517a2e1e68c09d88d78111fe9b6e8529cae482d7015c0b0c30f25f921b8d",
+      "n_trials": 11,
+      "trials": [
+        "momentum",
+        "trend",
+        "mean_reversion",
+        "volatility_breakout",
+        "stat_arb",
+        "seasonality",
+        "multi_factor",
+        "event_driven",
+        "sentiment",
+        "regime_hmm",
+        "pattern_recognition"
+      ],
+      "trial_daily_sharpes": [
+        -0.012653971499029346,
+        -0.035030701942876365,
+        -0.0979953569827665,
+        -0.19617133175661214,
+        -0.21475557000435389,
+        -0.16899244163303426,
+        0.005999920792409628,
+        -0.07088197595362547,
+        -0.1632218094383247,
+        -0.08879556686350723,
+        -0.10531423260492118
+      ],
+      "survivors": []
+    }
+  ],
+  "cumulative_trials": 11
+}

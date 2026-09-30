@@ -44,3 +44,8 @@ Full reference: `docs/PROJECT_CONTEXT.md`
 - Optional scheduled scan job + `/api/patterns/*` REST + `/patterns` frontend page
 - CNN/GAF and PPO position-sizer pieces live in an isolated `.venv-ml` env (Python 3.12, `uv`-managed) — never imported by the live `firm-api` process
 - Debugging: check `pattern_recognition: N symbols scanned, M signals` in the instance log (INFO level)
+
+## Backtest prices (2026-09-30)
+- The cache's `close` is raw (split-unadjusted). `execute_backtest` total-return-adjusts the whole panel (`backtest/datafeeds.total_return_adjust_panel`), so strategies and the broker see adjusted OHLC like live Alpaca/IBKR bars. Don't reintroduce raw-close P&L: split days book fake ±75–95% moves.
+- Evidence standard: 0/11 current strategies have standalone OOS edge (`docs/edge_search_verdict_2026_09.md`). A new strategy needs its own pre-registration and ledger before it's promoted.
+

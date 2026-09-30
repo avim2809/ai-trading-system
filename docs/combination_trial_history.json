@@ -144,6 +144,29 @@
         "C1_robust_attribution": "FAIL",
         "C2_robust_standalone": "FAIL"
       }
+    },
+    {
+      "date": "2026-09-30",
+      "source": "scripts/run_combination_evaluation.py (96bf26c8aa81)",
+      "n_trials": 5,
+      "candidates": [
+        "C0_legacy_optimal",
+        "C1_robust_attribution",
+        "C2_robust_standalone",
+        "C3_confidence",
+        "P_random_weights"
+      ],
+      "oos_sharpes": {
+        "C0_legacy_optimal": -0.22238529888934958,
+        "C1_robust_attribution": -0.7307749411989439,
+        "C2_robust_standalone": 0.3077175307135668,
+        "C3_confidence": -0.0659817019837298,
+        "P_random_weights": -0.24411788738525345
+      },
+      "verdicts": {
+        "C1_robust_attribution": "FAIL",
+        "C2_robust_standalone": "FAIL"
+      }
     }
   ]
 }

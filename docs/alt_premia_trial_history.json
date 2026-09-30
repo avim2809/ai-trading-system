@@ -1,0 +1,45 @@
+{
+  "family": "alt_premia",
+  "note": "New family (2026-09-29 edge search, Step 2). combination (52) and pattern_ml (104) ledgers are separate and unchanged.",
+  "entries": [
+    {
+      "date": "2026-09-29",
+      "fingerprint": "76598975432f3bc69b61b7f3d8a18484901c6d17f591818d02545e1df8992dec",
+      "n_trials": 10,
+      "trials": [
+        "V1_short_vol_timed",
+        "V2_put_write",
+        "K1_calendar",
+        "C1_btc_trend",
+        "T2_cross_asset_trend",
+        "M1_combo",
+        "M2_combo_crypto",
+        "BM1_SPY",
+        "BM2_60_40",
+        "BM3_SPY_VT"
+      ],
+      "trial_daily_sharpes": [
+        0.017816662473444586,
+        0.030063747342817696,
+        0.013150578692342587,
+        0.08714219927384886,
+        0.01854330057154067,
+        0.029205269578962044,
+        0.05190391531605814,
+        0.04465362257458415,
+        0.04175966461318628,
+        0.046630558224035244
+      ],
+      "tiers": {
+        "V1_short_vol_timed": "C",
+        "V2_put_write": "C",
+        "K1_calendar": "C",
+        "C1_btc_trend": "C",
+        "T2_cross_asset_trend": "C",
+        "M1_combo": "C",
+        "M2_combo_crypto": "C"
+      }
+    }
+  ],
+  "cumulative_trials": 10
+}

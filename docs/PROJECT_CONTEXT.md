@@ -1214,3 +1214,21 @@ Full detail is in `docs/optimal_combination_fix_2026_09.md`.
 - **Operational rule.** Services import from the checkout itself. Never edit
   tracked `src/` while a service is active: an uncommitted edit caused an
   ImportError in IBKR cycle 109.
+
+## 2026-09-30: edge search, and the backtest split bug
+
+Full verdict: `docs/edge_search_verdict_2026_09.md`. Plan: `docs/edge_search_plan_2026_09.md`.
+
+- **Backtest split bug (fixed on branch `research/edge-search`).** The backtest broker marked and filled positions at the cache's *raw*, split-unadjusted `close`. Every stock split booked a fake −75..−95% day on a long (a gain on a short). C3's worst day, −6.96% on 2024-06-10, was the NVDA 10:1 split. Raw closes also ignored dividends.
+  - Fix: `backtest/datafeeds._total_return_adjust` and `total_return_adjust_panel`. OHLC are scaled by `adj_close/close`, and volume inversely.
+  - Applied to the broker feed and, in `execute_backtest`'s cache branch, to the PIT panel, so backtests see the same adjusted bars live providers serve.
+  - `load_prices` itself is unchanged, because the live `pattern_scan_job` uses it.
+  - **Every backtest result before this fix that held stocks through a split is contaminated.**
+- **9/28 combination evaluation re-measured on the fixed engine** (a corrected price feed for every bar, so old and new paths differ on most days, not just split days): still FAIL. OOS Sharpe: C0 −0.69→−0.22, C3 −0.32→−0.07, placebo −0.23→−0.24. PBO 0.97→0.46. No method beats the placebo.
+- **Live config vs cash and SPY, 2020–2026:** Sharpe above T-bills 0.14, +25% total, beta ≈ 0. SPY returned +152% over the same days.
+- **Per-strategy standalone test (Step 1):** 0 of 11 strategies have a positive, significant, hedged, net-of-cost OOS edge. Most are negative even gross, and several books turn over 60–100% a day. Ledger: `docs/standalone_strategy_trial_history.json`.
+- **Alternative premia (Step 2):** all 7 candidates are Tier C (inconclusive) against SPY / 60-40 / vol-targeted SPY, mostly with negative point estimates. The candidates were timed short vol, put-write, turn-of-month/FOMC, cross-asset trend, two premia mixes, and BTC trend. The only lead is BTC 4-week trend vs BTC held (+0.28 Sharpe, not significant). Ledger: `docs/alt_premia_trial_history.json` (new family).
+- **Recommendation (proposal, not applied):** move one instance to the pre-registered fallback, 60/40 SPY/IEF rebalanced monthly, and keep the other as control. It needs an allocator outside the current risk caps (per-name 5%, net 0.5). A BTC-trend sleeve could be run as a forward paper test only.
+- **Latent live issue (IBKR only, not fixed).** When IBKR's data farm is down, the REST fallback serves raw OHLC. `LiveTradingEngine._resolve_cycle_prices` and `_closing_price` prefer raw `close`, so a split day would put a fake jump into per-strategy attribution. Alpaca is clean.
+- **Test isolation.** An autouse `_no_real_fundamentals_refresh` fixture stops tests from starting the real vendor fundamentals refresh. Some tests still write into `data/llm_cache.db` and `data/vectordb` relative to the working directory: a follow-up.
+- **Research briefs for non-equity instruments:** `docs/research_brief_new_instruments.md` (with repo access) and `..._standalone.md` (no repo access).
