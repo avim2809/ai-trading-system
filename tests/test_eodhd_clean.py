@@ -15,7 +15,7 @@ if str(_SCRIPTS) not in sys.path:
 
 import eodhd_clean as ec  # noqa: E402
 
-FROZEN_FP = "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd"  # v2; a shortlist prereg cites this value
+FROZEN_FP = "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054"  # v2; a shortlist prereg cites this value
 
 
 def _bars(prices, start="2015-12-21", vol=1000.0, freq="B"):
