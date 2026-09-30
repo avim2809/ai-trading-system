@@ -386,3 +386,74 @@ class TestDrawdownAndCalmar:
     def test_calmar_is_nan_when_there_is_no_drawdown(self):
         r = np.full(10, 0.001)
         assert np.isnan(ev.calmar(r))
+
+
+# ---------------------------------------------------------------------------
+# POST-HOC static-mix diagnostic (does not change the frozen tier)
+# ---------------------------------------------------------------------------
+
+class TestStaticMixDiagnostic:
+    def test_static_mix_holds_within_the_2pct_band_without_trading(self):
+        # SPY and bond leg both flat (0% return): the very first rebalance
+        # sets the target; with no drift at all, no further day should ever
+        # trigger a trade (there is nothing to compare against) besides day 0.
+        inp = _make_inputs(n_months=3, on_months=set())
+        static = ev.static_mix_returns(inp, spy_weight=0.52)
+        # only the initial allocation can carry a (one-off) cost; every later
+        # day must be exactly 0 (flat returns, no further drift -> no trade).
+        assert np.isfinite(static.to_numpy()).all()
+        assert (static.iloc[1:] == 0.0).all()
+
+    def test_static_mix_rebalances_only_at_the_monthly_check(self):
+        # SPY steadily outperforms for 39 sessions after the only first-of-month
+        # day in this fixture (day 0). If the 2% band were checked daily, the
+        # SPY weight share would get pulled back down once it drifted >2% above
+        # target; since it's checked only at the monthly cadence (and there is
+        # no second such day here), the weight share must rise monotonically
+        # the whole way instead -- direct proof no further trade occurs.
+        dates = _bdate_range("2010-01-04", periods=60)
+        spy_ret = pd.Series(0.0, index=dates)
+        spy_ret.iloc[1:40] = 0.01
+        bond_ret = pd.Series(0.0, index=dates)
+        first_of_month = np.zeros(len(dates), dtype=bool)
+        first_of_month[0] = True
+        inp = ev.Inputs(dates, spy_ret, bond_ret, pd.Series(0.0, index=dates),
+                         pd.Series(1.0, index=dates), pd.Series(1.0, index=dates), first_of_month)
+        rets = np.column_stack([inp.spy_ret.to_numpy(), inp.bond_ret.to_numpy()])
+        cost = ev._cost_matrix(inp, stress=False)[:, :2]
+        target = np.array([0.5, 0.5])
+
+        def decide(i, w):
+            if not inp.first_of_month[i]:
+                return None
+            return target if abs(w[0] - 0.5) > 0.02 else None
+        _, held = ev.simulate(rets, decide, cost)
+        assert np.all(np.diff(held[1:40, 0]) >= -1e-12)
+
+    def test_variant_held_weights_shape_and_bounds(self):
+        inp = _make_inputs(n_months=6, on_months={2})
+        held = ev.variant_held_weights(inp, "V1_primary")
+        assert held.shape == (len(inp.dates), 3)
+        assert np.isfinite(held).all()
+        # every row sums to 1.0 (fully invested, no idle cash)
+        assert np.allclose(held.sum(axis=1), 1.0)
+        # SPY weight is always either the "off" 0.6 or the "on" 0.3
+        assert set(np.round(np.unique(held[:, 0]), 6)) <= {0.3, 0.6}
+
+    def test_realised_avg_spy_weight_is_between_the_two_states(self):
+        inp = _make_inputs(n_months=12, on_months={1, 4, 7})
+        wmask = np.ones(len(inp.dates), dtype=bool)
+        res = ev.posthoc_static_mix_diagnostic(inp, wmask, "V1_primary")
+        assert 0.3 < res["realised_avg_spy_weight"] < 0.6
+        assert res["note"] == "post-hoc, not a bar -- does not change the frozen tier"
+
+    def test_diagnostic_output_has_the_expected_keys(self):
+        inp = _make_inputs(n_months=12, on_months={1, 4, 7})
+        wmask = np.ones(len(inp.dates), dtype=bool)
+        res = ev.posthoc_static_mix_diagnostic(inp, wmask, "V3_stricter_threshold")
+        assert set(res) >= {"note", "variant", "realised_avg_spy_weight", "V3_stricter_threshold",
+                             "static_mix", "sharpe_gap_variant_minus_static", "bootstrap_99pct_one_sided"}
+        for key in ("sharpe", "cagr", "max_dd", "calmar"):
+            assert key in res["V3_stricter_threshold"]
+            assert key in res["static_mix"]
+        assert "lb" in res["bootstrap_99pct_one_sided"] and "ub" in res["bootstrap_99pct_one_sided"]

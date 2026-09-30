@@ -287,15 +287,9 @@ def _variant_decision_states(inp: Inputs, variant_id: str) -> np.ndarray:
     return np.where(np.isfinite(sig), on, False)
 
 
-def variant_returns(inp: Inputs, variant_id: str, stress: bool = False,
-                     on_override: np.ndarray | None = None) -> tuple[pd.Series, np.ndarray]:
-    """Net daily returns for one overlay variant, and its daily on/off state array.
-
-    ``on_override``, when given, is used DIRECTLY as the final bool on/off
-    array (e.g. a placebo's already-permuted daily state) -- it is NOT
-    re-compared against the variant's threshold (that comparison only
-    happens once, inside ``_variant_decision_states``, for the REAL signal).
-    """
+def _variant_simulate(inp: Inputs, variant_id: str, stress: bool = False,
+                       on_override: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Shared simulation core for a variant: (net returns, on/off state, held weights (T,3))."""
     rets = _rets_matrix(inp)
     cost = _cost_matrix(inp, stress)
     on = np.asarray(on_override, dtype=bool) if on_override is not None else _variant_decision_states(inp, variant_id)
@@ -312,7 +306,26 @@ def variant_returns(inp: Inputs, variant_id: str, stress: bool = False,
         return np.array([0.6, 0.4, 0.0])
 
     net, held = simulate(rets, decide, cost)
+    return net, on, held
+
+
+def variant_returns(inp: Inputs, variant_id: str, stress: bool = False,
+                     on_override: np.ndarray | None = None) -> tuple[pd.Series, np.ndarray]:
+    """Net daily returns for one overlay variant, and its daily on/off state array.
+
+    ``on_override``, when given, is used DIRECTLY as the final bool on/off
+    array (e.g. a placebo's already-permuted daily state) -- it is NOT
+    re-compared against the variant's threshold (that comparison only
+    happens once, inside ``_variant_decision_states``, for the REAL signal).
+    """
+    net, on, _ = _variant_simulate(inp, variant_id, stress, on_override)
     return pd.Series(net, inp.dates, name=variant_id), on
+
+
+def variant_held_weights(inp: Inputs, variant_id: str, stress: bool = False) -> np.ndarray:
+    """(T, 3) realised weight path [SPY, bond_leg, cash_leg] for one overlay variant."""
+    _, _, held = _variant_simulate(inp, variant_id, stress)
+    return held
 
 
 def bm1_spy(inp: Inputs, stress: bool = False) -> pd.Series:
@@ -350,6 +363,59 @@ def bm3_spy_vt(inp: Inputs, stress: bool = False) -> pd.Series:
         return None
     net, _ = simulate(r, decide, cost)
     return pd.Series(net, inp.dates, name="BM3_SPY_VT")
+
+
+# ---------------------------------------------------------------------------
+# POST-HOC diagnostic (does not change the frozen tier): is a variant's edge
+# over BM2 timing, or just a lower average equity weight? A STATIC mix at the
+# variant's own realised time-average SPY weight, same monthly cadence / 2%
+# no-trade band / costs / window as BM2, isolates the answer.
+# ---------------------------------------------------------------------------
+
+def static_mix_returns(inp: Inputs, spy_weight: float, stress: bool = False) -> pd.Series:
+    rets = np.column_stack([inp.spy_ret.to_numpy(), inp.bond_ret.to_numpy()])
+    cost = _cost_matrix(inp, stress)[:, :2]
+    fom = inp.first_of_month
+    target = np.array([spy_weight, 1.0 - spy_weight])
+    band = 0.02
+
+    def decide(i: int, w: np.ndarray):
+        if not fom[i]:
+            return None
+        if abs(w[0] - spy_weight) > band:
+            return target
+        return None
+    net, _ = simulate(rets, decide, cost)
+    return pd.Series(net, inp.dates, name=f"static_mix_{spy_weight:.4f}")
+
+
+def posthoc_static_mix_diagnostic(inp: Inputs, wmask: np.ndarray, variant_id: str) -> dict:
+    """Sharpe/CAGR/maxDD/Calmar for ``variant_id`` and a static SPY/bond-leg mix
+    at its realised time-average SPY weight, plus the paired bootstrap Sharpe
+    gap (variant - static mix). Labelled 'post-hoc, not a bar' by the caller."""
+    held = variant_held_weights(inp, variant_id)
+    avg_spy_w = float(pd.Series(held[:, 0], inp.dates).loc[wmask].mean())
+    static = static_mix_returns(inp, avg_spy_w)
+
+    v_net, _ = variant_returns(inp, variant_id)
+    v = v_net.loc[wmask].dropna()
+    s = static.loc[wmask].dropna()
+    j = pd.concat([v, s], axis=1, keys=["v", "s"]).dropna()
+    ve, se = j.v.to_numpy(), j.s.to_numpy()
+    gap = sharpe(ve) - sharpe(se)
+    boot = paired_sharpe_gap_boot(ve, se, _seed_for("posthoc_static_mix", variant_id))
+    alpha = prereg.BOOTSTRAP["alpha_one_sided"]
+    lb, ub = float(np.quantile(boot, alpha)), float(np.quantile(boot, 1 - alpha))
+    return {
+        "note": "post-hoc, not a bar -- does not change the frozen tier",
+        "variant": variant_id, "realised_avg_spy_weight": avg_spy_w,
+        variant_id: {"sharpe": sharpe(ve), "cagr": cagr(v.to_numpy()), "max_dd": max_drawdown(v.to_numpy()),
+                     "calmar": calmar(v.to_numpy())},
+        "static_mix": {"sharpe": sharpe(se), "cagr": cagr(s.to_numpy()), "max_dd": max_drawdown(s.to_numpy()),
+                       "calmar": calmar(s.to_numpy())},
+        "sharpe_gap_variant_minus_static": gap,
+        "bootstrap_99pct_one_sided": {"lb": lb, "ub": ub, "alpha_one_sided": alpha},
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -601,6 +667,31 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_posthoc_static_mix(args: argparse.Namespace) -> int:
+    """POST-HOC diagnostic (does not change the frozen tier): merge
+    'posthoc_static_mix_diagnostic' into an existing report.json for one or
+    more variants, keyed by variant id."""
+    inp = load_inputs(Path(args.breadth))
+    wmask = window_mask(inp.dates)
+    out = {}
+    for vid in args.variants:
+        res = posthoc_static_mix_diagnostic(inp, wmask, vid)
+        out[vid] = res
+        log.info("posthoc static-mix %-24s avg_spy_w=%.4f  %s sharpe=%.3f cagr=%.3f maxdd=%.3f calmar=%.3f | "
+                  "static sharpe=%.3f cagr=%.3f maxdd=%.3f calmar=%.3f | gap=%+.3f [LB %+.3f, UB %+.3f]",
+                  vid, res["realised_avg_spy_weight"], vid, res[vid]["sharpe"], res[vid]["cagr"],
+                  res[vid]["max_dd"], res[vid]["calmar"], res["static_mix"]["sharpe"], res["static_mix"]["cagr"],
+                  res["static_mix"]["max_dd"], res["static_mix"]["calmar"], res["sharpe_gap_variant_minus_static"],
+                  res["bootstrap_99pct_one_sided"]["lb"], res["bootstrap_99pct_one_sided"]["ub"])
+    for report_path in args.report:
+        p = Path(report_path)
+        report = json.loads(p.read_text())
+        report.setdefault("posthoc_static_mix_diagnostic", {}).update(out)
+        p.write_text(json.dumps(report, indent=2, default=float))
+        log.info("merged posthoc_static_mix_diagnostic into %s", p)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -611,9 +702,14 @@ def main() -> int:
     p_ev.add_argument("--out", required=True)
     p_ev.add_argument("--report")
     p_ev.add_argument("--append-ledger", action="store_true")
+    p_ph = sub.add_parser("posthoc-static-mix")
+    p_ph.add_argument("--breadth", required=True)
+    p_ph.add_argument("--variants", nargs="+", required=True)
+    p_ph.add_argument("--report", nargs="+", required=True, help="report.json path(s) to update in place")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    return {"selfcheck": cmd_selfcheck, "evaluate": cmd_evaluate}[args.cmd](args)
+    return {"selfcheck": cmd_selfcheck, "evaluate": cmd_evaluate,
+             "posthoc-static-mix": cmd_posthoc_static_mix}[args.cmd](args)
 
 
 if __name__ == "__main__":
