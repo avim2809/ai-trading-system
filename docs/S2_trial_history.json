@@ -11,16 +11,23 @@
         "V3_stricter_threshold",
         "V4_alt_measure"
       ],
-      "trial_daily_sharpes": [
+      "trial_daily_sharpes_cash_excess_governing": [
+        0.0440045685279643,
+        0.03868115228934933,
+        0.046137589684815315,
+        0.04256925822538266
+      ],
+      "trial_daily_sharpes_bm2_excess_alt": [
         -0.009207948991113324,
         -0.02178866363794326,
         -0.0019821230462338207,
         -0.011798493909552723
       ],
-      "tiers_conditional_on_A7": {
+      "official_tier_conditional_on_A7": "C",
+      "tiers_conditional_on_A7_all_variants_descriptive": {
         "V1_primary": "C",
         "V2_cash_destination": "C",
-        "V3_stricter_threshold": "C",
+        "V3_stricter_threshold": "B",
         "V4_alt_measure": "C"
       }
     }

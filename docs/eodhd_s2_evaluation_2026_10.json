@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-09-30T19:55:42.391650+00:00",
+  "generated_at": "2026-09-30T20:39:41.546213+00:00",
   "fingerprint": "4fd97659e9affce3c2fb6391daba522ad83d8c36be4698f2370e78c39ff7b6ab",
   "prereg_at": "2026-09-30T19:18:54Z",
   "cleaning_fingerprint_used_for_breadth": "f62cb2e4... (label-only predecessor of the frozen fc0690f0...; cleaning BEHAVIOUR identical -- see module docstring)",
@@ -14,6 +14,7 @@
   "pbo": 0.0,
   "dsr_trials": 4,
   "dsr_prior_trials": 206,
+  "dsr_convention": "GOVERNING: literal reading -- each variant's own daily Sharpe, excess of cash (prereg_issue 2 resolved 2026-09-30 per coordinator instruction, most-literal-reading rule). Alternative (BM2-excess) kept under each variant's 'dsr_alt_bm2_excess'/'A3_alt_bm2_excess'/'bars_alt_bm2_excess'.",
   "sanity": {
     "spy_cagr": 0.0996614144239718,
     "spy_vol": 0.18911425776324273,
@@ -141,20 +142,29 @@
           "D": null
         }
       },
-      "dsr": 0.005805138116147246,
-      "placebo_p95": 0.05883866545226517,
-      "A3": false,
+      "dsr": 0.9971636821783647,
+      "placebo_p95": 0.688944330944322,
+      "sharpe_vs_cash": 0.698550869254159,
+      "A3": true,
+      "dsr_alt_bm2_excess": 0.005805138116147246,
+      "placebo_p95_alt_bm2_excess": 0.05883866545226517,
+      "A3_alt_bm2_excess": false,
+      "bars_alt_bm2_excess": {
+        "A2": false,
+        "A3": false
+      },
       "bars": {
         "A1": false,
-        "A2": false,
-        "A3": false,
+        "A2": true,
+        "A3": true,
         "A4": false,
         "A5": true,
         "A6": true,
         "A8": true
       },
       "A7": "PENDING (independent recompute not yet performed)",
-      "tier_conditional_on_A7": "C"
+      "tier_conditional_on_A7": "C",
+      "role": "primary (official candidate tier)"
     },
     "V2_cash_destination": {
       "n_days": 6225,
@@ -222,12 +232,20 @@
           "D": null
         }
       },
-      "dsr": 0.000206239759580229,
-      "placebo_p95": -0.0967088478037103,
+      "dsr": 0.9905670724342062,
+      "placebo_p95": 0.6424073919423116,
+      "sharpe_vs_cash": 0.6140442562982106,
       "A3": false,
+      "dsr_alt_bm2_excess": 0.000206239759580229,
+      "placebo_p95_alt_bm2_excess": -0.0967088478037103,
+      "A3_alt_bm2_excess": false,
+      "bars_alt_bm2_excess": {
+        "A2": false,
+        "A3": false
+      },
       "bars": {
         "A1": false,
-        "A2": false,
+        "A2": true,
         "A3": false,
         "A4": true,
         "A5": true,
@@ -235,7 +253,8 @@
         "A8": true
       },
       "A7": "PENDING (independent recompute not yet performed)",
-      "tier_conditional_on_A7": "C"
+      "tier_conditional_on_A7": "C",
+      "role": "non-primary variant, descriptive"
     },
     "V3_stricter_threshold": {
       "n_days": 6225,
@@ -303,20 +322,29 @@
           "D": null
         }
       },
-      "dsr": 0.025303156506906233,
-      "placebo_p95": 0.1305203873945827,
-      "A3": false,
+      "dsr": 0.9982928661863611,
+      "placebo_p95": 0.6743715251874409,
+      "sharpe_vs_cash": 0.7324115303877615,
+      "A3": true,
+      "dsr_alt_bm2_excess": 0.025303156506906233,
+      "placebo_p95_alt_bm2_excess": 0.1305203873945827,
+      "A3_alt_bm2_excess": false,
+      "bars_alt_bm2_excess": {
+        "A2": false,
+        "A3": false
+      },
       "bars": {
         "A1": false,
-        "A2": false,
-        "A3": false,
+        "A2": true,
+        "A3": true,
         "A4": true,
         "A5": true,
         "A6": true,
         "A8": true
       },
       "A7": "PENDING (independent recompute not yet performed)",
-      "tier_conditional_on_A7": "C"
+      "tier_conditional_on_A7": "B",
+      "role": "non-primary variant, descriptive"
     },
     "V4_alt_measure": {
       "n_days": 6225,
@@ -384,12 +412,20 @@
           "D": null
         }
       },
-      "dsr": 0.00319418951742112,
-      "placebo_p95": -0.020011312293350233,
+      "dsr": 0.9959615380807127,
+      "placebo_p95": 0.7216158314236217,
+      "sharpe_vs_cash": 0.6757660245651198,
       "A3": false,
+      "dsr_alt_bm2_excess": 0.00319418951742112,
+      "placebo_p95_alt_bm2_excess": -0.020011312293350233,
+      "A3_alt_bm2_excess": false,
+      "bars_alt_bm2_excess": {
+        "A2": false,
+        "A3": false
+      },
       "bars": {
         "A1": false,
-        "A2": false,
+        "A2": true,
         "A3": false,
         "A4": false,
         "A5": true,
@@ -397,16 +433,19 @@
         "A8": true
       },
       "A7": "PENDING (independent recompute not yet performed)",
-      "tier_conditional_on_A7": "C"
+      "tier_conditional_on_A7": "C",
+      "role": "non-primary variant, descriptive"
     }
   },
   "prereg_issues": [
     "VARIANTS['V2_cash_destination']'s OVERLAY rule_template (\"destination weight += (0.60 - spy_weight_cut)\") is ambiguous about what happens to the OTHER (non-destination) leg during the cut state when destination != IEF: does IEF keep its normal 0.40 (leaving 0.30 in un-remunerated cash, total 0.30+0.40+0.30=1.0 with 0.40 idle) or does the destination fully replace the non-SPY sleeve (0.30 SPY / 0.70 BIL, IEF=0)? Implemented the latter (full replacement) as the most literal, fully-invested reading -- matches 'SPY 0.60/IEF 0.40 (plain core)' being the explicit ELSE branch for every variant, and avoids idle, non-cash-earning NAV.",
-    "DSR['trial_sharpes'] text ('daily Sharpes of every variant the candidate declares') and PBO['series'] text ('daily excess returns vs BM2') don't explicitly say DSR's trial Sharpes are ALSO computed vs BM2 rather than as each variant's raw return Sharpe. Implemented consistently as excess-vs-BM2 throughout (DSR and PBO both), since A1/A4/A5/A8 are all framed 'vs BM2' and PBO is explicit about the vs-BM2 convention.",
+    "RESOLVED 2026-09-30 (coordinator correction, phase-2 most-literal-reading rule): originally implemented DSR/A3 as excess-vs-BM2 (inferring that convention from PBO's explicit 'vs BM2' wording). The literal reading is narrower: DSR says 'daily (non-annualised) Sharpe of each of the 4 declared overlay variants' and A3 says 'the Sharpe itself, not a gap' -- both mean each variant's own Sharpe, excess of CASH (the convention 'Sharpe' uses everywhere else in this protocol), not excess of BM2 or a Sharpe gap. PBO's own 'vs BM2' wording is unambiguous and unchanged (A6 still uses BM2-excess). Now GOVERNING: excess-of-cash DSR/A3 (see 'dsr_convention' and each variant's 'dsr'/'A3'/'placebo_p95'). Kept, not governing: the original BM2-excess numbers, under 'dsr_alt_bm2_excess'/'A3_alt_bm2_excess'/'placebo_p95_alt_bm2_excess'.",
     "PBO['series'] includes BM2_60_40 itself as one of the 7 series being excess-differenced against BM2 -- that column is identically 0 by construction (a series can't be excess vs itself). Implemented literally (BM2's column is all zeros); does not appear to break cscv_pbo mechanically (a constant column never wins an in-sample ranking) but is a literal degenerate case worth flagging.",
     "The bond/cash-leg proxy splice (VFITX->IEF, DTB3->BIL) leaves the real ETF's OWN first trading day return undefined (no prior close in ITS OWN series); implemented as: that one day uses the proxy's return for the same date (see _splice_returns docstring) -- a mechanical choice, not a deviation from PROXIES' handoff DATE."
   ],
-  "A7_status": "PENDING -- every reported tier is conditional on A7 (independent recompute)",
+  "official_tier_conditional_on_A7": "C",
+  "official_tier_note": "The candidate's tier is V1_primary's (the pre-declared primary variant), for consistency with S1 and because choosing among variants after seeing results is itself multiple testing. V2/V3/V4's bar outcomes are reported for information only ('role': 'non-primary variant, descriptive') and are NOT official tiers.",
+  "A7_status": "PENDING -- the official tier is conditional on A7 (independent recompute)",
   "posthoc_static_mix_diagnostic": {
     "V1_primary": {
       "note": "post-hoc, not a bar -- does not change the frozen tier",
