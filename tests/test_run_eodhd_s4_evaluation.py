@@ -135,6 +135,50 @@ class TestScheduleAndSimulateSlots:
 # Delisting / segment exit + -30% stress
 # ---------------------------------------------------------------------------
 
+class TestSegmentBoundaryMidHold:
+    """Regression tests for a real bug caught via the top-10-contributors sanity
+    check: a held position whose ticker hit a SEGMENT BREAK mid-hold (not the end of
+    its file -- e.g. a phantom reverse-split adjustment-factor reset seen in real
+    EODHD data for several penny/microcap names) must exit at the end of its OWN
+    segment, never continue into the new segment as if nothing happened."""
+
+    def test_segment_last_pos_clips_to_the_next_breaks_predecessor(self):
+        seg_starts_of = {"A": np.array([50, 120], dtype="int32")}
+        last_pos_of = {"A": 200}
+        assert r.segment_last_pos(seg_starts_of, last_pos_of, "A", 10) == 49
+        assert r.segment_last_pos(seg_starts_of, last_pos_of, "A", 60) == 119
+        assert r.segment_last_pos(seg_starts_of, last_pos_of, "A", 150) == 200
+
+    def test_segment_last_pos_with_no_breaks_is_just_last_pos(self):
+        assert r.segment_last_pos({}, {"A": 77}, "A", 5) == 77
+
+    def test_schedule_slots_exits_at_segment_end_even_though_the_file_continues(self):
+        # "D" is entered at pos 10, has a segment break at pos 30 (so its OWN segment
+        # ends at pos 29), but the underlying FILE keeps going to pos 199 in a new
+        # segment. A 6-month hold scheduled to run well past pos 30 must still exit
+        # at pos 29, not silently continue trading the post-break segment.
+        month_ends = pd.DatetimeIndex(["2000-01-31"])
+        entry_of = {month_ends[0]: 10}
+        col_of = {"D": 0}
+        last_pos_of = {"D": 199}          # the file itself runs to pos 199
+        seg_starts_of = {"D": np.array([30], dtype="int32")}
+        slots = r.schedule_slots(list(month_ends), entry_of, {month_ends[0]: ["D"]}, hold_months=6,
+                                 col_of=col_of, last_pos_of=last_pos_of, T=200, seg_starts_of=seg_starts_of)
+        assert len(slots) == 1
+        s = slots[0]
+        assert s.exit_pos == 29           # clipped to the end of D's OWN segment
+        assert s.early_exit is True        # exited before its scheduled 6-month unwind
+
+    def test_schedule_slots_without_seg_starts_of_ignores_segments(self):
+        # Backward-compatible: omitting seg_starts_of (e.g. a synthetic test with no
+        # segment concept) must reproduce the pre-fix last_pos-only clipping.
+        month_ends = pd.DatetimeIndex(["2000-01-31"])
+        entry_of = {month_ends[0]: 10}
+        slots = r.schedule_slots(list(month_ends), entry_of, {month_ends[0]: ["D"]}, hold_months=6,
+                                 col_of={"D": 0}, last_pos_of={"D": 199}, T=200)
+        assert slots[0].exit_pos == 199
+
+
 class TestDelistingAndStress:
     def test_early_exit_uses_last_clean_close_not_scheduled_exit(self):
         T, M = 10, 1
@@ -259,7 +303,7 @@ class TestPlaceboSharpes:
         monkeypatch.setitem(r.prereg.CANDIDATES, "S4_p1_6mo_N500", {"hold": "1_month", "N": 500, "is_primary": True})
         built = {"month_ends": month_ends, "per_month": per_month, "entry_of": entry_of,
                  "col_of": col_of, "last_pos_of": last_pos_of, "RET": RET, "ENTRY_RET": ENTRY_RET,
-                 "cash_ret": cash, "T": T, "cost_fn": r.flat_cost_bps(0.0)}
+                 "cash_ret": cash, "T": T, "cost_fn": r.flat_cost_bps(0.0), "seg_starts_of": {}}
         out = r.placebo_sharpes(built, "S4_p1_6mo_N500", n_draws=5, seed=1)
         assert len(out) == 5   # a well-formed Sharpe (possibly nan with all-zero returns) per draw
 
@@ -322,7 +366,8 @@ class TestBuildMatrices:
                            "close": closes, "adjusted_close": closes, "volume": 100_000})
         df.to_parquet(uni / "GOOD.parquet")
         dates = cal[100:250]
-        RET, ENTRY_RET, col_of, adv20_of, last_pos_of = r.build_matrices(["GOOD", "MISSING"], cal, dates, uni)
+        RET, ENTRY_RET, col_of, adv20_of, last_pos_of, seg_starts_of = r.build_matrices(
+            ["GOOD", "MISSING"], cal, dates, uni)
         assert RET.shape == (len(dates), 2)
         assert col_of == {"GOOD": 0, "MISSING": 1}
         assert "MISSING" not in adv20_of         # file doesn't exist: skipped cleanly

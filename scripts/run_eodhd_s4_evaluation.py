@@ -57,6 +57,35 @@ final message for the full list, not repeated in each report):
        ("Sharpe above the 95th percentile of the placebo Sharpes") never frames A3 as
        a benchmark-relative gap, unlike A1/A4/A5.
 
+A cleaning-rule GAP was found while sanity-checking the top-10 P&L contributors (not
+a prereg ambiguity -- a real defect in the SHARED, frozen scripts/eodhd_clean.py used
+by all five shortlist candidates, reported to the coordinator, not patched here):
+``clean_bars``'s segment-break detector only fires on a discrete one-day JUMP in
+``adjusted_close``. A different corruption pattern slips through it untouched: EODHD's
+own ``adjusted_close`` pinned at a constant sentinel ceiling (999999.9999, an apparent
+overflow in their split-adjustment-factor computation) for extended stretches -- a
+CONSTANT value produces no day-over-day jump, so no segment break is ever recorded,
+even though the series is corrupted throughout. Found in 182 of 16,229 eligible-ever
+tickers (~1.1%), concentrated in heavily reverse-split micro-caps/biotechs. Because
+``ratio_52wk`` is a within-segment RATIO, a constant multiplicative mis-adjustment
+cancels out of it exactly -- but ``adv63``/``adv20`` dollar-volume (adjusted_close x
+volume) is NOT scale-invariant, so an inflated ``adjusted_close`` can make a genuinely
+illiquid name look liquid enough to enter the top-N cut. All 4 non-mega-cap names in
+S4_p1's top-10 P&L contributors (SNCA, TMBR, BXRX, RXII, plus YRCW) carry this exact
+signature; the 5 mega-cap winners (AAPL, QCOM, CHKP, WDC, AMZN) do not. This was
+DISCOVERED, not fixed, here -- fixing scripts/eodhd_clean.py would retroactively
+change every OTHER shortlist candidate's already-computed results too, which is out
+of this candidate's scope; see the report's "cleaning_rule_gap_found" key and this
+session's final message.
+
+A separate, genuine HARNESS bug (not a cleaning-rule gap) was caught by the same
+sanity check and IS fixed here: a held position whose ticker hit a segment break
+MID-HOLD (as opposed to the end of its whole file) was not being forced to exit at
+the segment boundary, in violation of the frozen file's own "no return may be
+computed across a segment boundary" rule -- ``schedule_slots`` now clips every slot's
+exit to the end of its OWN entry segment (``seg_starts_of``/``segment_last_pos``),
+treating a segment break mid-hold exactly like a delisting.
+
     python scripts/run_eodhd_s4_evaluation.py --out <dir> \
         [--report docs/eodhd_s4_evaluation_2026_10.json] [--append-ledger] [--limit-placebo N]
 """
@@ -152,15 +181,20 @@ def cash_rate_series(dates: pd.DatetimeIndex) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 def build_matrices(tickers: list[str], calendar: pd.DatetimeIndex, dates: pd.DatetimeIndex,
-                   universe_dir: Path) -> tuple[np.ndarray, np.ndarray, dict, dict, dict]:
+                   universe_dir: Path) -> tuple[np.ndarray, np.ndarray, dict, dict, dict, dict]:
     """Returns (RET, ENTRY_RET) dense (T, M) float32 arrays, ``col_of[ticker]``,
-    ``adv20_of[ticker] -> (pos, adv20)`` sparse arrays, and ``last_pos_of[ticker]``."""
+    ``adv20_of[ticker] -> (pos, adv20)`` sparse arrays, ``last_pos_of[ticker]`` (last
+    valid bar of the WHOLE file) and ``seg_starts_of[ticker]`` (sorted positions where
+    a NEW segment starts, excluding the first bar -- used to force a held position to
+    exit at the end of ITS OWN segment, per protocol: "no return may be computed
+    across a segment boundary")."""
     T, M = len(dates), len(tickers)
     RET = np.full((T, M), np.nan, dtype="float32")
     ENTRY_RET = np.full((T, M), np.nan, dtype="float32")
     col_of = {t: i for i, t in enumerate(tickers)}
     adv20_of: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     last_pos_of: dict[str, int] = {}
+    seg_starts_of: dict[str, np.ndarray] = {}
     date_arr = dates.to_numpy()
     t0 = time.time()
     for i, tkr in enumerate(tickers):
@@ -205,10 +239,14 @@ def build_matrices(tickers: list[str], calendar: pd.DatetimeIndex, dates: pd.Dat
         av_ok = np.isfinite(av)
         adv20_of[tkr] = (p[av_ok].astype("int32"), av[av_ok])
         last_pos_of[tkr] = int(p[-1])
+        seg_v = seg[valid]
+        breaks = p[np.r_[False, seg_v[1:] != seg_v[:-1]]]
+        if len(breaks):
+            seg_starts_of[tkr] = breaks.astype("int32")
         if (i + 1) % 1000 == 0:
             log.info("  matrices: %d/%d tickers (%.1fs)", i + 1, M, time.time() - t0)
     log.info("matrices built: T=%d M=%d in %.1fs", T, M, time.time() - t0)
-    return RET, ENTRY_RET, col_of, adv20_of, last_pos_of
+    return RET, ENTRY_RET, col_of, adv20_of, last_pos_of, seg_starts_of
 
 
 def adv20_at_or_before(adv20_of: dict, ticker: str, pos: int) -> float:
@@ -219,6 +257,17 @@ def adv20_at_or_before(adv20_of: dict, ticker: str, pos: int) -> float:
     if idx < 0:
         return float("nan")
     return float(arr_val[idx])
+
+
+def segment_last_pos(seg_starts_of: dict, last_pos_of: dict, ticker: str, pos: int) -> int:
+    """Last position sharing ``pos``'s own segment (clipped to the ticker's last bar if
+    that segment runs to the end of its data, per the no-return-across-a-segment rule)."""
+    starts = seg_starts_of.get(ticker)
+    last = last_pos_of.get(ticker, pos)
+    if starts is None or len(starts) == 0:
+        return last
+    i = np.searchsorted(starts, pos, side="right")
+    return int(starts[i]) - 1 if i < len(starts) else last
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +310,7 @@ class Slot:
 
 def schedule_slots(month_ends: list[pd.Timestamp], entry_of: dict, per_month_names: dict,
                    hold_months: int, col_of: dict, last_pos_of: dict, T: int,
-                   weight_fn=None) -> list[Slot]:
+                   weight_fn=None, seg_starts_of: dict | None = None) -> list[Slot]:
     """One FRESH slot per (name, formation month) -- see design note 6: no netting of
     unchanged continuing members across consecutive reformations.
 
@@ -269,7 +318,15 @@ def schedule_slots(month_ends: list[pd.Timestamp], entry_of: dict, per_month_nam
     (the overlapping-cohort construction -- HOLD_STRUCTURES["6_month_overlapping"]:
     "1/6 of the book each month"), split equally across that cohort's names. For
     ``hold_months == 1`` (PRIMARY, the 1-month hold) this is just ``1/len(names)``,
-    since there is only ever one cohort open at a time."""
+    since there is only ever one cohort open at a time.
+
+    ``seg_starts_of``, when given, additionally clips every slot's exit to the end of
+    the SAME segment it was entered in (a segment break mid-hold -- e.g. a phantom
+    reverse-split adjustment-factor reset -- forces an early exit there, exactly like
+    a delisting, per the frozen file's "no return may be computed across a segment
+    boundary"). Every real call site (build_variant, build_primary, placebo_sharpes,
+    two_day_lag_variant) passes it; it is optional only for synthetic tests that don't
+    model segments at all."""
     slots: list[Slot] = []
     K = len(month_ends)
     for k, me in enumerate(month_ends):
@@ -295,8 +352,9 @@ def schedule_slots(month_ends: list[pd.Timestamp], entry_of: dict, per_month_nam
             last = last_pos_of.get(name, -1)
             if last < e_pos:
                 continue    # no data at all on/after entry: cannot open this slot
-            x = min(scheduled_x, last)
-            early = last < scheduled_x
+            seg_end = segment_last_pos(seg_starts_of, last_pos_of, name, e_pos) if seg_starts_of is not None else last
+            x = min(scheduled_x, last, seg_end)
+            early = x < scheduled_x
             slots.append(Slot(col, wt, e_pos, x, early))
     return slots
 
@@ -528,7 +586,7 @@ def build_all(panel_path: Path, universe_dir: Path = EODHD / "us_universe_full",
 
     tickers = sorted({t for me in month_ends for t in per_month[me][max(N_VALUES)]["universe"]})
     log.info("building matrices for %d tickers", len(tickers))
-    RET, ENTRY_RET, col_of, adv20_of, last_pos_of = build_matrices(tickers, calendar, dates, universe_dir)
+    RET, ENTRY_RET, col_of, adv20_of, last_pos_of, seg_starts_of = build_matrices(tickers, calendar, dates, universe_dir)
     ticker_of_col = tickers
     cost_fn = cost_bps_stock_lookup(adv20_of, ticker_of_col)
 
@@ -537,13 +595,15 @@ def build_all(panel_path: Path, universe_dir: Path = EODHD / "us_universe_full",
 
     def build_variant(hold_key: str, N: int, cost_mult=1.0, delist_stress=False) -> tuple[np.ndarray, list[Slot]]:
         names_by_month = {me: per_month[me][N]["decile"] for me in month_ends}
-        slots = schedule_slots(month_ends, entry_of, names_by_month, HOLD_MONTHS[hold_key], col_of, last_pos_of, T)
+        slots = schedule_slots(month_ends, entry_of, names_by_month, HOLD_MONTHS[hold_key], col_of, last_pos_of, T,
+                               seg_starts_of=seg_starts_of)
         net, _ = simulate_slots(slots, RET, ENTRY_RET, cash_ret, T, cost_mult, delist_stress, cost_fn)
         return net, slots
 
     def build_primary(N: int, cost_mult=1.0) -> tuple[np.ndarray, list[Slot]]:
         names_by_month = {me: per_month[me][N]["universe"] for me in month_ends}
-        slots = schedule_slots(month_ends, entry_of, names_by_month, 1, col_of, last_pos_of, T)
+        slots = schedule_slots(month_ends, entry_of, names_by_month, 1, col_of, last_pos_of, T,
+                               seg_starts_of=seg_starts_of)
         net, _ = simulate_slots(slots, RET, ENTRY_RET, cash_ret, T, cost_mult, False, cost_fn)
         return net, slots
 
@@ -583,7 +643,7 @@ def build_all(panel_path: Path, universe_dir: Path = EODHD / "us_universe_full",
         "primary_stress": primary_stress, "slots_of": slots_of,
         "month_ends": month_ends, "per_month": per_month, "entry_of": entry_of,
         "RET": RET, "ENTRY_RET": ENTRY_RET, "col_of": col_of, "adv20_of": adv20_of,
-        "last_pos_of": last_pos_of, "cost_fn": cost_fn, "bench": bench,
+        "last_pos_of": last_pos_of, "seg_starts_of": seg_starts_of, "cost_fn": cost_fn, "bench": bench,
     }
 
 
@@ -595,6 +655,7 @@ def placebo_sharpes(built: dict, cand: str, n_draws: int, seed: int) -> np.ndarr
     spec = prereg.CANDIDATES[cand]
     month_ends, per_month = built["month_ends"], built["per_month"]
     entry_of, col_of, last_pos_of = built["entry_of"], built["col_of"], built["last_pos_of"]
+    seg_starts_of = built["seg_starts_of"]
     RET, ENTRY_RET, cash_ret, T = built["RET"], built["ENTRY_RET"], built["cash_ret"], built["T"]
     cost_fn = built["cost_fn"]
     rng = np.random.default_rng(seed)
@@ -609,7 +670,8 @@ def placebo_sharpes(built: dict, cand: str, n_draws: int, seed: int) -> np.ndarr
             else:
                 idx = rng.choice(len(pool), size=dn, replace=False)
                 names_by_month[me] = [pool[i] for i in idx]
-        slots = schedule_slots(month_ends, entry_of, names_by_month, HOLD_MONTHS[spec["hold"]], col_of, last_pos_of, T)
+        slots = schedule_slots(month_ends, entry_of, names_by_month, HOLD_MONTHS[spec["hold"]], col_of, last_pos_of, T,
+                               seg_starts_of=seg_starts_of)
         net, _ = simulate_slots(slots, RET, ENTRY_RET, cash_ret, T, cost_bps_of=cost_fn)
         out[draw] = sharpe(net)
         if draw % 100 == 0:
@@ -620,6 +682,29 @@ def placebo_sharpes(built: dict, cand: str, n_draws: int, seed: int) -> np.ndarr
 # ---------------------------------------------------------------------------
 # Sanity checks
 # ---------------------------------------------------------------------------
+
+def detect_adjusted_close_sentinel_gap(tickers: list[str], universe_dir: Path,
+                                       sentinel: float = 999990.0) -> list[str]:
+    """Tickers whose file shows an adjusted_close >= ``sentinel`` at some point -- the
+    signature of the cleaning-rule gap documented in this module's docstring (a
+    constant-valued vendor overflow that never triggers a segment break, since a
+    discrete jump is what clean_bars' spike/segment detector looks for). Uses parquet
+    row-group statistics only (no full read) -- a cheap, separate diagnostic, not part
+    of the simulation itself."""
+    import pyarrow.parquet as pq
+    hits = []
+    for t in tickers:
+        f = universe_dir / f"{t}.parquet"
+        if not f.exists():
+            continue
+        try:
+            stats = pq.ParquetFile(f).metadata.row_group(0).column(5).statistics
+        except Exception:
+            continue
+        if stats is not None and stats.max is not None and stats.max >= sentinel:
+            hits.append(t)
+    return hits
+
 
 def sanity_checks(built: dict) -> dict:
     dates, base = built["dates"], built["base"]
@@ -746,7 +831,8 @@ def two_day_lag_variant(built: dict, cand: str) -> np.ndarray:
     entry_of = {me: (built["entry_of"][me] + 1 if built["entry_of"][me] is not None
                      and built["entry_of"][me] + 1 < T else None) for me in month_ends}
     names_by_month = {me: per_month[me][spec["N"]]["decile"] for me in month_ends}
-    slots = schedule_slots(month_ends, entry_of, names_by_month, HOLD_MONTHS[spec["hold"]], col_of, last_pos_of, T)
+    slots = schedule_slots(month_ends, entry_of, names_by_month, HOLD_MONTHS[spec["hold"]], col_of, last_pos_of, T,
+                           seg_starts_of=built["seg_starts_of"])
     net, _ = simulate_slots(slots, RET, ENTRY_RET, cash_ret, T, cost_bps_of=built["cost_fn"])
     return net
 
@@ -782,10 +868,17 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     trial_sr = (pbo_frame[list(prereg.CANDIDATES)].mean() / pbo_frame[list(prereg.CANDIDATES)].std(ddof=1)).to_numpy()
     log.info("PBO %.3f over %d series x %d days", pbo, pbo_frame.shape[1], pbo_frame.shape[0])
 
+    sentinel_hits = set(detect_adjusted_close_sentinel_gap(list(built["col_of"]), EODHD / "us_universe_full"))
+    log.info("cleaning-rule sentinel gap: %d/%d tickers show adjusted_close >= 999990",
+             len(sentinel_hits), len(built["col_of"]))
+
     results = {}
     for cand in prereg.CANDIDATES:
         results[cand] = evaluate_candidate(built, cand, placebo[cand], pbo, trial_sr)
-        results[cand]["top10_contributors"] = top_contributors(built, cand)
+        top10 = top_contributors(built, cand)
+        for row in top10:
+            row["adjusted_close_sentinel_gap_affected"] = row["ticker"] in sentinel_hits
+        results[cand]["top10_contributors"] = top10
         log.info("==> %s tier %s  bars=%s", cand, results[cand]["tier_reported"], results[cand]["bars"])
 
     sanity = sanity_checks(built)
@@ -844,6 +937,26 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         "cleaning_note": "cleaning v2's label-only update (f62cb2e4 -> fc0690f0) changed "
                         "only frozen_at's text; CLEANING_RULES (the actual behaviour) is "
                         "unchanged, so phase-1's panel.parquet is valid input here.",
+        "cleaning_rule_gap_found": {
+            "description": "NOT a prereg ambiguity -- a defect in the SHARED, frozen "
+                           "scripts/eodhd_clean.py used by all 5 shortlist candidates, "
+                           "found while sanity-checking top-10 P&L contributors, reported "
+                           "to the coordinator and NOT patched here (patching it would "
+                           "retroactively change every other candidate's already-computed "
+                           "results too). clean_bars' segment-break detector only fires on "
+                           "a discrete one-day jump in adjusted_close; a CONSTANT vendor "
+                           "sentinel value (999999.9999, an apparent overflow in EODHD's "
+                           "own split-adjustment-factor computation) held for extended "
+                           "stretches produces no jump and so is never flagged.",
+            "n_tickers_in_this_run_affected": len(sentinel_hits),
+            "n_tickers_in_this_run_total": len(built["col_of"]),
+            "affected_tickers_sample": sorted(sentinel_hits)[:30],
+            "note": "ratio_52wk is a within-segment RATIO, so a constant multiplicative "
+                   "mis-adjustment cancels out of it exactly; adv63/adv20 dollar-volume "
+                   "is NOT scale-invariant, so an affected name's liquidity can be "
+                   "overstated, letting it into the top-N cut. See each candidate's "
+                   "top10_contributors[].adjusted_close_sentinel_gap_affected flag.",
+        },
     }
     (out_dir / "report.json").write_text(json.dumps(report, indent=2, default=float))
     if args.report:
