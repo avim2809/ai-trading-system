@@ -25,9 +25,15 @@ class TestDraftStatus:
         assert prereg.PREREGISTERED_AT is None
 
     def test_cleaning_fingerprint_matches_frozen_rule(self):
-        # Same value asserted in tests/test_eodhd_clean.py for the shared,
-        # frozen cleaning rule this design commits to using.
-        assert prereg.CLEANING["fingerprint"] == "72a13e1edfb03c9ad62ac06b93fd1381353bd39292851f6d6c2d8b1b06bb42b5"
+        # v2, after Amendment 1 — same value asserted in tests/test_eodhd_clean.py
+        # for the shared, frozen cleaning rule this design commits to using.
+        assert prereg.CLEANING["fingerprint"] == "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd"
+        assert prereg.CLEANING["version"] == 2
+
+    def test_amendment_1_is_recorded(self):
+        assert prereg.AMENDMENT["id"] == "protocol_amendment_1"
+        assert prereg.AMENDMENT["changes_adopted"]
+        assert prereg.AMENDMENT["s3_specific_changes_in_this_pass"]
 
 
 class TestFingerprint:
@@ -64,17 +70,27 @@ class TestVariantGrid:
             for dep in v["uses"]:
                 assert dep in prereg.VARIANTS
 
+    def test_commodity_primary_is_now_the_12_1_month_peer_reviewed_lookback(self):
+        # Coordinator review: 12-1 month (Moskowitz-Ooi-Pedersen / Asness-Moskowitz-Pedersen)
+        # is primary; the 3-month practitioner backtest is now the sensitivity variant.
+        primary = prereg.VARIANTS["commodity_v1_primary"]
+        sensitivity = prereg.VARIANTS["commodity_v2_sensitivity"]
+        assert "12-1 month" in primary["signal"]
+        assert "reported_not_primary" not in primary
+        assert "3-month" in sensitivity["signal"]
+        assert sensitivity.get("reported_not_primary") is True
+
 
 class TestUniverse:
     def test_bond_universe_is_treasuries_only(self):
         assert prereg.UNIVERSE["bond_buckets"]["treasuries_only"] is True
-        assert set(prereg.UNIVERSE["bond_buckets"]["tickers"]) == {"SHY", "IEI", "IEF", "TLH", "TLT"}
+        assert set(prereg.UNIVERSE["bond_buckets"]["tickers"]) == {"SHY", "IEF", "TLT"}
 
-    def test_commodity_universe_size_in_range(self):
+    def test_commodity_universe_size_and_k(self):
         n = prereg.UNIVERSE["commodity_basket"]["n"]
         tickers = prereg.UNIVERSE["commodity_basket"]["tickers"]
-        assert len(tickers) == n
-        assert 8 <= n <= 10
+        assert len(tickers) == n == 6
+        assert prereg.UNIVERSE["commodity_basket"]["k"] == 3
 
     def test_satellite_weights_sum_to_declared_total(self):
         s = prereg.SATELLITE
@@ -127,12 +143,18 @@ class TestPowerReport:
         # 2 sub-candidates x 2 effect scenarios x 2 bet-rate scenarios
         assert len(rows) == 2 * 2 * 2
 
-    def test_bond_is_underpowered_everywhere(self):
-        rows = [r for r in prereg.power_report()["rows"] if r["sub_candidate"] == "bond"]
-        assert len(rows) == 4
-        assert not any(r["adequately_powered"] for r in rows), (
-            "bond sub-candidate must be flagged underpowered under every assumption pair"
-        )
+    def test_bond_is_underpowered_except_the_single_most_optimistic_pair(self):
+        # After Amendment 1's longer window (2002-07-26, +24.1y vs the original
+        # draft's 2007-01-11, +19.7y), the optimistic-effect x central-bet-rate
+        # pair just clears the bar (579.4 available vs 564.5 required) -- every
+        # other pair remains underpowered. The report must say so plainly, not
+        # claim the bond side is powered across the board.
+        rows = {(r["effect"], r["bet_rate_scenario"]): r for r in prereg.power_report()["rows"]
+                if r["sub_candidate"] == "bond"}
+        assert rows[("optimistic_assumed", "central")]["adequately_powered"] is True
+        assert rows[("optimistic_assumed", "conservative")]["adequately_powered"] is False
+        assert rows[("conservative_assumed", "conservative")]["adequately_powered"] is False
+        assert rows[("conservative_assumed", "central")]["adequately_powered"] is False
 
     def test_commodity_only_adequately_powered_under_the_most_optimistic_pair(self):
         rows = {(r["effect"], r["bet_rate_scenario"]): r for r in prereg.power_report()["rows"]

@@ -2,8 +2,9 @@
 momentum (Sihvonen) + commodity ETF dual momentum, combined into a 60/40-core
 satellite.
 
-Protocol: docs/eodhd_shortlist_protocol_2026_10.md (frozen 2026-09-30) — this
-file follows it exactly; where anything here differs, the protocol wins.
+Protocol: docs/eodhd_shortlist_protocol_2026_10.md (frozen 2026-09-30, amended
+once — Amendment 1, 2026-09-30T22:40Z, adopted here, see AMENDMENT below) —
+this file follows it exactly; where anything here differs, the protocol wins.
 Source candidate: docs/research_brief_eodhd_findings.md §1 candidate #3.
 
 STATUS: DRAFT, NOT FROZEN. This is Phase 1 (design only). No candidate,
@@ -38,28 +39,40 @@ at the portfolio level. Fixed income was represented by exactly one instrument
 (DBC, an already-diversified broad blend) — the momentum bet, in both cases,
 was "trend or no trend" on one representative number per asset class.
 
-S3 differs on every one of those axes, not just in parameter values:
+S3 differs on most of those axes, but NOT all of them after this amendment,
+and this section says so honestly rather than overstating the difference:
 
 1. Bond mechanism is different in kind, not degree. T2 trend-follows a single
    duration point (TLT) over 252-1 months. S3 follows Sihvonen's own
-   specification: 5 separate duration BUCKETS (SHY/IEI/IEF/TLH/TLT spanning
-   ~1-3y to 20y+), each judged over a 1-MONTH lookback, independently on/off.
+   specification: 3 separate duration BUCKETS (SHY/IEF/TLT spanning ~1-3y,
+   ~7-10y, 20y+), each judged over a 1-MONTH lookback, independently on/off.
    The bet is "has the yield curve just moved in this bucket's favour,"
    not "has this one bond ETF trended over the last year." Per the research
    brief's own instruction, the 1-month lookback is not extended — Sihvonen's
    own finding is that the effect is short-lived and "insignificant after the
    next month," so a 252-1 formation window (T2's window) would test a
-   different, already-published-null claim, not this one.
-2. Commodity mechanism is different in kind. T2 held ONE already-diversified
-   broad commodity index (DBC) as a single trend-or-not bet mixed in with
-   equities/bonds/REITs in the same inverse-vol blend. S3 never mixes
-   commodities with equities or bonds in its ranking step: it builds a
-   commodity-ONLY universe of 8 distinct exposures (energy, agriculture,
-   base metals, and four distinct precious/industrial single-metal names —
-   see UNIVERSE below) and applies a CROSS-SECTIONAL relative-strength rank
-   (hold the top K) plus an absolute-return filter (dual momentum) — a
-   selection problem among commodities, not a single time-series trend
-   number blended with everything else.
+   different, already-published-null claim, not this one. This axis of
+   differentiation is untouched by the amendment.
+2. Commodity mechanism is different in kind, but the PRIMARY lookback now
+   overlaps T2's horizon, and that overlap is stated plainly rather than
+   hidden. Per the coordinator's review, commodity_v1 (the primary variant)
+   now uses a 12-1 month formation window — the same order of horizon as
+   T2's 252-1-month window — because that is the peer-reviewed evidence
+   (Moskowitz, Ooi & Pedersen 2012, time-series momentum; Asness, Moskowitz &
+   Pedersen 2013, "Value and Momentum Everywhere," cross-sectional momentum),
+   materially stronger than the practitioner-grade 3-month backtests that
+   motivated the original brief (now the commodity_v2 sensitivity variant).
+   What still makes S3 a genuinely different test is NOT the horizon: T2
+   held ONE already-diversified broad commodity index (DBC) as a single
+   trend-or-not bet mixed in with equities/bonds/REITs in the same
+   inverse-vol blend. S3 never mixes commodities with equities or bonds in
+   its ranking step: it builds a commodity-ONLY universe of 6 distinct
+   exposures (energy, agriculture, base metals, gold, silver — see UNIVERSE
+   below) and applies a CROSS-SECTIONAL relative-strength rank (hold the top
+   3 of 6) plus an absolute-return filter (dual momentum) — a selection
+   problem among commodities, evaluated against a commodity-only buy-and-hold
+   benchmark, not a single time-series trend number blended with everything
+   else and judged only against SPY/60-40/vol-target-SPY.
 3. Benchmarks isolate the timing bet by asset class. T2's only benchmarks
    were SPY / 60-40 / vol-targeted SPY — none of which isolates whether
    bond-duration-timing or commodity-timing alone added anything over a
@@ -74,8 +87,27 @@ S3 differs on every one of those axes, not just in parameter values:
    is not hidden inside a single blended verdict the way it would be reusing
    T2's construction.
 
-Reusing T2's exact single-TLT / single-DBC / 252-1-month construction here
-would not be a new test; this file is checked to confirm it does not do that.
+In short: the differentiator is the cross-sectional, commodity-only
+construction and the own-asset-class benchmark, not the lookback horizon —
+and after this amendment the horizon point is conceded rather than claimed.
+
+-----------------------------------------------------------------------------
+Protocol Amendment 1 (adopted here; see the protocol file's own changelog)
+-----------------------------------------------------------------------------
+Made before any candidate's pre-registration froze or computed a return.
+Adopted in full:
+  - data source switched from data/research/eodhd/etfs/ (2005-start, now
+    superseded) to data/research/eodhd/etfs_full/ (full history from
+    inception: SHY/IEF/TLT from 2002-07-26, GLD from 2004-11-18, USO/SLV from
+    2006-04, DBA/DBB/DBE from 2007-01-05, BIL from 2007-05-30);
+  - cleaning moved to v2 (fingerprint f62cb2e4…, see CLEANING below);
+  - cash proxy is BIL from its first bar, and FRED DTB3 (accrued rate/100/252
+    per trading day) before that — this REPLACES this file's earlier
+    SHV-before-BIL rule;
+  - BM2's bond leg before IEF's 2002-07-26 inception is VFITX (Vanguard
+    Intermediate-Term Treasury, NAV total return) — a protocol-level,
+    candidate-generic change (affects every candidate's BM2, not S3-specific
+    logic), noted here for completeness.
 """
 
 from __future__ import annotations
@@ -92,14 +124,41 @@ DATA_END = "2026-09-29"  # last common clean close across every ticker below (AV
 TRADING_DAYS = 252
 SEED = 20260930
 
+AMENDMENT = {
+    "id": "protocol_amendment_1",
+    "adopted_at": "2026-09-30T22:40:00Z",  # protocol's own amendment timestamp
+    "merged_commit": "aa22da3 (research/eodhd-shortlist, merged into research/eodhd-S3)",
+    "changes_adopted": [
+        "data source: etfs/ (superseded) -> etfs_full/ (full history from inception)",
+        "cleaning: v1 (72a13e1e...) -> v2 (f62cb2e4...), adds asset='nav' for no-volume mutual-fund series",
+        "cash proxy: BIL from inception (2007-05-30); FRED DTB3 (data/research/fred/DTB3.parquet, "
+            "rate/100/252 per trading day) before that — replaces the earlier SHV-before-BIL rule",
+        "BM2 bond leg before IEF's 2002-07-26 inception: VFITX NAV total return (protocol-generic, "
+            "not S3-specific, noted for completeness)",
+    ],
+    "s3_specific_changes_in_this_pass": [
+        "bond set: SHY/IEI/IEF/TLH/TLT (5 buckets) -> SHY/IEF/TLT (3 buckets); IEI/TLH dropped strictly "
+            "for their later start date (2007-01-11 even in etfs_full), not for any return — verified by "
+            "re-checking their etfs_full first-clean-date, which is unchanged from etfs/",
+        "commodity set: 8 names -> 6 (DBA/DBB/DBE/USO/GLD/SLV); PALL/PPLT dropped, again strictly for "
+            "start date (2010-01-08 even in etfs_full, unchanged from etfs/), not return",
+        "commodity K: top-4-of-8 -> top-3-of-6",
+        "commodity primary lookback: 3-month -> 12-1 month (now commodity_v1_primary); 3-month is now "
+            "the sensitivity variant (commodity_v2_sensitivity)",
+    ],
+}
+
 # ---------------------------------------------------------------------------
-# Cleaning (shared, frozen 2026-09-30 — scripts/eodhd_clean.py)
+# Cleaning (shared protocol rule, v2 after Amendment 1 — scripts/eodhd_clean.py)
 # ---------------------------------------------------------------------------
 CLEANING = {
-    "fingerprint": "72a13e1edfb03c9ad62ac06b93fd1381353bd39292851f6d6c2d8b1b06bb42b5",
+    "fingerprint": "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd",
+    "version": 2,
     "source": "scripts/eodhd_clean.py:clean_bars / cleaning_fingerprint()",
-    "rule": "every ETF series below is run through clean_bars() (equity calendar = SPY dates) before any "
-            "return is computed; no return is computed across a `segment` boundary",
+    "rule": "every ETF series below is run through clean_bars() (equity calendar = etfs_full/SPY.parquet dates, "
+            "from 1993-01-29) before any return is computed; no return is computed across a `segment` boundary",
+    "nav_note": "VFITX (BM2's pre-IEF bond leg, protocol-generic) is cleaned with asset='nav' (skips the "
+               "volume rule); it is never a traded holding in S3 itself, only a benchmark input",
 }
 
 # ---------------------------------------------------------------------------
@@ -108,29 +167,40 @@ CLEANING = {
 # Full per-ticker snapshot: $S/runs/S3/availability.json (this session).
 # ---------------------------------------------------------------------------
 AVAILABILITY = {
-    "bond_tickers_first_clean_date": {
-        "SHY": "2005-01-03", "IEI": "2007-01-11", "IEF": "2005-01-03",
-        "TLH": "2007-01-11", "TLT": "2005-01-03",
-    },
-    "bond_common_start": "2007-01-11",  # max of the 5 bucket start dates (IEI/TLH bind)
+    "bond_tickers_first_clean_date": {"SHY": "2002-07-26", "IEF": "2002-07-26", "TLT": "2002-07-26"},
+    "bond_common_start": "2002-07-26",  # all three share the same inception date
     "commodity_tickers_first_clean_date": {
-        "DBA": "2007-01-05", "DBB": "2007-01-05", "DBE": "2007-01-05", "USO": "2006-04-10",
-        "GLD": "2005-01-03", "SLV": "2006-04-28", "PALL": "2010-01-08", "PPLT": "2010-01-08",
+        "DBA": "2007-01-05", "DBB": "2007-01-05", "DBE": "2007-01-05",
+        "USO": "2006-04-10", "GLD": "2004-11-18", "SLV": "2006-04-28",
     },
-    "commodity_common_start": "2010-01-08",  # max of the 8 tickers (PALL/PPLT bind)
-    "cash_proxy_tickers": {"SHV": "2007-01-11", "BIL": "2007-05-30"},
-    "core_tickers_first_clean_date": {"SPY": "2005-01-03", "IEF": "2005-01-03"},
+    "commodity_common_start": "2007-01-05",  # DBA/DBB/DBE bind it
+    "cash_proxy": {"BIL_first_clean_date": "2007-05-30", "fred_dtb3_from": "1954-01-04 (used pre-BIL only)"},
+    "core_tickers_first_clean_date": {"SPY": "1993-01-29", "IEF": "2002-07-26"},
+    "bm2_pre_ief_bond_leg_nav": {"VFITX_first_clean_date": "1993-01-29 (calendar-truncated to SPY's start)"},
     "last_clean_date_all_tickers": "2026-09-29",
     "adv20_usd_at_freeze": {  # from clean_bars output, last 20 clean bars, 2026-09 snapshot
-        "SHY": 419_870_218, "IEI": 280_903_566, "IEF": 829_515_407, "TLH": 216_023_404, "TLT": 3_230_380_081,
-        "DBA": 42_583_050, "DBB": 5_957_708, "DBE": 2_206_726, "USO": 986_606_133,
-        "GLD": 3_816_395_731, "SLV": 894_764_733, "PALL": 20_640_830, "PPLT": 36_371_332,
+        "SHY": 419_870_218, "IEF": 829_515_407, "TLT": 3_230_380_081,
+        "DBA": 42_583_050, "DBB": 5_957_708, "DBE": 2_206_726,
+        "USO": 986_606_133, "GLD": 3_816_395_731, "SLV": 894_764_733,
     },
-    "adv20_note": "all 5 bond buckets clear the protocol's $50M ETF-cost-tier threshold (3 bps/side); "
-                 "of the 8 commodity ETFs, only USO/GLD/SLV clear it today (3 bps) — DBA/DBB/DBE/PALL/PPLT sit "
-                 "in the 10 bps tier (ADV20 evaluated per rebalance per asset, not fixed at freeze)",
+    "adv20_note": "all 3 bond buckets and 3 of 6 commodity ETFs (USO/GLD/SLV) clear the protocol's $50M "
+                 "ETF-cost-tier threshold (3 bps/side); DBA/DBB/DBE sit in the 10 bps tier (ADV20 evaluated "
+                 "per rebalance per asset, not fixed at freeze)",
     "no_gaps_found": "all listed tickers show n_segments == 1 in clean_bars (no unadjusted-split-style break) "
                      "over their full clean history as of this snapshot",
+    "considered_and_excluded_bond": {
+        "IEI": "2007-01-11 even in etfs_full — later than SHY/IEF/TLT's common 2002-07-26 start; dropped "
+              "for start date only, per the coordinator's review",
+        "TLH": "2007-01-11 even in etfs_full — same reason as IEI",
+        "VGIT": "2009-11-23 — near-duplicate of IEI's band, later start, dropped in the original draft too",
+        "VGLT": "2009-11-24 — near-duplicate of TLT/TLH's band, later start",
+        "GOVT": "2012-02-24 — blended duration, latest start of all bond candidates considered",
+    },
+    "considered_and_excluded_commodity": {
+        "PALL": "2010-01-08 even in etfs_full — later than DBA/DBB/DBE's common 2007-01-05 start; dropped "
+               "for start date only, per the coordinator's review",
+        "PPLT": "2010-01-08 even in etfs_full — same reason as PALL",
+    },
 }
 
 # ---------------------------------------------------------------------------
@@ -138,62 +208,65 @@ AVAILABILITY = {
 # ---------------------------------------------------------------------------
 UNIVERSE = {
     "bond_buckets": {
-        "tickers": ["SHY", "IEI", "IEF", "TLH", "TLT"],
-        "why_these_five": "one liquid ETF per standard maturity rung spanning the curve "
-                          "(~1-3y, ~3-7y, ~7-10y, ~10-20y, 20y+), matching Sihvonen's own "
-                          "duration-bucket design directly. VGIT/VGLT/GOVT were deliberately "
-                          "left out: they are near-duplicates of IEI/TLT/IEF respectively "
-                          "(same duration band, different issuer) and start later (2009-2012) "
-                          "with no diversification benefit, so including them would only shorten "
-                          "the window for no new information.",
-        "excluded_near_duplicates": ["VGIT (~IEI band)", "VGLT (~TLT/TLH band)", "GOVT (blended, ~IEF-ish)"],
+        "tickers": ["SHY", "IEF", "TLT"],
+        "why_these_three": "one liquid ETF per standard maturity rung spanning the curve (~1-3y, ~7-10y, "
+                          "20y+), matching Sihvonen's own duration-bucket design (the brief specifies 3-4 "
+                          "buckets) and sharing a single common inception date (2002-07-26), giving the "
+                          "longest possible common bond window. IEI (~3-7y) and TLH (~10-20y) were "
+                          "considered — they would give 5 rungs instead of 3 — but both still start "
+                          "2007-01-11 even in the full-history etfs_full/ files, 4.5 years later than "
+                          "SHY/IEF/TLT; they are excluded on that start-date basis alone, not on any "
+                          "return, which was never computed. VGIT/VGLT/GOVT remain excluded as "
+                          "near-duplicates that also start later.",
+        "excluded_near_duplicates_or_later_start": ["IEI (2007-01-11)", "TLH (2007-01-11)",
+                                                    "VGIT (2009-11-23)", "VGLT (2009-11-24)", "GOVT (2012-02-24)"],
         "treasuries_only": True,
     },
     "commodity_basket": {
-        "tickers": ["DBA", "DBB", "DBE", "USO", "GLD", "SLV", "PALL", "PPLT"],
-        "n": 8,
+        "tickers": ["DBA", "DBB", "DBE", "USO", "GLD", "SLV"],
+        "n": 6,
         "coverage": {
             "agriculture": ["DBA"],
             "energy": ["DBE", "USO"],
             "base_metals": ["DBB"],
-            "precious_industrial_metals": ["GLD", "SLV", "PALL", "PPLT"],
+            "precious_metals": ["GLD", "SLV"],
         },
-        "why_these_eight": "one sector BASKET per broad category (agriculture, base metals, "
-                          "energy) plus four genuinely distinct single-name precious/industrial "
-                          "metals, each with a different dominant demand driver (gold: monetary/"
-                          "safe-haven; silver: industrial + monetary; platinum: diesel autocatalyst "
-                          "+ jewellery; palladium: gasoline autocatalyst, Russia/South-Africa supply "
-                          "concentrated) — a genuinely dispersed cross-section for the ranking step, "
-                          "not four bets on the same metal cycle.",
-        "excluded_near_duplicates": {
+        "why_these_six": "one sector BASKET per broad category (agriculture, base metals, energy) plus "
+                         "gold and silver as the two most liquid, genuinely distinct precious-metal single "
+                         "names (gold: monetary/safe-haven; silver: industrial + monetary) — a dispersed "
+                         "cross-section for the ranking step. PALL/PPLT (platinum, palladium) were "
+                         "considered for even more within-metals dispersion, but both start 2010-01-08 "
+                         "even in etfs_full/, 3 years later than DBA/DBB/DBE's common 2007-01-05 start; "
+                         "dropping them (start-date basis only, no return computed) is what lets this "
+                         "sub-candidate's window include 2008, which the coordinator flagged as important "
+                         "for a commodity-timing test.",
+        "excluded_near_duplicates_or_later_start": {
+            "PALL (2010-01-08)": "later start than the binding DBA/DBB/DBE date; would cost the window 2008-2009",
+            "PPLT (2010-01-08)": "same reason as PALL",
             "DBC/GSG/DJP (broad, all-sector blends)": "excluded entirely — including a broad index "
-                "alongside its own sector components would just re-litigate T2's single-blended-"
-                "index construction inside this ranking, and a broad index sits near the middle of "
-                "any cross-sectional rank by construction, diluting the K-of-N selection",
+                "alongside its own sector components would just re-litigate T2's single-blended-index "
+                "construction inside this ranking, and a broad index sits near the middle of any "
+                "cross-sectional rank by construction, diluting the K-of-N selection",
             "DBP (precious-metals basket, ~80% gold/20% silver)": "excluded in favour of GLD+SLV held "
-                "separately — same underlying exposure at ~28x GLD's and ~800x SLV's ADV20, "
-                "no diversification lost by dropping the basket",
-            "CORN/SOYB/WEAT (single grains)": "excluded — near-duplicates of DBA's own agriculture "
-                "basket, and the latest of the three (SOYB/WEAT) starts 2011-09, 20 months later "
-                "than the binding PALL/PPLT start, for a sub-sector already covered by DBA",
-            "CPER (single copper)": "excluded — copper is already a material (~30%+) weight inside "
-                "DBB; adding it as a ninth, highly correlated name would inflate the apparent bet "
-                "count without adding real cross-sectional information, and its 2011-11-15 start is "
-                "later than the binding PALL/PPLT start anyway",
-            "UNG (single natural gas)": "excluded — DBE already carries meaningful natural-gas "
-                "weight alongside crude/products; kept USO instead of UNG as the second energy name "
-                "because USO is far more liquid (ADV20 ~$987M vs UNG's ~$274M) for the same "
-                "diversification purpose",
+                "separately — same underlying exposure at far lower liquidity, no diversification lost",
+            "CORN/SOYB/WEAT (single grains)": "excluded — near-duplicates of DBA's own agriculture basket",
+            "CPER (single copper)": "excluded — copper is already a material weight inside DBB",
+            "UNG (single natural gas)": "excluded — DBE already carries meaningful natural-gas weight "
+                "alongside crude/products; kept USO instead as the second energy name for its far higher "
+                "liquidity (ADV20 ~$987M vs UNG's ~$274M)",
         },
+        "k": 3,
     },
     "core": {"tickers": ["SPY", "IEF"], "rule": "60% SPY / 40% IEF, rebalanced monthly (docs/allocation_deploy_runbook.md)"},
-    "cash": {"primary": "BIL", "pre_inception_fallback": "SHV (used 2007-01-11 to 2007-05-29, before BIL existed)"},
+    "cash": {"primary": "BIL", "pre_inception_fallback": "FRED DTB3 (accrued rate/100/252 per trading day), "
+                                                        "used before BIL's 2007-05-30 first bar"},
 }
 
 # ---------------------------------------------------------------------------
 # Satellite weight (fixed, not tuned) — mirrors the live BTC-trend satellite's
 # pro-rata-from-core construction (docs/allocation_deploy_runbook.md: core
 # 92% / satellite 8%; here 90%/10%, split evenly across the two new sleeves).
+# Confirmed as proposed by the coordinator's review (no change this pass).
 # ---------------------------------------------------------------------------
 SATELLITE = {
     "total_weight": 0.10,
@@ -205,16 +278,18 @@ SATELLITE = {
 
 # ---------------------------------------------------------------------------
 # Windows. Fixed at freeze from AVAILABILITY only (never from a return).
-# Midpoint = the trading-day exactly splitting the SPY-calendar session count
-# in the window (computed from the calendar only, not from any return).
+# Midpoint = the trading-day exactly splitting the SPY-calendar (etfs_full)
+# session count in the window (computed from the calendar only, not from any
+# return). Recomputed this pass for the new, longer bond window and the
+# commodity window that now reaches back to include 2008.
 # ---------------------------------------------------------------------------
 WINDOWS = {
-    "bond": {"start": "2007-01-11", "end": DATA_END, "midpoint": "2016-11-15", "n_sessions": 4960},
-    "commodity": {"start": "2010-01-08", "end": DATA_END, "midpoint": "2018-05-17", "n_sessions": 4206},
-    "combined": {"start": "2010-01-08", "end": DATA_END, "midpoint": "2018-05-17", "n_sessions": 4206,
-                 "note": "bound by the commodity sleeve's later start (PALL/PPLT, 2010-01-08); the bond "
-                         "sleeve and the 60/40 core both have data back to 2005-2007, but the combined "
-                         "portfolio can't run before every sleeve it holds exists"},
+    "bond": {"start": "2002-07-26", "end": DATA_END, "midpoint": "2014-08-25", "n_sessions": 6083},
+    "commodity": {"start": "2007-01-05", "end": DATA_END, "midpoint": "2016-11-11", "n_sessions": 4964},
+    "combined": {"start": "2007-01-05", "end": DATA_END, "midpoint": "2016-11-11", "n_sessions": 4964,
+                 "note": "bound by the commodity sleeve's later start (DBA/DBB/DBE, 2007-01-05); the bond "
+                         "sleeve and the 60/40 core both have data back to 2002-2007 (SPY to 1993), but the "
+                         "combined portfolio can't run before every sleeve it holds exists"},
 }
 
 # ---------------------------------------------------------------------------
@@ -227,6 +302,9 @@ EXECUTION = {
     "bond_rebalance": "monthly, on the first trading day of the month, using the prior calendar month's "
                       "bucket excess return (close-to-close) over the cash proxy",
     "commodity_rebalance": "monthly, same schedule, rank computed from each variant's declared lookback",
+    "cash_accrual": "BIL total return from 2007-05-30; FRED DTB3 (data/research/fred/DTB3.parquet), "
+                    "rate/100/252 per trading day, before that (protocol §2, Amendment 1) — REPLACES this "
+                    "file's original SHV-before-BIL rule",
 }
 COSTS = {
     "etf_tier_bps": {"adv20_ge_50m": 3.0, "adv20_lt_50m": 10.0},
@@ -239,13 +317,14 @@ COSTS = {
 # Benchmarks (protocol §3)
 # ---------------------------------------------------------------------------
 BENCHMARKS_GENERIC = {
-    "BM1_SPY": "SPY buy-and-hold",
-    "BM2_60_40": "60% SPY / 40% IEF, rebalanced monthly",
+    "BM1_SPY": "SPY buy-and-hold, from 1993-01-29",
+    "BM2_60_40": "60% SPY / 40% IEF, rebalanced monthly; bond leg is VFITX (NAV total return) before IEF's "
+                "2002-07-26 inception (protocol §3, Amendment 1)",
     "BM3_SPY_VT": "SPY weight = min(1, 0.12 / 21-day realised vol), traded when target moves > 0.10",
 }
 PRIMARY_BENCHMARKS = {
-    "bond": "equal-weight buy-and-hold of SHY/IEI/IEF/TLH/TLT, rebalanced monthly",
-    "commodity": "equal-weight buy-and-hold of DBA/DBB/DBE/USO/GLD/SLV/PALL/PPLT, rebalanced monthly",
+    "bond": "equal-weight buy-and-hold of SHY/IEF/TLT, rebalanced monthly",
+    "commodity": "equal-weight buy-and-hold of DBA/DBB/DBE/USO/GLD/SLV, rebalanced monthly",
     "combined": "90% (60/40 SPY/IEF) + 5% equal-weight bond basket (buy-and-hold) + 5% equal-weight "
                "commodity basket (buy-and-hold), rebalanced monthly — the same weights as SATELLITE, "
                "held static instead of timed",
@@ -254,6 +333,9 @@ PRIMARY_BENCHMARKS = {
 # ---------------------------------------------------------------------------
 # Variants (the declared grid — total 5, well under the task's cap of 6).
 # Every trial Sharpe that feeds DSR/PBO below comes from exactly these five.
+# commodity_v1 is now the 12-1 month (peer-reviewed) lookback, per the
+# coordinator's review; the 3-month practitioner backtest is now the
+# sensitivity variant.
 # ---------------------------------------------------------------------------
 VARIANTS = {
     "bond_v1": {
@@ -269,21 +351,26 @@ VARIANTS = {
     },
     "commodity_v1_primary": {
         "sleeve": "commodity",
-        "signal": "trailing 3-month total return per commodity ETF (formation, no skip month)",
-        "k": 4,
-        "rule": "rank all 8 by the signal; hold the top 4 equal-weight, but only those of the top 4 whose own "
+        "signal": "trailing 12-1 month total return per commodity ETF (skip the most recent month, the "
+                 "standard Jegadeesh-Titman convention)",
+        "k": 3,
+        "rule": "rank all 6 by the signal; hold the top 3 equal-weight, but only those of the top 3 whose own "
                 "trailing signal (excess over the cash proxy) is > 0 — dual momentum (relative rank + "
                 "absolute filter); unfilled slots and a fully-off month sit in the cash proxy",
-        "source": "Quantpedia-style multi-commodity dual momentum, practitioner-grade evidence only "
-                 "(brief §1 candidate #3); 3-month is the most commonly cited formation window in that "
-                 "literature",
+        "source": "Moskowitz, Ooi & Pedersen (2012), 'Time Series Momentum'; Asness, Moskowitz & Pedersen "
+                 "(2013), 'Value and Momentum Everywhere' — peer-reviewed, 12-1 month is the standard "
+                 "formation window in both. Made primary over the 3-month practitioner backtest per the "
+                 "coordinator's review: this is materially stronger evidence than Quantpedia-style "
+                 "practitioner-grade 3-month backtests. NOTE (see module docstring): this horizon overlaps "
+                 "T2's 252-1-month window — the differentiation from T2 is the commodity-only cross-"
+                 "sectional construction and own-asset-class benchmark, not the horizon.",
     },
     "commodity_v2_sensitivity": {
         "sleeve": "commodity",
-        "signal": "trailing 12-1 month total return per commodity ETF (skip the most recent month, "
-                 "the standard Jegadeesh-Titman convention already used for S1)",
-        "k": 4,
-        "rule": "same rank + absolute-filter rule as commodity_v1, different formation window",
+        "signal": "trailing 3-month total return per commodity ETF (formation, no skip month)",
+        "k": 3,
+        "rule": "same rank + absolute-filter rule as commodity_v1_primary, different (shorter) formation window",
+        "source": "Quantpedia-style multi-commodity dual momentum, practitioner-grade evidence only",
         "reported_not_primary": True,
     },
     "combined_v1_primary": {
@@ -322,6 +409,7 @@ DSR = {
     "prior_trials": "190 + other shortlist variants (fixed at freeze)",  # placeholder — see protocol §4;
     # 190 = combination 57 + pattern_ml 104 + standalone 11 + alt_premia 10 + insider 8, all as of 2026-09-30;
     # the S1/S2/S4/S5 variant counts are added once every shortlist candidate is frozen, not before.
+    # Confirmed as proposed (no change) by the coordinator's review.
     "ledger": "docs/S3_trial_history.json (new family; created on the first real --append-ledger run)",
 }
 
@@ -375,18 +463,20 @@ def classify(bars: dict[str, bool], tier_d: bool, tier_b: dict[str, bool]) -> st
 #
 #     N = ((z_alpha + z_beta) * sigma / mu) ** 2
 #
-# BOND: the 5 duration buckets are NOT 5 independent monthly bets — they share
+# BOND: the 3 duration buckets are NOT 3 independent monthly bets — they share
 # a large common factor (the level/slope of the Treasury curve), so a bucket-
 # count x month-count bet tally would overstate power. "effective_bets_per_year"
-# below treats the whole curve as 1-2 quasi-independent bets per month, not 5.
-# This, plus the source paper's own "short-lived, insignificant after the next
-# month" caveat (no magnitude given), is why this sub-candidate is flagged
-# UNDERPOWERED below under every assumption pair but the most optimistic one —
-# and even that one is borderline. Say so plainly in the final report.
+# below treats the whole curve as 1-2 quasi-independent bets per month, not 3
+# (unchanged reasoning from the 5-bucket draft: fewer buckets doesn't change
+# how correlated they are with each other). The longer window this amendment
+# gives (2002-07-26 vs 2007-01-11, +24 years vs +19.7) pushes the single most
+# optimistic pair (optimistic effect x central bet rate) just over the line —
+# every other pair remains underpowered. Say so plainly in the final report.
 #
-# COMMODITY: 8 distinct commodities with more genuinely separate macro drivers
-# than the bond buckets, but still share a general "commodity risk premium"
-# common factor; the conservative scenario halves the naive 8 x 12 bet count.
+# COMMODITY: 6 distinct commodities (was 8) with more genuinely separate macro
+# drivers than the bond buckets, but still share a general "commodity risk
+# premium" common factor; the conservative scenario halves the naive 6 x 12
+# bet count, same halving convention as the original 8-name draft.
 # ---------------------------------------------------------------------------
 POWER = {
     "bond": {
@@ -394,20 +484,21 @@ POWER = {
                                        # not derived from this window's data
         "effect_bps_per_month": {"conservative_assumed": 5.0, "optimistic_assumed": 20.0},
         "effective_bets_per_year": {"conservative": 12, "central": 24},
-        "window_years": (2026 - 2007) + (9 - 1) / 12,  # 2007-01-11 -> 2026-09-29, approx
+        "window_years": round(WINDOWS["bond"]["n_sessions"] / TRADING_DAYS, 2),  # 2002-07-26 -> 2026-09-29
     },
     "commodity": {
         "sigma_bps_per_month": 500.0,  # ASSUMED blended commodity monthly vol, general prior
         "effect_bps_per_month": {"conservative_assumed": 20.0, "optimistic_assumed": 50.0},
-        "effective_bets_per_year": {"conservative": 48, "central": 96},  # i.e. 4-8 of 8 names effectively independent, x 12
-        "window_years": (2026 - 2010) + (9 - 1) / 12,
+        "effective_bets_per_year": {"conservative": 36, "central": 72},  # i.e. 3-6 of 6 names effectively independent, x 12
+        "window_years": round(WINDOWS["commodity"]["n_sessions"] / TRADING_DAYS, 2),
     },
     "alpha_one_sided": BOOTSTRAP["alpha_one_sided"],
     "target_power": 0.80,
     "note": "UNVERIFIED-exact-figures throughout (sigma and effect assumptions are general, order-of-magnitude "
            "priors about Treasury-duration-ETF and commodity-ETF monthly return distributions, not re-derived "
            "from this window's own return series, and not sourced to a specific citation for an exact bp figure "
-           "— the same caveat insider_cluster_preregistered_bars.POWER applies to its small/micro-cap vol prior)",
+           "— the same caveat insider_cluster_preregistered_bars.POWER applies to its small/micro-cap vol "
+           "prior). Confirmed fine as labelled by the coordinator's review.",
 }
 
 
@@ -447,7 +538,8 @@ def bars_fingerprint() -> str:
     payload = json.dumps(
         {
             "DRAFT": DRAFT, "PREREGISTERED_AT": PREREGISTERED_AT, "DATA_END": DATA_END, "SEED": SEED,
-            "CLEANING": CLEANING, "AVAILABILITY": AVAILABILITY, "UNIVERSE": UNIVERSE, "SATELLITE": SATELLITE,
+            "AMENDMENT": AMENDMENT, "CLEANING": CLEANING, "AVAILABILITY": AVAILABILITY,
+            "UNIVERSE": UNIVERSE, "SATELLITE": SATELLITE,
             "WINDOWS": WINDOWS, "EXECUTION": EXECUTION, "COSTS": COSTS,
             "BENCHMARKS_GENERIC": BENCHMARKS_GENERIC, "PRIMARY_BENCHMARKS": PRIMARY_BENCHMARKS,
             "VARIANTS": VARIANTS, "N_VARIANTS": N_VARIANTS,
