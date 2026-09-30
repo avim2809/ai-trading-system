@@ -28,7 +28,7 @@ class TestDraftStatus:
         # used availability, not returns, to fix its window/eligibility.
         assert "availability" in prereg.AVAILABILITY["source_scan"]
         assert prereg.AVAILABILITY["cleaning_fingerprint"] == (
-            "72a13e1edfb03c9ad62ac06b93fd1381353bd39292851f6d6c2d8b1b06bb42b5"
+            "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd"
         )
 
 
@@ -51,9 +51,9 @@ class TestUniverse:
 class TestAvailabilityInternalConsistency:
     def test_eligible_counts_bounded_by_universe_size(self):
         a = prereg.AVAILABILITY
-        assert a["n_eligible_at_window_start_2006_06_30"] <= a["n_universe"]
+        assert a["n_eligible_at_window_start_2002_01_31"] <= a["n_universe"]
         assert a["n_eligible_at_data_end"] <= a["n_universe"]
-        assert a["min_n_eligible_over_window"] == a["n_eligible_at_window_start_2006_06_30"]
+        assert a["min_n_eligible_over_window"] == a["n_eligible_at_window_start_2002_01_31"]
 
     def test_pbj_excluded_by_its_own_adv_not_hand_picked(self):
         a = prereg.AVAILABILITY

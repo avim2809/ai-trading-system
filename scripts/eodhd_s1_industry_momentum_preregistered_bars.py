@@ -1,12 +1,13 @@
 """DRAFT pre-registration for S1 (industry/sector ETF momentum), EODHD shortlist.
 
-Protocol: docs/eodhd_shortlist_protocol_2026_10.md (frozen 2026-09-30) — this file
-follows it exactly for cleaning, execution, costs, benchmarks, inference and tiers;
-where anything here differs, the protocol wins. Source candidate: docs/
-research_brief_eodhd_findings.md §1 candidate #1. House style: scripts/
-alt_premia_preregistered_bars.py (structure) and scripts/insider_cluster_
-preregistered_bars.py (a DRAFT-then-freeze design built against real availability
-counts before any return existed).
+Protocol: docs/eodhd_shortlist_protocol_2026_10.md, AS AMENDED (Amendment 1,
+2026-09-30 22:40Z) — this file follows it exactly for cleaning, execution,
+costs, benchmarks, inference and tiers; where anything here differs, the
+protocol wins. Source candidate: docs/research_brief_eodhd_findings.md §1
+candidate #1. House style: scripts/alt_premia_preregistered_bars.py
+(structure) and scripts/insider_cluster_preregistered_bars.py (a
+DRAFT-then-freeze design built against real availability counts before any
+return existed).
 
 STATUS: DRAFT. PREREGISTERED_AT is None. Design work below used ONLY data
 *availability* (tickers present, first/last clean dates, ADV levels, count of
@@ -27,23 +28,42 @@ Industries Explain Momentum?", J. Finance 54:1249-1290 — see the research
 brief's citation and caveats (Grundy & Martin 2001 lag critique UNVERIFIED at
 first-hand level; HXZ 2020 survival UNVERIFIED at exact t-stat level).
 
-Data availability actually found this session (see AVAILABILITY below):
- - EODHD pulls in this repo start 2005-01-01 for every ETF (scripts/
-   fetch_eodhd_prices.py:START), REGARDLESS of true fund inception (the 11
-   SPDR sector funds actually launched Dec 1998; this system simply has no
-   data before 2005-01-03 for any of them). The evaluation window below is
-   therefore bounded by the DOWNLOAD's start, not by ETF history.
- - All 44 universe tickers have clean data through 2026-09-29 (the SPY-derived
-   exchange calendar's last session), one clean segment each (0 cleaning spike/
-   segment-break events across the whole universe at this cleaning
-   fingerprint) — an unusually clean set, consistent with these being large,
-   simple, single-share-class ETFs.
+Data availability actually found this session (see AVAILABILITY below), UPDATED
+after Amendment 1 switched every candidate from `etfs/` (2005-01-01 download
+start, an artifact of a fixed setting in the download script, not true fund
+inception) to `etfs_full/` (full history from inception):
+ - `etfs_full/SPY` starts 1993-01-29 (the exchange calendar); the 9 original
+   SPDR sector funds (XLB/XLE/XLF/XLI/XLK/XLP/XLU/XLV/XLY) start 1998-12-22;
+   XLRE starts 2015-10, XLC starts 2018-06. All 44 universe tickers have clean
+   data through 2026-09-29, one clean segment each at cleaning fingerprint v2
+   (0 spike/segment-break events across the whole universe).
+ - The window start is now re-derived from `etfs_full` and tied to this file's
+   OWN cash-fallback threshold (ELIGIBILITY['n_min_for_trading'] = 9): the
+   first month-end with >= 9 eligible ETFs THAT NEVER SUBSEQUENTLY DIPS BELOW 9
+   through data end. That turned out to be 2002-01-31, not "mid-1999" as a
+   naive reading of "9 sectors x 210 days" would suggest (2002-01-31 IS still
+   ~2 years earlier than the old 2005-based window did allow). The real
+   constraint in 1999-2001 is NOT history length (the 9 original sectors
+   already have 210+ days by mid-1999) but the ADV20 >= $1M eligibility floor:
+   the eligible count is genuinely noisy and repeatedly drops as low as 3
+   through 2000-2001 (e.g. only XLE/XLF/XLK clear $1M ADV for most of 2000) --
+   real, thin early trading volume in the sector SPDRs before they became
+   popular, not a bug. 2002-01-31 is the first point after which the count is
+   stable at >= 9 for the rest of the 297-month window (see AVAILABILITY).
+ - This window start (2002-01-31) is BEFORE IEF's first bar (2002-07-26), so
+   S1's own BM2 benchmark uses the VFITX NAV proxy (protocol §3) for its first
+   ~6 months, exactly as the amended protocol anticipates.
  - PBJ (food & beverage; part of the frozen UNIVERSE list) is currently BELOW
    the $1M ADV20 eligibility floor (~$0.37-0.42M) and has been for a while —
    it stays in the declared universe (so it isn't a) hand-picked out after
    looking at anything performance-related, and b) the point-in-time filter
    below is exactly what keeps an ETF that's gone illiquid out of the traded
    book, mirroring the protocol's S4 point-in-time-eligibility spirit).
+ - The universe is NOT static: it grows from 9 eligible names at window start
+   to 43 at data end (PBJ self-excludes throughout on ADV) as later sector/
+   industry ETFs launch and season. The primary benchmark (equal-weight
+   buy-and-hold of the SAME point-in-time eligible set) absorbs this growth by
+   construction -- it is never compared against a fixed later-date universe.
 """
 
 from __future__ import annotations
@@ -72,12 +92,15 @@ UNIVERSE = SECTOR_11 + INDUSTRY_33  # frozen list, 44 tickers; excludes broad/si
                                     # commodity/currency/country ETFs per the task's own rule
 
 AVAILABILITY = {
-    "source_scan": "one-off script over data/research/eodhd/etfs/*.parquet, cleaned with "
-                   "scripts/eodhd_clean.py:clean_bars (equity calendar), availability only "
-                   "(no returns); output frozen at $S/runs/S1/availability.json",
-    "cleaning_fingerprint": "72a13e1edfb03c9ad62ac06b93fd1381353bd39292851f6d6c2d8b1b06bb42b5",
+    "source_scan": "one-off script over data/research/eodhd/etfs_full/*.parquet (Amendment 1: "
+                   "etfs/ superseded), cleaned with scripts/eodhd_clean.py:clean_bars (equity "
+                   "calendar), availability only (no returns); output frozen at "
+                   "$S/runs/S1/availability.json",
+    "cleaning_fingerprint": "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd",  # v2
     "n_universe": len(UNIVERSE),
-    "download_start_all_tickers": "2005-01-01 (scripts/fetch_eodhd_prices.py:START; not true ETF inception)",
+    "data_start_note": "etfs_full pulls from inception (SPY 1993-01-29; the 9 original SPDR "
+                       "sectors 1998-12-22; XLRE 2015-10; XLC 2018-06); the 2005-01-01 download "
+                       "start in the superseded etfs/ folder is gone (Amendment 1)",
     "data_end_common_to_all": DATA_END,
     "n_segments_all_tickers": 1,  # 0 spike-reversal / segment-break events across the universe
     "adv20_eligibility_floor_usd": 1_000_000,
@@ -85,11 +108,18 @@ AVAILABILITY = {
                         "bar's own segment (none of these 44 series has a segment break at this "
                         "fingerprint, so this is the plain trailing 20-session median dollar volume)",
     "min_history_calendar_days_for_signal": 210,  # ~7 months: 6-month formation + 1-month skip + buffer
-    "n_eligible_at_window_start_2006_06_30": 20,
-    "min_n_eligible_over_window": 20,  # never dips below 20 from window start onward
+    "n_eligible_at_window_start_2002_01_31": 9,
+    "min_n_eligible_over_window": 9,  # never dips below 9 from window start onward (checked through
+                                      # all 297 remaining months); REPEATEDLY dips as low as 3
+                                      # between 1999 and 2001 on the ADV20 floor -- see module
+                                      # docstring, this is real early-sector-SPDR illiquidity, not a bug
     "n_eligible_at_data_end": 43,  # PBJ excluded by its own ADV20 (~$0.37-0.42M, below the $1M floor)
     "pbj_adv20_usd_at_data_end": 422_980,
-    "n_months_in_window": 244,
+    "n_months_in_window": 297,
+    "universe_growth_note": "the eligible set is NOT static: 9 names at window start, 43 at data "
+                            "end, as later sector/industry ETFs season past the ADV floor -- the "
+                            "primary benchmark (equal-weight of the SAME point-in-time eligible "
+                            "set) absorbs this by construction",
 }
 
 # ---------------------------------------------------------------------------
@@ -105,27 +135,37 @@ ELIGIBILITY = {
            "own via (b), it is never hand-excluded.",
     "min_history_calendar_days": AVAILABILITY["min_history_calendar_days_for_signal"],
     "adv20_floor_usd": AVAILABILITY["adv20_eligibility_floor_usd"],
-    "n_min_for_trading": 9,  # below this, HOLD CASH for that month (never triggers in-window:
-                             # min eligible count is 20 from window start; this is a documented
-                             # fallback for a data edge case, not an in-sample event). Chosen so
-                             # a "top tercile" of >=9 eligible names still holds >=3 ETFs.
-    "cash_instrument": "BIL total return (protocol §2); SHV before BIL existed (not needed in this window)",
+    "n_min_for_trading": 9,  # below this, HOLD CASH for that month. This is ALSO the window-start
+                             # threshold (WINDOW): the eligible count never dips below 9 from
+                             # window start onward, so this bar never actually triggers cash
+                             # in-window either -- it is still a documented fallback for a data
+                             # edge case. Chosen so a "top tercile" of >=9 eligible names still
+                             # holds >=3 ETFs.
+    "cash_instrument": "BIL total return from BIL's first bar (2007-05-30); FRED DTB3 "
+                       "(data/research/fred/DTB3.parquet, rate/100/252 per trading day) before "
+                       "that (protocol §2, Amendment 1) -- needed for S1, whose window starts "
+                       "2002-01-31, well before BIL existed",
 }
 
 # ---------------------------------------------------------------------------
 # Evaluation window, fixed from availability only (never from returns).
 # ---------------------------------------------------------------------------
 WINDOW = {
-    "start": "2006-06-30",  # first month-end with >= 20 eligible ETFs; never dips below 20 after
+    "start": "2002-01-31",  # first month-end with >= n_min_for_trading (9) eligible ETFs that
+                            # NEVER SUBSEQUENTLY DIPS BELOW 9 through data end
     "end": DATA_END,
-    "rationale": "start = first month-end where the point-in-time eligible count reaches 20 "
-                "AND stays >= 20 every month through data end (checked over the full remaining "
-                "244 months, not just at the crossing date) -- chosen so the top-tercile split "
-                "always has a minimum of ~6-7 names on both sides, consistent with the research "
-                "brief's own '~20-30 liquid ETFs' sizing. Before 2006-06, the eligible count is "
-                "held down by the 2005-01-01 download start (7-month formation-window floor), "
-                "not by anything about the candidate.",
-    "midpoint_date": "2016-08-14",  # halves split (protocol §4); calendar midpoint of start/end,
+    "rationale": "start = first month-end where the point-in-time eligible count reaches "
+                "ELIGIBILITY['n_min_for_trading'] (9) AND stays >= 9 every month through data end "
+                "(checked over the full remaining 297 months, not just at the crossing date). "
+                "NOT simply '9 original sectors x 210 days' (~mid-1999): the binding constraint in "
+                "1999-2001 is the $1M ADV20 floor, not history length -- the eligible count "
+                "repeatedly falls back to as low as 3 through 2000-2001 as early sector-SPDR "
+                "trading volume was genuinely thin, so 2002-01-31 is the first date the >= 9 bar "
+                "holds for good. This adds the 2000-02 US equity bear market to the window, a key "
+                "regime for momentum crash risk. The universe itself keeps growing after window "
+                "start (9 -> 43 eligible names by data end); the primary benchmark is built from "
+                "the SAME point-in-time eligible set every month, so it absorbs that growth.",
+    "midpoint_date": "2014-05-31",  # halves split (protocol §4); calendar midpoint of start/end,
                                     # fixed at freeze from availability only
 }
 
@@ -192,7 +232,11 @@ COSTS = {
 # ---------------------------------------------------------------------------
 BENCHMARKS = {
     "BM1_SPY": {"rule": "SPY buy-and-hold, 100%"},
-    "BM2_60_40": {"rule": "60% SPY / 40% IEF, rebalanced to target at close t+1 after each month-end t"},
+    "BM2_60_40": {"rule": "60% SPY / 40% IEF, rebalanced to target at close t+1 after each month-end t. "
+                         "Before IEF's first bar (2002-07-26), the bond leg is VFITX (Vanguard "
+                         "Intermediate-Term Treasury, NAV total return, asset='nav' cleaning, from "
+                         "1991-12). S1's own WINDOW starts 2002-01-31, i.e. ~6 months before IEF "
+                         "exists, so BM2 uses VFITX for that opening stretch of S1's window."},
     "BM3_SPY_VT": {"rule": "SPY weight = min(1, 0.12 / annualised std of last 21 daily SPY returns at "
                           "close t), traded at close t+1 only when |target - held| > 0.10; remainder "
                           "in cash",
@@ -320,7 +364,7 @@ BET_FREQUENCY_PRIORS = {
                          # (not believed; included only to bound the range)
 }
 POWER = {
-    "years_available": 20.249,  # (date(2026,9,29) - date(2006,6,30)).days / 365.25
+    "years_available": 24.66,  # (date(2026,9,29) - date(2002,1,31)).days / 365.25 = 9007/365.25
     "alpha_one_sided": BOOTSTRAP["alpha_one_sided"],
     "target_power": 0.80,
 }
