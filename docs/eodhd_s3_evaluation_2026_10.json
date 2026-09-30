@@ -1,0 +1,433 @@
+{
+  "generated_at": "2026-09-30T19:59:33.626565+00:00",
+  "fingerprint": "8baa2481ce901eede120977917d15de90eca5840c8b9d7934fae13c9e47ac9ff",
+  "prereg_at": "2026-09-30T19:18:54Z",
+  "data_end": "2026-09-29",
+  "alpha_one_sided": 0.01,
+  "pbo": 0.2,
+  "dsr_trials": 5,
+  "dsr_prior_trials": 205,
+  "results": {
+    "bond": {
+      "sub_candidate": "bond",
+      "variant": "bond_v1",
+      "window": {
+        "start": "2002-07-26",
+        "end": "2026-09-29",
+        "midpoint": "2014-08-25",
+        "n_sessions": 6083
+      },
+      "n_days": 6083,
+      "sharpe": 0.1837083743507137,
+      "cagr": 0.026273442887857712,
+      "vol": 0.061373196268651876,
+      "max_dd": 0.13444612655132493,
+      "vs": {
+        "primary": {
+          "benchmark": "bond_bh",
+          "n_days": 6083,
+          "sharpe_c": 0.1837083743507137,
+          "sharpe_b": 0.20890359018993243,
+          "gap": -0.025195215839218743,
+          "lb": -0.36422230579476866,
+          "ub": 0.3284379591171406,
+          "gap_half1": -0.23538559087703614,
+          "gap_half2": 0.1772243038317416,
+          "gap_stress_2x_costs": -0.09717259487495401,
+          "A1": false,
+          "A4_component": false,
+          "A5_component": false,
+          "D_component": false
+        },
+        "BM1_SPY": {
+          "benchmark": "BM1_SPY",
+          "n_days": 6083,
+          "sharpe_c": 0.1837083743507137,
+          "sharpe_b": 0.5882195581742988,
+          "gap": -0.40451118382358514,
+          "lb": -1.0959286521583307,
+          "ub": 0.2329025673584871,
+          "gap_half1": -0.17170505882159204,
+          "gap_half2": -0.6586513262451613,
+          "gap_stress_2x_costs": -0.4778246245167702,
+          "A1": false,
+          "A4_component": false,
+          "A5_component": false,
+          "D_component": false
+        },
+        "BM2_60_40": {
+          "benchmark": "BM2_60_40",
+          "n_days": 6083,
+          "sharpe_c": 0.1837083743507137,
+          "sharpe_b": 0.6704139392482616,
+          "gap": -0.48670556489754796,
+          "lb": -1.1139678778705067,
+          "ub": 0.08027596847244753,
+          "gap_half1": -0.34278103481922906,
+          "gap_half2": -0.6336891866482675,
+          "gap_stress_2x_costs": -0.5591904177782476,
+          "A1": false,
+          "A4_component": false,
+          "A5_component": false,
+          "D_component": false
+        },
+        "BM3_SPY_VT": {
+          "benchmark": "BM3_SPY_VT",
+          "n_days": 6083,
+          "sharpe_c": 0.1837083743507137,
+          "sharpe_b": 0.71714426038894,
+          "gap": -0.5334358860382262,
+          "lb": -1.1579231717082465,
+          "ub": 0.11377961293838715,
+          "gap_half1": -0.37764847928312506,
+          "gap_half2": -0.6896417872623753,
+          "gap_stress_2x_costs": -0.6024337413393143,
+          "A1": false,
+          "A4_component": false,
+          "A5_component": false,
+          "D_component": false
+        }
+      },
+      "dsr": 0.022267542593638168,
+      "placebo_p95": 0.2830370845282405,
+      "placebo_median": 0.08356601454571205,
+      "A3": false,
+      "bars_A": {
+        "A1": false,
+        "A2": false,
+        "A3": false,
+        "A4": false,
+        "A5": false,
+        "A6": true
+      },
+      "bars_B": {
+        "B_a": false
+      },
+      "tier_D_condition": false,
+      "A7": "PENDING (independent recompute not yet run)",
+      "tier_excl_A7": "C",
+      "tier": "C (conditional on A7)"
+    },
+    "commodity": {
+      "sub_candidate": "commodity",
+      "variant": "commodity_v1_primary",
+      "window": {
+        "start": "2007-01-05",
+        "end": "2026-09-29",
+        "midpoint": "2016-11-11",
+        "n_sessions": 4964
+      },
+      "n_days": 4964,
+      "sharpe": 0.2640700533450917,
+      "cagr": 0.04941038272613074,
+      "vol": 0.21367832091388714,
+      "max_dd": 0.6181236003018044,
+      "vs": {
+        "primary": {
+          "benchmark": "commodity_bh",
+          "n_days": 4964,
+          "sharpe_c": 0.2640700533450917,
+          "sharpe_b": 0.2748272671190027,
+          "gap": -0.010757213773910979,
+          "lb": -0.40955380075272163,
+          "ub": 0.36006064734414267,
+          "gap_half1": 0.13013528301336588,
+          "gap_half2": -0.23206283868109767,
+          "gap_stress_2x_costs": -0.022145354374378978,
+          "A1": false,
+          "A4_component": false,
+          "A5_component": false,
+          "D_component": false
+        },
+        "BM1_SPY": {
+          "benchmark": "BM1_SPY",
+          "n_days": 4964,
+          "sharpe_c": 0.2640700533450917,
+          "sharpe_b": 0.5517674691676997,
+          "gap": -0.287697415822608,
+          "lb": -0.8702229083955483,
+          "ub": 0.23749753049546407,
+          "gap_half1": -0.26233129901668684,
+          "gap_half2": -0.36435880218691086,
+          "gap_stress_2x_costs": -0.3008493202399717,
+          "A1": false,
+          "A4_component": false,
+          "A5_component": false,
+          "D_component": false
+        },
+        "BM2_60_40": {
+          "benchmark": "BM2_60_40",
+          "n_days": 4964,
+          "sharpe_c": 0.2640700533450917,
+          "sharpe_b": 0.6286498398665269,
+          "gap": -0.3645797865214352,
+          "lb": -0.9739399917531587,
+          "ub": 0.21345201788916437,
+          "gap_half1": -0.4496215624987602,
+          "gap_half2": -0.3021408425026879,
+          "gap_stress_2x_costs": -0.3770088245722093,
+          "A1": false,
+          "A4_component": false,
+          "A5_component": false,
+          "D_component": false
+        },
+        "BM3_SPY_VT": {
+          "benchmark": "BM3_SPY_VT",
+          "n_days": 4964,
+          "sharpe_c": 0.2640700533450917,
+          "sharpe_b": 0.6878888802619281,
+          "gap": -0.42381882691683637,
+          "lb": -1.044166310555414,
+          "ub": 0.16423583607064546,
+          "gap_half1": -0.41046899360897193,
+          "gap_half2": -0.46104519078336315,
+          "gap_stress_2x_costs": -0.432318937530508,
+          "A1": false,
+          "A4_component": false,
+          "A5_component": false,
+          "D_component": false
+        }
+      },
+      "dsr": 0.07403183642219624,
+      "placebo_p95": 0.5226040740142458,
+      "placebo_median": 0.20712579721091295,
+      "A3": false,
+      "bars_A": {
+        "A1": false,
+        "A2": false,
+        "A3": false,
+        "A4": false,
+        "A5": false,
+        "A6": true
+      },
+      "bars_B": {
+        "B_a": false
+      },
+      "tier_D_condition": false,
+      "A7": "PENDING (independent recompute not yet run)",
+      "tier_excl_A7": "C",
+      "tier": "C (conditional on A7)"
+    },
+    "combined": {
+      "sub_candidate": "combined",
+      "variant": "combined_v1_primary",
+      "window": {
+        "start": "2007-01-05",
+        "end": "2026-09-29",
+        "midpoint": "2016-11-11",
+        "n_sessions": 4964,
+        "note": "bound by the commodity sleeve's later start (DBA/DBB/DBE, 2007-01-05); the bond sleeve and the 60/40 core both have data back to 2002-2007 (SPY to 1993), but the combined portfolio can't run before every sleeve it holds exists"
+      },
+      "n_days": 4964,
+      "sharpe": 0.6452996321019845,
+      "cagr": 0.07852444255335622,
+      "vol": 0.10234497259551514,
+      "max_dd": 0.30744366901559683,
+      "vs": {
+        "primary": {
+          "benchmark": "combined_bh",
+          "n_days": 4964,
+          "sharpe_c": 0.6452996321019845,
+          "sharpe_b": 0.637605812132794,
+          "gap": 0.007693819969190496,
+          "lb": -0.0353339125631928,
+          "ub": 0.05023021674400807,
+          "gap_half1": 0.013611174452094699,
+          "gap_half2": 0.0007550093461849983,
+          "gap_stress_2x_costs": 0.004705555740391998,
+          "A1": false,
+          "A4_component": true,
+          "A5_component": true,
+          "D_component": false
+        },
+        "BM1_SPY": {
+          "benchmark": "BM1_SPY",
+          "n_days": 4964,
+          "sharpe_c": 0.6452996321019845,
+          "sharpe_b": 0.5517674691676997,
+          "gap": 0.09353216293428479,
+          "lb": -0.06570386126514037,
+          "ub": 0.2506460670841087,
+          "gap_half1": 0.20028458658621628,
+          "gap_half2": -0.04219509425287449,
+          "gap_stress_2x_costs": 0.08966294928647,
+          "A1": false,
+          "A4_component": false,
+          "A5_component": true,
+          "D_component": false
+        },
+        "BM2_60_40": {
+          "benchmark": "BM2_60_40",
+          "n_days": 4964,
+          "sharpe_c": 0.6452996321019845,
+          "sharpe_b": 0.6286498398665269,
+          "gap": 0.016649792235457594,
+          "lb": -0.04099780415950653,
+          "ub": 0.07944992977679026,
+          "gap_half1": 0.012994323104142946,
+          "gap_half2": 0.020022865431348458,
+          "gap_stress_2x_costs": 0.013503444954232391,
+          "A1": false,
+          "A4_component": true,
+          "A5_component": true,
+          "D_component": false
+        },
+        "BM3_SPY_VT": {
+          "benchmark": "BM3_SPY_VT",
+          "n_days": 4964,
+          "sharpe_c": 0.6452996321019845,
+          "sharpe_b": 0.6878888802619281,
+          "gap": -0.04258924815994358,
+          "lb": -0.3215979365066465,
+          "ub": 0.24446008210507206,
+          "gap_half1": 0.05214689199393119,
+          "gap_half2": -0.13888148284932678,
+          "gap_stress_2x_costs": -0.041806668004066294,
+          "A1": false,
+          "A4_component": false,
+          "A5_component": false,
+          "D_component": false
+        }
+      },
+      "dsr": 0.5929465703280861,
+      "placebo_p95": 0.6726309512622853,
+      "placebo_median": 0.6338167674165724,
+      "A3": false,
+      "bars_A": {
+        "A1": false,
+        "A2": false,
+        "A3": false,
+        "A4": false,
+        "A5": false,
+        "A6": true
+      },
+      "bars_B": {
+        "B_a": false
+      },
+      "tier_D_condition": false,
+      "A7": "PENDING (independent recompute not yet run)",
+      "tier_excl_A7": "C",
+      "tier": "C (conditional on A7)"
+    }
+  },
+  "sanity_checks": {
+    "bond": {
+      "BM1_SPY": {
+        "cagr": 0.11598653947788651,
+        "vol": 0.18795857511093428,
+        "max_dd": 0.5520887866051418,
+        "sharpe_over_cash": 0.5882195581742988
+      },
+      "BM2_60_40": {
+        "cagr": 0.08570360890476802,
+        "vol": 0.10582667182946986,
+        "max_dd": 0.32516273457996214,
+        "sharpe_over_cash": 0.6704139392482616
+      }
+    },
+    "commodity": {
+      "BM1_SPY": {
+        "cagr": 0.10943709521760003,
+        "vol": 0.1956043375138101,
+        "max_dd": 0.5520887866051412,
+        "sharpe_over_cash": 0.5517674691676997
+      },
+      "BM2_60_40": {
+        "cagr": 0.08131326753089518,
+        "vol": 0.10995074299529614,
+        "max_dd": 0.32516273457996314,
+        "sharpe_over_cash": 0.6286498398665269
+      }
+    },
+    "combined": {
+      "BM1_SPY": {
+        "cagr": 0.10943709521760003,
+        "vol": 0.1956043375138101,
+        "max_dd": 0.5520887866051412,
+        "sharpe_over_cash": 0.5517674691676997
+      },
+      "BM2_60_40": {
+        "cagr": 0.08131326753089518,
+        "vol": 0.10995074299529614,
+        "max_dd": 0.32516273457996314,
+        "sharpe_over_cash": 0.6286498398665269
+      }
+    },
+    "big_daily_moves_gt_15pct": [
+      {
+        "ticker": "SLV",
+        "date": "2008-10-10",
+        "return": -0.17991631799163166
+      },
+      {
+        "ticker": "USO",
+        "date": "2020-03-09",
+        "return": -0.2531500572737687
+      },
+      {
+        "ticker": "USO",
+        "date": "2020-03-18",
+        "return": -0.17513134851138357
+      },
+      {
+        "ticker": "USO",
+        "date": "2020-04-02",
+        "return": 0.16666666666666674
+      },
+      {
+        "ticker": "USO",
+        "date": "2020-04-03",
+        "return": 0.1545988258317026
+      },
+      {
+        "ticker": "USO",
+        "date": "2020-04-21",
+        "return": -0.2506666666666667
+      },
+      {
+        "ticker": "SLV",
+        "date": "2026-01-30",
+        "return": -0.2854030501089324
+      },
+      {
+        "ticker": "SLV",
+        "date": "2026-02-05",
+        "return": -0.15774185400353635
+      }
+    ],
+    "nan_days_in_eval_windows": {
+      "bond": 0,
+      "commodity": 0,
+      "combined": 0
+    },
+    "turnover": {
+      "bond_v1": {
+        "avg_abs_weight_change_per_rebalance": 0.5267489711934156,
+        "annualised_one_way_turnover": 6.336633663366337
+      },
+      "commodity_v1_primary": {
+        "avg_abs_weight_change_per_rebalance": 0.21893004115226336,
+        "annualised_one_way_turnover": 2.633663366336634
+      },
+      "commodity_v2_sensitivity": {
+        "avg_abs_weight_change_per_rebalance": 0.4032921810699588,
+        "annualised_one_way_turnover": 4.851485148514851
+      }
+    }
+  },
+  "post_pass_audits": {},
+  "prereg_issues": [
+    {
+      "issue": "EXECUTION only says 'trades fill at the next bar's adjusted open'; it does not say how a single calendar day should split between the overnight (pre-trade) and intraday (post-trade) legs for an ONGOING multi-asset monthly rebalance (only a single-event entry, as in insider_cluster_preregistered_bars.py, is unambiguous under that text). Resolved literally and symmetrically: overnight leg uses the OLD weight, intraday leg uses the NEW weight, for every asset whose weight changes that day; unchanged assets get the exact close-to-close return (no distortion). See simulate_next_open's docstring.",
+      "materiality": "low -- only affects ~12-24 rebalance days/year per sub-candidate, on liquid ETFs whose overnight gaps are typically a few bps"
+    },
+    {
+      "issue": "cash's behaviour under the same overnight/intraday split is not specified at all. Resolved pragmatically: the whole day's cash return (BIL or FRED DTB3) is credited to the OLD cash weight only; the freed-up (or newly-committed) cash from a same-day trade earns nothing for that one day.",
+      "materiality": "negligible -- one day's interest on a weight change of a few percent, at a daily rate of ~1-4 bps/year / 252"
+    },
+    {
+      "issue": "PRIMARY_BENCHMARKS/EXECUTION say the primary buy-and-hold benchmarks are 'rebalanced monthly' but do not give a cost-tier convention for that rebalance, nor whether the combined portfolio's 90/5/5 blend should itself be periodically re-trued-up at an extra cost. Resolved literally: the buy-and-hold baskets use the SAME dynamic ADV20-median ETF cost tiers as the timed variants (protocol \u00a71/\u00a72 applies generically to every ETF trade); the combined portfolio's three streams (core, bond sleeve, commodity sleeve) are blended as a pure daily linear combination with NO extra meta-rebalancing cost, since the frozen COSTS dict prices only the ETF-level trades already inside each stream, and inventing an unspecified extra cost was judged less literal than not inventing one.",
+      "materiality": "low -- a meta-rebalancing cost, if it existed, would be charged on at most a few percent of NAV drifting between three streams, monthly"
+    }
+  ]
+}
