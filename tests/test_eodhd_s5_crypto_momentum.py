@@ -92,6 +92,36 @@ class TestUniverseExclusion:
         assert s5.base_symbol("X2-USD") == "X2"
 
 
+class TestLiquidityFloorAndBiases:
+    def test_liquidity_floor_is_one_million_usd(self):
+        # Required per coordinator review 2026-10-01: implementability-based
+        # floor, not a tuned threshold.
+        assert s5.UNIVERSE["liquidity_floor_usd"] == pytest.approx(1_000_000.0)
+
+    def test_biases_dict_declares_all_four_required_items(self):
+        for key in ("residual_survivorship", "wash_trading_volume",
+                    "ticker_collision_bare", "segment_break_adjacent"):
+            assert key in s5.BIASES
+            assert isinstance(s5.BIASES[key], str) and len(s5.BIASES[key]) > 20
+
+    def test_survivorship_bias_direction_is_named_upward(self):
+        assert "UPWARD" in s5.BIASES["residual_survivorship"]
+
+    def test_wash_trading_bias_names_volume_inflation(self):
+        assert "inflates" in s5.BIASES["wash_trading_volume"]
+
+    def test_segment_break_adjacent_matches_lookback_days(self):
+        # The 28-day post-break exclusion is meant to line up exactly with
+        # SIGNAL['lookback_days'], not be an independently chosen number.
+        assert str(s5.SIGNAL["lookback_days"]) in s5.BIASES["segment_break_adjacent"]
+
+    def test_fingerprint_changes_if_biases_change(self, monkeypatch):
+        before = s5.bars_fingerprint()
+        monkeypatch.setitem(s5.BIASES, "residual_survivorship", "changed")
+        after = s5.bars_fingerprint()
+        assert before != after
+
+
 class TestTercileCount:
     @pytest.mark.parametrize("n,expected", [(20, 7), (30, 10), (3, 1), (1, 0), (2, 1)])
     def test_round_half_up(self, n, expected):

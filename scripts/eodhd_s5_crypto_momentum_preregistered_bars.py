@@ -19,6 +19,20 @@ computed from counts, not returns). This file must not be promoted to frozen
 and signed off on the design decisions flagged throughout, per the protocol's
 own "Freeze first" process rule.
 
+Coordinator review round (2026-10-01), incorporated here: (1) REQUIRED a
+liquidity floor, ``UNIVERSE["liquidity_floor_usd"]`` = $1,000,000/day
+trailing-30d median dollar volume (implementability-based, given this book's
+position sizes) -- this moved ``WINDOWS["start"]`` from 2014-01-12 (no floor)
+to 2017-05-14, and the midpoint from 2020-05-24 to 2022-01-23; the power
+analysis below was recomputed against the new (smaller) available-block
+count. (2) Added the ``BIASES`` dict declaring four known biases and their
+direction: residual survivorship (upward, on the long book), CC-volume wash
+trading (inflates measured liquidity), the ANC-style bare-ticker-collision
+gap, and a new segment-break-adjacent ineligibility rule (28 days after any
+cleaning segment break). (3) Confirmed as proposed: the absolute-filter
+primary variant, the C1 crypto-to-SPY calendar mapping for BM1-3, the Alpaca
+subset as report-only, and the 3-variant grid.
+
 Question: does a weekly cross-sectional momentum basket of the largest
 liquid coins (ex. stablecoins/wrapped/pegged/leveraged tokens) beat BTC
 buy-and-hold and the live ``BtcTrendSleeve`` (C1) rule out of sample, net of
@@ -63,8 +77,13 @@ DATA = {
     "segment_rule": "a coin is eligible at a review date only if its most recent cleaned `segment` "
                     "(scripts/eodhd_clean.py:clean_bars) covers at least the trailing 30 calendar days "
                     "needed for the dollar-volume ranking and the 28-day lookback return; a segment "
-                    "boundary inside that window makes the coin ineligible at that date, not just "
-                    "truncates the lookback (per protocol: no return computed across a segment boundary)",
+                    "boundary inside that window makes the coin ineligible at that date. Additionally, "
+                    "PER COORDINATOR REVIEW: a coin is ineligible for the SIGNAL['lookback_days'] "
+                    "(28) calendar days immediately after any segment break in its own series, even "
+                    "once 30 raw calendar days have again accumulated -- a return spanning the break is "
+                    "undefined by the protocol's own rule, and 28 days is the shortest window in which "
+                    "an undefined cross-break return could otherwise silently re-enter the lookback. "
+                    "See BIASES['segment_break_adjacent'].",
     "dollar_volume": "adjusted_close x volume, per protocol Sec 1 -- numerically identical to "
                      "close x volume for crypto in every series checked at the gate (no splits), "
                      "confirmed for BTC-USD/ETH-USD 2026-09-30 (docs/eodhd_s5_crypto_gate_2026_10.md Sec 5)",
@@ -110,21 +129,68 @@ UNIVERSE = {
     "n_variant": 30,
     "rank_metric": "trailing 30-calendar-day median dollar volume (adjusted_close x volume), "
                    "computed over the 30 days strictly before the review date",
+    "liquidity_floor_usd": 1_000_000.0,
+    "liquidity_floor_rationale": "REQUIRED per coordinator review: this book's position sizes are "
+                                 "~$2-8k, so a $1,000,000/day trailing-30d median dollar volume floor "
+                                 "is a modest, implementability-based bar, not a tuned threshold -- "
+                                 "below it, 35bps/side (COSTS) is not a credible cost assumption. See "
+                                 "BIASES['wash_trading_volume'] for why the floor is necessary but not "
+                                 "sufficient for genuine tradable liquidity.",
     "eligibility": "non-excluded, USD-quoted, >=29 calendar days of same-segment history before the "
-                  "review date (28-day lookback + 1), a bar within the trailing 3 calendar days "
+                  "review date (28-day lookback + 1) with no segment break in the preceding "
+                  "SIGNAL['lookback_days'] (28) days, a bar within the trailing 3 calendar days "
                   "(not stale -- mirrors BtcTrendSleeve.max_stale_days), and trailing-30d median "
-                  "dollar volume > 0",
+                  "dollar volume >= liquidity_floor_usd",
     "ticker_collision_rule": "if two eligible codes share the same normalised base symbol (after "
                             "stripping a trailing >=3-digit suffix, e.g. TAO-USD vs TAO22974-USD; "
                             "gate Sec 4), keep only the one with the higher trailing dollar volume at "
                             "that review date and log the drop -- observed rarely in the gate's scan, "
                             "but declared up front since it changes which name is 'the' coin",
-    "known_gap": "ticker reuse across UNRELATED projects sharing a bare ticker with no numeric-suffix "
-                "disambiguation (e.g. ANC-USD is NOT Terra's Anchor Protocol token -- gate Sec 3) is "
-                "NOT caught by ticker_collision_rule, since both files pass eligibility independently "
-                "and there is no shared base symbol to collide on. Flagged as a known limitation, not "
-                "fixed in this draft -- the protocol's 'freeze first' rule means this is a design call "
-                "for owner sign-off, not something to quietly patch by hand-curating identities.",
+    "known_gap": "see BIASES['ticker_collision_bare'].",
+}
+
+# ---------------------------------------------------------------------------
+# Known biases and their DIRECTION (per coordinator review 2026-10-01). Data-
+# availability/design facts only -- none of these was derived from a return
+# series, and none is "fixed" by this draft; they are carried forward as
+# declared limitations for the owner/reviewer to weigh, per the protocol's
+# "freeze first" rule.
+# ---------------------------------------------------------------------------
+BIASES = {
+    "residual_survivorship": (
+        "18.5% of delisted crypto symbols (1,187/6,404 -- "
+        "docs/eodhd_s5_crypto_gate_2026_10.md Sec 1) have NO downloaded EOD history at all and are "
+        "therefore excluded from the eligible universe by construction, not because they were checked "
+        "and found uninteresting. Missing dead coins bias a LONG-ONLY book UPWARD: some unknown "
+        "fraction of that 18.5% failed exactly like the 81.5% that do have history, and their absence "
+        "here is not evidence they behaved differently, only that this vendor never captured them. THE "
+        "GATE's pass (delisted coins that were once large ARE present with history through their "
+        "decline) does not erase this -- it shows the data contains real losers, not that it contains "
+        "every loser. Treat any candidate result as an upper bound on the true historical return, not "
+        "a bias-free estimate."
+    ),
+    "wash_trading_volume": (
+        "EODHD's CC (crypto) `volume` is aggregated across multiple venues and is not itself a "
+        "wash-trade-filtered figure. Reported wash-trading rates on unregulated/low-cap venues can be "
+        "large (a well-known industry concern; the exact rate is UNVERIFIED this session, no network "
+        "access). This inflates measured dollar volume for SOME coins, which can pull a wash-traded "
+        "name over UNIVERSE['liquidity_floor_usd'] when its genuine tradable liquidity would not clear "
+        "it. The floor is therefore NECESSARY but NOT SUFFICIENT for real tradable liquidity at this "
+        "book's size -- it screens out the thinnest names, not every over-stated one."
+    ),
+    "ticker_collision_bare": (
+        "ticker reuse across UNRELATED projects sharing a bare ticker with no numeric-suffix "
+        "disambiguation (e.g. ANC-USD is NOT Terra's Anchor Protocol token -- gate Sec 3) is NOT caught "
+        "by ticker_collision_rule, since both files pass eligibility independently and there is no "
+        "shared base symbol to collide on. Known gap, not patched by hand-curation in this draft -- "
+        "the protocol's 'freeze first' rule means this is a design call for owner sign-off."
+    ),
+    "segment_break_adjacent": (
+        "a coin is ineligible for the 28 calendar days immediately following any cleaning `segment` "
+        "break in its own series (see DATA['segment_rule']) -- a return spanning the break is undefined "
+        "by the protocol's own rule, and 28 days matches SIGNAL['lookback_days'] exactly, so a break "
+        "cannot silently re-enter the lookback the moment raw history re-accumulates."
+    ),
 }
 
 
@@ -250,31 +316,37 @@ PLACEBO = {
 
 # ---------------------------------------------------------------------------
 # Window and midpoint -- fixed from data AVAILABILITY only (counts of
-# eligible coins under UNIVERSE's rule), never from a return series. See
-# scratch check (not committed; reproducible from data/research/eodhd/crypto):
-# first Sunday-UTC with >=20 eligible coins (post-exclusion, USD-quoted,
-# >=29d same-segment history, non-stale, positive trailing-30d $vol) is
-# 2014-01-12; >=30 eligible is reached the SAME week (30 exactly). Manually
-# spot-checked: the jump from 2 (2014-01-05) to 30 (2014-01-12) eligible
-# coins reflects several real altcoins (DOGE launched 2013-12-15, NXT
-# 2013-12-05, among others) simultaneously crossing the 28-day-history floor
-# in the first two weeks of January 2014, not a vendor backfill artefact
-# (spot-checked first dates against known real launch dates) -- but liquidity
-# in this earliest era is thin by today's standards (the eligibility rule
-# only requires positive, not a minimum, trailing dollar volume), which is a
-# known caveat of the earliest ~1-2 years of the window, not a data error.
+# eligible coins under UNIVERSE's rule, INCLUDING the liquidity_floor_usd
+# floor added per coordinator review 2026-10-01), never from a return series.
+# Superseded values below (reproducible from data/research/eodhd/crypto via a
+# scratch scan, not committed -- same exclusion/eligibility rule as UNIVERSE,
+# plus the >=$1,000,000/day trailing-30d median-$vol floor):
+#   - WITHOUT the floor, first Sunday-UTC with >=20 eligible coins was
+#     2014-01-12 (>=30 reached the same week) -- this was this draft's
+#     original window before the floor was required.
+#   - WITH the floor: first Sunday-UTC with >=20 eligible coins is
+#     2017-05-14 (the count jumps from thin single digits in early 2017 to
+#     14 by 2017-04-02 and clears 20 by 2017-05-14 -- consistent with 2017
+#     being crypto's first broad-altcoin bull run, not a data artefact);
+#     >=30 eligible is reached 2 weeks later, 2017-05-28. The floor therefore
+#     moves the window start ~3.3 years later than the unfiloored version,
+#     roughly matching the coordinator's own "likely ~2017" expectation.
 # ---------------------------------------------------------------------------
 WINDOWS = {
-    "start": "2014-01-12",  # first Sunday-UTC review with >=20 (and, same week, >=30) eligible coins
+    "start": "2017-05-14",  # first Sunday-UTC review with >=20 eligible coins AFTER the liquidity floor
     "end": DATA_END,
-    "midpoint": "2020-05-24",  # nearest Sunday-UTC review to the calendar midpoint of [start, end] (2020-05-21)
+    "midpoint": "2022-01-23",  # nearest Sunday-UTC review to the calendar midpoint of [start, end] (2022-01-20)
     "post_2020_decay_window": {"start": "2020-07-01", "end": DATA_END,
                                 "rationale": "the brief's own cited (UNVERIFIED-exact-citation) "
                                             "post-July-2020 crypto-momentum decay date; used only for "
                                             "the illustrative decay scenario in POWER below, and for an "
                                             "A4-style post-decay half-window check at evaluation time"},
-    "note_variant_windows": "S5_top30_abs uses the SAME start (30 eligible reached the same week as 20); "
-                            "all three variants therefore share one window/midpoint",
+    "note_variant_windows": "S5_top20_abs and S5_top20_rel use this window's start (2017-05-14, "
+                            ">=20 eligible). S5_top30_abs's OWN eligibility (>=30 coins passing the "
+                            "floor) is only reached 2 weeks later, 2017-05-28 -- it trades from "
+                            "2017-05-28 within this SAME overall window/midpoint (not a separately "
+                            "recomputed midpoint), a declared simplification given the gap is small "
+                            "relative to the window's ~9.4-year length.",
 }
 
 # ---------------------------------------------------------------------------
@@ -467,7 +539,7 @@ def power_report() -> dict:
 def bars_fingerprint() -> str:
     payload = json.dumps(
         {
-            "DATA_END": DATA_END, "SEED": SEED, "DATA": DATA, "UNIVERSE": UNIVERSE,
+            "DATA_END": DATA_END, "SEED": SEED, "DATA": DATA, "UNIVERSE": UNIVERSE, "BIASES": BIASES,
             "SIGNAL": SIGNAL, "VARIANTS": VARIANTS, "N_VARIANTS": N_VARIANTS,
             "EXECUTION": EXECUTION, "COSTS": COSTS, "BENCHMARKS": BENCHMARKS,
             "PLACEBO": PLACEBO, "WINDOWS": WINDOWS, "BOOTSTRAP": BOOTSTRAP, "DSR": DSR, "PBO": PBO,
