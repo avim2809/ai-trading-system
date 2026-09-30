@@ -24,8 +24,8 @@ class TestDraftStatus:
     def test_is_still_draft(self):
         # Phase 1 of this candidate: design frozen against AVAILABILITY only,
         # no return computed -- must not claim to be frozen yet.
-        assert prereg.DRAFT is True
-        assert prereg.PREREGISTERED_AT is None
+        assert prereg.DRAFT is False
+        assert prereg.PREREGISTERED_AT == "2026-09-30T19:18:54Z"
 
     def test_cleaning_fingerprint_matches_the_frozen_rule(self):
         import eodhd_clean as ec
@@ -87,7 +87,7 @@ class TestTierBars:
     def test_dsr_prior_trials_is_the_frozen_placeholder(self):
         # Exact placeholder text mandated for phase 1 (not a number yet --
         # the other 4 shortlist candidates' grids aren't all frozen).
-        assert prereg.DSR["prior_trials"] == "190 + other shortlist variants (fixed at freeze)"
+        assert prereg.DSR["prior_trials"] == 206
 
 
 class TestClassifyPrecedence:

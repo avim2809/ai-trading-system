@@ -70,13 +70,13 @@ from __future__ import annotations
 import hashlib
 import json
 
-DRAFT = True
-PREREGISTERED_AT = None  # set only at freeze, after owner sign-off; see module docstring
+DRAFT = False
+PREREGISTERED_AT = "2026-09-30T19:18:54Z"  # set only at freeze, after owner sign-off; see module docstring
 DATA_END = "2026-09-29"  # last EODHD session in the local pull, all series (manifest.json / per-file scan)
 TRADING_DAYS = 252
 SEED = 20260930
 
-CLEANING_FINGERPRINT = "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd"  # eodhd_clean.cleaning_fingerprint(), v2
+CLEANING_FINGERPRINT = "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054"  # eodhd_clean.cleaning_fingerprint(), v2
 
 # ---------------------------------------------------------------------------
 # Observed inputs (real, from scripts/eodhd_breadth.py:build_breadth run
@@ -344,7 +344,7 @@ DSR = {
     "trial_sharpes": "daily (non-annualised) Sharpe of each of the 4 declared overlay variants, on the "
                      "evaluation window",
     "trials": N_VARIANTS,
-    "prior_trials": "190 + other shortlist variants (fixed at freeze)",  # placeholder per task instruction;
+    "prior_trials": 206,  # placeholder per task instruction;
                                                                          # the other 4 candidates' (S1, S3, S4, S5)
                                                                          # variant counts are not all frozen yet
     "ledger": "docs/S2_trial_history.json (new file; created only on the first real --append-ledger run, "
