@@ -1,0 +1,36 @@
+{
+  "family": "S2",
+  "entries": [
+    {
+      "date": "2026-09-30",
+      "fingerprint": "4fd97659e9affce3c2fb6391daba522ad83d8c36be4698f2370e78c39ff7b6ab",
+      "n_trials": 4,
+      "trials": [
+        "V1_primary",
+        "V2_cash_destination",
+        "V3_stricter_threshold",
+        "V4_alt_measure"
+      ],
+      "trial_daily_sharpes_cash_excess_governing": [
+        0.0440045685279643,
+        0.03868115228934933,
+        0.046137589684815315,
+        0.04256925822538266
+      ],
+      "trial_daily_sharpes_bm2_excess_alt": [
+        -0.009207948991113324,
+        -0.02178866363794326,
+        -0.0019821230462338207,
+        -0.011798493909552723
+      ],
+      "official_tier_conditional_on_A7": "C",
+      "tiers_conditional_on_A7_all_variants_descriptive": {
+        "V1_primary": "C",
+        "V2_cash_destination": "C",
+        "V3_stricter_threshold": "B",
+        "V4_alt_measure": "C"
+      }
+    }
+  ],
+  "cumulative_trials": 4
+}
