@@ -19,8 +19,8 @@ import eodhd_s4_52wk_high_preregistered_bars as prereg  # noqa: E402
 
 class TestDraftStatus:
     def test_is_draft_not_frozen(self):
-        assert prereg.DRAFT is True
-        assert prereg.PREREGISTERED_AT is None
+        assert prereg.DRAFT is False
+        assert prereg.PREREGISTERED_AT == "2026-09-30T19:18:54Z"
 
     def test_variant_cap(self):
         assert prereg.N_VARIANTS == len(prereg.CANDIDATES)

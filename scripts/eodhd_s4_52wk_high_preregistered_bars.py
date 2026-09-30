@@ -65,8 +65,8 @@ if str(_SCRIPTS) not in sys.path:
 
 import eodhd_clean as ec  # noqa: E402
 
-DRAFT = True
-PREREGISTERED_AT = None
+DRAFT = False
+PREREGISTERED_AT = "2026-09-30T19:18:54Z"
 SEED = 20260930
 
 # ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ SEED = 20260930
 # is descriptive; nothing here gates a tier outcome.
 # ---------------------------------------------------------------------------
 OBSERVED = {
-    "cleaning_fingerprint_v2": ec.cleaning_fingerprint(),
+    "cleaning_fingerprint_v2": "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054",
     "universe_dir": "data/research/eodhd/us_universe_full",
     "n_ticker_files": 22732,           # "extras final" us:{ok:22732,empty:9}, 2026-09-30
     "calendar_start": "1993-01-29",    # SPY's first bar in etfs_full/ (protocol amendment 1)
@@ -340,7 +340,7 @@ BOOTSTRAP = {
 }
 DSR = {
     "trials": N_VARIANTS,  # the daily Sharpes of every variant S4 itself declares
-    "prior_trials": "190 + other shortlist variants (fixed at freeze)",
+    "prior_trials": 206,
     "trial_sharpes": "daily (non-annualised) Sharpe of each of the 4 CANDIDATES entries",
     "ledger": "docs/S4_trial_history.json (new family; untouched by every other ledger)",
 }
@@ -481,3 +481,6 @@ if __name__ == "__main__":
     print(("DRAFT" if DRAFT else "FROZEN") + " fingerprint:", bars_fingerprint())
     import pprint
     pprint.pprint(power_report())
+
+# Frozen cleaning rule: fail loudly if scripts/eodhd_clean.py changed after the freeze.
+assert ec.cleaning_fingerprint() == OBSERVED["cleaning_fingerprint_v2"], "cleaning rule changed since freeze"
