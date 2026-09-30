@@ -10,6 +10,7 @@ import type {
   LLMProvider, LLMConfig, LLMCacheStats, RAGStats, EmbeddingModelInfo, LogTailResponse,
   BlackboardView, OrderRecord, SystemResources, PatternMatchRecord, PatternSummary,
   PositionsSummary, LivePortfolioHistory, LiveAttribution, LiveAttributionHistory,
+  AllocationStatus,
 } from '../api/types'
 
 export const mockStrategies: StrategyInfo[] = [
@@ -45,6 +46,39 @@ export const mockLiveStatusRunning: LiveStatus = {
   last_cycle: { cycle_id: 1, timestamp: '2026-07-21T19:49:04.066971', orders_generated: 20 },
   cycle_running_seconds: null,
   market_open: true, next_market_open: '2026-07-22T09:30:00-04:00', next_market_close: '2026-07-22T16:00:00-04:00',
+}
+
+export const mockAllocationStatus: AllocationStatus = {
+  band_abs: 0.02, liquidate_unmanaged: true, kill_switch_drawdown: 0.25, max_order_notional: 70000,
+  sleeves: [
+    { name: 'core', type: 'StaticSleeve', weight: 0.92, symbols: ['SPY', 'IEF'], last_rebalance: '2026-09-01T14:30:00' },
+    { name: 'btc_trend', type: 'BtcTrendSleeve', weight: 0.08, symbols: ['BTC/USD'], last_rebalance: null },
+  ],
+  day: '2026-09-01', day_status: 'settled', day_attempts: 1, last_run_at: '2026-09-01T14:30:00',
+  nav: 100000,
+  current_weights: { SPY: 0.55, IEF: 0.37, AAPL: 0.015 },
+  plan: {
+    asof: '2026-09-01T14:30:00', nav: 100000,
+    targets: { SPY: 0.552, IEF: 0.368, 'BTC/USD': 0.0 },
+    actual_weights: {}, sleeve_targets: { core: { SPY: 0.6, IEF: 0.4 }, btc_trend: { 'BTC/USD': 0.0 } },
+    sleeve_weights: { core: 0.92, btc_trend: 0.08 },
+    due_sleeves: ['core', 'btc_trend'], rebalanced_sleeves: ['core', 'btc_trend'], drift_symbols: [],
+    unmanaged: {},
+    orders: [
+      { symbol: 'SPY', side: 'buy', quantity: 110, price: 500, strategy: 'core', order_type: 'market', notional: 55000 },
+      { symbol: 'IEF', side: 'buy', quantity: 387, price: 95, strategy: 'core', order_type: 'market', notional: 36765 },
+    ],
+    symbol_sleeves: { SPY: ['core'], IEF: ['core'], 'BTC/USD': ['btc_trend'] },
+    gross_before: 0, gross_after: 0.918, buy_scale: 1, errors: [],
+  },
+}
+
+export const mockLiveStatusAllocation: LiveStatus = {
+  ...mockLiveStatusRunning,
+  broker: 'alpaca_paper',
+  active_strategies: [],
+  strategy_mode: 'allocation',
+  allocation: mockAllocationStatus,
 }
 
 export const mockLiveConfig: LiveConfig = {

@@ -317,6 +317,14 @@ def resolve_live_startup(
         # key in this tuple. Read by _start_live_scheduler (firm.api.routers.
         # live) to build the TradingScheduler's news_ingestion kwarg.
         "news_ingestion",
+        # strategy_mode: "allocation" + its allocation: block (passive core +
+        # satellite sleeves, see firm.allocation and LiveTradingEngine.
+        # _run_allocation_cycle, 2026-09-30). Absent = "pipeline", unchanged.
+        # Same silent-drop bug class as every other key in this tuple: a
+        # YAML-only strategy_mode would otherwise never reach the engine via
+        # the systemd auto-start path.
+        "strategy_mode",
+        "allocation",
     ):
         if key in yaml_cfg:
             engine_config[key] = yaml_cfg[key]

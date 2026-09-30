@@ -545,6 +545,8 @@ def live_status(request: Request) -> dict[str, Any]:
             "market_open": None,
             "next_market_open": None,
             "next_market_close": None,
+            "strategy_mode": None,
+            "allocation": None,
         }
 
     next_run = None
@@ -602,7 +604,31 @@ def live_status(request: Request) -> dict[str, Any]:
         "market_open": market_open,
         "next_market_open": next_market_open,
         "next_market_close": next_market_close,
+        # "pipeline" (default) | "allocation". In allocation mode `allocation`
+        # carries the latest plan (targets, actual weights, orders) plus
+        # last_rebalance per sleeve -- read from engine state only, never a
+        # broker call (see LiveTradingEngine.allocation_status).
+        "strategy_mode": _strategy_mode(engine),
+        "allocation": _allocation_status(engine),
     }
+
+
+def _strategy_mode(engine: Any) -> str:
+    mode = getattr(engine, "strategy_mode", "pipeline")
+    return mode if isinstance(mode, str) else "pipeline"
+
+
+def _allocation_status(engine: Any) -> dict[str, Any] | None:
+    if _strategy_mode(engine) != "allocation":
+        return None
+    fn = getattr(engine, "allocation_status", None)
+    if not callable(fn):
+        return None
+    try:
+        return fn()
+    except Exception:
+        log.warning("live_status: allocation_status() failed", exc_info=True)
+        return None
 
 
 @router.post("/start")

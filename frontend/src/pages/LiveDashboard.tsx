@@ -13,6 +13,7 @@ import Spinner from '../components/Spinner'
 import EquityCurveChart from '../components/EquityCurveChart'
 import DrawdownChart from '../components/DrawdownChart'
 import AttributionBar from '../components/AttributionBar'
+import AllocationPanel from '../components/AllocationPanel'
 import StrategyAttributionTable from '../components/StrategyAttributionTable'
 import { formatDateTime } from '../lib/time'
 import { formatMetric, signColor, MIN_OBSERVATIONS_FOR_RATIOS } from '../lib/metrics'
@@ -522,7 +523,14 @@ export default function LiveDashboard() {
       {/* Status Card */}
       {status && (
         <div className="bg-slate-800 rounded-xl border border-slate-700 p-5 mb-6">
-          <h3 className="text-sm font-semibold text-slate-300 mb-3">Engine Status</h3>
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <h3 className="text-sm font-semibold text-slate-300">Engine Status</h3>
+            {status.strategy_mode && (
+              <span className="px-2 py-0.5 bg-slate-900/50 border border-slate-600 rounded text-xs text-slate-300 font-mono">
+                mode: {status.strategy_mode}
+              </span>
+            )}
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4 text-sm">
             <div>
               <span className="text-xs text-slate-400">State</span>
@@ -596,6 +604,11 @@ export default function LiveDashboard() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Allocation portfolio (strategy_mode: allocation only) */}
+      {status?.strategy_mode === 'allocation' && status.allocation && (
+        <AllocationPanel allocation={status.allocation} />
       )}
 
       {/* Account Summary */}

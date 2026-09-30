@@ -44,6 +44,7 @@ CYCLE_COUNTER_KEY = "cycle_counter"
 SLEEVE_PORTFOLIOS_KEY = "sleeve_portfolios"
 SLEEVE_HISTORY_KEY = "sleeve_history"
 CORRECTED_FILLS_KEY = "sleeve_corrected_fills"
+ALLOCATION_STATE_KEY = "allocation_state"
 
 
 class LiveStateStore:
@@ -347,6 +348,22 @@ class LiveStateStore:
             return int(blob.get("cycle_count", 0))
         except (TypeError, ValueError):
             return None
+
+    # ------------------------------------------------------------------
+    # strategy_mode: allocation (see firm.allocation / LiveTradingEngine.
+    # _run_allocation_cycle). Holds last_rebalance per allocation sleeve
+    # plus the once-per-trading-day run marker and the latest plan. Must
+    # survive a restart: losing last_rebalance would make every monthly
+    # sleeve look "never rebalanced" and re-trade it on the next boot, and
+    # losing the day marker would let a same-day restart run the day's
+    # allocation twice.
+    # ------------------------------------------------------------------
+
+    def save_allocation_state(self, state: dict[str, Any]) -> None:
+        self._save_blob(ALLOCATION_STATE_KEY, state)
+
+    def load_allocation_state(self) -> dict[str, Any] | None:
+        return self._load_blob(ALLOCATION_STATE_KEY)
 
     # ------------------------------------------------------------------
 

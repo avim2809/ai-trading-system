@@ -977,6 +977,39 @@ design/history: `docs/capital_sleeves_plan.md`.
   orchestrator refuses to construct in sleeved mode if they are, rather than silently
   multiplying LLM call volume ~N-fold).
 
+### Allocation mode (`strategy_mode: allocation`, `src/firm/allocation/`, 2026-09-30, NOT live yet)
+
+Opt-in alternative to the whole strategy→analyst→PM→risk pipeline, built after the
+edge-search verdict (`docs/edge_search_verdict_2026_09.md`). Absent key / `pipeline` =
+unchanged. Proposed config for the Alpaca instance: `config/live_alpaca_allocation.example.yaml`.
+
+- **Sleeves** (`allocation/sleeves.py`): `Sleeve` ABC (`name`, `weight` of NAV,
+  `target_weights(asof, history)`, `is_rebalance_due(asof, last)`, `symbols()`, optional
+  `fractional`/`time_in_force`). `StaticSleeve` (monthly = first NYSE trading day of a new
+  month in US/Eastern, rolling forward if missed; weekly; daily). `build_sleeves()` registry by
+  `type:` (`static`, `btc_trend` → `allocation/btc_trend.py`, imported lazily; missing module =
+  engine start fails). NYSE holidays in `allocation/calendar.py` (no external calendar dep).
+- **Allocator** (`allocation/allocator.py`): combined targets = Σ sleeve.weight × within-sleeve
+  weight (≤ 1, rest cash); trades a symbol if a sleeve owning it is due OR |actual − target| >
+  `band_abs`; sells before buys; never shorts; buys scaled so projected gross ≤ `max_gross` (1.0);
+  unmanaged broker positions left alone unless `liquidate_unmanaged`; Alpaca crypto aliases
+  (`BTCUSD` ↔ `BTC/USD`) normalized.
+- **Engine** (`LiveTradingEngine._run_allocation_cycle`): orchestrator built (forced blended,
+  warmup off) but never stepped; no `data_feed.refresh()` (only `fetch_close_history` for sleeve
+  symbols). Positions/NAV from the broker each cycle, kill switch every cycle, allocator at most
+  once per US/Eastern trading day; same-day re-plan only after a failed/rejected/news-held order
+  (`max_attempts_per_day`), waiting while orders are still working. Orders go through
+  `_execute_orders` (FIRM_ALLOW_TRADING, audit, notional cap, circuit breaker, alerts), the news
+  guard and the daily trade/turnover budget (budget-capped orders defer to the next day).
+  Planning/extended-hours cycles are skipped. Overrides: `allocation.kill_switch_drawdown`,
+  `max_order_notional`, `max_daily_turnover`, `max_daily_trades`.
+  `_execute_orders` keeps fractional qty only for orders carrying `"fractional": True`.
+- **State**: `LiveStateStore` key `allocation_state` (last_rebalance per sleeve, day marker,
+  day's order ids, last plan): survives restarts.
+- **API/UI**: `GET /api/live/status` → `strategy_mode` + `allocation` (sleeves, last plan,
+  current weights from the last broker sync; no broker call). `components/AllocationPanel.tsx`
+  on the Live Dashboard.
+
 ### Web UI surfaces (`frontend/src`)
 
 | Page | Adds |

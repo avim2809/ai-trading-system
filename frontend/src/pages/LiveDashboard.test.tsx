@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { server } from '../test/server'
 import { renderWithProviders } from '../test/utils'
 import LiveDashboard from './LiveDashboard'
+import { mockLiveStatusAllocation } from '../test/mockData'
 
 describe('LiveDashboard', () => {
   const runningStatus = {
@@ -208,6 +209,36 @@ describe('LiveDashboard', () => {
     await waitFor(() => expect(screen.getByText('Running')).toBeInTheDocument())
     expect(screen.queryByText('Open')).not.toBeInTheDocument()
     expect(screen.queryByText('Closed')).not.toBeInTheDocument()
+  })
+
+  it('shows the allocation panel with target vs actual weights in allocation mode', async () => {
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json(mockLiveStatusAllocation)),
+    )
+    renderWithProviders(<LiveDashboard />)
+    const panel = await screen.findByTestId('allocation-panel')
+    expect(within(panel).getByText('Allocation Portfolio')).toBeInTheDocument()
+    expect(screen.getByText('mode: allocation', { selector: '.font-mono.text-slate-300' })).toBeInTheDocument()
+    expect(within(panel).getByText('core')).toBeInTheDocument()
+    expect(within(panel).getByText('92.0% of NAV')).toBeInTheDocument()
+    expect(within(panel).getByText('55.2%')).toBeInTheDocument() // SPY target
+    expect(within(panel).getByText('55.0%')).toBeInTheDocument() // SPY actual
+    expect(within(panel).getByText('buy 110')).toBeInTheDocument()
+    expect(within(panel).getByText('unmanaged')).toBeInTheDocument() // AAPL leftover
+    expect(within(panel).getByText(/last rebalance: never/)).toBeInTheDocument() // btc_trend
+    expect(within(panel).getByText(/2026-09-01: done \(all filled\)/)).toBeInTheDocument()
+  })
+
+  it('does not render the allocation panel in pipeline mode', async () => {
+    server.use(
+      http.get('http://localhost/api/live/status', () => HttpResponse.json({
+        ...runningStatus, strategy_mode: 'pipeline', allocation: null,
+      })),
+    )
+    renderWithProviders(<LiveDashboard />)
+    await waitFor(() => expect(screen.getByText('Running')).toBeInTheDocument())
+    expect(screen.getByText('mode: pipeline')).toBeInTheDocument()
+    expect(screen.queryByTestId('allocation-panel')).not.toBeInTheDocument()
   })
 
   it('start form submits the full payload including selected strategies', async () => {

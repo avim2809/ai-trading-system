@@ -29,6 +29,11 @@ sleeved` — independent per-strategy capital/P&L, netted only at the final
 real-order pass); Alpaca (`:8001`) runs sleeved live today, IBKR stays
 blended as the control. See `docs/capital_sleeves_plan.md`.
 
+`strategy_mode: allocation` (opt-in, not live yet; `src/firm/allocation/`) bypasses the
+whole pipeline for a passive core + satellite-sleeve allocator planned against broker
+positions — proposed for Alpaca in `config/live_alpaca_allocation.example.yaml`; see the
+"Allocation mode" section of `docs/PROJECT_CONTEXT.md`.
+
 ## Eval & behavioural features (wired backend + React UI)
 
 - **Overfitting**: PBO/CSCV + Deflated/Probabilistic Sharpe (`src/firm/eval/overfitting.py`);

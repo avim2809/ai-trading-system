@@ -268,6 +268,73 @@ export interface LiveStatus {
   market_open: boolean | null
   next_market_open: string | null
   next_market_close: string | null
+  /** "pipeline" (default strategy pipeline) | "allocation" (core + satellite sleeves); null when stopped. */
+  strategy_mode?: 'pipeline' | 'allocation' | null
+  /** Present only in allocation mode (see LiveTradingEngine.allocation_status). */
+  allocation?: AllocationStatus | null
+}
+
+export interface AllocationSleeveStatus {
+  name: string
+  type: string
+  /** Fraction of total NAV this sleeve controls. */
+  weight: number
+  symbols: string[]
+  /** ISO timestamp (naive UTC) of the sleeve's last completed rebalance, null = never. */
+  last_rebalance: string | null
+}
+
+export interface AllocationOrder {
+  symbol: string
+  side: 'buy' | 'sell'
+  quantity: number
+  price: number
+  strategy: string
+  order_type: string
+  notional: number
+  fractional?: boolean
+  time_in_force?: string
+}
+
+export interface AllocationPlan {
+  asof: string
+  nav: number
+  /** Combined target weight of NAV per symbol (sleeve weight x within-sleeve weight). */
+  targets: Record<string, number>
+  /** Broker weights at plan time (pre-trade). */
+  actual_weights: Record<string, number>
+  sleeve_targets: Record<string, Record<string, number>>
+  sleeve_weights: Record<string, number>
+  due_sleeves: string[]
+  rebalanced_sleeves: string[]
+  drift_symbols: string[]
+  /** Held symbols no sleeve targets -> weight of NAV. */
+  unmanaged: Record<string, number>
+  orders: AllocationOrder[]
+  symbol_sleeves: Record<string, string[]>
+  gross_before: number
+  gross_after: number
+  buy_scale: number
+  errors: string[]
+  last_rebalance?: Record<string, string>
+}
+
+export interface AllocationStatus {
+  band_abs: number
+  liquidate_unmanaged: boolean
+  kill_switch_drawdown: number
+  max_order_notional: number | null
+  sleeves: AllocationSleeveStatus[]
+  /** Trading day (US/Eastern, YYYY-MM-DD) of the last allocation run. */
+  day: string | null
+  /** complete | settled | retry | null */
+  day_status: string | null
+  day_attempts: number
+  last_run_at: string | null
+  nav: number
+  /** Weights as of the last cycle's broker sync (post-trade once the next cycle syncs). */
+  current_weights: Record<string, number>
+  plan: AllocationPlan | null
 }
 
 export interface LiveStartRequest {

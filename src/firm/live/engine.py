@@ -147,6 +147,45 @@ class LiveTradingEngine:
         state_db_path: str | Path | None = None,
     ) -> None:
         config = {**config, "strategy_params": sanitize_strategy_params(config.get("strategy_params"))}
+        # strategy_mode (2026-09-30): "pipeline" (default -- the 13-strategy
+        # -> analysts -> PM -> risk -> execution orchestrator, unchanged) or
+        # "allocation" (a passive core + satellite sleeves allocator that
+        # bypasses the orchestrator entirely -- see firm.allocation and
+        # _run_allocation_cycle). Allocation mode is built here, at
+        # construction, so a bad allocation config (unknown/missing sleeve
+        # module, weights > 1) fails engine start loudly instead of on the
+        # first trading cycle.
+        self._strategy_mode = str(config.get("strategy_mode") or "pipeline").strip().lower()
+        if self._strategy_mode not in ("pipeline", "allocation"):
+            raise ValueError(
+                f"Unknown strategy_mode {self._strategy_mode!r} (expected 'pipeline' or 'allocation')"
+            )
+        self._allocation_cfg: dict[str, Any] = {}
+        self._allocator: Any = None
+        if self._strategy_mode == "allocation":
+            from firm.allocation import build_allocator
+
+            self._allocation_cfg = dict(config.get("allocation") or {})
+            self._allocator = build_allocator(self._allocation_cfg)
+            # The orchestrator is still constructed (API endpoints and
+            # reconciliation read attributes off it) but never stepped. Force
+            # it blended so the dormant pipeline's virtual sleeve books
+            # (capital_allocation_mode: sleeved) neither drive reconciliation
+            # nor get rewritten -- their persisted state is left untouched
+            # for a later switch back -- and skip the pipeline warmup (HMM/
+            # RAG/LLM imports) nothing in this mode uses.
+            if config.get("capital_allocation_mode") not in (None, "blended"):
+                log.warning(
+                    "strategy_mode=allocation: ignoring capital_allocation_mode=%r "
+                    "(pipeline sleeves are dormant in allocation mode)",
+                    config.get("capital_allocation_mode"),
+                )
+            config = {**config, "capital_allocation_mode": "blended", "pipeline_warmup": False}
+            log.warning(
+                "LiveTradingEngine in strategy_mode=allocation: sleeves=%s, symbols=%s -- "
+                "the strategy/analyst/PM/risk pipeline will NOT run",
+                [(s.name, s.weight) for s in self._allocator.sleeves], self._allocator.symbols(),
+            )
         self._config = config
         self._broker = broker
         self._data_feed = data_feed
@@ -309,6 +348,11 @@ class LiveTradingEngine:
         self._kill_switch_drawdown = float(
             config.get("kill_switch_drawdown", config.get("max_drawdown_pct", 1.0))
         )
+        # Allocation-mode overrides of risk limits sized for the old stock-
+        # picking book (None = keep the pipeline value / behaviour).
+        self._allocation_max_order_notional: float | None = None
+        if self._strategy_mode == "allocation":
+            self._apply_allocation_risk_overrides()
         self._halted = False
         # Durable halt state: without this, a process restart after a
         # drawdown trip silently un-halts the engine (in-memory ``_halted``
@@ -334,6 +378,13 @@ class LiveTradingEngine:
             LiveStateStore(state_db_path) if state_db_path else None
         )
         self._load_persisted_state()
+        # strategy_mode: allocation durable state (last_rebalance per sleeve,
+        # once-per-trading-day run marker, latest plan) -- see
+        # _run_allocation_cycle. Empty/unused in pipeline mode.
+        self._allocation_state: dict[str, Any] = self._default_allocation_state()
+        self._last_allocation_plan: dict[str, Any] | None = None
+        if self._strategy_mode == "allocation":
+            self._load_allocation_state()
         # Serialises cycles so a manual/API trigger cannot run concurrently
         # with a scheduled one (which, combined with no broker idempotency,
         # would double-submit real orders).
@@ -1111,7 +1162,13 @@ class LiveTradingEngine:
 
     @classmethod
     def _is_dust_order(cls, o: dict[str, Any]) -> bool:
-        """True when the order rounds to 0 whole shares (see _execute_orders)."""
+        """True when the order rounds to 0 whole shares (see _execute_orders).
+
+        A ``"fractional": True`` order (allocation crypto sleeves) is only
+        dust when its quantity is zero -- it is never rounded to shares.
+        """
+        if o.get("fractional") is True:
+            return abs(cls._order_qty(o)) <= 0
         return int(round(abs(cls._order_qty(o)))) <= 0
 
     def _apply_news_guard(
@@ -2269,6 +2326,14 @@ class LiveTradingEngine:
                 result.error = "broker unavailable: proactive health check failed"
                 return
 
+            if self._strategy_mode == "allocation":
+                # Replaces everything below (full data refresh, reflection,
+                # orchestrator.step, planning-cycle plan application) with
+                # the sleeve allocator; orders still go through
+                # _execute_orders' safety gates.
+                self._run_allocation_cycle(token, now, result)
+                return
+
             pit_view = self._data_feed.refresh(asof=now)
 
             # Runs before price resolution, and unconditionally: this is
@@ -2616,6 +2681,519 @@ class LiveTradingEngine:
                     result, f"Broker call failed during cycle: {exc}",
                     reconnected=reconnected,
                 )
+
+    # ------------------------------------------------------------------
+    # strategy_mode: allocation (2026-09-30)
+    #
+    # A passive core (e.g. 60/40 SPY/IEF, monthly) plus small satellite
+    # sleeves, planned by firm.allocation.Allocator against the BROKER's real
+    # positions/NAV (ground truth -- there is no virtual book to drift). Runs
+    # at most once per US/Eastern trading day: the first regular-hours cycle
+    # plans and submits; later cycles that day only re-plan when an earlier
+    # order failed/was rejected/was held (bounded by
+    # allocation.max_attempts_per_day). Every cycle still syncs the portfolio
+    # and runs the drawdown kill switch. Orders go through the same
+    # _execute_orders path as the pipeline (FIRM_ALLOW_TRADING gate, audit
+    # log, per-order notional cap, submission circuit breaker, alerts).
+    # ------------------------------------------------------------------
+
+    @property
+    def strategy_mode(self) -> str:
+        return self._strategy_mode
+
+    def _allocation_symbols(self) -> set[str]:
+        if self._allocator is None:
+            return set()
+        return set(self._allocator.symbols())
+
+    def _apply_allocation_risk_overrides(self) -> None:
+        cfg = self._allocation_cfg
+        if cfg.get("kill_switch_drawdown") is not None:
+            old = self._kill_switch_drawdown
+            self._kill_switch_drawdown = float(cfg["kill_switch_drawdown"])
+            log.warning(
+                "strategy_mode=allocation: kill_switch_drawdown %.3f -> %.3f "
+                "(allocation.kill_switch_drawdown)", old, self._kill_switch_drawdown,
+            )
+        if cfg.get("max_order_notional") is not None:
+            self._allocation_max_order_notional = float(cfg["max_order_notional"])
+            log.warning(
+                "strategy_mode=allocation: per-order notional cap = $%.2f "
+                "(allocation.max_order_notional)", self._allocation_max_order_notional,
+            )
+        else:
+            log.warning(
+                "strategy_mode=allocation without allocation.max_order_notional: the "
+                "pipeline cap (2 x max_position_pct=%.3f x NAV) still applies and will "
+                "block any core order larger than that", self._max_position_pct,
+            )
+        if cfg.get("max_daily_turnover") is not None:
+            self._max_daily_turnover = float(cfg["max_daily_turnover"])
+            log.info("strategy_mode=allocation: max_daily_turnover=%.3f", self._max_daily_turnover)
+        if cfg.get("max_daily_trades") is not None:
+            self._max_daily_trades = int(cfg["max_daily_trades"])
+            log.info("strategy_mode=allocation: max_daily_trades=%d", self._max_daily_trades)
+
+    @staticmethod
+    def _default_allocation_state() -> dict[str, Any]:
+        return {
+            "last_rebalance": {},
+            "day": None,
+            "day_status": None,
+            "day_attempts": 0,
+            "day_orders": [],
+            "day_prev_last_rebalance": {},
+            "last_plan": None,
+            "last_run_at": None,
+        }
+
+    def _load_allocation_state(self) -> None:
+        if self._state_store is None:
+            log.warning(
+                "strategy_mode=allocation without a state store: last_rebalance and the "
+                "once-per-day marker are in-memory only and will NOT survive a restart"
+            )
+            return
+        try:
+            raw = self._state_store.load_allocation_state()
+        except Exception:
+            log.warning("Failed to restore persisted allocation state", exc_info=True)
+            return
+        if not raw:
+            log.info("No persisted allocation state yet (first allocation-mode start)")
+            return
+        self._allocation_state = {**self._default_allocation_state(), **raw}
+        self._last_allocation_plan = self._allocation_state.get("last_plan")
+        log.info(
+            "Restored allocation state: last_rebalance=%s day=%s status=%s",
+            self._allocation_state.get("last_rebalance"),
+            self._allocation_state.get("day"), self._allocation_state.get("day_status"),
+        )
+
+    def _persist_allocation_state(self) -> None:
+        if self._state_store is None:
+            return
+        try:
+            self._state_store.save_allocation_state(self._allocation_state)
+        except Exception:
+            log.warning("Failed to persist allocation state", exc_info=True)
+
+    def _allocation_last_rebalance(self) -> dict[str, datetime | None]:
+        out: dict[str, datetime | None] = {}
+        for sleeve in self._allocator.sleeves:
+            raw = (self._allocation_state.get("last_rebalance") or {}).get(sleeve.name)
+            if not raw:
+                out[sleeve.name] = None
+                continue
+            try:
+                out[sleeve.name] = datetime.fromisoformat(raw)
+            except (TypeError, ValueError):
+                log.warning(
+                    "Unparseable persisted last_rebalance %r for sleeve %s -- treating as never",
+                    raw, sleeve.name,
+                )
+                out[sleeve.name] = None
+        return out
+
+    def _check_allocation_orders(self) -> str:
+        """Outcome of today's already-submitted allocation orders:
+        ``"failed"`` (any rejected/cancelled -- reverts those sleeves'
+        last_rebalance so they are due again), ``"pending"`` (still working
+        at the broker, or status unknown -- never re-submit on a guess), or
+        ``"filled"``."""
+        st = self._allocation_state
+        failed_sleeves: set[str] = set()
+        pending = False
+        # Terminal orders are dropped once accounted for, so a rejection
+        # already acted on is not re-counted by the next cycle's check.
+        still_open: list[dict[str, Any]] = []
+        for rec in st.get("day_orders") or []:
+            oid = rec.get("order_id")
+            if not oid:
+                continue
+            try:
+                status = self._broker.get_order_status(oid)
+            except Exception:
+                log.warning(
+                    "Allocation: could not read status of order %s (%s) -- treating as "
+                    "still pending", oid, rec.get("symbol"), exc_info=True,
+                )
+                pending = True
+                still_open.append(rec)
+                continue
+            if status.status in ("rejected", "cancelled"):
+                log.warning(
+                    "Allocation: order %s %s ended %s (filled %.6f/%.6f) -- scheduling a retry",
+                    oid, rec.get("symbol"), status.status,
+                    status.filled_quantity, status.quantity,
+                )
+                failed_sleeves.update(rec.get("sleeves") or [])
+            elif status.status != "filled":
+                pending = True
+                still_open.append(rec)
+        if pending:
+            # Wait until every order is terminal: re-planning while one is
+            # still working would re-buy what it is about to fill.
+            return "pending"
+        st["day_orders"] = still_open
+        if failed_sleeves:
+            prev = st.get("day_prev_last_rebalance") or {}
+            last_rb = st.setdefault("last_rebalance", {})
+            for name in failed_sleeves:
+                if name in prev:
+                    if prev[name] is None:
+                        last_rb.pop(name, None)
+                    else:
+                        last_rb[name] = prev[name]
+            return "failed"
+        return "filled"
+
+    def _allocation_should_run(self, day: str) -> tuple[bool, str]:
+        st = self._allocation_state
+        max_attempts = int(self._allocation_cfg.get("max_attempts_per_day", 3))
+        if st.get("day") != day:
+            return True, "first allocation run of the trading day"
+        status = st.get("day_status")
+        if status == "complete":
+            outcome = self._check_allocation_orders()
+            if outcome == "pending":
+                return False, "today's allocation orders are still working at the broker"
+            if outcome == "filled":
+                st["day_status"] = "settled"
+                self._persist_allocation_state()
+                return False, "already allocated today (all orders filled)"
+            st["day_status"] = "retry"
+            self._persist_allocation_state()
+            status = "retry"
+        elif status == "retry":
+            # Orders that did submit on the failed attempt must be terminal
+            # before re-planning against broker positions.
+            if self._check_allocation_orders() == "pending":
+                return False, "retry pending: earlier allocation orders still working"
+        if status == "retry":
+            if int(st.get("day_attempts") or 0) >= max_attempts:
+                return False, (
+                    f"retry limit reached ({st.get('day_attempts')}/{max_attempts} attempts today)"
+                )
+            return True, "retrying after a failed/held/rejected order earlier today"
+        return False, f"already allocated today (status={status})"
+
+    def _allocation_prices(
+        self,
+        positions: list[Any],
+        history: dict[str, pd.Series],
+    ) -> dict[str, float]:
+        """Marks for every held + sleeve symbol: broker position marks first
+        (ground truth), then live quotes for missing whole-share symbols
+        (not on IBKR, whose reqTickers is bound to another thread -- see
+        _resolve_cycle_prices), then the last completed close."""
+        prices: dict[str, float] = {}
+        for p in positions:
+            if p.quantity and p.market_value:
+                prices[p.symbol] = abs(float(p.market_value) / float(p.quantity))
+        # Broker-symbol aliases (Alpaca reports BTC/USD as BTCUSD): expose the
+        # mark under the sleeve's symbol too, so order notionals (daily
+        # budget, audit) see it.
+        for broker_sym, sleeve_sym in self._allocator.symbol_aliases().items():
+            if broker_sym in prices and sleeve_sym not in prices:
+                prices[sleeve_sym] = prices[broker_sym]
+        fractional = self._allocator.fractional_symbols()
+        missing = [s for s in self._allocator.symbols() if s not in prices]
+        quote_syms = [s for s in missing if s not in fractional]
+        from firm.brokers.ibkr import IBKRBroker
+
+        if quote_syms and not isinstance(self._broker, IBKRBroker):
+            try:
+                quotes = self._broker.get_current_prices(quote_syms) or {}
+                prices.update({s: float(v) for s, v in quotes.items() if v and float(v) > 0})
+            except Exception:
+                log.warning(
+                    "Allocation: live quotes failed for %s -- falling back to last close",
+                    quote_syms, exc_info=True,
+                )
+        for sym in missing:
+            if sym in prices:
+                continue
+            series = history.get(sym)
+            if series is not None and not series.empty:
+                prices[sym] = float(series.iloc[-1])
+                log.info("Allocation: %s priced from last completed close %.4f", sym, prices[sym])
+        return prices
+
+    def _run_allocation_cycle(self, token: object, now: datetime, result: CycleResult) -> None:
+        """strategy_mode: allocation body of ``_run_cycle_work``."""
+        if result.cycle_type == "planning":
+            log.info("Cycle %d: allocation mode does not run planning cycles -- skipped",
+                     self._cycle_count)
+            result.skipped = True
+            result.error = "skipped: planning cycle not used in allocation mode"
+            return
+        if result.extended_hours_cycle:
+            log.info("Cycle %d: allocation mode trades regular hours only -- skipped",
+                     self._cycle_count)
+            result.skipped = True
+            result.error = "skipped: extended-hours cycle not used in allocation mode"
+            return
+
+        discrepancies = sync_portfolio_from_broker(self._broker, self._portfolio, prices=None)
+        result.discrepancies = discrepancies
+        if self._consecutive_broker_failures:
+            log.warning(
+                "Broker connectivity restored after %d failed cycle(s)",
+                self._consecutive_broker_failures,
+            )
+            result.alerts.append(self._emit_alert(
+                "broker_reconnected", "warning",
+                f"Broker connectivity restored after "
+                f"{self._consecutive_broker_failures} failed cycle(s).",
+            ))
+            self._consecutive_broker_failures = 0
+
+        account = self._broker.get_account()
+        broker_positions = list(self._broker.get_positions())
+        position_marks = {
+            p.symbol: abs(float(p.market_value) / float(p.quantity))
+            for p in broker_positions if p.quantity and p.market_value
+        }
+        # Unconditional (unlike the pipeline's `if prices:`): an all-cash
+        # book has no marks yet but its NAV point still belongs on the curve.
+        self._portfolio.record_snapshot(now, position_marks)
+
+        self._check_drawdown(result)
+        if self._halted:
+            result.halted = True
+            result.error = "halted: drawdown kill switch tripped"
+            return
+
+        day = trading_day_key(now, self._trading_day_timezone)
+        should_run, reason = self._allocation_should_run(day)
+        if not should_run:
+            log.info("Cycle %d: allocation not run -- %s", self._cycle_count, reason)
+            return
+        log.info("Cycle %d: running allocation (%s)", self._cycle_count, reason)
+
+        # One fetch per sleeve, so a symbol one provider can't serve (e.g. a
+        # crypto pair on an equities bar endpoint) can't blank every other
+        # sleeve's history with it.
+        history: dict[str, pd.Series] = {}
+        for sleeve in self._allocator.sleeves:
+            wanted = [s for s in sleeve.symbols() if s not in history]
+            if wanted:
+                history.update(self._data_feed.fetch_close_history(wanted, asof=now))
+        prices = self._allocation_prices(broker_positions, history)
+        nav = float(account.get("equity") or 0.0) or self._portfolio.nav
+        positions_mv = {p.symbol: float(p.market_value) for p in broker_positions}
+        quantities = {p.symbol: float(p.quantity) for p in broker_positions}
+        last_rebalance = self._allocation_last_rebalance()
+        plan = self._allocator.plan(
+            now, nav, positions_mv, prices, history, last_rebalance, quantities=quantities,
+        )
+        plan_dict = plan.to_dict()
+        self._last_allocation_plan = plan_dict
+
+        st = self._allocation_state
+        same_day = st.get("day") == day
+        st["day"] = day
+        st["day_attempts"] = (int(st.get("day_attempts") or 0) + 1) if same_day else 1
+        if not same_day:
+            st["day_orders"] = []
+            st["day_prev_last_rebalance"] = {}
+        st["last_plan"] = plan_dict
+        st["last_run_at"] = now.isoformat()
+        if plan.errors:
+            result.alerts.append(self._emit_alert(
+                "allocation_plan_errors", "warning",
+                f"Allocation plan had {len(plan.errors)} problem(s): " + "; ".join(plan.errors[:5]),
+            ))
+
+        orders = list(plan.orders)
+        result.orders_generated = len(orders)
+        problem_symbols: set[str] = set()
+        # Subset of problem_symbols that must NOT trigger a same-day retry
+        # (queued for a human, or scaled down by the daily turnover budget --
+        # retrying would only hit the same exhausted budget); their sleeves
+        # just stay due and finish on a later day.
+        deferred_symbols: set[str] = set()
+        unplannable = set(plan.due_sleeves) - set(plan.rebalanced_sleeves)
+
+        def _finish(submitted: list[tuple[OrderStatus, str, dict[str, Any]]]) -> None:
+            sleeve_syms = {n: set(t) for n, t in plan.sleeve_targets.items()}
+            prev = st.setdefault("day_prev_last_rebalance", {})
+            for name in plan.rebalanced_sleeves:
+                if sleeve_syms.get(name, set()) & problem_symbols:
+                    log.warning(
+                        "Allocation sleeve %s NOT marked rebalanced (problem orders: %s)",
+                        name, sorted(sleeve_syms.get(name, set()) & problem_symbols),
+                    )
+                    continue
+                prev.setdefault(name, (st.get("last_rebalance") or {}).get(name))
+                st.setdefault("last_rebalance", {})[name] = now.isoformat()
+                log.info("Allocation sleeve %s rebalanced at %s", name, now.isoformat())
+            st["day_orders"] = list(st.get("day_orders") or []) + [
+                {
+                    "order_id": s.order_id,
+                    "symbol": s.symbol,
+                    "sleeves": plan.symbol_sleeves.get(o.get("symbol"), []),
+                }
+                for s, _strategy, o in submitted
+            ]
+            needs_retry = bool((problem_symbols - deferred_symbols) or unplannable)
+            st["day_status"] = "retry" if needs_retry else "complete"
+            plan_dict["last_rebalance"] = dict(st.get("last_rebalance") or {})
+            self._persist_allocation_state()
+
+        if not orders:
+            log.info("Cycle %d: allocation plan needs no orders", self._cycle_count)
+            _finish([])
+            return
+
+        if not self._cycle_token_active(token):
+            log.warning("Cycle %d abandoned before allocation order routing -- dropping %d orders",
+                        self._cycle_count, len(orders))
+            st["day_status"] = "retry"
+            self._persist_allocation_state()
+            return
+
+        n_before_guard = len(orders)
+        guarded = self._apply_news_guard(orders, now, result)
+        result.orders_news_held = n_before_guard - len(guarded)
+        guarded_syms = {o["symbol"] for o in guarded}
+        problem_symbols |= {o["symbol"] for o in orders if o["symbol"] not in guarded_syms}
+        orders = guarded
+
+        dust = [o for o in orders if self._is_dust_order(o)]
+        if dust:
+            orders = [o for o in orders if not self._is_dust_order(o)]
+            result.orders_dust_skipped = len(dust)
+
+        if orders:
+            pre_cap = {o["symbol"]: self._order_qty(o) for o in orders}
+            alerts_before = len(self._alerts)
+            force_manual, orders = self._check_daily_limits(now, orders, prices)
+            if len(self._alerts) > alerts_before:
+                result.alerts.append(self._alerts[-1])
+            kept_syms = {o["symbol"] for o in orders}
+            deferred_symbols.update(sym for sym in pre_cap if sym not in kept_syms)
+            for o in orders:
+                if self._order_qty(o) < pre_cap.get(o["symbol"], 0.0) - 1e-9:
+                    # Scaled to the daily turnover budget: the sleeve is not
+                    # at target yet; it stays due and finishes next day.
+                    deferred_symbols.add(o["symbol"])
+            if deferred_symbols:
+                log.warning(
+                    "Cycle %d: allocation orders capped by the daily trade/turnover budget "
+                    "(%s) -- affected sleeves stay due and continue next trading day",
+                    self._cycle_count, sorted(deferred_symbols),
+                )
+            problem_symbols |= deferred_symbols
+            if force_manual:
+                auto_orders, manual_orders = [], orders
+            else:
+                auto_orders, manual_orders = self._split_by_approval(orders)
+        else:
+            auto_orders, manual_orders = [], []
+
+        statuses: list[tuple[OrderStatus, str, dict[str, Any]]] = []
+        if auto_orders:
+            if not self._broker.health_check() and not self._try_broker_reconnect():
+                result.error = (
+                    "broker unavailable: pre-submission health check and reconnect both failed"
+                )
+                self._consecutive_broker_failures += 1
+                self._emit_broker_failure_alert(
+                    result, "Broker unavailable before allocation order submission",
+                    reconnected=False,
+                )
+                problem_symbols |= {o["symbol"] for o in auto_orders}
+                _finish([])
+                return
+            statuses, failed = self._execute_orders(
+                auto_orders, cycle_id=self._cycle_count, extended_hours=False,
+            )
+            result.orders_submitted = len(statuses)
+            result.order_statuses = [
+                self._status_to_dict(s, strategy, order=o) for s, strategy, o in statuses
+            ]
+            result.failed_orders = failed
+            result.orders_failed = len(failed)
+            problem_symbols |= {o["symbol"] for o in failed}
+            problem_symbols |= {
+                o["symbol"] for s, _strategy, o in statuses if s.status in ("rejected", "cancelled")
+            }
+            if result.orders_submitted == 0 and result.orders_failed == len(auto_orders):
+                result.alerts.append(self._emit_alert(
+                    "cycle_all_orders_failed", "critical",
+                    f"All {result.orders_failed} allocation order(s) failed to submit this "
+                    "cycle (0 submitted).",
+                ))
+
+        if manual_orders:
+            for strategy, group in self._group_by_strategy(manual_orders).items():
+                aid = self._approval_queue.add(orders=group, blackboard=None, strategy=strategy)
+                result.orders_queued += len(group)
+                result.approval_ids.append(aid)
+            # A human decides these; not a reason to re-plan later today, but
+            # the sleeve is not at target until they are approved.
+            deferred_symbols.update(o["symbol"] for o in manual_orders)
+            problem_symbols |= deferred_symbols
+
+        log.info(
+            "Cycle %d (allocation): %d planned, %d submitted, %d queued, %d failed, "
+            "%d news-held, due=%s",
+            self._cycle_count, result.orders_generated, result.orders_submitted,
+            result.orders_queued, result.orders_failed, result.orders_news_held,
+            plan.due_sleeves,
+        )
+        _finish(statuses)
+
+    def allocation_status(self) -> dict[str, Any] | None:
+        """Read-only allocation snapshot for ``GET /api/live/status``.
+
+        ``None`` in pipeline mode. Never calls the broker (the status
+        endpoint runs on the API thread; IBKR is bound to the cycle worker):
+        ``current_weights`` come from the last cycle's broker sync.
+        """
+        if self._allocator is None:
+            return None
+        st = self._allocation_state
+        last_rb = st.get("last_rebalance") or {}
+        plan = self._last_allocation_plan or {}
+        nav = self._portfolio.nav
+        current: dict[str, float] = {}
+        if nav > 0:
+            marks = dict(getattr(self._portfolio, "_last_prices", {}) or {})
+            raw = {
+                sym: qty * marks.get(sym, 0.0)
+                for sym, qty in self._portfolio.holdings.items()
+                if qty and marks.get(sym)
+            }
+            current = {
+                sym: round(mv / nav, 6)
+                for sym, mv in self._allocator.normalize_symbols(raw).items()
+            }
+        return {
+            "band_abs": self._allocator.band_abs,
+            "liquidate_unmanaged": self._allocator.liquidate_unmanaged,
+            "kill_switch_drawdown": self._kill_switch_drawdown,
+            "max_order_notional": self._allocation_max_order_notional,
+            "sleeves": [
+                {
+                    "name": s.name,
+                    "type": type(s).__name__,
+                    "weight": float(s.weight),
+                    "symbols": list(s.symbols()),
+                    "last_rebalance": last_rb.get(s.name),
+                }
+                for s in self._allocator.sleeves
+            ],
+            "day": st.get("day"),
+            "day_status": st.get("day_status"),
+            "day_attempts": int(st.get("day_attempts") or 0),
+            "last_run_at": st.get("last_run_at"),
+            "nav": round(nav, 2),
+            "current_weights": current,
+            "plan": plan or None,
+        }
 
     def _emit_broker_failure_alert(
         self, result: CycleResult, detail: str, *, reconnected: bool
@@ -3198,9 +3776,18 @@ class LiveTradingEngine:
         # one is. Without this, a removed symbol's leftover position could
         # never actually be sold through this path at all.
         allowlist = set(self._data_feed._universe) | set(self._portfolio.holdings)
+        max_position_notional = 2.0 * self._max_position_pct * self._portfolio.nav
+        if self._strategy_mode == "allocation":
+            # Sleeve instruments (SPY/IEF/BTC...) need not be in the stock
+            # universe; and the pipeline's 2 x max_position_pct cap (~10% of
+            # NAV) would block a 60% core position -- allocation.
+            # max_order_notional replaces it when configured.
+            allowlist |= self._allocation_symbols()
+            if self._allocation_max_order_notional is not None:
+                max_position_notional = self._allocation_max_order_notional
         risk_profile = RiskProfile(
             account_equity=self._portfolio.nav,
-            max_position_notional=2.0 * self._max_position_pct * self._portfolio.nav,
+            max_position_notional=max_position_notional,
             symbol_allowlist=list(allowlist),
             require_stop=False,
         )
@@ -3254,7 +3841,13 @@ class LiveTradingEngine:
                 continue
 
             raw_qty = self._order_qty(o)
-            share_qty = int(round(abs(raw_qty)))
+            if o.get("fractional") is True:
+                # Opt-in per order (crypto sleeves): keep the fractional
+                # quantity instead of rounding to whole shares. Every other
+                # order keeps the integer path below unchanged.
+                share_qty: float = round(abs(raw_qty), 9)
+            else:
+                share_qty = int(round(abs(raw_qty)))
             if share_qty <= 0:
                 log.debug(
                     "Skipping dust order %s %s (raw qty %.4f rounds to 0 shares)",
@@ -3262,6 +3855,10 @@ class LiveTradingEngine:
                 )
                 continue
 
+            # Only forwarded when an order explicitly carries one (allocation
+            # sleeves, e.g. "gtc" for crypto); pipeline orders never do, so
+            # OrderRequest keeps its own default for them.
+            tif_kwarg = {"time_in_force": o["time_in_force"]} if o.get("time_in_force") else {}
             req = OrderRequest(
                 symbol=o["symbol"],
                 side=o["side"],
@@ -3277,6 +3874,7 @@ class LiveTradingEngine:
                 # extended-hours window, never a global config toggle
                 # applied regardless of when this cycle actually runs.
                 extended_hours=extended_hours,
+                **tif_kwarg,
             )
             if broker_circuit_open:
                 failed.append({

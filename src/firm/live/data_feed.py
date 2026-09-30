@@ -451,6 +451,62 @@ class LiveDataFeed:
 
         return LivePitViewAdapter(self._pit_store, asof, self._universe)
 
+    def fetch_close_history(
+        self,
+        symbols: list[str],
+        asof: datetime | None = None,
+        lookback_days: int | None = None,
+    ) -> dict[str, pd.Series]:
+        """Daily closes per symbol from the ``prices`` provider only.
+
+        Used by ``strategy_mode: allocation``, which needs a handful of
+        instruments' price history and nothing else -- running the full
+        :meth:`refresh` (fundamentals/sentiment/estimates/... for the whole
+        stock universe) would be pure waste there. Same completed-bars rule
+        as :meth:`refresh`: the still-forming ``asof``-day bar is dropped.
+        Prefers ``adj_close`` over ``close``. Symbols with no rows are
+        simply absent from the result (logged).
+        """
+        asof = asof or utcnow()
+        lookback = int(lookback_days or self._lookback_days)
+        end = asof.strftime("%Y-%m-%d")
+        start = (asof - timedelta(days=lookback)).strftime("%Y-%m-%d")
+        price_prov = self._providers.get("prices")
+        if not price_prov:
+            log.error("fetch_close_history: no 'prices' provider configured")
+            return {}
+        try:
+            prices = price_prov.get_prices(list(symbols), start, end)
+        except Exception:
+            log.exception("fetch_close_history: price fetch failed for %s", symbols)
+            return {}
+        if prices is None or prices.empty or "date" not in prices.columns:
+            log.warning("fetch_close_history: no price rows returned for %s", symbols)
+            return {}
+        dates = pd.to_datetime(prices["date"])
+        if dates.dt.tz is not None:
+            dates = dates.dt.tz_localize(None)
+        prices = prices.assign(date=dates)
+        if self._exclude_forming_bar:
+            today = pd.Timestamp(asof)
+            if today.tz is not None:
+                today = today.tz_localize(None)
+            prices = prices[prices["date"].dt.normalize() < today.normalize()]
+        out: dict[str, pd.Series] = {}
+        for sym in symbols:
+            rows = prices[prices["symbol"] == sym].sort_values("date")
+            if rows.empty:
+                log.warning("fetch_close_history: no completed bars for %s", sym)
+                continue
+            col = "adj_close" if "adj_close" in rows.columns and rows["adj_close"].notna().any() else "close"
+            series = pd.Series(rows[col].astype(float).values, index=pd.DatetimeIndex(rows["date"]), name=sym)
+            out[sym] = series.dropna()
+        log.info(
+            "fetch_close_history: %d/%d symbol(s) with history (%s..%s)",
+            len(out), len(symbols), start, end,
+        )
+        return out
+
     @property
     def pit_store(self) -> PointInTimeDataStore:
         return self._pit_store
