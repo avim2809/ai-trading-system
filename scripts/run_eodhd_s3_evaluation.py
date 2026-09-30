@@ -481,8 +481,12 @@ def _block_permute_df(df: pd.DataFrame, block: int, rng: np.random.Generator) ->
     return out
 
 
-def placebo_bond(inp: Inputs, rng: np.random.Generator) -> pd.Series:
-    state = bond_monthly_state(inp)
+def placebo_bond(inp: Inputs, rng: np.random.Generator, state: pd.DataFrame | None = None) -> pd.Series:
+    """``state`` (the REAL, unpermuted monthly on/off state) may be precomputed
+    once and passed in -- it does not depend on ``rng`` and recomputing it
+    inside a per-draw loop (500 draws) is pure waste (measured: this is the
+    dominant cost of a placebo draw, not the simulator itself)."""
+    state = bond_monthly_state(inp) if state is None else state
     statep = _block_permute_df(state, 12, rng)
     monthly_target = statep.astype(float).apply(lambda row: row / row.sum() if row.sum() > 0 else row, axis=1)
     return _bond_v1_from_target(inp, monthly_target)
@@ -498,9 +502,13 @@ def _bond_v1_from_target(inp: Inputs, monthly_target: pd.DataFrame, stress: bool
     return pd.Series(net, inp.dates, name="bond_v1_placebo")
 
 
-def placebo_commodity(inp: Inputs, k_months: int, skip: bool, rng: np.random.Generator) -> pd.Series:
-    formation, formation_cash = commodity_formation(inp, k_months, skip)
-    monthly_target = commodity_monthly_target(formation, formation_cash, COMMOD_K)
+def placebo_commodity(inp: Inputs, k_months: int, skip: bool, rng: np.random.Generator,
+                       monthly_target: pd.DataFrame | None = None) -> pd.Series:
+    """``monthly_target`` (the REAL, unpermuted target) may be precomputed once
+    and passed in -- see placebo_bond's docstring for why this matters."""
+    if monthly_target is None:
+        formation, formation_cash = commodity_formation(inp, k_months, skip)
+        monthly_target = commodity_monthly_target(formation, formation_cash, COMMOD_K)
     # Permute the REALIZED on/off (target>0) state per asset, independently, in
     # 12-month blocks, then reconstruct via equal weight among the (now
     # permuted) on-assets each month -- same technique as
@@ -777,13 +785,18 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     frame.to_parquet(out_dir / "returns_base.parquet")
     pd.DataFrame(stress).assign(rf=inp.rf).to_parquet(out_dir / "returns_stress.parquet")
 
-    # Placebos
+    # Placebos. The REAL (unpermuted) bond state and commodity target are
+    # computed ONCE here and reused every draw -- they do not depend on the
+    # placebo RNG at all (see placebo_bond/placebo_commodity docstrings).
     log.info("placebos: %d draws", prereg.PLACEBO["n_draws"])
     prng = np.random.default_rng(prereg.PLACEBO["seed"])
+    base_bond_state = bond_monthly_state(inp)
+    _formation, _formation_cash = commodity_formation(inp, 11, True)
+    base_commod_target = commodity_monthly_target(_formation, _formation_cash, COMMOD_K)
     plac: dict[str, list[float]] = {"bond": [], "commodity": [], "combined": []}
     for draw in range(prereg.PLACEBO["n_draws"]):
-        bond_p = placebo_bond(inp, prng)
-        commod_p = placebo_commodity(inp, 11, True, prng)
+        bond_p = placebo_bond(inp, prng, state=base_bond_state)
+        commod_p = placebo_commodity(inp, 11, True, prng, monthly_target=base_commod_target)
         combined_p = combined(base["BM2_60_40"], bond_p, commod_p, "combined_placebo")
         plac["bond"].append(sharpe(window(bond_p - inp.rf, prereg.WINDOWS["bond"]["start"]).to_numpy()))
         plac["commodity"].append(sharpe(window(commod_p - inp.rf, prereg.WINDOWS["commodity"]["start"]).to_numpy()))
