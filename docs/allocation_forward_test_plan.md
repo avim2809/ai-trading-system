@@ -23,78 +23,55 @@ for the live test, not yet run — nothing has been deployed). Full numbers:
   volatile, reviewed once a week. This is the one lead that search found; it is
   **not proven**, only "not ruled out."
 
-## 2. Historical sanity check (2015-02 → 2026-09, as far back as we have
-   good BTC data) — not a new edge claim, just "what would this exact
-   portfolio have done"
+## 2. Historical sanity check (2015-02 → 2026-09)
 
-| | CAGR | Volatility | Sharpe (above cash) | Worst drawdown |
+This is not a new edge claim. It replays **the real allocator code**, the same
+classes the live engine runs (`scripts/allocation_replay.py`,
+`docs/allocation_replay_2026_09.json`), including:
+- whole-share ETF orders;
+- fractional BTC;
+- the 2% drift band;
+- the BTC sleeve's weekly review and its own 0.10 band;
+- per-side costs.
+
+| | Annual return | Volatility | Sharpe (above cash) | Worst drawdown |
 |---|---|---|---|---|
-| **This portfolio (92/8)** | **+23.2%** | 17.7% | **1.15** | **27.9%** |
-| 60/40 alone (100%) | +8.9% | 10.3% | 0.67 | 21.2% |
+| **This portfolio (92% 60/40 + 8% BTC trend)** | **+12.1%** | 10.3% | **0.96** | **19.4%** (Oct 2022) |
+| 60/40 alone (100%) | +8.7% | 10.5% | 0.65 | 21.2% |
 | SPY alone | +14.2% | 17.5% | 0.72 | 33.7% |
-| 92% core + 8% left in cash (no BTC) | +8.5% | 9.9% | 0.66 | 20.2% |
-| BTC-trend sleeve alone, 100% notional | +49.9% | 32.2% | 1.35 | 49.0% |
 
-Two things to read carefully in that table:
+Other figures from the replay:
+- Trading is about 1× NAV a year, costing about 0.2% of NAV a year.
+- The worst month was −6.9%.
+- Calendar-year returns ranged from −15.9% (2022) to +26.9% (2019).
 
-- The 92/8 blend looks much better than 60/40 alone or SPY alone. Most of that
-  gap is BTC's decade of enormous returns, not something the rule invented —
-  see the caveat in §4.
-- **2020 and 2022 stress test:** the blend's worst drawdown in the COVID crash
-  (2020) was 15.5%, and in the 2022 bond/stock selloff it was 19.1% — both
-  *smaller* than 60/40 alone in 2022 (21.2%) and much smaller than SPY alone in
-  2020 (33.7%). The worst single month was November 2022, −9.5%.
+**Read carefully:** most of the gap over 60/40 is Bitcoin's enormous
+2015–2026 run, not something the timing rule invented. Bitcoin is also
+crypto's survivor, picked with hindsight. Don't expect this gap to repeat.
 
-**A design choice that matters, found while building this:** if the 92%/8%
-split between the two sleeves is never reset (each sleeve just compounds on
-its own, which is how "sleeved" capital already works live on Alpaca), a
-decade of BTC's returns lets the satellite balloon from 8% of the account to
-**over three-quarters of it** by 2026 in the backtest. That is very likely not
-what anyone intends. Two honest options, and this plan does not pick one for
-you:
+**The satellite stays near 8%.** Every target is a fixed share of *current*
+total NAV. The BTC sleeve is re-sized at its weekly review whenever it's
+more than 0.10 of its own sleeve away from target. An earlier draft of this
+plan modelled the two sleeves as never rebalanced against each other, under
+which BTC grew to about 78% of the account. That is not what the allocator
+does, and it was corrected before deployment (see `REVISION` in the
+pre-registration).
 
-1. **As literally specified (no cross-sleeve rebalancing):** the +23.2%/1.15
-   Sharpe row above. Realistic risk: the "8% satellite" can quietly become the
-   dominant position over years.
-2. **With the 92/8 split also reset every month (alongside the core's own
-   rebalance):** CAGR +12.3%, Sharpe 1.00, worst drawdown 19.2% — still much
-   better than 60/40 alone, and the satellite never dominates the account.
+## 3. Kill switch: the live 8% threshold is too tight for this portfolio
 
-**Recommendation: pick option 2 (reset the 92/8 split monthly) unless you
-want the satellite's share to float.** It's cheap (one more rebalance
-decision, same monthly cadence as the core already has) and removes a
-surprise. The forward test tracks the satellite's actual share either way and
-flags it if it moves outside 4%–16% of NAV.
+Both live accounts halt trading at an **8%** drawdown (`kill_switch_drawdown`).
+That was sized for the old, near-cash stock-picking book. In the replay:
 
-## 3. Kill-switch: the live 8% threshold is very likely too tight for this
-   portfolio
+| Drawdown threshold | Times it would have tripped, 2015–2026 |
+|---|---|
+| 8% | 4 (2022, 2020, 2018, early 2025) |
+| 12% / 15% | 2 (2022 at 19.4%, 2020 at 18.9%) |
+| 20% | 0 |
+| 25% | 0 |
 
-Both live accounts halt trading if the account drawdown hits **8%**
-(`kill_switch_drawdown` in `config/live.yaml` / `config/live_alpaca.yaml`). That
-number was set with the old, much-lower-volatility equity strategy in mind.
-
-Over the full 2015–2026 backtest, this portfolio crossed an 8% drawdown **11
-separate times** (out of 45 distinct drawdown episodes of 2% or worse) — most
-recently in 2024 (−27.9%, the worst on record, a 99-day round trip) and again
-in a 2025–26 episode (−22.6%). Even under the more conservative "reset
-monthly" version above, the worst drawdown (19.2%) still clears 8% several
-times over.
-
-**Recommendation: raise the kill-switch threshold for this instance before
-going live**, or accept that the switch will trip on ordinary, expected
-drawdowns rather than a real problem. Where you set it is a judgment call
-about how much drawdown you're willing to sit through before wanting a human
-to look — the backtest can only tell you what each choice would have caught:
-
-- **~24–27%** would only have caught the single worst historical episode
-  (2024, −27.9%, a 99-day round trip).
-- **~20–22%** would catch the three deepest episodes (2024, 2017–18 at
-  −23.5%, and 2025–26 at −22.6%), while still letting the account ride out
-  the 2022 bond/equity selloff (−19.1%) and the 2020 COVID crash (−15.5%)
-  without halting.
-- **Below ~16%**, the switch would have tripped on comparatively ordinary
-  drawdowns several times a decade (11 of 45 drawdown episodes ≥2% reached 8%
-  or worse over 2015–2026).
+**Recommendation: 25%.** It rides out every drawdown in the sample, including
+2020 and 2022, and still halts in something clearly worse than any of them.
+You pick the final value when you sign off on the config.
 
 ## 4. What the forward test can and cannot show you
 

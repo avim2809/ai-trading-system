@@ -25,7 +25,17 @@ from __future__ import annotations
 import hashlib
 import json
 
-PREREGISTERED_AT = "2026-09-30T12:00:00Z"
+REVISION = (
+    "2026-09-30 (before deployment, no live data existed): the first frozen version (fingerprint "
+    "632439e1f60a34ea18fb7529d051d731dac66493778d7265f0231a22e7376e35) specified 'sleeved' capital with no cross-rebalance, under which the backtest let BTC "
+    "drift to ~78% of NAV. That is not what the allocator does. Corrected to the allocator's actual "
+    "fixed-NAV-weight semantics, BAR_SLEEVE_DRIFT made a gated band check, and the simulated_nav "
+    "reference switched to scripts/allocation_replay.py (the real allocator code). Replay, 2015-02 to "
+    "2026-09: CAGR 12.1%, vol 10.3%, Sharpe above T-bills 0.96, max drawdown 19.4% "
+    "(docs/allocation_replay_2026_09.json)."
+)
+
+PREREGISTERED_AT = "2026-09-30T10:05:00Z"  # re-frozen before deployment; see REVISION below
 
 # ---------------------------------------------------------------------------
 # Deployment identity (frozen once known)
@@ -78,11 +88,14 @@ PORTFOLIO = {
         "lag_days": 1,
         "cost_bps_per_side": 25.0,
     },
-    "capital_treatment": "sleeved (independent per-sleeve capital/P&L; matches capital_allocation_mode: sleeved "
-                          "already live on Alpaca). The 92/8 split is NOT automatically restored between "
-                          "sleeves; docs/allocation_portfolio_backtest_2026_09.json shows this lets the "
-                          "satellite's actual NAV share drift far from 8% over multi-year horizons "
-                          "(satellite_actual_share). BAR_SLEEVE_DRIFT below monitors this in the forward test.",
+    "capital_treatment": "fixed NAV weights, exactly as src/firm/allocation/allocator.py implements them: "
+                          "combined target per symbol = sleeve weight x within-sleeve weight, measured against "
+                          "CURRENT total NAV. Core symbols trade on the monthly clock or when their NAV weight "
+                          "drifts more than drift_band_abs (0.02) from target (checked daily). The BTC sleeve "
+                          "trades only at its weekly review (drift_check=False), and then only on an on/off "
+                          "flip or a within-sleeve gap above band_abs (0.10), where the sleeve's capital is "
+                          "0.08 x current NAV. The satellite therefore stays near 8% of NAV; it is NOT "
+                          "independent sleeved capital (capital_allocation_mode is ignored in allocation mode).",
     "reused_prereg_fingerprint_backtest": "see docs/allocation_portfolio_backtest_2026_09.json['reused_prereg_fingerprint']",
 }
 
@@ -93,8 +106,8 @@ MEASURES = {
     "live_nav": "daily NAV from the Alpaca broker API (same source as the existing live dashboard), "
                 "end-of-day, after that day's fills settle",
     "simulated_nav": "a parallel NAV computed OFFLINE from the same rule set (PORTFOLIO above) applied "
-                      "deterministically to realised market closes (same data source/adjustment convention as "
-                      "scripts/allocation_portfolio_backtest.py), starting from the live account's actual "
+                      "deterministically to realised market closes by scripts/allocation_replay.py, which runs the SAME "
+                      "Allocator/StaticSleeve/BtcTrendSleeve classes the live engine runs, starting from the live account's actual "
                       "starting NAV on START_DATE -- this is the implementation-correctness reference, not a "
                       "second edge claim",
     "tracking_error": "daily (live_nav return - simulated_nav return); this checks the IMPLEMENTATION "
@@ -131,10 +144,10 @@ BARS_IMPLEMENTATION = [
      "rule": "100% of orders map to a logged allocator decision; the live PORTFOLIO parameters (weights, "
              "bands, lag, costs) match this file's frozen block bit-for-bit at every audit"},
     {"id": "BAR_SLEEVE_DRIFT",
-     "rule": "report (not gated): the satellite's actual share of NAV each month-end, flagged if it moves "
-             "outside [0.04, 0.16] (2x target either way) -- the historical backtest shows this WILL happen "
-             "over long enough horizons under the sleeved (no cross-rebalance) convention; a flag here is "
-             "informational for the owner's periodic-rebalance decision, not an implementation failure"},
+     "rule": "gated: the satellite's actual share of NAV at each weekly review, after that review's "
+             "orders fill, must lie within 0.08 x [target_within +/- 0.10] (the band), or be 0 when the "
+             "trend is off; between reviews it may drift with BTC's price (no mid-week trades by design). "
+             "A breach is an implementation failure (the band logic is not doing what it should)."},
 ]
 IMPLEMENTATION_ACTION = {
     "all_pass": "implementation verified; continue monitoring, no code/config change needed",
@@ -243,7 +256,7 @@ FINDINGS_ACTIONS = {
 def bars_fingerprint() -> str:
     payload = json.dumps(
         {
-            "PREREGISTERED_AT": PREREGISTERED_AT, "MIN_DURATION_MONTHS": MIN_DURATION_MONTHS,
+            "PREREGISTERED_AT": PREREGISTERED_AT, "REVISION": REVISION, "MIN_DURATION_MONTHS": MIN_DURATION_MONTHS,
             "MIN_DURATION_RATIONALE": MIN_DURATION_RATIONALE,
             "PORTFOLIO": PORTFOLIO, "MEASURES": MEASURES,
             "BARS_IMPLEMENTATION": BARS_IMPLEMENTATION, "IMPLEMENTATION_ACTION": IMPLEMENTATION_ACTION,

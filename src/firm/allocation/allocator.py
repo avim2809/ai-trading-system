@@ -404,7 +404,13 @@ class Allocator:
             buy_notional = sum(_order_notional(o) for o in buys)
             excess = gross_after - limit
             scale = max(0.0, (buy_notional - excess) / buy_notional) if buy_notional > 0 else 0.0
-            log.warning(
+            # Expected, small overshoot: positions sitting overweight inside
+            # their drift band consume the cash a due buy would need (e.g. a
+            # weekly BTC buy mid-month); buys wait for the next rebalance.
+            # Only a larger overshoot is worth a warning.
+            level = logging.INFO if excess <= self.band_abs * nav + 1e-6 else logging.WARNING
+            log.log(
+                level,
                 "Allocation: projected gross %.2f%% exceeds cap %.2f%% -- scaling buys by %.4f",
                 100 * gross_after / nav, 100 * self.max_gross, scale,
             )
