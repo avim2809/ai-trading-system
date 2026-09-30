@@ -1,10 +1,10 @@
 # EODHD shortlist: shared evaluation protocol (frozen 2026-09-30, amended once)
 
-**Amendment 1 (2026-09-30 22:40Z).** Made before any candidate's pre-registration froze or computed a return. The first downloads all started on 2005-01-01 because of a fixed setting in the download script (`START`), so a full-history set (from 1985) was fetched into `*_full/` folders. Amendment 1 does four things:
+**Amendment 1 (commit aa22da3, 2026-09-30 18:23Z).** Made before any candidate's pre-registration froze or computed a return. The first downloads all started on 2005-01-01 because of a fixed setting in the download script (`START`), so a full-history set (from 1985) was fetched into `*_full/` folders. Amendment 1 does four things:
 - switches every candidate to the `*_full/` folders;
 - adds cash and 60/40 proxies for the years before BIL and IEF existed;
 - adds a `nav` asset type for no-volume mutual-fund series;
-- moves the cleaning rule to v2 (fingerprint `f62cb2e4…`).
+- moves the cleaning rule to v2 (fingerprint `fc0690f0…`; an earlier v2 label, `f62cb2e4…`, carried a wrong freeze-time string, local time written as UTC, and was corrected before any freeze).
 
 This covers the five candidates in `research_brief_eodhd_findings.md` §1, tested in parallel. Each candidate gets its own pre-registration, `scripts/<id>_preregistered_bars.py`, structured like `alt_premia_preregistered_bars.py`. Each is frozen and committed before any of its returns on the test window is computed, and each must follow this protocol. Where a pre-registration differs from this protocol, the protocol wins.
 
@@ -22,11 +22,11 @@ This covers the five candidates in `research_brief_eodhd_findings.md` §1, teste
   - EODHD full-history folders `data/research/eodhd/{etfs_full,us_universe_full,forex_full}/` (from 1985 or inception), plus `crypto/` (crypto history starts ~2010 in any case);
   - FRED `data/research/fred/DTB3.parquet` (3-month T-bill, from 1954).
   - The 2005-start folders `etfs/` and `us_universe/` are superseded.
-- **Cleaning:** every bar series goes through `scripts/eodhd_clean.py:clean_bars` first. Each pre-registration records the cleaning fingerprint (v2, `f62cb2e4…`, from `cleaning_fingerprint()`).
+- **Cleaning:** every bar series goes through `scripts/eodhd_clean.py:clean_bars` first. Each pre-registration records the cleaning fingerprint (v2, `fc0690f0…`, from `cleaning_fingerprint()`).
   - The exchange calendar is SPY's dates, so equity bars before 1993-01-29 are dropped.
   - Mutual-fund NAV series (VFITX, VUSTX, VFISX in `etfs_full/`) are cleaned with `asset="nav"`. They are used only as the proxies named in §2–3, never as a traded holding. No return may be computed across a `segment` boundary: a holding that spans one is closed at the last close before it.
 - **Survivorship:**
-  - S4 builds its universe at each rebalance from **all** `us_universe/` stocks, active and delisted, using only information known at that date, i.e. trailing dollar volume and price.
+  - S4 builds its universe at each rebalance from **all** `us_universe_full/` stocks, active and delisted, using only information known at that date, i.e. trailing dollar volume and price.
   - Current index membership must not be used.
   - S5 uses active and delisted coins.
 - **Dollar volume:** `adjusted_close × volume`, because EODHD volume is split-adjusted while open/close are raw.
