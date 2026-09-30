@@ -538,25 +538,44 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     log.info("sanity: %s", sanity)
 
     # placebo ---------------------------------------------------------------
+    # Scores each placebo draw BOTH ways from the SAME permutation (same RNG
+    # consumption order/seeds as before a fix changes nothing about which
+    # draws are generated): excess-of-cash (GOVERNING, per the literal text
+    # -- "Sharpe" elsewhere in this protocol means excess-of-cash, and A3
+    # says "the Sharpe itself, not a gap") and excess-of-BM2 (kept, reported
+    # as "alternative convention (BM2-excess)").
     log.info("placebos: %d draws x %d variants", prereg.PLACEBO["n_draws"], len(VARIANT_IDS))
+    cash_w = inp.cash_ret.loc[wmask]
     prng = np.random.default_rng(prereg.PLACEBO["seed"])
-    placebo_sharpes: dict[str, list[float]] = {vid: [] for vid in VARIANT_IDS}
+    placebo_sharpes_bm2: dict[str, list[float]] = {vid: [] for vid in VARIANT_IDS}
+    placebo_sharpes_cash: dict[str, list[float]] = {vid: [] for vid in VARIANT_IDS}
     for draw in range(prereg.PLACEBO["n_draws"]):
         for vid in VARIANT_IDS:
             p = placebo_variant(inp, vid, prng)
-            ex = (p.loc[wmask] - bms["BM2_60_40"].loc[wmask]).to_numpy()
-            placebo_sharpes[vid].append(sharpe(ex))
+            placebo_sharpes_bm2[vid].append(sharpe((p.loc[wmask] - bms["BM2_60_40"].loc[wmask]).to_numpy()))
+            placebo_sharpes_cash[vid].append(sharpe((p.loc[wmask] - cash_w).to_numpy()))
         if draw % 100 == 0:
             log.info("placebo draw %d/%d", draw, prereg.PLACEBO["n_draws"])
-    pd.DataFrame(placebo_sharpes).to_parquet(out_dir / "placebo_sharpes.parquet")
+    pd.DataFrame(placebo_sharpes_bm2).to_parquet(out_dir / "placebo_sharpes.parquet")
+    pd.DataFrame(placebo_sharpes_cash).to_parquet(out_dir / "placebo_sharpes_cash_excess.parquet")
 
-    # PBO / DSR ---------------------------------------------------------------
+    # PBO -------------------------------------------------------------------
+    # A6/PBO's series definition is unambiguous in the frozen text ("daily
+    # excess returns vs BM2") -- unchanged.
     pbo_cols = VARIANT_IDS + ["BM1_SPY", "BM2_60_40", "BM3_SPY_VT"]
     excess_vs_bm2 = frame.loc[wmask, pbo_cols].sub(frame.loc[wmask, "BM2_60_40"], axis=0).dropna()
     pbo_value = float(cscv_pbo(excess_vs_bm2.to_numpy(), n_partitions=prereg.PBO["n_partitions"]))
-    trial_daily_sr = (excess_vs_bm2[VARIANT_IDS].mean() / excess_vs_bm2[VARIANT_IDS].std(ddof=1)).to_numpy()
-    log.info("PBO %.3f over %d series x %d days; DSR trial daily Sharpes %s", pbo_value, len(pbo_cols),
-              len(excess_vs_bm2), trial_daily_sr)
+    trial_daily_sr_bm2_excess = (excess_vs_bm2[VARIANT_IDS].mean() / excess_vs_bm2[VARIANT_IDS].std(ddof=1)).to_numpy()
+
+    # DSR trial Sharpes -- GOVERNING (literal): "daily (non-annualised) Sharpe
+    # of each of the 4 declared overlay variants" means each variant's OWN
+    # daily excess-of-CASH Sharpe (the convention "Sharpe" uses everywhere
+    # else in this protocol), not excess-of-BM2.
+    excess_vs_cash = frame.loc[wmask, VARIANT_IDS].sub(cash_w, axis=0).dropna()
+    trial_daily_sr_cash_excess = (excess_vs_cash.mean() / excess_vs_cash.std(ddof=1)).to_numpy()
+    log.info("PBO %.3f over %d series x %d days; DSR trial daily Sharpes (literal, cash-excess) %s "
+              "(alt, BM2-excess) %s", pbo_value, len(pbo_cols), len(excess_vs_bm2),
+              trial_daily_sr_cash_excess, trial_daily_sr_bm2_excess)
 
     lo_mask, hi_mask = _halves(inp.dates)
     results = {}
@@ -567,11 +586,23 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
                "sharpe": sharpe(c_full.to_numpy()), "cagr": cagr(c_full.to_numpy()),
                "vol": float(c_full.std(ddof=1) * ANN), "max_dd": max_drawdown(c_full.to_numpy()),
                "calmar": calmar(c_full.to_numpy()), "vs": {}}
+        ex_vs_cash = (c - cash_w).dropna().to_numpy()
         ex_vs_bm2 = (c - bms["BM2_60_40"].loc[wmask]).dropna().to_numpy()
-        res["dsr"] = float(deflated_sharpe(ex_vs_bm2, trial_daily_sr, prior_trials=prereg.DSR["prior_trials"]))
-        arr = np.asarray(placebo_sharpes[vid])
-        res["placebo_p95"] = float(np.nanpercentile(arr, prereg.PLACEBO["pass_percentile"]))
-        res["A3"] = bool(sharpe(ex_vs_bm2) > res["placebo_p95"])
+
+        # GOVERNING (literal reading): A2 and A3 on the variant's OWN Sharpe,
+        # excess of cash -- not a gap, not excess of BM2.
+        res["dsr"] = float(deflated_sharpe(ex_vs_cash, trial_daily_sr_cash_excess, prior_trials=prereg.DSR["prior_trials"]))
+        arr_cash = np.asarray(placebo_sharpes_cash[vid])
+        res["placebo_p95"] = float(np.nanpercentile(arr_cash, prereg.PLACEBO["pass_percentile"]))
+        res["sharpe_vs_cash"] = sharpe(ex_vs_cash)
+        res["A3"] = bool(res["sharpe_vs_cash"] > res["placebo_p95"])
+
+        # Alternative convention (BM2-excess), reported -- not governing.
+        res["dsr_alt_bm2_excess"] = float(deflated_sharpe(ex_vs_bm2, trial_daily_sr_bm2_excess,
+                                                           prior_trials=prereg.DSR["prior_trials"]))
+        arr_bm2 = np.asarray(placebo_sharpes_bm2[vid])
+        res["placebo_p95_alt_bm2_excess"] = float(np.nanpercentile(arr_bm2, prereg.PLACEBO["pass_percentile"]))
+        res["A3_alt_bm2_excess"] = bool(sharpe(ex_vs_bm2) > res["placebo_p95_alt_bm2_excess"])
 
         for bm in ("BM1_SPY", "BM2_60_40", "BM3_SPY_VT"):
             b = bms[bm].loc[wmask]
@@ -608,13 +639,20 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
             "A5": all(res["vs"][b]["A5"] for b in ("BM1_SPY", "BM2_60_40", "BM3_SPY_VT")),
             "A6": bool(pbo_value < 0.50), "A8": a8,
         }
+        bars_alt_bm2_excess = {"A2": bool(res["dsr_alt_bm2_excess"] > 0.95), "A3": res["A3_alt_bm2_excess"]}
+        res["bars_alt_bm2_excess"] = bars_alt_bm2_excess
         tier_d = any(res["vs"][b]["D"] for b in ("BM2_60_40",) if res["vs"][b]["D"] is not None)
         tier_b = {"B_a": bool(v_bm2["gap"] > 0), "B_b": bool(res["A3"] and bars["A4"] and bars["A5"])}
         res["bars"] = bars
         res["A7"] = "PENDING (independent recompute not yet performed)"
         res["tier_conditional_on_A7"] = prereg.classify(bars, tier_d, tier_b)
+        res["role"] = ("primary (official candidate tier)" if vid == "V1_primary"
+                       else "non-primary variant, descriptive")
         results[vid] = res
         log.info("==> %s tier(conditional on A7)=%s bars=%s", vid, res["tier_conditional_on_A7"], bars)
+
+    official_tier = results["V1_primary"]["tier_conditional_on_A7"]
+    log.info("OFFICIAL tier (V1_primary, conditional on A7) = %s", official_tier)
 
     prereg_issues = [
         "VARIANTS['V2_cash_destination']'s OVERLAY rule_template (\"destination weight += "
@@ -624,11 +662,15 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         "fully replace the non-SPY sleeve (0.30 SPY / 0.70 BIL, IEF=0)? Implemented the latter (full "
         "replacement) as the most literal, fully-invested reading -- matches 'SPY 0.60/IEF 0.40 (plain "
         "core)' being the explicit ELSE branch for every variant, and avoids idle, non-cash-earning NAV.",
-        "DSR['trial_sharpes'] text ('daily Sharpes of every variant the candidate declares') and "
-        "PBO['series'] text ('daily excess returns vs BM2') don't explicitly say DSR's trial Sharpes "
-        "are ALSO computed vs BM2 rather than as each variant's raw return Sharpe. Implemented "
-        "consistently as excess-vs-BM2 throughout (DSR and PBO both), since A1/A4/A5/A8 are all framed "
-        "'vs BM2' and PBO is explicit about the vs-BM2 convention.",
+        "RESOLVED 2026-09-30 (coordinator correction, phase-2 most-literal-reading rule): originally "
+        "implemented DSR/A3 as excess-vs-BM2 (inferring that convention from PBO's explicit "
+        "'vs BM2' wording). The literal reading is narrower: DSR says 'daily (non-annualised) Sharpe "
+        "of each of the 4 declared overlay variants' and A3 says 'the Sharpe itself, not a gap' -- "
+        "both mean each variant's own Sharpe, excess of CASH (the convention 'Sharpe' uses everywhere "
+        "else in this protocol), not excess of BM2 or a Sharpe gap. PBO's own 'vs BM2' wording is "
+        "unambiguous and unchanged (A6 still uses BM2-excess). Now GOVERNING: excess-of-cash DSR/A3 "
+        "(see 'dsr_convention' and each variant's 'dsr'/'A3'/'placebo_p95'). Kept, not governing: the "
+        "original BM2-excess numbers, under 'dsr_alt_bm2_excess'/'A3_alt_bm2_excess'/'placebo_p95_alt_bm2_excess'.",
         "PBO['series'] includes BM2_60_40 itself as one of the 7 series being excess-differenced "
         "against BM2 -- that column is identically 0 by construction (a series can't be excess vs "
         "itself). Implemented literally (BM2's column is all zeros); does not appear to break cscv_pbo "
@@ -645,9 +687,17 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         "prereg_at": prereg.PREREGISTERED_AT, "cleaning_fingerprint_used_for_breadth": "f62cb2e4... (label-only "
         "predecessor of the frozen fc0690f0...; cleaning BEHAVIOUR identical -- see module docstring)",
         "window": prereg.WINDOW, "alpha_one_sided": alpha, "pbo": pbo_value,
-        "dsr_trials": len(trial_daily_sr), "dsr_prior_trials": prereg.DSR["prior_trials"],
+        "dsr_trials": len(trial_daily_sr_cash_excess), "dsr_prior_trials": prereg.DSR["prior_trials"],
+        "dsr_convention": "GOVERNING: literal reading -- each variant's own daily Sharpe, excess of cash "
+        "(prereg_issue 2 resolved 2026-09-30 per coordinator instruction, most-literal-reading rule). "
+        "Alternative (BM2-excess) kept under each variant's 'dsr_alt_bm2_excess'/'A3_alt_bm2_excess'/'bars_alt_bm2_excess'.",
         "sanity": sanity, "variants": results, "prereg_issues": prereg_issues,
-        "A7_status": "PENDING -- every reported tier is conditional on A7 (independent recompute)",
+        "official_tier_conditional_on_A7": official_tier,
+        "official_tier_note": "The candidate's tier is V1_primary's (the pre-declared primary variant), "
+        "for consistency with S1 and because choosing among variants after seeing results is itself "
+        "multiple testing. V2/V3/V4's bar outcomes are reported for information only ('role': "
+        "'non-primary variant, descriptive') and are NOT official tiers.",
+        "A7_status": "PENDING -- the official tier is conditional on A7 (independent recompute)",
     }
     (out_dir / "report.json").write_text(json.dumps(report, indent=2, default=float))
     if args.report:
@@ -656,9 +706,11 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"family": "S2", "entries": []}
         ledger["entries"].append({
             "date": datetime.now(timezone.utc).date().isoformat(), "fingerprint": fp,
-            "n_trials": len(trial_daily_sr), "trials": VARIANT_IDS,
-            "trial_daily_sharpes": [float(x) for x in trial_daily_sr],
-            "tiers_conditional_on_A7": {k: v["tier_conditional_on_A7"] for k, v in results.items()},
+            "n_trials": len(trial_daily_sr_cash_excess), "trials": VARIANT_IDS,
+            "trial_daily_sharpes_cash_excess_governing": [float(x) for x in trial_daily_sr_cash_excess],
+            "trial_daily_sharpes_bm2_excess_alt": [float(x) for x in trial_daily_sr_bm2_excess],
+            "official_tier_conditional_on_A7": official_tier,
+            "tiers_conditional_on_A7_all_variants_descriptive": {k: v["tier_conditional_on_A7"] for k, v in results.items()},
         })
         ledger["cumulative_trials"] = sum(e["n_trials"] for e in ledger["entries"])
         LEDGER.write_text(json.dumps(ledger, indent=2))
