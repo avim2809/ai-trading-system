@@ -15,6 +15,8 @@ if str(_SCRIPTS) not in sys.path:
 
 import eodhd_clean as ec  # noqa: E402
 
+FROZEN_FP = "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd"  # v2; a shortlist prereg cites this value
+
 
 def _bars(prices, start="2015-12-21", vol=1000.0, freq="B"):
     dates = pd.date_range(start, periods=len(prices), freq=freq)
@@ -24,8 +26,8 @@ def _bars(prices, start="2015-12-21", vol=1000.0, freq="B"):
 
 def test_fingerprint_is_frozen():
     # Changing any rule changes this; a shortlist prereg cites the value.
-    assert ec.CLEANING_RULES["version"] == 1
-    assert ec.cleaning_fingerprint() == "72a13e1edfb03c9ad62ac06b93fd1381353bd39292851f6d6c2d8b1b06bb42b5"
+    assert ec.CLEANING_RULES["version"] == 2
+    assert ec.cleaning_fingerprint() == FROZEN_FP
 
 
 def test_phantom_holiday_bar_is_dropped():
@@ -72,6 +74,15 @@ def test_real_crash_is_kept_and_normal_moves_untouched():
     calm = _bars(100 * np.cumprod(1 + rng.normal(0, 0.02, 300)))
     _, rep = ec.clean_bars(calm, "equity", pd.DatetimeIndex(calm["date"]))
     assert rep["n_out"] == 300
+
+
+def test_nav_funds_keep_zero_volume_bars_but_obey_the_calendar():
+    d = _bars([10.0, 10.02, 10.01, 10.05, 10.04], vol=0.0, freq="D")
+    cal = pd.DatetimeIndex(d["date"].iloc[[0, 1, 2, 4]])
+    out, rep = ec.clean_bars(d, "nav", cal)
+    assert rep["zero_volume"] == 0 and rep["off_calendar"] == 1 and len(out) == 4
+    _, rep_eq = ec.clean_bars(d, "equity", cal)
+    assert rep_eq["n_out"] == 0
 
 
 def test_bad_prices_and_inputs():
