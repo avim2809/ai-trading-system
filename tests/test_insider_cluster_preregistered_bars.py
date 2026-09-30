@@ -18,12 +18,19 @@ if str(_SCRIPTS) not in sys.path:
 import insider_cluster_preregistered_bars as prereg  # noqa: E402
 
 
-class TestDraftStatus:
-    def test_is_still_draft(self):
-        # This must stay True until a price vendor is chosen, paid for, and
-        # loaded for the ~8,800 event tickers — see the module docstring.
-        assert prereg.DRAFT is True
-        assert prereg.PREREGISTERED_AT is None
+class TestFrozenStatus:
+    def test_is_frozen_with_timestamp(self):
+        # Frozen 2026-09-30 once EODHD prices existed and before any event
+        # return was computed (see FREEZE_NOTES).
+        assert prereg.DRAFT is False
+        assert prereg.PREREGISTERED_AT == "2026-09-30T17:15:00Z"
+
+    def test_freeze_notes_fix_the_open_design_choices(self):
+        notes = prereg.FREEZE_NOTES
+        for key in ("universe_filter", "event_sets", "overlap_rule", "returns", "benchmark_primary",
+                    "delisting_stress", "bootstrap", "calendar_time_portfolio", "tier_b"):
+            assert key in notes, key
+        assert any(b["id"] == "A7" for b in prereg.TIER_A_BARS)
 
 
 class TestFingerprint:

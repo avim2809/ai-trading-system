@@ -1,6 +1,14 @@
-"""DRAFT pre-registration for the SEC insider-purchase-cluster candidate.
+"""FROZEN pre-registration for the SEC insider-purchase-cluster candidate.
 
-STATUS: DRAFT, not frozen for evaluation. Unlike
+STATUS: FROZEN 2026-09-30 (see PREREGISTERED_AT and the FREEZE_NOTES block),
+after EODHD Historian prices were downloaded (scripts/fetch_eodhd_prices.py)
+and BEFORE any event return was computed. Only coverage counts (which events
+have a price series spanning their entry date, and whether the issuer name
+matches) were looked at. Do not edit after results exist.
+
+The original DRAFT text follows unchanged.
+
+STATUS (as drafted): DRAFT, not frozen for evaluation. Unlike
 ``scripts/alt_premia_preregistered_bars.py`` (frozen before any return series
 existed), this candidate has NO PRICE DATA YET for its event universe — see
 docs/research_findings_beyond_equities_2026_09_30.md §"SEC-filings-driven
@@ -46,8 +54,8 @@ from __future__ import annotations
 import hashlib
 import json
 
-DRAFT = True  # must be flipped to False (and PREREGISTERED_AT set) only once price data exists
-PREREGISTERED_AT = None  # set at the moment this file is frozen, not before
+DRAFT = False  # frozen 2026-09-30 once EODHD prices existed; see FREEZE_NOTES
+PREREGISTERED_AT = "2026-09-30T17:15:00Z"
 DATA_END_INSIDER_EVENTS = "2026-06-30"  # last complete quarter in the SEC DERA data set as of 2026-09-30
 TRADING_DAYS = 252
 SEED = 20260930
@@ -81,6 +89,58 @@ UNIVERSE = {
             "for real requires a shares-outstanding x price join against the chosen "
             "price vendor once selected; until then this is a DESIGN placeholder, "
             "not something already checked against the 33,258 events above.",
+}
+
+# ---------------------------------------------------------------------------
+# Freeze-time decisions (2026-09-30). These SUPERSEDE the draft placeholders
+# below wherever they conflict; every one was fixed from data availability and
+# design reasoning only, before any event return existed.
+# ---------------------------------------------------------------------------
+FREEZE_NOTES = {
+    "price_source": "EODHD Historian EOD (open, close, adjusted_close, volume), incl. delisted "
+                    "(data/research/eodhd/prices; scripts/fetch_eodhd_prices.py, commit 8d2cd5f)",
+    "coverage_at_freeze": "85.7% of 33,258 events have a price series spanning the event date "
+                          "(87.1% post-2008); 80.1% also pass the issuer-name check",
+    "universe_filter": "market cap is unavailable (no fundamentals in the plan), so the draft's "
+                       "$50M-$2B cap band is REPLACED by: 20-trading-day median dollar volume "
+                       "(adjusted_close x volume over the 20 sessions ending the day before entry; EODHD "
+                       "volume is split-adjusted while close is raw -- verified on AAPL 2020-08-31 -- so "
+                       "close x volume would overstate pre-split dollar volume) in [$0.5M, $50M], and "
+                       "entry-day adjusted open >= $2.00",
+    "event_sets": {
+        "primary": "strict: price series spans the entry date AND the filer issuer name matches "
+                   "EODHD's name for the code (exact normalised match, or same first word)",
+        "sensitivity": "covered: price series spans the entry date regardless of name check "
+                       "(reported, not gated)",
+    },
+    "overlap_rule": "per ticker and hold length, an event is skipped if a position from an earlier "
+                    "event on the same ticker is still open on its entry day",
+    "returns": "entry at the adjusted OPEN of the first trading day strictly after known_date "
+               "(adjusted open = open x adjusted_close / close); exit at the adjusted CLOSE 63 or 126 "
+               "trading days later, or the last available close if the series ends first (early exit)",
+    "benchmark_primary": "ADV-bucket ETF over the identical entry-open -> exit-close window: "
+                         "ADV20 < $5M -> IWC (micro-cap), $5M-$20M -> IWM (small), > $20M -> IJH (mid); "
+                         "REPLACES the draft's IJR/IJH blend (IWC/IWM/IJH are in the EODHD download)",
+    "benchmark_secondary": "IWM for every event (reported, not gated)",
+    "costs": "round trip by ADV bucket as in COSTS below, charged once per event",
+    "delisting_stress": "bar A7: the result must stay positive when every EARLY exit (series ends "
+                        "before the hold completes and before DATA_END) takes an extra -30% "
+                        "(Shumway 1997 average performance-delisting return), a deliberately harsh "
+                        "stress since mergers are included",
+    "bootstrap": "REPLACES the draft's 8-event blocks: cluster bootstrap over calendar MONTHS of entry "
+                 "(resample months with replacement, keep all events in a drawn month), because events "
+                 "bunch in time (2008 alone ~3,000); 5000 draws; one-sided alpha 0.05/8",
+    "calendar_time_portfolio": "for DSR/PBO and a tradability view: each day, equal-weight all open "
+                               "event positions (primary set, one hold length at a time) net of costs, "
+                               "minus the same-weighted benchmark ETFs; days with no open position earn 0",
+    "dsr": "on the calendar-time daily excess series; trials = 8 (2 holds x 2 event sets x 2 benchmarks), "
+           "new ledger docs/insider_cluster_trial_history.json",
+    "pbo": "CSCV over the 8 calendar-time variants, n_partitions 8",
+    "tier_b": "REPLACES the draft's B_a: Tier B = point estimate > 0 for both holds AND A3, A5 and A7 "
+              "pass while A1 fails (promising but not proven: forward paper test only)",
+    "missing_data_bias_check": "reported: events without usable prices vs covered events by year, "
+                               "ADV bucket (where computable) and whether the ticker later delisted",
+    "windows": "unchanged: primary 2008-01-01 -> 2026-06-30 by entry date; secondary 2013+",
 }
 
 # ---------------------------------------------------------------------------
@@ -253,6 +313,8 @@ def power_report() -> dict:
 # Tiers — same frozen-precedence pattern as alt_premia_preregistered_bars.py.
 # ---------------------------------------------------------------------------
 TIER_A_BARS = [
+    {"id": "A7", "rule": "delisting stress (FREEZE_NOTES): mean excess return stays > 0, both holds, "
+                         "when every early exit takes an extra -30%"},
     {"id": "A1", "rule": "vs primary benchmark, BOTH holds: mean excess return > 0 AND bootstrap "
                          "one-sided lower bound at alpha_one_sided > 0"},
     {"id": "A2", "rule": "DSR > 0.95 on the primary post-sample window (2008-2026)"},
@@ -264,8 +326,8 @@ TIER_A_BARS = [
 ]
 TIER_D_RULE = "vs primary benchmark, either hold: bootstrap one-sided upper bound at alpha_one_sided < 0"
 TIER_B_BARS = [
-    {"id": "B_a", "rule": "bootstrap one-sided lower bound at alpha_one_sided > -0.10 x sigma"},
-    {"id": "B_b", "rule": "A3 and A5 pass"},
+    {"id": "B_a", "rule": "mean excess return point estimate > 0 for both holds (see FREEZE_NOTES['tier_b'])"},
+    {"id": "B_b", "rule": "A3, A5 and A7 pass"},
 ]
 TIER_ACTIONS = {
     "A": "small/mid-cap live proposal (config diff + universe-expansion diff for owner sign-off)",
@@ -288,6 +350,7 @@ def classify(bars: dict[str, bool], tier_d: bool, tier_b: dict[str, bool]) -> st
 def bars_fingerprint() -> str:
     payload = json.dumps(
         {
+            "PREREGISTERED_AT": PREREGISTERED_AT, "FREEZE_NOTES": FREEZE_NOTES,
             "DATA_END_INSIDER_EVENTS": DATA_END_INSIDER_EVENTS, "SEED": SEED, "OBSERVED": OBSERVED,
             "UNIVERSE": UNIVERSE, "EXECUTION": EXECUTION, "COSTS": COSTS, "BENCHMARK": BENCHMARK,
             "PLACEBO": PLACEBO, "WINDOWS": WINDOWS, "BOOTSTRAP": BOOTSTRAP, "DSR": DSR, "PBO": PBO,
@@ -300,6 +363,6 @@ def bars_fingerprint() -> str:
 
 
 if __name__ == "__main__":
-    print("DRAFT fingerprint (will change until frozen — see module docstring):", bars_fingerprint())
+    print(("DRAFT" if DRAFT else "FROZEN") + " fingerprint:", bars_fingerprint())
     import pprint
     pprint.pprint(power_report())
