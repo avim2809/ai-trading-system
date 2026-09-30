@@ -205,7 +205,7 @@ All of the following are implemented, tested, and documented in
 29. **Strategy regime weights — live parity + calibration** (2026-07-27) —
     `strategy_regime_weights` wired through `config/live.yaml`, live engine/API,
     frontend (`LiveConfig` / `NewBacktest`), `scripts/calibrate_strategy_regime_weights.py`;
-    A/B on 3 diagnostic windows documented in `docs/strategy_regime_weights_calibration.md`
+    A/B on 3 diagnostic windows documented in `docs/archive/strategy_regime_weights_calibration.md`
     (example weights hurt 2/3 windows — remain disabled).
 30. **Membership ETL + paper-track-record policy** (2026-07-27) —
     `scripts/import_universe_membership.py`, `data/cache/README.md`, and
@@ -216,7 +216,7 @@ All of the following are implemented, tested, and documented in
 32. **Regime weights v2 research** (2026-07-28) — `scripts/suggest_strategy_regime_weights.py`
     (data-driven draft from train-window strategy × regime Sharpe); hold-out +0.051 Sharpe
     on `run_18mo_2025_2026`; `tests/test_import_universe_membership.py`;
-    `docs/longer_dataset_vendor_decision.md` (Sharadar recommended).
+    `docs/archive/longer_dataset_vendor_decision.md` (Sharadar recommended).
 33. **Tiingo price backfill** (2026-07-28) — `scripts/backfill_tiingo_prices.py` ran for
     live 25-symbol universe; `combined/prices` now ~2010-01-04 → present. Survivorship
     gap remains (no membership/delistings).
@@ -225,7 +225,7 @@ All of the following are implemented, tested, and documented in
     this stack. Clarified: 10Y covers current diagnostic/PBO windows (earliest 2020-12);
     15Y+ only if 2010-start panels. ROI is research/risk-reduction, not direct P&L.
     Operator on Sharadar free tier; purchase pending. Details:
-    `docs/longer_dataset_vendor_decision.md`.
+    `docs/archive/longer_dataset_vendor_decision.md`.
 
 Also, earlier in this remediation pass (before the above numbered list):
 eliminated all pytest warnings (datetime.utcnow deprecations, hmmlearn/
@@ -257,7 +257,7 @@ have no `plan-id` and don't appear in the "Full task list" block below.
     look-ahead leak found in the LLM A/B's Arm B path. Two small non-blocking
     follow-ups noted, not done: tighten `earnings_ingestor.py` to real
     transcript dates; add a reporting lag to `run_ingestor.py`. Details:
-    `docs/llm_lookahead_audit.md`.
+    `docs/archive/llm_lookahead_audit.md`.
 37. **Structured trading-decision reflection** (2026-07-29) —
     `TradingMemoryLog.reflect()` now returns a `DecisionReflection`
     (verdict/what_worked/what_failed/lesson, `firm.llm.schemas`) instead of
@@ -1438,7 +1438,7 @@ data/time, but the following scaffolding landed this session:
 | `min-paper-track-record` | Policy gate documented in `docs/PROJECT_CONTEXT.md` → "Real-capital allocation gate" (revised 2026-07-29 from a flat 6-12mo calendar bar to a trade-count/bootstrap-Sharpe-CI bar + tranched initial capital); `scripts/import_universe_membership.py` + `data/cache/README.md` | ≥60 trading days AND ≥100 trades AND bootstrap Sharpe CI lower bound > 0 |
 
 Next actionable picks (operator): **purchase Sharadar Bundle 10Y** (see
-`docs/longer_dataset_vendor_decision.md` ROI section) → run ETL → re-audit PBO.
+`docs/archive/longer_dataset_vendor_decision.md` ROI section) → run ETL → re-audit PBO.
 **Weekly:** LLM A/B snapshot (`scripts/snapshot_llm_ab_arm.py`).
 
 ## Full task list (recreate with TodoWrite when resuming)

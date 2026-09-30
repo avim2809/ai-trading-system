@@ -1,0 +1,68 @@
+# docs/ index
+
+Start with **`PROJECT_CONTEXT.md`**: architecture, deployment, live config, and a
+dated log of every significant change.
+
+**Paths are load-bearing:**
+- **Frozen pre-registrations** (`scripts/*_preregistered*.py`) name their ledgers
+  and result files by path, and a changed file would break their audit trail.
+- **Code and config comments** cite docs by path.
+
+So files named there stay at the top level, even where they look like interim
+output.
+
+## Current state (read these first)
+
+| Doc | What it is |
+|---|---|
+| `PROJECT_CONTEXT.md` | Full reference: architecture, services, config, change log |
+| `edge_search_verdict_2026_09.md` | Why the 11-strategy system was replaced: nothing tested beats the benchmarks |
+| `allocation_deploy_runbook.md` | How the Alpaca allocation portfolio was deployed, the exact config, and rollback |
+| `allocation_forward_test_plan.md` | How the live allocation portfolio is judged (plain language) |
+| `capital_sleeves_plan.md` | Per-strategy capital sleeves (pipeline mode; used by the IBKR/pipeline code path) |
+
+## Decisions and verdicts (settled, with evidence)
+
+| Doc | Verdict |
+|---|---|
+| `optimal_combination_fix_2026_09.md` | Signal-combination methods: FAIL (re-measured on the fixed engine, still FAIL) |
+| `pattern_ml_final_verdict_2026_09.md` | Pattern-recognition ML layer: stays off |
+| `pattern_ml_isolated_evaluation_2026_09.md` | Earlier isolated pattern-ML evaluation (pre-fix; kept, cited by code) |
+| `formal_pbo_audit.md` | Six architecture changes, each failed the PBO/DSR gate |
+| `portfolio_construction_diagnosis.md` | Confidence vs optimal combination (July; its basis was later refuted) |
+| `ensemble_redundancy_audit_2026_09.md` | Ensemble redundancy audit (§2 corrected by the optimal-combination doc) |
+| `gann_research_closeout.md` | Gann strategy: permanently disabled |
+| `regime_ensemble_scoping.md` | Regime-ensemble scoping |
+
+## Plans and feature docs
+
+`edge_search_plan_2026_09.md` (the approved plan behind the verdict),
+`pattern_recognition_plan.md`, `danelfin_best_stocks_arm.md` (decommissioned),
+`investing_pro_integration.md`, `llm_ab_test_runbook.md`,
+`llm_ab_experiment_log.md`, `remediation_progress.md` (long running log).
+
+## Research and scoping (pending owner decisions)
+
+| Doc | Status |
+|---|---|
+| `research_findings_beyond_equities_2026_09_30.md` | External research on options, FX, CFDs, futures and more, with corrections |
+| `futures_data_vendor_comparison_2026_09.md`, `futures_trend_integration_sketch.md` | Futures trend: needs Norgate data plus 34–56 days of engineering; owner to decide |
+| `longer_dataset_options.md` | Survivorship-free data vendors (reference) |
+
+## Evaluation records (machine-readable; don't move)
+
+| Family | Ledger (cumulative trials) | Results |
+|---|---|---|
+| Signal combination | `combination_trial_history.json` | `combination_evaluation_2026_09.json`, `combination_evaluation_2026_09_corrected_engine.json` |
+| Pattern ML | `pattern_ml_trial_history.json` | `pattern_ml_workstream_d_run_log.json` |
+| Standalone strategies | `standalone_strategy_trial_history.json` | `standalone_strategy_evaluation_2026_09.json` |
+| Alternative premia | `alt_premia_trial_history.json` | `alt_premia_evaluation_2026_09.json`, `alt_premia_power_analysis_2026_09.json` |
+| Allocation forward test | `allocation_forward_test_trial_history.json` | `allocation_replay_2026_09.json` (reference simulation); `allocation_portfolio_backtest_2026_09.json` (first sanity backtest, superseded by the replay, kept because the frozen prereg cites it) |
+
+## Subfolders
+
+| Folder | Contents |
+|---|---|
+| `prompts/` | Briefs for external research agents (non-equity instruments, EODHD-based ideas) |
+| `archive/` | Superseded one-off docs: old RAG research, the LLM look-ahead audit, the regime-weights A/B, the July vendor-decision draft |
+| `claude-memory/` | Repo mirror of the agent's persistent memory; keep in sync |

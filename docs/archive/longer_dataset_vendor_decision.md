@@ -1,6 +1,6 @@
 # Longer dataset — vendor decision (draft)
 
-**Status:** awaiting operator purchase decision (updated 2026-07-29). Engineering
+**Status: SUPERSEDED (2026-09-30).** The owner bought EODHD Historian (delisted US end-of-day prices) for the insider-cluster test; see `docs/research_findings_beyond_equities_2026_09_30.md` and `scripts/fetch_eodhd_prices.py`. Original status: awaiting operator purchase decision (updated 2026-07-29). Engineering
 is ready; see `docs/longer_dataset_options.md` for the full shortlist.
 
 **Operator context (2026-07-29):** subscribed to Sharadar free tier; evaluating

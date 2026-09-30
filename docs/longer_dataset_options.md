@@ -71,7 +71,7 @@ and how it plugs into the existing PIT stack.
 
 ## Budget / decision needed
 
-See **`docs/longer_dataset_vendor_decision.md`** for the recommended pick
+See **`docs/archive/longer_dataset_vendor_decision.md`** (superseded 2026-09-30: EODHD Historian bought for the insider-cluster test) for the recommended pick
 (Sharadar primary, Norgate alternative) and operator approval checklist.
 
 No vendor is selected yet — pick based on:

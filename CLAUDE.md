@@ -7,6 +7,7 @@ concise agent memory lives in `.cursor/rules/` and the full reference in
 | Resource | Purpose |
 |----------|---------|
 | [docs/PROJECT_CONTEXT.md](docs/PROJECT_CONTEXT.md) | Full architecture, deployment, live config, REST/UI wiring, IBKR pitfalls |
+| [docs/README.md](docs/README.md) | Index of docs/: current state, verdicts, evaluation ledgers, research, prompts, archive |
 | [.cursor/rules/](.cursor/rules/) | Concise agent memory (project context, live trading, strategies, IBKR, logging, frontend) |
 | [docs/claude-memory/](docs/claude-memory/) | Repo mirror of Claude's persistent session memory (`MEMORY.md` index + per-topic files) — keep in sync when it changes |
 | [deploy/ai-trading.service](deploy/ai-trading.service) | Production systemd unit (`firm-api` + auto-start live) |

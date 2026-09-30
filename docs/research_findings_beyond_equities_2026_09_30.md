@@ -6,7 +6,7 @@ recommendation.** Nothing here has been pre-registered or tested against this
 system's evaluation standard. It is an input to that process, not a result of
 it.
 
-Brief used: `docs/research_brief_new_instruments.md` (the repo-access version;
+Brief used: `docs/prompts/research_brief_new_instruments.md` (the repo-access version;
 the report cites `src/firm/...` paths directly).
 
 ## 0. Corrections made after a direct repo read

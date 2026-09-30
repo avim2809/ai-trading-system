@@ -1228,11 +1228,11 @@ on the simpler version first).
 - [AUTOMATED_TRADING_GUIDE.md](../AUTOMATED_TRADING_GUIDE.md) — Paper trading operations
 - [AGENTS.md](../AGENTS.md) — Pointer for AI agents
 - [longer_dataset_options.md](longer_dataset_options.md) — Vendor scoping for delisting-inclusive history
-- [longer_dataset_vendor_decision.md](longer_dataset_vendor_decision.md) — Recommended vendor + approval checklist
+- [archive/longer_dataset_vendor_decision.md](archive/longer_dataset_vendor_decision.md) — Recommended vendor + approval checklist
 - [formal_pbo_audit.md](formal_pbo_audit.md) — First walk-forward PBO audit results
-- [strategy_regime_weights_calibration.md](strategy_regime_weights_calibration.md) — Regime weight A/B (v1/v2)
+- [archive/strategy_regime_weights_calibration.md](archive/strategy_regime_weights_calibration.md) — Regime weight A/B (v1/v2)
 - [llm_ab_test_runbook.md](llm_ab_test_runbook.md) — Quant vs LLM paper experiment procedure
-- [llm_lookahead_audit.md](llm_lookahead_audit.md) — RAG point-in-time audit + a dense-channel crash-on-None-date fix
+- [archive/llm_lookahead_audit.md](archive/llm_lookahead_audit.md) — RAG point-in-time audit + a dense-channel crash-on-None-date fix
 - [regime_ensemble_scoping.md](regime_ensemble_scoping.md) — ensemble-HMM regime detector, A/B'd (shipped disabled: calms `regime_hmm`'s own noise but doesn't rescue `strategy_regime_weights`)
 - [pattern_recognition_plan.md](pattern_recognition_plan.md) — chart-pattern recognition (Strategy #13): 5 build phases + a follow-up pass (scheduled scan job, ONNX export, isolated CNN/PPO env)
 - [capital_sleeves_plan.md](capital_sleeves_plan.md) — per-strategy capital sleeves: design, an A/B-found-and-fixed rebalance-band bug, live cutover on Alpaca
@@ -1286,4 +1286,4 @@ Full verdict: `docs/edge_search_verdict_2026_09.md`. Plan: `docs/edge_search_pla
 - **Recommendation (proposal, not applied):** move one instance to the pre-registered fallback, 60/40 SPY/IEF rebalanced monthly, and keep the other as control. It needs an allocator outside the current risk caps (per-name 5%, net 0.5). A BTC-trend sleeve could be run as a forward paper test only.
 - **Latent live issue (IBKR only, not fixed).** When IBKR's data farm is down, the REST fallback serves raw OHLC. `LiveTradingEngine._resolve_cycle_prices` and `_closing_price` prefer raw `close`, so a split day would put a fake jump into per-strategy attribution. Alpaca is clean.
 - **Test isolation.** An autouse `_no_real_fundamentals_refresh` fixture stops tests from starting the real vendor fundamentals refresh. Some tests still write into `data/llm_cache.db` and `data/vectordb` relative to the working directory: a follow-up.
-- **Research briefs for non-equity instruments:** `docs/research_brief_new_instruments.md` (with repo access) and `..._standalone.md` (no repo access).
+- **Research briefs for non-equity instruments:** `docs/prompts/research_brief_new_instruments.md` (with repo access) and `..._standalone.md` (no repo access); EODHD-based idea brief: `docs/prompts/research_brief_eodhd_ideas.md`.

@@ -40,6 +40,8 @@ data/sp500_sector_map.json
 # Trained model artifacts (regenerable via scripts/train_pattern_ml.py) —
 # binary blobs don't belong in git history.
 data/models/
+# Paid-vendor research downloads (EODHD etc.): licensed data, never commit
+data/research/
 # data_alpaca/ — isolated runtime state for the parallel Alpaca instance
 # (deploy/ai-trading-alpaca.service, FIRM_DATA_DIR=data_alpaca).
 data_alpaca/
