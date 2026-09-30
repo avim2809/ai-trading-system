@@ -1,0 +1,24 @@
+{
+  "family": "S1",
+  "entries": [
+    {
+      "date": "2026-09-30",
+      "fingerprint": "287294d0552396299b2e4fbe916a92a9adef564d53dbb6458c4a591941c8b359",
+      "n_trials": 4,
+      "trials": [
+        "primary_6_1_tercile",
+        "12_1_tercile",
+        "6_1_top3",
+        "12_1_top3"
+      ],
+      "trial_daily_sharpes": [
+        0.027129861816038832,
+        0.0306819977682045,
+        0.02443026888503279,
+        0.026601035737694546
+      ],
+      "tier": "C"
+    }
+  ],
+  "cumulative_trials": 4
+}

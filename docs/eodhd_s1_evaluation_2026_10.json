@@ -1,0 +1,176 @@
+{
+  "generated_at": "2026-09-30T19:53:28.893987+00:00",
+  "fingerprint": "287294d0552396299b2e4fbe916a92a9adef564d53dbb6458c4a591941c8b359",
+  "prereg_at": "2026-09-30T19:18:54Z",
+  "data_end": "2026-09-29",
+  "window": {
+    "start": "2002-01-31",
+    "end": "2026-09-29",
+    "rationale": "start = first month-end where the point-in-time eligible count reaches ELIGIBILITY['n_min_for_trading'] (9) AND stays >= 9 every month through data end (checked over the full remaining 297 months, not just at the crossing date). NOT simply '9 original sectors x 210 days' (~mid-1999): the binding constraint in 1999-2001 is the $1M ADV20 floor, not history length -- the eligible count repeatedly falls back to as low as 3 through 2000-2001 as early sector-SPDR trading volume was genuinely thin, so 2002-01-31 is the first date the >= 9 bar holds for good. This adds the 2000-02 US equity bear market to the window, a key regime for momentum crash risk. The universe itself keeps growing after window start (9 -> 43 eligible names by data end); the primary benchmark is built from the SAME point-in-time eligible set every month, so it absorbs that growth.",
+    "midpoint_date": "2014-05-31"
+  },
+  "primary_variant": "primary_6_1_tercile",
+  "alpha_one_sided": 0.01,
+  "table": {
+    "primary_variant": {
+      "sharpe_excess_of_cash": 0.4306732048127155,
+      "cagr": 0.0908821765731167,
+      "vol": 0.2189916059071948,
+      "max_dd": 0.6296657207623043,
+      "n_days": 6205
+    },
+    "EW_universe_bh": {
+      "sharpe_excess_of_cash": 0.43567147969156667,
+      "cagr": 0.09069038597393142,
+      "vol": 0.2130460447455162,
+      "max_dd": 0.5698325568822344,
+      "n_days": 6205
+    },
+    "BM1_SPY": {
+      "sharpe_excess_of_cash": 0.5141594786870338,
+      "cagr": 0.10095865131267479,
+      "vol": 0.18915477323577887,
+      "max_dd": 0.5518910194097935,
+      "n_days": 6205
+    },
+    "BM2_60_40": {
+      "sharpe_excess_of_cash": 0.6053521748920331,
+      "cagr": 0.07848888005761578,
+      "vol": 0.10631276502905708,
+      "max_dd": 0.32177378714040206,
+      "n_days": 6205
+    },
+    "BM3_SPY_VT": {
+      "sharpe_excess_of_cash": 0.6359272333603327,
+      "cagr": 0.08701281932542382,
+      "vol": 0.1153683361462911,
+      "max_dd": 0.28029348407045274,
+      "n_days": 6205
+    }
+  },
+  "bars": {
+    "A1": false,
+    "A2": false,
+    "A3": false,
+    "A4": false,
+    "A5": false,
+    "A6": false
+  },
+  "tier_D_condition": false,
+  "tier_B": {
+    "B": false
+  },
+  "tier": "C",
+  "A7_status": "PENDING (independent recompute not yet run)",
+  "a1_detail": {
+    "sharpe_c": 0.4306732048127155,
+    "sharpe_b": 0.43567147969156667,
+    "gap": -0.004998274878851183,
+    "lb": -0.1725616095082293,
+    "ub": 0.1507754333768599,
+    "n_days": 6205
+  },
+  "a4_detail": {
+    "EW_universe_bh": {
+      "gap_half1": -0.06452168168641476,
+      "gap_half2": 0.04157708270254379,
+      "pass": false
+    },
+    "BM1_SPY": {
+      "gap_half1": -0.0812991685149495,
+      "gap_half2": -0.10292984690581886,
+      "pass": false
+    },
+    "BM2_60_40": {
+      "gap_half1": -0.25606407078296073,
+      "gap_half2": -0.08449309190717036,
+      "pass": false
+    },
+    "BM3_SPY_VT": {
+      "gap_half1": -0.2610051754215626,
+      "gap_half2": -0.13136808889581053,
+      "pass": false
+    }
+  },
+  "a5_detail": {
+    "EW_universe_bh": {
+      "gap_stress": -0.02080213688535898,
+      "pass": false
+    },
+    "BM1_SPY": {
+      "gap_stress": -0.10350650035209713,
+      "pass": false
+    },
+    "BM2_60_40": {
+      "gap_stress": -0.19404712013068376,
+      "pass": false
+    },
+    "BM3_SPY_VT": {
+      "gap_stress": -0.22093274193609586,
+      "pass": false
+    }
+  },
+  "dsr": 0.9405974000819731,
+  "dsr_trials": 4,
+  "dsr_prior_trials": 206,
+  "trial_daily_sharpes": [
+    0.027129861816038832,
+    0.0306819977682045,
+    0.02443026888503279,
+    0.026601035737694546
+  ],
+  "pbo": 0.6714285714285714,
+  "placebo_p95": 0.45265373642380086,
+  "placebo_median": 0.3823905389073329,
+  "primary_sharpe_full_window": 0.4306732048127155,
+  "sanity": {
+    "spy_bh": {
+      "cagr": 0.10095865131267479,
+      "vol": 0.18915477323577887,
+      "max_dd": 0.5518910194097935
+    },
+    "sixty_forty": {
+      "cagr": 0.07848888005761578,
+      "vol": 0.10631276502905708,
+      "max_dd": 0.32177378714040206
+    },
+    "n_big_moves_gt_15pct": 0,
+    "big_moves": [],
+    "nan_days_by_series": {
+      "primary_variant": 0,
+      "EW_universe_bh": 0,
+      "BM1_SPY": 0,
+      "BM2_60_40": 0,
+      "BM3_SPY_VT": 0
+    },
+    "candidate_annualised_one_way_turnover": 6.998162944458168,
+    "n_12_1_signal_gaps_by_variant": {
+      "primary_6_1_tercile": 0,
+      "12_1_tercile": 104,
+      "6_1_top3": 0,
+      "12_1_top3": 104
+    }
+  },
+  "prereg_issues": [
+    {
+      "id": "issue_1_history_floor_undersizes_12_1",
+      "text": "ELIGIBILITY['min_history_calendar_days'] = 210 (~7 months) is sized only for the 6-1 variant's own lookback (6+1 months), but VARIANTS also declares 12-1 variants needing ~13 months of history; the ELIGIBILITY text itself claims 210 days covers '6-1 (or 12-1)', which is not arithmetically true for 12-1. Most literal fix implemented: use the single global 210-day/$1M ELIGIBILITY floor for universe membership (unchanged, exactly as frozen), AND separately require a computable (non-NaN, asof-based) signal for whichever variant is being ranked that month -- a ticker that is nominally 'eligible' but lacks the extra ~6 months a 12-1 signal needs (only possible for a ticker added to the universe well after window start, e.g. XLRE 2015, XLC 2018, or any later-seasoning industry ETF) is silently dropped from THAT variant's ranking pool for that month only, logged and counted (see 'n_12_1_signal_gaps' in the report)."
+    },
+    {
+      "id": "issue_2_open_vs_close_execution_conflict",
+      "text": "Protocol \u00a72 states execution generally as 'trades fill at the next bar's adjusted open' for every candidate, but \u00a73's own BM2/BM3 text says the target is set 'at close t+1' (a full close-to-close rebalance, not an open/close split) -- the protocol's general rule and its own benchmark-specific text disagree. Most literal reading implemented: BM1/BM2/BM3 follow their OWN literal \u00a73 text (close t+1, no open/close split -- reusing the alt_premia house-style close-based simulator); the candidate (all 4 variants) and PRIMARY_BENCHMARK use \u00a72's adjusted-open execution, since PRIMARY_BENCHMARK's own text says 'same cadence as the candidate,' which I read as also meaning the same fill convention."
+    },
+    {
+      "id": "issue_3_vfitx_cost_unspecified",
+      "text": "COSTS only defines ETF ADV-tier bps; it says nothing about a mutual-fund NAV proxy (VFITX). Implemented: VFITX leg costs 0 bps (it is a return proxy standing in for a benchmark's pre-2002-07-26 bond leg, never an actual traded position, per the cleaning doc's own 'never as a traded holding' language) -- a documented assumption, not a computed figure."
+    },
+    {
+      "id": "issue_4_which_bars_apply_per_variant",
+      "text": "TIER_A_BARS/TIER_D_RULE/TIER_B_BARS are written in the singular ('the candidate'), while DSR/PBO explicitly span all 4 declared variants. Implemented: A1/A3/A4/A5/D/B are computed ONLY for PRIMARY_VARIANT (that is 'the candidate' being tiered); A2 (DSR) and A6 (PBO) are panel-wide statistics computed over all 4 variants (+ BM1-3 for PBO), exactly as their own dict text specifies. The other 3 variants are never separately tiered."
+    },
+    {
+      "id": "issue_5_pbo_reference_is_primary_benchmark_not_cash",
+      "text": "PBO['series'] literally specifies 'daily excess returns over the primary benchmark' (not over cash/rf) -- implemented literally: the PBO panel's 7 columns (4 variants + BM1-3) are each (series - PRIMARY_BENCHMARK), not (series - rf). A1/A4/A5/D/bootstrap, by contrast, use the more conventional excess-of-cash Sharpe (subtracting rf) before taking a Sharpe gap -- this is the alt_premia house-style convention, since the protocol itself does not say whether 'Sharpe' means Sharpe of raw or cash-excess returns; flagged here since it is the one place this harness makes that convention choice rather than reading it directly off frozen text."
+    }
+  ]
+}
