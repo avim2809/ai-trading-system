@@ -1,0 +1,20 @@
+{
+  "entries": [
+    {
+      "appended_at": "2026-09-30T19:47:09.770109+00:00",
+      "fingerprint": "30decf9398917c2e5229cfee3b186f9f1f9d623a814273ba5ac629a194dbd584",
+      "trial_daily_sharpes": [
+        0.027853389437189225,
+        0.026055341319043,
+        0.03183237546047951
+      ],
+      "variant_names": [
+        "S5_top20_abs",
+        "S5_top20_rel",
+        "S5_top30_abs"
+      ],
+      "prior_trials_used": 207,
+      "tier": "C"
+    }
+  ]
+}

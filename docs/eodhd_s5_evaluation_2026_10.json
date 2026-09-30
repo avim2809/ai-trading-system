@@ -1,0 +1,222 @@
+{
+  "generated_at": "2026-09-30T19:47:09.762517+00:00",
+  "fingerprint_at_freeze": "30decf9398917c2e5229cfee3b186f9f1f9d623a814273ba5ac629a194dbd584",
+  "fingerprint_recomputed": "30decf9398917c2e5229cfee3b186f9f1f9d623a814273ba5ac629a194dbd584",
+  "preregistered_at": "2026-09-30T19:18:54Z",
+  "primary_variant": "S5_top20_abs",
+  "window": {
+    "start": "2017-05-14",
+    "end": "2026-09-28",
+    "midpoint": "2022-01-23"
+  },
+  "prereg_issues": [
+    "segment_rule states both '>=29 calendar days' and 'the trailing 30 calendar days' as the same-segment coverage requirement; both are checked (AND), 30 is the binding one -- no behavioural effect, an internal wording inconsistency only.",
+    "BOOTSTRAP mean_block_calendar_days=91 has no separately-stated figure for the BM1-3 sub-comparisons (SPY-calendar rows); applied literally as 91 ROWS on whichever series is paired, not converted between the crypto (365/yr) and SPY (252/yr) calendars.",
+    "C1_live's inherited instrument field cites Tiingo BTC data, unavailable in this research folder; C1's RULE is applied verbatim to data/research/eodhd/crypto/BTC-USD.parquet instead, for data-source consistency with the rest of this report.",
+    "WINDOWS['note_variant_windows'] fixes S5_top30_abs's trading start 2 weeks later (2017-05-28) but does not say whether its OWN inference windows (bootstrap/DSR/PBO) should also start later; implemented so they do, while A4's halves split keeps the shared midpoint."
+  ],
+  "bars": {
+    "A1": false,
+    "A2": false,
+    "A3": false,
+    "A4": false,
+    "A5": false,
+    "A6": true
+  },
+  "tier_d_triggered": false,
+  "tier_b_bars": {
+    "B_a": false,
+    "B_b": false
+  },
+  "tier": "C",
+  "tier_conditional_on_A7": "C (conditional on A7 -- PENDING, per instructions)",
+  "gaps_vs_benchmarks": {
+    "BTC_BH": {
+      "sharpe_candidate": 0.44711173048379804,
+      "sharpe_benchmark": 0.8926684946689757,
+      "gap": -0.44555676418517765,
+      "boot_lower_alpha01": -1.111293065382513,
+      "boot_upper_alpha01": 0.21514144699596982
+    },
+    "C1_live": {
+      "sharpe_candidate": 0.44711173048379804,
+      "sharpe_benchmark": 1.1285468146581739,
+      "gap": -0.6814350841743758,
+      "boot_lower_alpha01": -1.3612618702243535,
+      "boot_upper_alpha01": 0.030634847849639827
+    },
+    "BM1_SPY": {
+      "sharpe_candidate": 0.4421588497262161,
+      "sharpe_benchmark": 0.7196411063763523,
+      "gap": -0.27748225665013615,
+      "boot_lower_alpha01": -1.1044907233247396,
+      "boot_upper_alpha01": 0.4312368958661123
+    },
+    "BM2_60_40": {
+      "sharpe_candidate": 0.4421588497262161,
+      "sharpe_benchmark": 0.6498113433107837,
+      "gap": -0.2076524935845676,
+      "boot_lower_alpha01": -1.0603381408290697,
+      "boot_upper_alpha01": 0.5266724822638518
+    },
+    "BM3_SPY_VT": {
+      "sharpe_candidate": 0.4421588497262161,
+      "sharpe_benchmark": 0.8902517216153565,
+      "gap": -0.4480928718891404,
+      "boot_lower_alpha01": -1.2025076031121886,
+      "boot_upper_alpha01": 0.25249307271137306
+    }
+  },
+  "a4_halves": {
+    "BTC_BH": {
+      "half1_gap": -0.6054928769389684,
+      "half2_gap": -0.21737819352068172,
+      "pass": false
+    },
+    "C1_live": {
+      "half1_gap": -1.0051560364489065,
+      "half2_gap": -0.3207578371096607,
+      "pass": false
+    },
+    "BM1_SPY": {
+      "half1_gap": -0.1859747697889107,
+      "half2_gap": -0.4246237948988224,
+      "pass": false
+    },
+    "BM2_60_40": {
+      "half1_gap": -0.31381323726675303,
+      "half2_gap": -0.17308126615610353,
+      "pass": false
+    },
+    "BM3_SPY_VT": {
+      "half1_gap": -0.4809548999803057,
+      "half2_gap": -0.4892285824090895,
+      "pass": false
+    }
+  },
+  "a5_stress_pass": {
+    "BTC_BH": false,
+    "C1_live": false,
+    "BM1_SPY": false,
+    "BM2_60_40": false,
+    "BM3_SPY_VT": false
+  },
+  "dsr": 0.8292984116923794,
+  "dsr_prior_trials": 207,
+  "trial_sharpes": [
+    0.027853389437189225,
+    0.026055341319043,
+    0.03183237546047951
+  ],
+  "pbo": 0.05714285714285714,
+  "placebo": {
+    "n_draws": 500,
+    "candidate_percentile": 58.8,
+    "candidate_sharpe": 0.44711173048379804,
+    "placebo_sharpe_mean": 0.4215121222894649,
+    "placebo_sharpe_p95": 0.6446829899589719
+  },
+  "sanity_checks": {
+    "performance": {
+      "S5_top20_abs": {
+        "cagr": 0.08180338930640141,
+        "annual_vol": 0.7737019578900711,
+        "sharpe_excess": NaN,
+        "max_drawdown": 0.8974707669463468
+      },
+      "BTC_BH": {
+        "cagr": 0.5047488188196341,
+        "annual_vol": 0.6730171091302984,
+        "sharpe_excess": NaN,
+        "max_drawdown": 0.8339900920034273
+      },
+      "C1_live": {
+        "cagr": 0.4075593927418526,
+        "annual_vol": 0.3149242049308993,
+        "sharpe_excess": NaN,
+        "max_drawdown": 0.4936960448594776
+      },
+      "BM1_SPY": {
+        "cagr": 0.14996960857622854,
+        "annual_vol": 0.18435873309166348,
+        "sharpe_excess": NaN,
+        "max_drawdown": 0.3371738514933913
+      },
+      "BM2_60_40": {
+        "cagr": 0.09340427547684049,
+        "annual_vol": 0.10954493603579088,
+        "sharpe_excess": NaN,
+        "max_drawdown": 0.21281453493935
+      },
+      "BM3_SPY_VT": {
+        "cagr": 0.12504123005583678,
+        "annual_vol": 0.11239167208920857,
+        "sharpe_excess": NaN,
+        "max_drawdown": 0.1444213731736741
+      }
+    },
+    "n_nan_days": {
+      "S5_top20_abs": 0,
+      "S5_top20_rel": 0,
+      "S5_top30_abs": 0,
+      "BTC_BH": 0,
+      "C1_live": 0,
+      "BM1_SPY": 0,
+      "BM2_60_40": 0,
+      "BM3_SPY_VT": 0
+    },
+    "n_days_abs_return_gt_40pct": 0,
+    "big_moves": [],
+    "turnover_total_primary": 301.69373063984943,
+    "cost_drag_total_primary": 1.055928057239473,
+    "top10_contributors_primary": [
+      {
+        "code": "ZEC-USD",
+        "total_contribution": 0.6271944642066956
+      },
+      {
+        "code": "BNB-USD",
+        "total_contribution": 0.5212389826774597
+      },
+      {
+        "code": "BCH-USD",
+        "total_contribution": 0.49795475602149963
+      },
+      {
+        "code": "MAPR-USD",
+        "total_contribution": 0.48565244674682617
+      },
+      {
+        "code": "BTC-USD",
+        "total_contribution": 0.47583484649658203
+      },
+      {
+        "code": "ETH-USD",
+        "total_contribution": 0.4235008656978607
+      },
+      {
+        "code": "LINK-USD",
+        "total_contribution": 0.34956035017967224
+      },
+      {
+        "code": "MKR-USD",
+        "total_contribution": 0.3375125825405121
+      },
+      {
+        "code": "EOS-USD",
+        "total_contribution": 0.2931787967681885
+      },
+      {
+        "code": "SOL-USD",
+        "total_contribution": 0.29290181398391724
+      }
+    ],
+    "top10_contributor_plausibility_notes": {
+      "method": "post-hoc, per name: contribution_t = held_before_rebalance_t * daily_return_t, summed over the window",
+      "BTC-USD, ETH-USD, BNB-USD, ZEC-USD, BCH-USD, LINK-USD, MKR-USD, EOS-USD, SOL-USD": "all well-known, real, large-cap coins with plausible multi-year price histories -- consistent with a top-20-by-dollar-volume universe (expected to be dominated by exactly these names).",
+      "MAPR-USD": "FLAGGED, not fixed. Manual check of the raw and cleaned bars (data/research/eodhd/crypto/MAPR-USD.parquet) shows a per-unit price starting at ~$19,000 (2019-07) and later spiking as high as ~$1.6M with sparse, irregular trading gaps (e.g. consecutive KEPT bars 8 days apart) and a wildly erratic path even within one cleaning segment (2024: 1.26M -> 1.13M -> ... -> 1.6M -> 511K in adjacent kept bars). This is implausible as a genuine large-cap, liquid coin and did not trigger clean_bars' spike-reversal/segment-break rules only because the moves are gradual/choppy rather than single-day jumps. This is a concrete, realised instance of BIASES['wash_trading_volume'] in the FROZEN pre-registration (the $1M/day floor is necessary but not sufficient for genuine tradable liquidity) -- NOT patched here (out of this evaluation's mandate to implement the frozen design as declared), but its ~0.49 total-contribution figure should be treated as unreliable, not a real captured return."
+    }
+  },
+  "union_pool_size": 244,
+  "harness_log": "smoke test: build only, 202-file subset, before harness commit; no evaluation output viewed. Full 6,962-file build (PID 268956) was also launched before the harness commit, for wall-clock reasons, but no bar or Sharpe outcome was computed or inspected from it until after commit efce89a. evaluate (this report) ran entirely after the harness was committed."
+}
