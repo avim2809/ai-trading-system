@@ -86,6 +86,6 @@ approval. The same steps run as single commands matching the allow rules went th
 - **Forward test** started 2026-09-30 (`docs/allocation_forward_test_trial_history.json`, fp 20e25edb).
 - **Next events:** the BTC weekly review after the Sunday 10/4 UTC close, and the core monthly
   rebalance on 11/2.
-- **Data purchase:** the owner is buying Sharadar directly. Recommended: the Bundle, 1 month, full
-  history; the owner put `NASDAQ_DATA_LINK_API_KEY` in `.env`, but it only gives the free sample.
-  Download everything, then run the insider-cluster prereg.
+- **Data purchase:** SUPERSEDED. The owner bought EODHD Historian (1 month) instead of Sharadar.
+  Everything was downloaded, and the insider-cluster test ran: Tier C. See
+  [[project-eodhd-data-and-insider-verdict-sep30]]. `NASDAQ_DATA_LINK_API_KEY` is free sample only (unused).

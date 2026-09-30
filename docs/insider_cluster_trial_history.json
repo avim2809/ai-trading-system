@@ -1,0 +1,32 @@
+{
+  "family": "insider_cluster",
+  "entries": [
+    {
+      "date": "2026-09-30",
+      "fingerprint": "f355b0756683cf6fb1a3ac5b2db47cc891a0d9e0a1a2076dd575142278693a74",
+      "n_trials": 8,
+      "trials": [
+        "3_month|strict|bench_primary",
+        "3_month|strict|bench_iwm",
+        "3_month|covered|bench_primary",
+        "3_month|covered|bench_iwm",
+        "6_month|strict|bench_primary",
+        "6_month|strict|bench_iwm",
+        "6_month|covered|bench_primary",
+        "6_month|covered|bench_iwm"
+      ],
+      "trial_daily_sharpes": [
+        0.01533987554468911,
+        0.015338937603484374,
+        0.015349735894310402,
+        0.015348809308759414,
+        0.01546373145533005,
+        0.01546173162493216,
+        0.015493240515252246,
+        0.015491212103786317
+      ],
+      "tier": "C"
+    }
+  ],
+  "cumulative_trials": 8
+}

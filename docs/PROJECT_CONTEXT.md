@@ -1287,3 +1287,21 @@ Full verdict: `docs/edge_search_verdict_2026_09.md`. Plan: `docs/edge_search_pla
 - **Latent live issue (IBKR only, not fixed).** When IBKR's data farm is down, the REST fallback serves raw OHLC. `LiveTradingEngine._resolve_cycle_prices` and `_closing_price` prefer raw `close`, so a split day would put a fake jump into per-strategy attribution. Alpaca is clean.
 - **Test isolation.** An autouse `_no_real_fundamentals_refresh` fixture stops tests from starting the real vendor fundamentals refresh. Some tests still write into `data/llm_cache.db` and `data/vectordb` relative to the working directory: a follow-up.
 - **Research briefs for non-equity instruments:** `docs/prompts/research_brief_new_instruments.md` (with repo access) and `..._standalone.md` (no repo access); EODHD-based idea brief: `docs/prompts/research_brief_eodhd_ideas.md`.
+
+## 2026-09-30: EODHD data, and the insider-cluster test
+
+- **EODHD Historian bought for one month** (key `EODHD_API_KEY` in `.env`). Everything worth keeping was downloaded to `data/research/eodhd/` (gitignored, licensed, 2.8 GB):
+  - EOD prices for the insider universe, incl. delisted (`scripts/fetch_eodhd_prices.py`);
+  - all 997 forex pairs;
+  - 7,085 crypto series, active and delisted;
+  - splits and dividends for ~7,400 tickers;
+  - 127 country, sector, industry, bond and commodity ETFs;
+  - 18,025 US exchange-listed common stocks, active and delisted (`scripts/fetch_eodhd_extras.py`, which takes `--max-rps`; concurrent runs must stay under ~16/s).
+  - EODHD quirks: volume is split-adjusted but open/close are raw, so dollar volume = `adjusted_close × volume`. Daily crypto bars are stamped 00:00 UTC. News is sparse before 2019.
+- **Insider-purchase clusters: Tier C, no edge.** Full verdict: `docs/insider_cluster_verdict_2026_09.md`.
+  - The median event loses −1.6% / −3.3% (3m / 6m) against a size-matched ETF. The mean is positive only because of outliers, and negative after 2013.
+  - An independent recompute reproduced every bar exactly.
+  - Ledger: `docs/insider_cluster_trial_history.json` (new family).
+- **EODHD price data has bad bars.** Examples: a phantom holiday bar (SMLP 2015-12-25, $0.0002), scale errors (XBKS), unadjusted reverse splits (ACRX, CERN), garbage quotes (QPAC). They faked the calendar-time DSR and PBO passes, and more remain unidentified. Any new EODHD pre-registration must freeze a cleaning rule before the run.
+- **Test isolation.** `tests/test_api.py::TestMemoryDecisionsAPI` fails when `FIRM_DATA_DIR` is set in the environment: the tests don't isolate from it. Run the suite without it, or fix the fixtures (follow-up).
+
