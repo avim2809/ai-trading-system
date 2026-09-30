@@ -263,7 +263,13 @@ def schedule_slots(month_ends: list[pd.Timestamp], entry_of: dict, per_month_nam
                    hold_months: int, col_of: dict, last_pos_of: dict, T: int,
                    weight_fn=None) -> list[Slot]:
     """One FRESH slot per (name, formation month) -- see design note 6: no netting of
-    unchanged continuing members across consecutive reformations."""
+    unchanged continuing members across consecutive reformations.
+
+    Default weighting: each month-end's cohort is ``1/hold_months`` of the whole book
+    (the overlapping-cohort construction -- HOLD_STRUCTURES["6_month_overlapping"]:
+    "1/6 of the book each month"), split equally across that cohort's names. For
+    ``hold_months == 1`` (PRIMARY, the 1-month hold) this is just ``1/len(names)``,
+    since there is only ever one cohort open at a time."""
     slots: list[Slot] = []
     K = len(month_ends)
     for k, me in enumerate(month_ends):
@@ -274,7 +280,7 @@ def schedule_slots(month_ends: list[pd.Timestamp], entry_of: dict, per_month_nam
         names = per_month_names.get(me, [])
         if not names:
             continue
-        w = weight_fn(me, names) if weight_fn else {n: 1.0 / len(names) for n in names}
+        w = weight_fn(me, names) if weight_fn else {n: (1.0 / hold_months) / len(names) for n in names}
         k_exit = k + hold_months
         if k_exit < K:
             exit_me = month_ends[k_exit]
@@ -529,7 +535,7 @@ def build_all(panel_path: Path, universe_dir: Path = EODHD / "us_universe_full",
     bench = {name: load_bench_daily(name, asset, dates, calendar)
              for name, asset in (("SPY", "equity"), ("IEF", "equity"), ("VFITX", "nav"))}
 
-    def build_variant(hold_key: str, N: int, key: str, cost_mult=1.0, delist_stress=False) -> tuple[np.ndarray, list[Slot]]:
+    def build_variant(hold_key: str, N: int, cost_mult=1.0, delist_stress=False) -> tuple[np.ndarray, list[Slot]]:
         names_by_month = {me: per_month[me][N]["decile"] for me in month_ends}
         slots = schedule_slots(month_ends, entry_of, names_by_month, HOLD_MONTHS[hold_key], col_of, last_pos_of, T)
         net, _ = simulate_slots(slots, RET, ENTRY_RET, cash_ret, T, cost_mult, delist_stress, cost_fn)

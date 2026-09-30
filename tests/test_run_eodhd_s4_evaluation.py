@@ -49,6 +49,33 @@ def _toy_matrices(T: int, M: int):
 
 
 class TestScheduleAndSimulateSlots:
+    def test_default_weight_divides_by_hold_months_not_just_decile_size(self):
+        # Regression test for a real bug caught in the first full run: with hold_months=6
+        # and no custom weight_fn, each of a month's ``decile_size`` names must get
+        # 1/(6*decile_size) of the book, not 1/decile_size (which -- summed across the
+        # ~6 concurrently open cohorts -- inflated total invested weight to ~5.76x and
+        # produced a fabricated -68% single-day loss on 2020-03-16 in the real run).
+        month_ends = [pd.Timestamp("2000-01-31")]
+        entry_of = {month_ends[0]: 1}
+        names = ["A", "B"]
+        col_of = {"A": 0, "B": 1}
+        last_pos_of = {"A": 99, "B": 99}
+        slots = r.schedule_slots(month_ends, entry_of, {month_ends[0]: names}, hold_months=6,
+                                 col_of=col_of, last_pos_of=last_pos_of, T=100)
+        assert len(slots) == 2
+        for s in slots:
+            assert s.weight == pytest.approx(1.0 / 6 / 2)
+
+    def test_default_weight_with_hold_months_one_is_plain_equal_weight(self):
+        month_ends = [pd.Timestamp("2000-01-31")]
+        entry_of = {month_ends[0]: 1}
+        names = ["A", "B", "C", "D"]
+        col_of = {n: i for i, n in enumerate(names)}
+        last_pos_of = {n: 99 for n in names}
+        slots = r.schedule_slots(month_ends, entry_of, {month_ends[0]: names}, hold_months=1,
+                                 col_of=col_of, last_pos_of=last_pos_of, T=100)
+        assert all(s.weight == pytest.approx(0.25) for s in slots)
+
     def test_single_name_next_open_entry_then_close_to_close(self):
         # Name "A" (col 0): enters day 2 (open->close 5%), then two more close-to-close
         # days of 1% each, no cost (flat 0bps) to isolate the return-path mechanics.
