@@ -30,13 +30,51 @@ try:
         StopOrderRequest,
         TrailingStopOrderRequest,
     )
-    from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus
+    from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus, AssetClass
     from alpaca.data.historical import StockHistoricalDataClient
-    from alpaca.data.requests import StockLatestQuoteRequest
+    from alpaca.data.historical.crypto import CryptoHistoricalDataClient
+    from alpaca.data.requests import StockLatestQuoteRequest, CryptoLatestQuoteRequest
 
     _HAS_ALPACA = True
 except ImportError:
     _HAS_ALPACA = False
+
+# Alpaca crypto symbology quirk (confirmed via Alpaca's own support docs,
+# "Why am I seeing BTCUSD after I bought BTC/USD?" --
+# https://alpaca.markets/support/symbology-positions-list -- and
+# https://docs.alpaca.markets/docs/working-with-positions): an order for a
+# crypto pair is submitted/quoted with a slash ("BTC/USD" -- this is also the
+# canonical form every caller in this codebase uses, e.g.
+# BtcTrendSleeve.symbol), but Alpaca's *positions* endpoints (GET
+# /v2/positions, GET /v2/positions/{symbol}) both accept and return the
+# compact, slash-less form ("BTCUSD") -- a plain "BTC/USD" 404s there. Both
+# directions are normalised at the edges here so the rest of this adapter
+# (and every caller) only ever sees the canonical "BTC/USD" form. Quote
+# assets are ordered longest-first so e.g. "USDT" is matched before the "USD"
+# it contains.
+_CRYPTO_QUOTE_ASSETS = ("USDT", "USDC", "USD", "BTC", "ETH")
+
+
+def _is_crypto_symbol(symbol: str) -> bool:
+    """True if *symbol* is this codebase's canonical crypto form
+    ("BASE/QUOTE", e.g. "BTC/USD") -- the convention every caller (sleeves,
+    the engine, tests) uses for a crypto instrument."""
+    return "/" in symbol
+
+
+def _crypto_symbol_to_alpaca_compact(symbol: str) -> str:
+    """"BTC/USD" -> "BTCUSD", for Alpaca's positions endpoints."""
+    return symbol.replace("/", "")
+
+
+def _crypto_symbol_from_alpaca_compact(symbol: str) -> str:
+    """"BTCUSD" -> "BTC/USD" (inverse of the above), for positions Alpaca
+    returns. Falls back to *symbol* unchanged if no known quote-asset suffix
+    matches, rather than guessing a wrong split point."""
+    for quote in _CRYPTO_QUOTE_ASSETS:
+        if symbol.endswith(quote) and len(symbol) > len(quote):
+            return f"{symbol[:-len(quote)]}/{quote}"
+    return symbol
 
 # Alpaca's generic "insufficient qty/wash trade" error code -- see both
 # _plan_flip_split's docstring (same code, "insufficient qty available",
@@ -145,6 +183,7 @@ class AlpacaBroker(Broker):
         self._paper = paper
         self._trading: TradingClient | None = None
         self._data: StockHistoricalDataClient | None = None
+        self._crypto_data: CryptoHistoricalDataClient | None = None
 
     def connect(self) -> None:
         _require_alpaca()
@@ -154,6 +193,10 @@ class AlpacaBroker(Broker):
             paper=self._paper,
         )
         self._data = StockHistoricalDataClient(
+            api_key=self._api_key,
+            secret_key=self._secret_key,
+        )
+        self._crypto_data = CryptoHistoricalDataClient(
             api_key=self._api_key,
             secret_key=self._secret_key,
         )
@@ -167,6 +210,7 @@ class AlpacaBroker(Broker):
     def disconnect(self) -> None:
         self._trading = None
         self._data = None
+        self._crypto_data = None
         log.info("Disconnected from Alpaca")
 
     def is_connected(self) -> bool:
@@ -191,7 +235,7 @@ class AlpacaBroker(Broker):
         ``refresh()``/reconciliation and are handled by the existing
         reactive reconnect path.
         """
-        return self._trading is not None and self._data is not None
+        return self._trading is not None and self._data is not None and self._crypto_data is not None
 
     def _ensure_connected(self) -> TradingClient:
         if self._trading is None:
@@ -212,23 +256,36 @@ class AlpacaBroker(Broker):
     def get_positions(self) -> list[BrokerPosition]:
         client = self._ensure_connected()
         positions = client.get_all_positions()
-        return [
-            BrokerPosition(
-                symbol=p.symbol,
-                quantity=float(p.qty),
-                avg_cost=float(p.avg_entry_price),
-                market_value=float(p.market_value),
-                unrealized_pnl=float(p.unrealized_pl),
+        result = []
+        for p in positions:
+            # Alpaca reports crypto positions with the compact, slash-less
+            # symbol ("BTCUSD") regardless of how the order that opened them
+            # was submitted -- normalise back to this codebase's canonical
+            # "BTC/USD" form (see the module-level symbology note) so callers
+            # never have to special-case crypto here.
+            is_crypto = getattr(p, "asset_class", None) == AssetClass.CRYPTO
+            symbol = _crypto_symbol_from_alpaca_compact(p.symbol) if is_crypto else p.symbol
+            result.append(
+                BrokerPosition(
+                    symbol=symbol,
+                    quantity=float(p.qty),
+                    avg_cost=float(p.avg_entry_price),
+                    market_value=float(p.market_value),
+                    unrealized_pnl=float(p.unrealized_pl),
+                )
             )
-            for p in positions
-        ]
+        return result
 
     def get_position(self, symbol: str) -> BrokerPosition | None:
         client = self._ensure_connected()
+        # Positions endpoints want the compact form ("BTCUSD"), not the
+        # canonical "BTC/USD" every caller passes in here -- see the
+        # module-level symbology note.
+        lookup_symbol = _crypto_symbol_to_alpaca_compact(symbol) if _is_crypto_symbol(symbol) else symbol
         try:
-            p = client.get_open_position(symbol)
+            p = client.get_open_position(lookup_symbol)
             return BrokerPosition(
-                symbol=p.symbol,
+                symbol=symbol,
                 quantity=float(p.qty),
                 avg_cost=float(p.avg_entry_price),
                 market_value=float(p.market_value),
@@ -267,6 +324,17 @@ class AlpacaBroker(Broker):
         available"), even though shorting itself is fully permitted. See
         :meth:`_plan_flip_split`.
         """
+        if _is_crypto_symbol(order.symbol) and order.order_type != "market":
+            # Alpaca crypto does support limit/stop_limit natively, but this
+            # adapter has only been built and verified against market orders
+            # (the only order type the BTC trend sleeve's rule issues) --
+            # fail loudly rather than silently mis-handle an untested order
+            # type/TIF/precision combination for a real crypto submission.
+            raise BrokerError(
+                f"Crypto order type '{order.order_type}' is not supported by this "
+                f"adapter for {order.symbol} -- only 'market' is implemented for crypto"
+            )
+
         split = None
         if order.order_type == "market":
             split = self._plan_flip_split(order)
@@ -279,8 +347,8 @@ class AlpacaBroker(Broker):
         close_qty, open_qty = split
         close_coid = self._suffix_coid(order.client_order_id, "close")
         log.info(
-            "Flip %s: flattening %.0f share(s) first (order_id suffix=%s) "
-            "before opening %.0f in the new direction",
+            "Flip %s: flattening %s share(s) first (order_id suffix=%s) "
+            "before opening %s in the new direction",
             order.symbol, close_qty, close_coid, open_qty,
         )
         close_status = self._submit_single(order, qty=close_qty, client_order_id=close_coid)
@@ -306,7 +374,7 @@ class AlpacaBroker(Broker):
         )
         return open_status
 
-    def _plan_flip_split(self, order: OrderRequest) -> tuple[int, int] | None:
+    def _plan_flip_split(self, order: OrderRequest) -> tuple[float, float] | None:
         """Return ``(close_qty, open_qty)`` if *order* would flip the
         symbol's position through zero, else ``None`` (submit as one order,
         unchanged from today's behavior).
@@ -318,6 +386,12 @@ class AlpacaBroker(Broker):
         exactly today's behavior, rather than risking a wrong split from a
         stale read).
         """
+        if _is_crypto_symbol(order.symbol):
+            # Alpaca crypto is long-only (no short side), so a position can
+            # never be crossed through zero -- the split logic below (built
+            # for equities' long<->short flips) doesn't apply.
+            return None
+
         pos = self.get_position(order.symbol)
         current = pos.quantity if pos is not None else 0.0
         if current == 0.0:
@@ -329,6 +403,12 @@ class AlpacaBroker(Broker):
             close_qty = abs(current)
         else:
             return None
+
+        if order.fractional:
+            open_qty = order.quantity - close_qty
+            if close_qty <= 0 or open_qty <= 0:
+                return None
+            return close_qty, open_qty
 
         close_int = int(round(close_qty))
         open_int = int(round(order.quantity - close_qty))
@@ -386,6 +466,13 @@ class AlpacaBroker(Broker):
         """
         if not order.extended_hours:
             return {}
+        if _is_crypto_symbol(order.symbol):
+            log.warning(
+                "extended_hours requested for crypto order %s -- crypto trades "
+                "24/7 and Alpaca has no extended_hours concept for it; ignoring the flag",
+                order.symbol,
+            )
+            return {}
         if order.order_type == "limit":
             return {"extended_hours": True}
         log.warning(
@@ -400,9 +487,30 @@ class AlpacaBroker(Broker):
         self, order: OrderRequest, *, qty: float, client_order_id: str | None,
     ) -> OrderStatus:
         client = self._ensure_connected()
-        tif = getattr(TimeInForce, _TIF_MAP.get(order.time_in_force, "day").upper(), TimeInForce.DAY)
+        is_crypto = _is_crypto_symbol(order.symbol)
+
+        tif_key = order.time_in_force
+        if is_crypto and tif_key not in ("gtc", "ioc"):
+            # Alpaca rejects "day" (and any other TIF) for crypto orders --
+            # only gtc/ioc are accepted. See docs.alpaca.markets/docs/crypto-trading
+            # ("the supported time_in_force values are gtc, and ioc").
+            log.warning(
+                "Crypto order for %s requested time_in_force=%s, which Alpaca "
+                "rejects for crypto (only gtc/ioc supported) -- submitting as gtc instead",
+                order.symbol, tif_key,
+            )
+            tif_key = "gtc"
+        tif = getattr(TimeInForce, _TIF_MAP.get(tif_key, "day").upper(), TimeInForce.DAY)
         side = OrderSide.BUY if order.side == "buy" else OrderSide.SELL
         extended_hours_kwarg = self._extended_hours_kwarg(order)
+
+        if is_crypto:
+            # Alpaca crypto quantities are fractional-native, up to 9 decimal
+            # places (docs.alpaca.markets/docs/crypto-trading: "The maximum
+            # decimal places accepted are 9"). Round rather than truncate so
+            # a float-arithmetic artefact one ULP past 9 decimals doesn't get
+            # rejected outright.
+            qty = round(qty, 9)
 
         try:
             if order.order_type == "limit":
@@ -544,7 +652,22 @@ class AlpacaBroker(Broker):
             orders = client.get_orders()
         return [self._map_order(o) for o in orders]
 
+    @staticmethod
+    def _mid_from_quote(quote: Any) -> float:
+        mid = (float(quote.ask_price) + float(quote.bid_price)) / 2
+        return mid if mid > 0 else float(quote.ask_price or quote.bid_price)
+
     def get_current_price(self, symbol: str) -> float:
+        if _is_crypto_symbol(symbol):
+            if self._crypto_data is None:
+                raise BrokerError("Crypto data client not initialized – call connect() first")
+            request = CryptoLatestQuoteRequest(symbol_or_symbols=symbol)
+            quotes = self._crypto_data.get_crypto_latest_quote(request)
+            quote = quotes.get(symbol)
+            if quote is None:
+                raise BrokerError(f"No crypto quote for {symbol}")
+            return self._mid_from_quote(quote)
+
         if self._data is None:
             raise BrokerError("Data client not initialized – call connect() first")
         request = StockLatestQuoteRequest(symbol_or_symbols=symbol)
@@ -552,22 +675,37 @@ class AlpacaBroker(Broker):
         quote = quotes.get(symbol)
         if quote is None:
             raise BrokerError(f"No quote for {symbol}")
-        mid = (float(quote.ask_price) + float(quote.bid_price)) / 2
-        return mid if mid > 0 else float(quote.ask_price or quote.bid_price)
+        return self._mid_from_quote(quote)
 
     def get_current_prices(self, symbols: list[str]) -> dict[str, float]:
-        if self._data is None:
-            raise BrokerError("Data client not initialized – call connect() first")
-        request = StockLatestQuoteRequest(symbol_or_symbols=symbols)
-        quotes = self._data.get_stock_latest_quote(request)
+        crypto_symbols = [s for s in symbols if _is_crypto_symbol(s)]
+        equity_symbols = [s for s in symbols if not _is_crypto_symbol(s)]
         result: dict[str, float] = {}
-        for sym in symbols:
-            quote = quotes.get(sym)
-            if quote is not None:
-                mid = (float(quote.ask_price) + float(quote.bid_price)) / 2
-                result[sym] = mid if mid > 0 else float(quote.ask_price or quote.bid_price)
-            else:
-                log.warning("No quote returned for %s; omitting from prices", sym)
+
+        if equity_symbols:
+            if self._data is None:
+                raise BrokerError("Data client not initialized – call connect() first")
+            request = StockLatestQuoteRequest(symbol_or_symbols=equity_symbols)
+            quotes = self._data.get_stock_latest_quote(request)
+            for sym in equity_symbols:
+                quote = quotes.get(sym)
+                if quote is not None:
+                    result[sym] = self._mid_from_quote(quote)
+                else:
+                    log.warning("No quote returned for %s; omitting from prices", sym)
+
+        if crypto_symbols:
+            if self._crypto_data is None:
+                raise BrokerError("Crypto data client not initialized – call connect() first")
+            request = CryptoLatestQuoteRequest(symbol_or_symbols=crypto_symbols)
+            quotes = self._crypto_data.get_crypto_latest_quote(request)
+            for sym in crypto_symbols:
+                quote = quotes.get(sym)
+                if quote is not None:
+                    result[sym] = self._mid_from_quote(quote)
+                else:
+                    log.warning("No crypto quote returned for %s; omitting from prices", sym)
+
         return result
 
     def is_market_open(self) -> bool:

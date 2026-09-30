@@ -31,19 +31,30 @@ from firm.config import Settings, get_settings
 from firm.data.providers.base import DataProvider, ProviderError
 from firm.data.providers.sentiment_lexicon import score_headline
 from firm.data.schemas import PRICE_COLS, SENTIMENT_COLS
+from firm.time_utils import utcnow
 
 log = logging.getLogger("firm.data.providers.alpaca")
 
 try:
     from alpaca.data.enums import Adjustment, DataFeed
+    from alpaca.data.historical.crypto import CryptoHistoricalDataClient
     from alpaca.data.historical.news import NewsClient
     from alpaca.data.historical.stock import StockHistoricalDataClient
-    from alpaca.data.requests import NewsRequest, StockBarsRequest
+    from alpaca.data.requests import CryptoBarsRequest, NewsRequest, StockBarsRequest
     from alpaca.data.timeframe import TimeFrame
 
     _HAS_ALPACA = True
 except ImportError:
     _HAS_ALPACA = False
+
+
+def _is_crypto_symbol(symbol: str) -> bool:
+    """True for this codebase's canonical crypto form ("BASE/QUOTE", e.g.
+    "BTC/USD") -- mirrors ``firm.brokers.alpaca``'s convention of the same
+    name (kept as a local copy rather than a cross-import since the two
+    modules -- broker vs data provider -- have no other dependency on each
+    other)."""
+    return "/" in symbol
 
 
 class AlpacaProvider(DataProvider):
@@ -67,9 +78,78 @@ class AlpacaProvider(DataProvider):
         self._secret_key = secret_key or self.settings.require("alpaca_secret_key")
         super().__init__(self._api_key)
         self._stock_client = StockHistoricalDataClient(self._api_key, self._secret_key)
+        self._crypto_client = CryptoHistoricalDataClient(self._api_key, self._secret_key)
         self._news_client = NewsClient(self._api_key, self._secret_key)
 
     def get_prices(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        crypto_symbols = [s for s in symbols if _is_crypto_symbol(s)]
+        equity_symbols = [s for s in symbols if not _is_crypto_symbol(s)]
+        frames: list[pd.DataFrame] = []
+        if equity_symbols:
+            frames.append(self._get_equity_prices(equity_symbols, start, end))
+        if crypto_symbols:
+            frames.append(self._get_crypto_prices(crypto_symbols, start, end))
+        frames = [f for f in frames if not f.empty]
+        if not frames:
+            return self.empty_prices()
+        return pd.concat(frames, ignore_index=True)
+
+    def _get_crypto_prices(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
+        """Daily UTC bars for crypto pairs (e.g. "BTC/USD") via alpaca-py's
+        crypto market-data client. Unlike equities, crypto trades 24/7 with
+        no splits/dividends, so there's no adjustment parameter and
+        ``adj_close`` is just ``close``, mirroring this provider's own
+        equity convention (``adjustment="all"`` already bakes corporate
+        actions into OHLC there too).
+
+        Only *completed* UTC daily bars are returned -- Alpaca can hand back
+        a same-day, still-forming bar when ``end`` is close to "now" (its
+        volume/close aren't final yet), which would leak into any
+        signal computed off it (e.g. BtcTrendSleeve's weekly review). Bars
+        dated on or after the current UTC calendar date are dropped.
+        """
+        try:
+            request = CryptoBarsRequest(
+                symbol_or_symbols=list(symbols),
+                timeframe=TimeFrame.Day,
+                start=pd.Timestamp(start).to_pydatetime(),
+                end=pd.Timestamp(end).to_pydatetime(),
+            )
+            barset = self._crypto_client.get_crypto_bars(request)
+        except Exception as exc:
+            raise ProviderError(f"Alpaca get_crypto_bars failed: {exc}") from exc
+
+        today = utcnow().date()
+        frames: list[pd.DataFrame] = []
+        for sym in symbols:
+            bars = barset.data.get(sym, [])
+            if not bars:
+                log.warning("No crypto historical data for %s", sym)
+                continue
+            rows = [
+                {
+                    "date": bar.timestamp.date(),
+                    "symbol": sym,
+                    "open": bar.open,
+                    "high": bar.high,
+                    "low": bar.low,
+                    "close": bar.close,
+                    "volume": bar.volume,
+                    "adj_close": bar.close,
+                }
+                for bar in bars
+                if bar.timestamp.date() < today
+            ]
+            if not rows:
+                log.info("No completed UTC crypto bars for %s (today's forming bar dropped)", sym)
+                continue
+            frames.append(pd.DataFrame(rows, columns=PRICE_COLS))
+
+        if not frames:
+            return self.empty_prices()
+        return pd.concat(frames, ignore_index=True)
+
+    def _get_equity_prices(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
         try:
             request = StockBarsRequest(
                 symbol_or_symbols=list(symbols),

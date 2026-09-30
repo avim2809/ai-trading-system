@@ -12,6 +12,7 @@ import requests
 from firm.config import Settings, get_settings
 from firm.data.providers.base import DataProvider
 from firm.data.schemas import PRICE_COLS, SENTIMENT_COLS
+from firm.time_utils import utcnow
 
 log = logging.getLogger("firm.data.providers.tiingo")
 
@@ -55,6 +56,12 @@ class TiingoProvider(DataProvider):
         frames: list[pd.DataFrame] = []
         for sym in symbols:
             try:
+                if "/" in sym:
+                    # Crypto pair (e.g. "BTC/USD") -- fallback source for
+                    # BTC daily bars when AlpacaProvider's crypto data client
+                    # is unavailable/fails. See _get_crypto_price_frame.
+                    frames.append(self._get_crypto_price_frame(sym, start, end))
+                    continue
                 data = self._get(
                     f"{_BASE_URL}/tiingo/daily/{sym}/prices",
                     params={"startDate": start, "endDate": end},
@@ -84,6 +91,50 @@ class TiingoProvider(DataProvider):
         if not frames:
             return pd.DataFrame(columns=PRICE_COLS)
         return pd.concat(frames, ignore_index=True)
+
+    def _get_crypto_price_frame(self, symbol: str, start: str, end: str) -> pd.DataFrame:
+        """Daily UTC OHLCV for a crypto pair (e.g. "BTC/USD") via Tiingo's
+        crypto endpoint (``/tiingo/crypto/prices``) -- the fallback source
+        for BTC daily bars used by AlpacaProvider's own crypto client fails
+        or isn't configured (same TIINGO_API_KEY as this provider's equity
+        prices, no separate signup). Tiingo's crypto tickers are the
+        compact lowercase form ("btcusd"), not this codebase's canonical
+        "BTC/USD".
+
+        Drops any bar dated on/after the current UTC calendar date -- same
+        completed-bars-only contract as AlpacaProvider._get_crypto_prices,
+        in case Tiingo ever hands back a still-forming same-day bar.
+        """
+        ticker = symbol.replace("/", "").lower()
+        data = self._get(
+            f"{_BASE_URL}/tiingo/crypto/prices",
+            params={
+                "tickers": ticker,
+                "startDate": start,
+                "endDate": end,
+                "resampleFreq": "1day",
+            },
+        )
+        if not data:
+            log.warning("No crypto price data for %s", symbol)
+            return pd.DataFrame(columns=PRICE_COLS)
+        price_data = data[0].get("priceData", []) if isinstance(data, list) else []
+        if not price_data:
+            log.warning("No crypto price bars for %s", symbol)
+            return pd.DataFrame(columns=PRICE_COLS)
+        df = pd.DataFrame(price_data)
+        df["date"] = pd.to_datetime(df["date"], utc=True).dt.tz_localize(None).dt.normalize()
+        today = pd.Timestamp(utcnow().date())
+        df = df[df["date"] < today]
+        if df.empty:
+            log.info("No completed UTC crypto bars for %s (today's forming bar dropped)", symbol)
+            return pd.DataFrame(columns=PRICE_COLS)
+        df["symbol"] = symbol
+        df["adj_close"] = df["close"]  # crypto has no splits/dividends to adjust for
+        for col in PRICE_COLS:
+            if col not in df.columns:
+                df[col] = None
+        return df[PRICE_COLS]
 
     def get_fundamentals(self, symbols: list[str], start: str, end: str) -> pd.DataFrame:
         raise NotImplementedError("Tiingo does not provide fundamental data; use FMP.")

@@ -199,6 +199,46 @@ Options, smallest first:
 - Treat it as a forward paper experiment with its bars fixed in advance, not as a deployment.
 - It needs crypto order support in the allocator, and a 24/7 calendar for the weekly review.
 
+**Implementation (built on `feat/btc-trend-sleeve`, not yet merged/deployed):**
+
+- `src/firm/allocation/btc_trend.py`'s `BtcTrendSleeve` implements the rule
+  above against a `Sleeve` ABC (`src/firm/allocation/sleeves.py`) shared with
+  the allocation-engine work: `target_weights(asof, history)` returns the
+  signal-derived target (0 when the trend is off, or before the lookback/vol
+  windows have enough history) for the most recently completed Sunday-UTC
+  review in `history`; `is_rebalance_due(asof, last_rebalance)` gates the
+  weekly cadence (true once per week, on the first check after each
+  Sunday-UTC close). It is a pure function of the closes it's given — no
+  network calls, no hidden state — so the allocator owns the actual
+  held/drifted weight and the rule's own trade-or-hold band (`band_abs`,
+  exposed as a public attribute, matching this codebase's existing
+  `rebalance_band_pct` convention applied per-sleeve).
+- Verified by construction: a parity test
+  (`tests/test_btc_trend_sleeve.py::TestParityWithEvaluationHarness`)
+  cross-checks the sleeve's weekly on/off + target weight against the
+  evaluation harness's own `c1_signal` computation on every Sunday
+  2014–2026 using the cached Tiingo BTC/USD daily series — zero mismatches
+  across 600+ weekly reviews.
+- `src/firm/brokers/alpaca.py`'s `AlpacaBroker` gained crypto order support:
+  symbols of the form `"BASE/QUOTE"` (e.g. `"BTC/USD"`) route to Alpaca's
+  crypto endpoints with gtc/ioc time-in-force (Alpaca rejects `day` for
+  crypto), fractional quantities (no int-rounding, rounded to Alpaca's
+  9-decimal-place maximum), no `extended_hours` (crypto trades 24/7), and
+  market orders only (this adapter isn't yet built/tested against crypto
+  limit/stop_limit, even though Alpaca supports them). Positions are
+  normalised between Alpaca's compact form (`"BTCUSD"`, used by its
+  positions endpoints) and this codebase's canonical slash form
+  (`"BTC/USD"`, used everywhere else, including order submission).
+- `src/firm/data/providers/alpaca.py` and `.../tiingo.py` both gained daily
+  BTC/USD bar support (Alpaca's `CryptoHistoricalDataClient` primary,
+  Tiingo's `/tiingo/crypto/prices` as fallback), always dropping the current
+  UTC day's still-forming bar.
+- **Still forward-paper-test-only, not deployed**: no `config/live*.yaml`
+  change has been made, and the sleeve isn't wired into either live
+  instance's engine loop yet. This is a Tier C, not-statistically-proven
+  rule (§3/§6) — treat any run of it strictly as a forward test with its
+  bars fixed in advance, exactly as this proposal already said above.
+
 ## 5. What was tried and failed, in one list
 
 - **Signal combination** (5 methods × 2 engines). The placebo is indistinguishable.
