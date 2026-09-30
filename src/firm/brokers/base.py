@@ -55,6 +55,16 @@ class OrderRequest:
     # without it rather than raising, so a misconfigured combination degrades
     # to a regular-hours order instead of crashing the submission.
     extended_hours: bool = False
+    # Set by an allocator/sleeve (e.g. src/firm/allocation/btc_trend.py's
+    # BtcTrendSleeve) whose sizing is inherently sub-share, so the quantity
+    # must be submitted exactly as computed rather than rounded/truncated to
+    # a whole share/coin. Crypto symbols (see AlpacaBroker._is_crypto_symbol)
+    # are always treated as fractional regardless of this flag -- Alpaca
+    # crypto quantities are fractional-native (up to 9 decimal places) and
+    # never round to an integer. This flag exists for non-crypto instruments
+    # an allocator may size fractionally (e.g. fractional equities); no
+    # current strategy uses it for equities yet.
+    fractional: bool = False
 
 
 @dataclass

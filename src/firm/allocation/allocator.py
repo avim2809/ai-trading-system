@@ -299,7 +299,12 @@ class Allocator:
             actual_w = actual_mv / nav
             sleeves_for_sym = owners.get(sym, [])
             is_due = any(due.get(n, False) for n in sleeves_for_sym)
-            drifted = abs(actual_w - target_w) > self.band_abs + _EPS
+            owner_objs = [s for s in self.sleeves if s.name in sleeves_for_sym]
+            # A sleeve can opt out of the daily NAV-level drift trigger
+            # (``drift_check = False``) when its own pre-registered rule
+            # trades only at its review, e.g. the weekly BTC trend rule.
+            drift_enabled = any(getattr(s, "drift_check", True) for s in owner_objs)
+            drifted = drift_enabled and abs(actual_w - target_w) > self.band_abs + _EPS
             if drifted:
                 plan.drift_symbols.append(sym)
             if not (is_due or drifted):
@@ -308,6 +313,23 @@ class Allocator:
                     sym, actual_w, target_w, self.band_abs,
                 )
                 continue
+            if is_due and not drifted and len(owner_objs) == 1:
+                # Sleeve-level trade band, in units of the sleeve's own
+                # capital (``band_within``): at a review, trade only on an
+                # on/off flip or when the within-sleeve gap exceeds the band
+                # -- the pre-registered rule's own "trade if flips or
+                # |target - held| > band".
+                owner = owner_objs[0]
+                band_within = getattr(owner, "band_within", None)
+                if band_within is not None and owner.weight > 0:
+                    flip = (target_w > _EPS) != (actual_w > _EPS)
+                    gap_within = abs(target_w - actual_w) / owner.weight
+                    if not flip and gap_within <= float(band_within) + _EPS:
+                        log.info(
+                            "Allocation %s: sleeve %s review, no flip and within-sleeve gap %.4f "
+                            "<= band %.4f; holding", sym, owner.name, gap_within, band_within,
+                        )
+                        continue
             price = float(prices.get(sym) or 0.0)
             if price <= 0 or not math.isfinite(price):
                 msg = f"{sym}: no usable price; cannot trade it this run"
