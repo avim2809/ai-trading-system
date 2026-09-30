@@ -51,7 +51,7 @@ EODHD = Path(__file__).resolve().parents[1] / "data" / "research" / "eodhd"
 
 CLEANING_RULES = {
     "version": 2,
-    "frozen_at": "2026-09-30T22:40:00Z",
+    "frozen_at": "2026-09-30T18:23:17Z",  # UTC time of commit aa22da3 (v1: 18:07:57Z, commit 53161f6)
     "v2_change": "asset='nav' skips the volume rule (before any shortlist prereg froze)",
     "drop_nonpositive_or_missing_price": ["open", "close", "adjusted_close"],
     "drop_zero_or_missing_volume": True,
