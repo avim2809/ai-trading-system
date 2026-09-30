@@ -21,13 +21,13 @@ import eodhd_s3_bond_commodity_trend_preregistered_bars as prereg  # noqa: E402
 
 class TestDraftStatus:
     def test_is_draft_not_frozen(self):
-        assert prereg.DRAFT is True
-        assert prereg.PREREGISTERED_AT is None
+        assert prereg.DRAFT is False
+        assert prereg.PREREGISTERED_AT == "2026-09-30T19:18:54Z"
 
     def test_cleaning_fingerprint_matches_frozen_rule(self):
         # v2, after Amendment 1 — same value asserted in tests/test_eodhd_clean.py
         # for the shared, frozen cleaning rule this design commits to using.
-        assert prereg.CLEANING["fingerprint"] == "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd"
+        assert prereg.CLEANING["fingerprint"] == "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054"
         assert prereg.CLEANING["version"] == 2
 
     def test_amendment_1_is_recorded(self):

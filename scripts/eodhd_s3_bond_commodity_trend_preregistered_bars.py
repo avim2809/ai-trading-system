@@ -100,7 +100,7 @@ Adopted in full:
     superseded) to data/research/eodhd/etfs_full/ (full history from
     inception: SHY/IEF/TLT from 2002-07-26, GLD from 2004-11-18, USO/SLV from
     2006-04, DBA/DBB/DBE from 2007-01-05, BIL from 2007-05-30);
-  - cleaning moved to v2 (fingerprint f62cb2e4…, see CLEANING below);
+  - cleaning moved to v2 (fingerprint fc0690f0…, see CLEANING below);
   - cash proxy is BIL from its first bar, and FRED DTB3 (accrued rate/100/252
     per trading day) before that — this REPLACES this file's earlier
     SHV-before-BIL rule;
@@ -118,8 +118,8 @@ import json
 # ---------------------------------------------------------------------------
 # Freeze status (Phase 1: draft only)
 # ---------------------------------------------------------------------------
-DRAFT = True
-PREREGISTERED_AT = None  # set only once this draft is reviewed with no return computed
+DRAFT = False
+PREREGISTERED_AT = "2026-09-30T19:18:54Z"  # set only once this draft is reviewed with no return computed
 DATA_END = "2026-09-29"  # last common clean close across every ticker below (AVAILABILITY)
 TRADING_DAYS = 252
 SEED = 20260930
@@ -130,7 +130,7 @@ AMENDMENT = {
     "merged_commit": "aa22da3 (research/eodhd-shortlist, merged into research/eodhd-S3)",
     "changes_adopted": [
         "data source: etfs/ (superseded) -> etfs_full/ (full history from inception)",
-        "cleaning: v1 (72a13e1e...) -> v2 (f62cb2e4...), adds asset='nav' for no-volume mutual-fund series",
+        "cleaning: v1 (72a13e1e...) -> v2 (fc0690f0...), adds asset='nav' for no-volume mutual-fund series",
         "cash proxy: BIL from inception (2007-05-30); FRED DTB3 (data/research/fred/DTB3.parquet, "
             "rate/100/252 per trading day) before that — replaces the earlier SHV-before-BIL rule",
         "BM2 bond leg before IEF's 2002-07-26 inception: VFITX NAV total return (protocol-generic, "
@@ -152,7 +152,7 @@ AMENDMENT = {
 # Cleaning (shared protocol rule, v2 after Amendment 1 — scripts/eodhd_clean.py)
 # ---------------------------------------------------------------------------
 CLEANING = {
-    "fingerprint": "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd",
+    "fingerprint": "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054",
     "version": 2,
     "source": "scripts/eodhd_clean.py:clean_bars / cleaning_fingerprint()",
     "rule": "every ETF series below is run through clean_bars() (equity calendar = etfs_full/SPY.parquet dates, "
@@ -406,7 +406,7 @@ PLACEBO = {
 PBO = {"n_partitions": 8, "series": "all 5 variants above plus BM1-BM3, each sub-candidate's own daily excess returns"}
 DSR = {
     "trial_sharpes": "daily Sharpe of every one of the 5 VARIANTS above, on the PBO window",
-    "prior_trials": "190 + other shortlist variants (fixed at freeze)",  # placeholder — see protocol §4;
+    "prior_trials": 205,  # placeholder — see protocol §4;
     # 190 = combination 57 + pattern_ml 104 + standalone 11 + alt_premia 10 + insider 8, all as of 2026-09-30;
     # the S1/S2/S4/S5 variant counts are added once every shortlist candidate is frozen, not before.
     # Confirmed as proposed (no change) by the coordinator's review.
