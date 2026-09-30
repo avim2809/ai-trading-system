@@ -68,8 +68,8 @@ def _save(df: pd.DataFrame, path: Path) -> None:
     tmp.replace(path)
 
 
-def fetch_eod(client: Client, code: str, path: Path) -> dict:
-    status, data = client.get(f"eod/{code}", **{"from": START})
+def fetch_eod(client: Client, code: str, path: Path, start: str = START) -> dict:
+    status, data = client.get(f"eod/{code}", **{"from": start})
     if status != 200:
         return {"status": "error", "http": status}
     if not isinstance(data, list) or not data or not isinstance(data[0], dict) or "date" not in data[0]:
@@ -104,13 +104,15 @@ def _merge_manifest(path: Path, updates: dict) -> dict:
     return merged
 
 
-def jobs(client: Client, only: set[str]) -> list[tuple[str, callable]]:
+def jobs(client: Client, only: set[str], start: str = START, suffix: str = "") -> list[tuple[str, callable]]:
+    """(manifest key, output path, fetch fn) per item. ``suffix`` writes EOD jobs to
+    ``<kind><suffix>/`` (e.g. ``etfs_full/`` for a longer ``start``), leaving the originals."""
     out: list[tuple[str, callable]] = []
     if "forex" in only:
         s, d = client.get("exchange-symbol-list/FOREX")
         for code in sorted({x["Code"] for x in (d if isinstance(d, list) else [])}):
-            p = OUT / "forex" / f"{_safe(code)}.parquet"
-            out.append((f"forex:{code}", p, lambda c=code, p=p: fetch_eod(client, f"{c}.FOREX", p)))
+            p = OUT / f"forex{suffix}" / f"{_safe(code)}.parquet"
+            out.append((f"forex:{code}", p, lambda c=code, p=p: fetch_eod(client, f"{c}.FOREX", p, start)))
     if "crypto" in only:
         codes: dict[str, str] = {}
         for params, flag in (({}, "active"), ({"delisted": 1}, "delisted")):
@@ -120,12 +122,12 @@ def jobs(client: Client, only: set[str]) -> list[tuple[str, callable]]:
         pd.DataFrame({"code": list(codes), "listing": list(codes.values())}).to_parquet(
             OUT / "crypto_symbols.parquet")
         for code in sorted(codes):
-            p = OUT / "crypto" / f"{_safe(code)}.parquet"
-            out.append((f"crypto:{code}", p, lambda c=code, p=p: fetch_eod(client, f"{c}.CC", p)))
+            p = OUT / f"crypto{suffix}" / f"{_safe(code)}.parquet"
+            out.append((f"crypto:{code}", p, lambda c=code, p=p: fetch_eod(client, f"{c}.CC", p, start)))
     if "etfs" in only:
         for sym in ETFS:
-            p = OUT / "etfs" / f"{sym}.parquet"
-            out.append((f"etf:{sym}", p, lambda s=sym, p=p: fetch_eod(client, f"{s}.US", p)))
+            p = OUT / f"etfs{suffix}" / f"{sym}.parquet"
+            out.append((f"etf:{sym}", p, lambda s=sym, p=p: fetch_eod(client, f"{s}.US", p, start)))
     if "us_universe" in only:
         # Every exchange-listed US common stock, ACTIVE AND DELISTED: a
         # survivorship-free universe for breadth / 52-week-high / cross-sectional
@@ -140,8 +142,8 @@ def jobs(client: Client, only: set[str]) -> list[tuple[str, callable]]:
         uni = pd.concat(frames, ignore_index=True).drop_duplicates("Code")
         uni.to_parquet(OUT / "us_universe_symbols.parquet")
         for code in sorted(uni["Code"]):
-            p = OUT / "us_universe" / f"{_safe(code)}.parquet"
-            out.append((f"us:{code}", p, lambda c=code, p=p: fetch_eod(client, f"{c}.US", p)))
+            p = OUT / f"us_universe{suffix}" / f"{_safe(code)}.parquet"
+            out.append((f"us:{code}", p, lambda c=code, p=p: fetch_eod(client, f"{c}.US", p, start)))
     if "actions" in only:
         for f in sorted((OUT / "prices").glob("*.parquet")):
             t = f.stem
@@ -157,15 +159,18 @@ def main() -> int:
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--max-rps", type=float, default=MAX_RPS,
                     help="per-process rate; concurrent runs must sum below EODHD's ~16/s")
+    ap.add_argument("--start", default=START, help="first date requested for EOD jobs")
+    ap.add_argument("--suffix", default="", help="write EOD jobs to <kind><suffix>/ with their own manifest")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     only = {x.strip() for x in args.only.split(",") if x.strip()}
-    manifest_path = OUT / "extras_manifest.json"
+    manifest_path = OUT / f"extras_manifest{args.suffix}.json"
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     client = Client(_key(), max_rps=args.max_rps)
-    todo = [(k, fn) for k, p, fn in jobs(client, only)
+    todo = [(k, fn) for k, p, fn in jobs(client, only, args.start, args.suffix)
             if not p.exists() and manifest.get(k, {}).get("status") != "empty"]
-    log.info("extras: %d items to fetch (%s) at %.1f req/s", len(todo), sorted(only), args.max_rps)
+    log.info("extras: %d items to fetch (%s) from %s into *%s at %.1f req/s", len(todo), sorted(only),
+             args.start, args.suffix, args.max_rps)
     updates: dict = {}
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures = {pool.submit(fn): k for k, fn in todo}
