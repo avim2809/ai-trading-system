@@ -406,5 +406,53 @@
     "PBO['series'] includes BM2_60_40 itself as one of the 7 series being excess-differenced against BM2 -- that column is identically 0 by construction (a series can't be excess vs itself). Implemented literally (BM2's column is all zeros); does not appear to break cscv_pbo mechanically (a constant column never wins an in-sample ranking) but is a literal degenerate case worth flagging.",
     "The bond/cash-leg proxy splice (VFITX->IEF, DTB3->BIL) leaves the real ETF's OWN first trading day return undefined (no prior close in ITS OWN series); implemented as: that one day uses the proxy's return for the same date (see _splice_returns docstring) -- a mechanical choice, not a deviation from PROXIES' handoff DATE."
   ],
-  "A7_status": "PENDING -- every reported tier is conditional on A7 (independent recompute)"
+  "A7_status": "PENDING -- every reported tier is conditional on A7 (independent recompute)",
+  "posthoc_static_mix_diagnostic": {
+    "V1_primary": {
+      "note": "post-hoc, not a bar -- does not change the frozen tier",
+      "variant": "V1_primary",
+      "realised_avg_spy_weight": 0.5239248596315522,
+      "V1_primary": {
+        "sharpe": 0.9058814801547755,
+        "cagr": 0.07245265538850276,
+        "max_dd": 0.20905868523689897,
+        "calmar": 0.34656611040293117
+      },
+      "static_mix": {
+        "sharpe": 0.8093987130251916,
+        "cagr": 0.07313819270343669,
+        "max_dd": 0.2710526078540564,
+        "calmar": 0.26983024912572207
+      },
+      "sharpe_gap_variant_minus_static": 0.09648276712958392,
+      "bootstrap_99pct_one_sided": {
+        "lb": -0.10355462714805642,
+        "ub": 0.28848178372153416,
+        "alpha_one_sided": 0.01
+      }
+    },
+    "V3_stricter_threshold": {
+      "note": "post-hoc, not a bar -- does not change the frozen tier",
+      "variant": "V3_stricter_threshold",
+      "realised_avg_spy_weight": 0.552367069230056,
+      "V3_stricter_threshold": {
+        "sharpe": 0.9316868819592029,
+        "cagr": 0.07833876863606926,
+        "max_dd": 0.1875611634368748,
+        "calmar": 0.41767051984850156
+      },
+      "static_mix": {
+        "sharpe": 0.7899458469535054,
+        "cagr": 0.07492423092474354,
+        "max_dd": 0.2912024028411928,
+        "calmar": 0.2572926260007664
+      },
+      "sharpe_gap_variant_minus_static": 0.14174103500569746,
+      "bootstrap_99pct_one_sided": {
+        "lb": -0.03050245822969541,
+        "ub": 0.297883506570049,
+        "alpha_one_sided": 0.01
+      }
+    }
+  }
 }
