@@ -138,6 +138,22 @@ def _make_inputs(n_months: int = 6, on_months: set[int] | None = None) -> ev.Inp
 
 
 class TestOverlayWeights:
+    def test_on_override_is_used_directly_not_rethresholded(self):
+        # Regression test for a real bug found while building this harness:
+        # variant_returns(on_override=...) must treat the override as the
+        # FINAL on/off array, not re-compare it against the variant's own
+        # threshold. V4's threshold is 0.0, so re-comparing a boolean
+        # override (values 0/1) against 0.0 would silently force "off" on
+        # every single day (0 < 0.0 and 1 < 0.0 are both False) -- exactly
+        # what a naive re-threshold bug produces.
+        inp = _make_inputs(n_months=3, on_months=set())
+        forced_on = np.ones(len(inp.dates), dtype=bool)
+        _, on = ev.variant_returns(inp, "V4_alt_measure", on_override=forced_on)
+        assert on.all()
+        forced_off = np.zeros(len(inp.dates), dtype=bool)
+        _, on2 = ev.variant_returns(inp, "V4_alt_measure", on_override=forced_off)
+        assert not on2.any()
+
     def test_off_state_is_plain_60_40_for_every_variant(self):
         inp = _make_inputs(n_months=3, on_months=set())
         for vid in ev.VARIANT_IDS:

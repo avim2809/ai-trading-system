@@ -277,21 +277,28 @@ def _cost_matrix(inp: Inputs, stress: bool) -> np.ndarray:
     return cost
 
 
-def _variant_decision_states(inp: Inputs, variant_id: str, signal_override: np.ndarray | None = None) -> np.ndarray:
-    """Bool array (len(inp.dates)): True on a rebalance day where the overlay is ON (SPY cut)."""
+def _variant_decision_states(inp: Inputs, variant_id: str) -> np.ndarray:
+    """Bool array (len(inp.dates)): True on a day where the variant's OWN measure/threshold
+    reads "below" (overlay ON, SPY cut). NaN signal (not enough history yet) reads as OFF."""
     v = prereg.VARIANTS[variant_id]
     measure = inp.breadth_pct_above_prior if v["measure"] == "pct_above_200sma" else inp.breadth_net_ad_prior
-    sig = signal_override if signal_override is not None else measure.to_numpy()
+    sig = measure.to_numpy()
     on = sig < v["threshold"]
     return np.where(np.isfinite(sig), on, False)
 
 
 def variant_returns(inp: Inputs, variant_id: str, stress: bool = False,
                      on_override: np.ndarray | None = None) -> tuple[pd.Series, np.ndarray]:
-    """Net daily returns for one overlay variant, and its daily on/off state array."""
+    """Net daily returns for one overlay variant, and its daily on/off state array.
+
+    ``on_override``, when given, is used DIRECTLY as the final bool on/off
+    array (e.g. a placebo's already-permuted daily state) -- it is NOT
+    re-compared against the variant's threshold (that comparison only
+    happens once, inside ``_variant_decision_states``, for the REAL signal).
+    """
     rets = _rets_matrix(inp)
     cost = _cost_matrix(inp, stress)
-    on = _variant_decision_states(inp, variant_id, on_override)
+    on = np.asarray(on_override, dtype=bool) if on_override is not None else _variant_decision_states(inp, variant_id)
     destination_is_cash_leg = prereg.VARIANTS[variant_id]["destination"] == "BIL"
     fom = inp.first_of_month
 
