@@ -12,7 +12,10 @@ Rules, applied in order:
 
 1. Drop bars with a missing or non-positive open, close or adjusted_close.
 2. Drop bars with zero or missing volume (no trade: the quote is not executable).
-3. Equities/ETFs: drop bars whose date is not an exchange session, taken as the
+   Skipped for asset="nav": mutual-fund NAV series (e.g. VFITX) carry no volume.
+   They serve only as benchmark/cash proxies before an ETF existed, never as a
+   traded holding.
+3. Equities/ETFs/NAV funds: drop bars whose date is not an exchange session, taken as the
    dates of the SPY series. Crypto trades every day: no calendar filter.
 4. Spike reversal: a bar whose adjusted close moves beyond +100% / -50% against
    the previous kept bar, and where one of the next 5 kept bars is back within
@@ -47,11 +50,12 @@ log = logging.getLogger(__name__)
 EODHD = Path(__file__).resolve().parents[1] / "data" / "research" / "eodhd"
 
 CLEANING_RULES = {
-    "version": 1,
-    "frozen_at": "2026-09-30T21:30:00Z",
+    "version": 2,
+    "frozen_at": "2026-09-30T22:40:00Z",
+    "v2_change": "asset='nav' skips the volume rule (before any shortlist prereg froze)",
     "drop_nonpositive_or_missing_price": ["open", "close", "adjusted_close"],
     "drop_zero_or_missing_volume": True,
-    "equity_calendar": "dates of data/research/eodhd/etfs/SPY.parquet",
+    "equity_calendar": "dates of data/research/eodhd/etfs_full/SPY.parquet (from 1993-01-29)",
     "crypto_calendar": "none (all days)",
     "spike_reversal": {"jump_up": 1.0, "jump_down": -0.5, "revert_within_bars": 5, "revert_band": 0.25},
     "segment_break_up_jump": 1.5,
@@ -95,10 +99,10 @@ def clean_bars(d: pd.DataFrame, asset: str = "equity",
     """Return (clean bars with a ``segment`` column, per-rule drop counts).
 
     ``d`` needs date, open, close, adjusted_close, volume. ``calendar`` is required
-    for asset="equity" (use ``equity_calendar()``) and ignored for "crypto".
+    for asset="equity"/"nav" (use ``equity_calendar()``) and ignored for "crypto".
     """
-    if asset not in ("equity", "crypto"):
-        raise ValueError(f"asset must be 'equity' or 'crypto', not {asset!r}")
+    if asset not in ("equity", "crypto", "nav"):
+        raise ValueError(f"asset must be 'equity', 'crypto' or 'nav', not {asset!r}")
     d = d.copy()
     d["date"] = pd.to_datetime(d["date"])
     d = d.sort_values("date").drop_duplicates("date").reset_index(drop=True)
@@ -109,10 +113,10 @@ def clean_bars(d: pd.DataFrame, asset: str = "equity",
     bad_px = ~(px > 0).all(axis=1)
     rep["price"] = int(bad_px.sum())
     d = d[~bad_px]
-    bad_vol = ~(d["volume"] > 0)
+    bad_vol = ~(d["volume"] > 0) if asset != "nav" else pd.Series(False, index=d.index)
     rep["zero_volume"] = int(bad_vol.sum())
     d = d[~bad_vol]
-    if asset == "equity":
+    if asset in ("equity", "nav"):
         if calendar is None:
             raise ValueError("equity cleaning needs the exchange calendar")
         off = ~d["date"].isin(calendar)
@@ -128,8 +132,10 @@ def clean_bars(d: pd.DataFrame, asset: str = "equity",
     return d, rep
 
 
-def equity_calendar() -> pd.DatetimeIndex:
-    spy = pd.read_parquet(EODHD / "etfs" / "SPY.parquet", columns=["date"])
+def equity_calendar(subdir: str = "etfs_full") -> pd.DatetimeIndex:
+    """Exchange sessions = SPY's dates (from 1993-01-29 in etfs_full/). Before SPY
+    existed there is no calendar: equity bars before 1993-01-29 are dropped."""
+    spy = pd.read_parquet(EODHD / subdir / "SPY.parquet", columns=["date"])
     return pd.DatetimeIndex(pd.to_datetime(spy["date"])).sort_values()
 
 
@@ -137,10 +143,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default="prices", help="subfolder of data/research/eodhd")
     ap.add_argument("--report", action="store_true")
+    ap.add_argument("--asset", choices=["equity", "crypto", "nav"], help="default: crypto for crypto*/, else equity")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    asset = "crypto" if args.dir == "crypto" else "equity"
-    cal = equity_calendar() if asset == "equity" else None
+    asset = args.asset or ("crypto" if args.dir.startswith("crypto") else "equity")
+    cal = equity_calendar() if asset in ("equity", "nav") else None
     totals: dict[str, int] = {}
     worst = []
     for f in sorted((EODHD / args.dir).glob("*.parquet")):
