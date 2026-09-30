@@ -1,0 +1,30 @@
+{
+  "family": "S3",
+  "entries": [
+    {
+      "date": "2026-09-30",
+      "fingerprint": "8baa2481ce901eede120977917d15de90eca5840c8b9d7934fae13c9e47ac9ff",
+      "n_trials": 5,
+      "trials": [
+        "bond_v1",
+        "commodity_v1_primary",
+        "commodity_v2_sensitivity",
+        "combined_v1_primary",
+        "combined_v2_sensitivity"
+      ],
+      "trial_daily_sharpes": [
+        0.00980494651859382,
+        0.015252388005158803,
+        0.018165757377404276,
+        0.03802715493227692,
+        0.038505507651179716
+      ],
+      "tiers": {
+        "bond": "C (conditional on A7)",
+        "commodity": "C (conditional on A7)",
+        "combined": "C (conditional on A7)"
+      }
+    }
+  ],
+  "cumulative_trials": 5
+}
