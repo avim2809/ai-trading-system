@@ -1,0 +1,596 @@
+{
+  "generated_at": "2026-09-30T09:20:50.152799+00:00",
+  "note": "sanity backtest, not a new edge claim; reuses the frozen C1 rule from alt_premia_preregistered_bars.py and its cost model",
+  "reused_prereg_fingerprint": "76598975432f3bc69b61b7f3d8a18484901c6d17f591818d02545e1df8992dec",
+  "window": {
+    "start": "2015-02-01",
+    "end": "2026-09-28",
+    "reason": "BTC data availability (C1's own eval_start)"
+  },
+  "portfolio_definition": {
+    "core_weight": 0.92,
+    "satellite_weight": 0.08,
+    "core_targets": {
+      "SPY": 0.6,
+      "IEF": 0.4
+    },
+    "core_rebalance": "monthly (first US trading day) + 2%-absolute daily drift band",
+    "satellite_rule": "C1_btc_trend, unmodified (see alt_premia_preregistered_bars.CANDIDATES['C1_btc_trend'])",
+    "capital_treatment": "sleeved: 92/8 fixed at inception, sleeves never rebalanced against each other"
+  },
+  "core_rebalance_events_full_history": {
+    "monthly_trades": 290,
+    "drift_band_trades": 60
+  },
+  "kill_switch_live_config": 0.08,
+  "results": {
+    "portfolio_92_8": {
+      "n_days": 2931,
+      "start": "2015-02-02",
+      "end": "2026-09-28",
+      "total_return": 10.357446507573986,
+      "cagr": 0.23233952383642764,
+      "annualized_vol": 0.1772380710772659,
+      "sharpe_above_tbills": 1.1488099448742202,
+      "max_drawdown": 0.2792329026056467,
+      "worst_month": {
+        "month": "2022-11-30",
+        "return": -0.09467808062009653
+      },
+      "drawdown_2020": 0.15467923735199984,
+      "drawdown_2022": 0.19091542882199553
+    },
+    "bm2_60_40_100pct": {
+      "n_days": 2931,
+      "start": "2015-02-02",
+      "end": "2026-09-28",
+      "total_return": 1.683839359155615,
+      "cagr": 0.08858765718488093,
+      "annualized_vol": 0.1032702004182242,
+      "sharpe_above_tbills": 0.6703123884767683,
+      "max_drawdown": 0.21194531223449753,
+      "worst_month": {
+        "month": "2022-09-30",
+        "return": -0.07422463136595925
+      },
+      "drawdown_2020": 0.18652277379427262,
+      "drawdown_2022": 0.21194531223449753
+    },
+    "bm1_spy_100pct": {
+      "n_days": 2931,
+      "start": "2015-02-02",
+      "end": "2026-09-28",
+      "total_return": 3.662753732628767,
+      "cagr": 0.14153227954675973,
+      "annualized_vol": 0.17543621708049145,
+      "sharpe_above_tbills": 0.7228975055750173,
+      "max_drawdown": 0.33699940470543965,
+      "worst_month": {
+        "month": "2020-03-31",
+        "return": -0.12464253025343297
+      },
+      "drawdown_2020": 0.33699940470543965,
+      "drawdown_2022": 0.24497192419553793
+    },
+    "core_92pct_plus_8pct_cash": {
+      "n_days": 2931,
+      "start": "2015-02-02",
+      "end": "2026-09-28",
+      "total_return": 1.5824171754239562,
+      "cagr": 0.08498814403605803,
+      "annualized_vol": 0.09896074481493285,
+      "sharpe_above_tbills": 0.6616112402933848,
+      "max_drawdown": 0.20174556029900403,
+      "worst_month": {
+        "month": "2022-09-30",
+        "return": -0.07029766503902612
+      },
+      "drawdown_2020": 0.18292796268748268,
+      "drawdown_2022": 0.20174556029900403
+    },
+    "satellite_c1_btc_trend_alone": {
+      "n_days": 2931,
+      "start": "2015-02-02",
+      "end": "2026-09-28",
+      "total_return": 109.96470272061715,
+      "cagr": 0.4991318949827275,
+      "annualized_vol": 0.321692071458862,
+      "sharpe_above_tbills": 1.354380169863055,
+      "max_drawdown": 0.4896142368349512,
+      "worst_month": {
+        "month": "2022-11-30",
+        "return": -0.1545430838953935
+      },
+      "drawdown_2020": 0.26493030386793026,
+      "drawdown_2022": 0.22169798241034389
+    }
+  },
+  "satellite_contribution": {
+    "definition": "portfolio_92_8 minus core_92pct_plus_8pct_cash, same 92% core, isolates swapping the unallocated 8%% between cash and the BTC sleeve",
+    "delta_cagr": 0.1473513798003696,
+    "delta_sharpe_above_tbills": 0.48719870458083536,
+    "delta_vol": 0.07827732626233307,
+    "delta_max_drawdown": 0.07748734230664267
+  },
+  "satellite_actual_share": {
+    "start": 0.079510105160263,
+    "end": 0.781617259806529,
+    "max": 0.8338345666030104,
+    "min": 0.07164411613744984,
+    "note": "target is a fixed 8%; with no cross-sleeve rebalancing this drifts with relative sleeve performance"
+  },
+  "core_actual_share_end": 0.21838274019347098,
+  "sensitivity_monthly_sleeve_rebalance": {
+    "n_days": 2931,
+    "start": "2015-02-02",
+    "end": "2026-09-28",
+    "total_return": 2.8530340870543247,
+    "cagr": 0.12296405243199215,
+    "annualized_vol": 0.10018677790616115,
+    "sharpe_above_tbills": 0.9981831183823539,
+    "max_drawdown": 0.19212000624203696,
+    "worst_month": {
+      "month": "2022-04-30",
+      "return": -0.06996296840420779
+    },
+    "drawdown_2020": 0.18494347435898606,
+    "drawdown_2022": 0.19212000624203696,
+    "note": "alternative to the headline 'sleeved, never cross-rebalanced' result: also resets the 92/8 split monthly. Included because the un-rebalanced satellite share drifts to 78% of NAV by 2026-09-28 (see satellite_actual_share)."
+  },
+  "drawdown_distribution": {
+    "episodes_ge_2pct": [
+      {
+        "peak": "2024-03-14",
+        "trough": "2024-08-06",
+        "depth": -0.2792329026056467,
+        "days_to_trough": 99
+      },
+      {
+        "peak": "2017-12-18",
+        "trough": "2018-12-24",
+        "depth": -0.23477391982290297,
+        "days_to_trough": 255
+      },
+      {
+        "peak": "2025-08-14",
+        "trough": "2026-03-30",
+        "depth": -0.22620619428331745,
+        "days_to_trough": 156
+      },
+      {
+        "peak": "2022-03-30",
+        "trough": "2022-12-20",
+        "depth": -0.19091542882199553,
+        "days_to_trough": 183
+      },
+      {
+        "peak": "2020-02-13",
+        "trough": "2020-03-23",
+        "depth": -0.15467923735199984,
+        "days_to_trough": 26
+      },
+      {
+        "peak": "2024-12-17",
+        "trough": "2025-04-16",
+        "depth": -0.10685765942210013,
+        "days_to_trough": 81
+      },
+      {
+        "peak": "2024-01-09",
+        "trough": "2024-01-23",
+        "depth": -0.106015178010894,
+        "days_to_trough": 9
+      },
+      {
+        "peak": "2023-04-14",
+        "trough": "2023-09-27",
+        "depth": -0.10438651634938956,
+        "days_to_trough": 114
+      },
+      {
+        "peak": "2021-09-07",
+        "trough": "2022-02-22",
+        "depth": -0.10428229814296541,
+        "days_to_trough": 116
+      },
+      {
+        "peak": "2019-06-27",
+        "trough": "2019-11-25",
+        "depth": -0.10068920595818143,
+        "days_to_trough": 105
+      },
+      {
+        "peak": "2020-09-02",
+        "trough": "2020-09-23",
+        "depth": -0.08354235946343525,
+        "days_to_trough": 14
+      },
+      {
+        "peak": "2021-01-08",
+        "trough": "2021-01-28",
+        "depth": -0.07949016155332855,
+        "days_to_trough": 13
+      },
+      {
+        "peak": "2015-07-14",
+        "trough": "2015-08-25",
+        "depth": -0.06567021040022769,
+        "days_to_trough": 30
+      },
+      {
+        "peak": "2021-02-22",
+        "trough": "2021-03-01",
+        "depth": -0.06432946226546765,
+        "days_to_trough": 5
+      },
+      {
+        "peak": "2017-01-06",
+        "trough": "2017-01-13",
+        "depth": -0.06264492427961177,
+        "days_to_trough": 5
+      },
+      {
+        "peak": "2015-11-05",
+        "trough": "2016-01-20",
+        "depth": -0.05921878616596765,
+        "days_to_trough": 50
+      },
+      {
+        "peak": "2025-05-23",
+        "trough": "2025-06-06",
+        "depth": -0.05730722190889159,
+        "days_to_trough": 9
+      },
+      {
+        "peak": "2023-12-06",
+        "trough": "2023-12-12",
+        "depth": -0.0495563379565489,
+        "days_to_trough": 4
+      },
+      {
+        "peak": "2020-11-25",
+        "trough": "2020-11-27",
+        "depth": -0.04683264763028172,
+        "days_to_trough": 1
+      },
+      {
+        "peak": "2021-04-16",
+        "trough": "2021-05-12",
+        "depth": -0.04485355281761172,
+        "days_to_trough": 18
+      },
+      {
+        "peak": "2024-11-22",
+        "trough": "2024-11-27",
+        "depth": -0.04277103634401924,
+        "days_to_trough": 3
+      },
+      {
+        "peak": "2023-11-16",
+        "trough": "2023-11-22",
+        "depth": -0.04118343433856397,
+        "days_to_trough": 4
+      },
+      {
+        "peak": "2024-03-05",
+        "trough": "2024-03-06",
+        "depth": -0.040836512807088554,
+        "days_to_trough": 1
+      },
+      {
+        "peak": "2025-07-23",
+        "trough": "2025-08-06",
+        "depth": -0.04019892133566216,
+        "days_to_trough": 10
+      },
+      {
+        "peak": "2020-06-08",
+        "trough": "2020-06-26",
+        "depth": -0.0397657669908984,
+        "days_to_trough": 14
+      },
+      {
+        "peak": "2023-02-21",
+        "trough": "2023-03-01",
+        "depth": -0.03746971213749706,
+        "days_to_trough": 6
+      },
+      {
+        "peak": "2017-06-13",
+        "trough": "2017-07-03",
+        "depth": -0.03598510547306599,
+        "days_to_trough": 14
+      },
+      {
+        "peak": "2016-06-21",
+        "trough": "2016-06-24",
+        "depth": -0.0345937620845157,
+        "days_to_trough": 3
+      },
+      {
+        "peak": "2024-01-03",
+        "trough": "2024-01-04",
+        "depth": -0.0340492998822175,
+        "days_to_trough": 1
+      },
+      {
+        "peak": "2017-11-06",
+        "trough": "2017-11-14",
+        "depth": -0.03339812439045631,
+        "days_to_trough": 6
+      },
+      {
+        "peak": "2017-03-15",
+        "trough": "2017-03-21",
+        "depth": -0.031170623615335735,
+        "days_to_trough": 4
+      },
+      {
+        "peak": "2021-03-15",
+        "trough": "2021-03-24",
+        "depth": -0.030254898874882752,
+        "days_to_trough": 7
+      },
+      {
+        "peak": "2024-12-09",
+        "trough": "2024-12-11",
+        "depth": -0.03004294231188931,
+        "days_to_trough": 2
+      },
+      {
+        "peak": "2024-11-14",
+        "trough": "2024-11-15",
+        "depth": -0.028389671765556623,
+        "days_to_trough": 1
+      },
+      {
+        "peak": "2023-11-13",
+        "trough": "2023-11-15",
+        "depth": -0.028083577923562864,
+        "days_to_trough": 2
+      },
+      {
+        "peak": "2020-12-01",
+        "trough": "2020-12-11",
+        "depth": -0.027502415261446145,
+        "days_to_trough": 8
+      },
+      {
+        "peak": "2015-04-24",
+        "trough": "2015-06-09",
+        "depth": -0.025499734006636743,
+        "days_to_trough": 31
+      },
+      {
+        "peak": "2023-03-24",
+        "trough": "2023-03-28",
+        "depth": -0.02486599430050851,
+        "days_to_trough": 2
+      },
+      {
+        "peak": "2023-02-16",
+        "trough": "2023-02-17",
+        "depth": -0.024325909700464887,
+        "days_to_trough": 1
+      },
+      {
+        "peak": "2019-05-28",
+        "trough": "2019-06-05",
+        "depth": -0.024189871646795424,
+        "days_to_trough": 6
+      },
+      {
+        "peak": "2020-08-18",
+        "trough": "2020-08-26",
+        "depth": -0.02212233989504142,
+        "days_to_trough": 6
+      },
+      {
+        "peak": "2017-09-08",
+        "trough": "2017-09-21",
+        "depth": -0.02149085870623524,
+        "days_to_trough": 9
+      },
+      {
+        "peak": "2019-05-16",
+        "trough": "2019-05-23",
+        "depth": -0.02123632113474283,
+        "days_to_trough": 5
+      },
+      {
+        "peak": "2021-08-16",
+        "trough": "2021-08-18",
+        "depth": -0.02068023393040086,
+        "days_to_trough": 2
+      },
+      {
+        "peak": "2015-02-24",
+        "trough": "2015-03-10",
+        "depth": -0.020134079242793423,
+        "days_to_trough": 10
+      }
+    ],
+    "kill_switch_threshold": 0.08,
+    "episodes_that_would_have_tripped_8pct": [
+      {
+        "peak": "2024-03-14",
+        "trough": "2024-08-06",
+        "depth": -0.2792329026056467,
+        "days_to_trough": 99
+      },
+      {
+        "peak": "2017-12-18",
+        "trough": "2018-12-24",
+        "depth": -0.23477391982290297,
+        "days_to_trough": 255
+      },
+      {
+        "peak": "2025-08-14",
+        "trough": "2026-03-30",
+        "depth": -0.22620619428331745,
+        "days_to_trough": 156
+      },
+      {
+        "peak": "2022-03-30",
+        "trough": "2022-12-20",
+        "depth": -0.19091542882199553,
+        "days_to_trough": 183
+      },
+      {
+        "peak": "2020-02-13",
+        "trough": "2020-03-23",
+        "depth": -0.15467923735199984,
+        "days_to_trough": 26
+      },
+      {
+        "peak": "2024-12-17",
+        "trough": "2025-04-16",
+        "depth": -0.10685765942210013,
+        "days_to_trough": 81
+      },
+      {
+        "peak": "2024-01-09",
+        "trough": "2024-01-23",
+        "depth": -0.106015178010894,
+        "days_to_trough": 9
+      },
+      {
+        "peak": "2023-04-14",
+        "trough": "2023-09-27",
+        "depth": -0.10438651634938956,
+        "days_to_trough": 114
+      },
+      {
+        "peak": "2021-09-07",
+        "trough": "2022-02-22",
+        "depth": -0.10428229814296541,
+        "days_to_trough": 116
+      },
+      {
+        "peak": "2019-06-27",
+        "trough": "2019-11-25",
+        "depth": -0.10068920595818143,
+        "days_to_trough": 105
+      },
+      {
+        "peak": "2020-09-02",
+        "trough": "2020-09-23",
+        "depth": -0.08354235946343525,
+        "days_to_trough": 14
+      }
+    ],
+    "n_trips": 11,
+    "pct_of_days_in_ge_8pct_drawdown": 0.3299215284885705,
+    "drawdown_percentiles": {
+      "50": 0.05342252188202956,
+      "75": 0.0928738834440031,
+      "90": 0.16633874634785217,
+      "95": 0.1917316589248702,
+      "99": 0.22188588958479194,
+      "100": 0.2792329026056467
+    },
+    "kill_switch_calibration_note": "11 of 45 distinct drawdown episodes >=2% would have reached or exceeded the live 8% kill-switch threshold; deepest episode 27.9%."
+  },
+  "overlapping_window_vs_legacy": {
+    "start": "2020-01-02",
+    "end": "2026-06-30",
+    "results": {
+      "portfolio_92_8": {
+        "n_days": 1631,
+        "start": "2020-01-02",
+        "end": "2026-06-30",
+        "total_return": 3.9934881441217733,
+        "cagr": 0.28205872243353736,
+        "annualized_vol": 0.21211484612765938,
+        "sharpe_above_tbills": 1.144633689570102,
+        "max_drawdown": 0.2792329026056459,
+        "worst_month": {
+          "month": "2022-11-30",
+          "return": -0.09467808062009653
+        },
+        "drawdown_2020": 0.15467923735199995,
+        "drawdown_2022": 0.19091542882199453
+      },
+      "bm2_60_40_100pct": {
+        "n_days": 1631,
+        "start": "2020-01-02",
+        "end": "2026-06-30",
+        "total_return": 0.8043004758039438,
+        "cagr": 0.09547222175641523,
+        "annualized_vol": 0.12138231202330943,
+        "sharpe_above_tbills": 0.5802024338625112,
+        "max_drawdown": 0.21194531223449786,
+        "worst_month": {
+          "month": "2022-09-30",
+          "return": -0.07422463136595925
+        },
+        "drawdown_2020": 0.18652277379427262,
+        "drawdown_2022": 0.21194531223449786
+      },
+      "bm1_spy_100pct": {
+        "n_days": 1631,
+        "start": "2020-01-02",
+        "end": "2026-06-30",
+        "total_return": 1.546915303267013,
+        "cagr": 0.15539864670496728,
+        "annualized_vol": 0.20320417299158455,
+        "sharpe_above_tbills": 0.6743523351775281,
+        "max_drawdown": 0.33699940470543976,
+        "worst_month": {
+          "month": "2020-03-31",
+          "return": -0.12464253025343297
+        },
+        "drawdown_2020": 0.33699940470543976,
+        "drawdown_2022": 0.2449719241955397
+      },
+      "core_92pct_plus_8pct_cash": {
+        "n_days": 1631,
+        "start": "2020-01-02",
+        "end": "2026-06-30",
+        "total_return": 0.7728218395856921,
+        "cagr": 0.09249726332420494,
+        "annualized_vol": 0.11708969111048907,
+        "sharpe_above_tbills": 0.5738570522970075,
+        "max_drawdown": 0.20174556029900348,
+        "worst_month": {
+          "month": "2022-09-30",
+          "return": -0.07029766503902612
+        },
+        "drawdown_2020": 0.1829279626874829,
+        "drawdown_2022": 0.20174556029900348
+      },
+      "satellite_c1_btc_trend_alone": {
+        "n_days": 1631,
+        "start": "2020-01-02",
+        "end": "2026-06-30",
+        "total_return": 8.909452445852196,
+        "cagr": 0.4252665231105688,
+        "annualized_vol": 0.30131334452020764,
+        "sharpe_above_tbills": 1.2327435892453042,
+        "max_drawdown": 0.34877861481167916,
+        "worst_month": {
+          "month": "2022-11-30",
+          "return": -0.1545430838953935
+        },
+        "drawdown_2020": 0.16037315613993963,
+        "drawdown_2022": 0.22169798241034389
+      },
+      "legacy_C0_live_config": {
+        "n_days": 1631,
+        "start": "2020-01-02",
+        "end": "2026-06-30",
+        "total_return": 0.24623694973471055,
+        "cagr": 0.03459627824941758,
+        "annualized_vol": 0.052936082753963214,
+        "sharpe_above_tbills": 0.13708565844509318,
+        "max_drawdown": 0.1118748862252612,
+        "worst_month": {
+          "month": "2023-01-31",
+          "return": -0.053732748500301075
+        },
+        "drawdown_2020": 0.0557539308611007,
+        "drawdown_2022": 0.06467844659658017
+      }
+    }
+  }
+}
