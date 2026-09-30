@@ -30,8 +30,9 @@ REVISION = (
     "632439e1f60a34ea18fb7529d051d731dac66493778d7265f0231a22e7376e35) specified 'sleeved' capital with no cross-rebalance, under which the backtest let BTC "
     "drift to ~78% of NAV. That is not what the allocator does. Corrected to the allocator's actual "
     "fixed-NAV-weight semantics, BAR_SLEEVE_DRIFT made a gated band check, and the simulated_nav "
-    "reference switched to scripts/allocation_replay.py (the real allocator code). Replay, 2015-02 to "
-    "2026-09: CAGR 12.1%, vol 10.3%, Sharpe above T-bills 0.96, max drawdown 19.4% "
+    "reference switched to scripts/allocation_replay.py (the real allocator code). A 1% cash_buffer "
+    "was added after the code review (Alpaca crypto needs settled cash). Replay, 2015-02 to "
+    "2026-09: CAGR 12.0%, vol 10.1%, Sharpe above T-bills 0.96, max drawdown 19.2% (with the 1% cash buffer) "
     "(docs/allocation_replay_2026_09.json)."
 )
 
@@ -88,7 +89,9 @@ PORTFOLIO = {
         "lag_days": 1,
         "cost_bps_per_side": 25.0,
     },
-    "capital_treatment": "fixed NAV weights, exactly as src/firm/allocation/allocator.py implements them: "
+    "cash_buffer": 0.01,
+    "capital_treatment": "fixed NAV weights (all combined targets scaled by 1 - cash_buffer, so 1% of NAV "
+                          "is always cash; proportions stay exactly 92/8), exactly as src/firm/allocation/allocator.py implements them: "
                           "combined target per symbol = sleeve weight x within-sleeve weight, measured against "
                           "CURRENT total NAV. Core symbols trade on the monthly clock or when their NAV weight "
                           "drifts more than drift_band_abs (0.02) from target (checked daily). The BTC sleeve "

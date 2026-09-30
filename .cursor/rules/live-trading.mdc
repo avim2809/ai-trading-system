@@ -55,3 +55,9 @@ Only `full_auto` and `semi_auto` are valid. Anything else queues all orders.
 - Both `firm-api` services import from this checkout. Never modify tracked `src/` while `ai-trading` / `ai-trading-alpaca` is active: modules are lazily imported mid-run, so an uncommitted edit can produce a mixed-version process (an ImportError failed IBKR cycle 109). Use a `git worktree`, or stop the services first.
 - `signal_combination.estimator` is `legacy` (default, live) or `robust` (off, see `docs/optimal_combination_fix_2026_09.md`). The Live Config / New Backtest pages preserve all `signal_combination` keys on save.
 - `rebalance_fraction` is per *trading day*, not per cycle (2026-09-29): `ExecutionAgent._day_anchor` anchors each (book, symbol) at its first order of the day. Any new per-period knob must be cadence-aware the same way, because live runs ~7 cycles per day and the backtest runs 1.
+
+## Allocation mode (2026-09-30, opt-in, not live until owner sign-off)
+- `strategy_mode: allocation` bypasses the strategy/analyst/PM/risk pipeline; `src/firm/allocation/` sleeves → targets of current NAV → orders via `_execute_orders`. Default `pipeline` unchanged (IBKR).
+- Safety invariants (tested in `tests/test_allocation_review_fixes.py`): market-open only, no planning while orders are open, marks checked vs last close, leverage backstop at last-close prices, `submitting` persisted before routing, `full_auto` required, `cash_buffer`.
+- Deploy only via `docs/allocation_deploy_runbook.md` with owner sign-off on the exact `config/live_alpaca.yaml` diff.
+

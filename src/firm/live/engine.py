@@ -192,6 +192,14 @@ class LiveTradingEngine:
         self._approval_queue = approval_queue
         self._trade_history = trade_history
         self._approval_mode = approval_mode
+        if self._strategy_mode == "allocation" and approval_mode != "full_auto":
+            # The approval queue rounds quantities to whole units and drops
+            # time_in_force (a 0.07 BTC order would round to 0), and queued
+            # orders are invisible to the next day's plan -- refuse rather
+            # than half-work (review finding 2026-09-30).
+            raise ValueError(
+                f"strategy_mode=allocation requires approval_mode=full_auto, got {approval_mode!r}"
+            )
         self._auto_approve: set[str] = set(auto_approve_strategies or [])
 
         self._orchestrator = build_orchestrator(config)
@@ -2865,6 +2873,13 @@ class LiveTradingEngine:
             st["day_status"] = "retry"
             self._persist_allocation_state()
             status = "retry"
+        elif status == "submitting":
+            # Crashed/restarted mid-submission: order ids weren't recorded.
+            # Re-plan against broker positions (the open-orders gate in
+            # _run_allocation_cycle holds off while anything still works).
+            log.warning("Allocation: previous run stopped while submitting -- re-planning "
+                        "against broker positions once no orders are working")
+            status = "retry"
         elif status == "retry":
             # Orders that did submit on the failed attempt must be terminal
             # before re-planning against broker positions.
@@ -2899,7 +2914,7 @@ class LiveTradingEngine:
                 prices[sleeve_sym] = prices[broker_sym]
         fractional = self._allocator.fractional_symbols()
         missing = [s for s in self._allocator.symbols() if s not in prices]
-        quote_syms = [s for s in missing if s not in fractional]
+        quote_syms = list(missing)
         from firm.brokers.ibkr import IBKRBroker
 
         if quote_syms and not isinstance(self._broker, IBKRBroker):
@@ -2911,6 +2926,29 @@ class LiveTradingEngine:
                     "Allocation: live quotes failed for %s -- falling back to last close",
                     quote_syms, exc_info=True,
                 )
+        # Sanity-check every mark against the last completed close: a
+        # one-sided quote (ask=0 -> "mid" = bid/2) once priced SPY at half,
+        # doubling the share count, and every downstream cap checks against
+        # that same price (review finding 2026-09-30). Out-of-tolerance
+        # marks are replaced by the close.
+        for sym in list(prices):
+            series = history.get(sym)
+            if series is None or series.empty:
+                if sym in self._allocator.symbols():
+                    log.warning("Allocation: no completed-close history for %s -- its mark %.4f "
+                                "can't be sanity-checked", sym, prices[sym])
+                continue
+            ref = float(series.iloc[-1])
+            if ref <= 0:
+                continue
+            tol = 0.25 if sym in fractional else 0.10
+            if abs(prices[sym] / ref - 1.0) > tol:
+                log.warning(
+                    "Allocation: %s mark %.4f is %.1f%% from last close %.4f (tolerance %.0f%%) "
+                    "-- using the close", sym, prices[sym], 100 * (prices[sym] / ref - 1.0), ref,
+                    100 * tol,
+                )
+                prices[sym] = ref
         for sym in missing:
             if sym in prices:
                 continue
@@ -2919,6 +2957,81 @@ class LiveTradingEngine:
                 prices[sym] = float(series.iloc[-1])
                 log.info("Allocation: %s priced from last completed close %.4f", sym, prices[sym])
         return prices
+
+    def _allocation_gross_ok(
+        self,
+        orders: list[dict[str, Any]],
+        positions: list[Any],
+        history: dict[str, pd.Series],
+        cash: float,
+    ) -> tuple[bool, str]:
+        """Leverage backstop at an INDEPENDENT reference price (the last
+        completed close), not the planning mark.
+
+        NAV and gross are both valued at the reference, so an ordinary
+        market move since the close can't make a fully invested book look
+        levered (re-review 2026-09-30); a plan passes when projected gross
+        <= max_gross x reference NAV (+1% slack), or when it does not raise
+        gross at all (risk-reducing plans always pass). Fails closed only
+        for symbols the plan actually trades that have no reference price.
+        Returns (ok, reason)."""
+        norm = self._allocator.normalize_symbols
+        qty_before = {s: q for s, q in norm({p.symbol: float(p.quantity) for p in positions}).items()
+                      if abs(q) > 1e-12}
+        broker_mv = norm({p.symbol: abs(float(p.market_value or 0.0)) for p in positions})
+        traded = {o["symbol"] for o in orders}
+
+        def ref(sym: str) -> float | None:
+            series = history.get(sym)
+            if series is not None and not series.empty and float(series.iloc[-1]) > 0:
+                return float(series.iloc[-1])
+            q = qty_before.get(sym)
+            if q and broker_mv.get(sym):
+                return broker_mv[sym] / abs(q)
+            return None
+
+        qty_after = dict(qty_before)
+        for o in orders:
+            signed = float(o["quantity"]) * (1 if o["side"] == "buy" else -1)
+            qty_after[o["symbol"]] = qty_after.get(o["symbol"], 0.0) + signed
+
+        def value(qtys: dict[str, float]) -> tuple[float, float] | None:
+            gross = net = 0.0
+            for sym, q in qtys.items():
+                if abs(q) < 1e-12:
+                    continue
+                r = ref(sym)
+                if r is None:
+                    if sym in traded:
+                        return None
+                    # Untraded position with no usable price: carry the
+                    # broker's own value, don't block the whole plan on it.
+                    mv = broker_mv.get(sym, 0.0)
+                    gross += mv
+                    net += mv if q > 0 else -mv
+                    continue
+                gross += abs(q) * r
+                net += q * r
+            return gross, net
+
+        before, after = value(qty_before), value(qty_after)
+        if after is None or before is None:
+            missing = sorted(s for s in traded if ref(s) is None)
+            return False, f"no reference price for traded symbol(s) {missing}"
+        gross_before, net_before = before
+        gross_after, _ = after
+        nav_ref = float(cash) + net_before
+        if nav_ref <= 0:
+            return False, f"non-positive reference NAV {nav_ref:.2f}"
+        if gross_after <= gross_before + 1e-6:
+            return True, "plan does not raise gross exposure"
+        limit = self._allocator.max_gross * nav_ref * 1.01
+        if gross_after > limit:
+            return False, (
+                f"projected gross {gross_after:,.0f} exceeds {limit:,.0f} "
+                f"({gross_after / nav_ref:.2f}x reference NAV) at last-close prices"
+            )
+        return True, "within max_gross at last-close prices"
 
     def _run_allocation_cycle(self, token: object, now: datetime, result: CycleResult) -> None:
         """strategy_mode: allocation body of ``_run_cycle_work``."""
@@ -2965,11 +3078,80 @@ class LiveTradingEngine:
             result.error = "halted: drawdown kill switch tripped"
             return
 
+        if self._approval_mode != "full_auto":
+            # Guarded at construction and in PUT /live/config; this catches any
+            # other path that changes it at runtime (re-review 2026-09-30).
+            log.error("Cycle %d: allocation requires approval_mode=full_auto (is %r) -- not run",
+                      self._cycle_count, self._approval_mode)
+            result.error = "allocation requires approval_mode=full_auto"
+            result.alerts.append(self._emit_alert(
+                "allocation_approval_mode", "critical",
+                f"Allocation not run: approval_mode is {self._approval_mode!r}, must be full_auto.",
+            ))
+            return
+
+        # Plan only while the US market is actually open -- even on a forced
+        # trigger, and fail closed if the clock can't be read. An order sent
+        # while closed queues at the broker for the next open, and that
+        # day's first run would plan (and submit) the same trades again.
+        try:
+            market_open = bool(self._broker.is_market_open())
+        except Exception:
+            log.warning("Cycle %d: market clock unavailable -- allocation not run (fail closed)",
+                        self._cycle_count, exc_info=True)
+            market_open = False
+        if not market_open:
+            log.info("Cycle %d: allocation mode plans only while the market is open -- skipped",
+                     self._cycle_count)
+            result.skipped = True
+            result.error = "skipped: market closed (allocation mode)"
+            return
+
         day = trading_day_key(now, self._trading_day_timezone)
         should_run, reason = self._allocation_should_run(day)
         if not should_run:
             log.info("Cycle %d: allocation not run -- %s", self._cycle_count, reason)
             return
+
+        # Never plan while any non-protective order is working at the broker
+        # (e.g. left open from a previous day or from a crashed run): its
+        # fill isn't in broker positions yet, so a new plan would buy it
+        # again. Fail closed if open orders can't be read.
+        try:
+            open_orders = [
+                o for o in (self._broker.get_open_orders() or [])
+                if getattr(o, "order_type", "market") not in ("stop", "stop_limit", "trailing_stop")
+            ]
+        except Exception:
+            log.warning("Cycle %d: could not read open orders -- allocation not run (fail closed)",
+                        self._cycle_count, exc_info=True)
+            return
+        if open_orders:
+            desc = sorted({f"{o.symbol}:{o.side}:{o.order_id}" for o in open_orders})[:10]
+            log.warning(
+                "Cycle %d: allocation not run -- %d order(s) still working at the broker: %s",
+                self._cycle_count, len(open_orders), desc,
+            )
+            # Escalate so a stuck order can't block the allocator silently:
+            # a warning on the first blocked cycle of a trading day, critical
+            # once the block has lasted into a second trading day.
+            st = self._allocation_state
+            blocked = st.setdefault("blocked_by_open_orders", {})
+            if blocked.get("last_day") != day:
+                first = blocked.get("since_day") or day
+                if not blocked.get("since_day"):
+                    blocked["since_day"] = day
+                blocked["last_day"] = day
+                self._persist_allocation_state()
+                severity = "critical" if first != day else "warning"
+                result.alerts.append(self._emit_alert(
+                    "allocation_blocked_by_open_orders", severity,
+                    f"Allocation is waiting on {len(open_orders)} open order(s) at the broker "
+                    f"(since {first}): {', '.join(desc)}. Cancel them if they are stuck.",
+                ))
+            return
+        if self._allocation_state.pop("blocked_by_open_orders", None):
+            self._persist_allocation_state()
         log.info("Cycle %d: running allocation (%s)", self._cycle_count, reason)
 
         # One fetch per sleeve, so a symbol one provider can't serve (e.g. a
@@ -2981,9 +3163,29 @@ class LiveTradingEngine:
             if wanted:
                 history.update(self._data_feed.fetch_close_history(wanted, asof=now))
         prices = self._allocation_prices(broker_positions, history)
-        nav = float(account.get("equity") or 0.0) or self._portfolio.nav
-        positions_mv = {p.symbol: float(p.market_value) for p in broker_positions}
         quantities = {p.symbol: float(p.quantity) for p in broker_positions}
+        # Value holdings and NAV at the SAME (sanity-checked) marks the plan
+        # uses: a bad broker mark corrected in `prices` must not survive in
+        # position values/NAV, or the planner trades against an inconsistent
+        # book (re-review 2026-09-30). Broker equity is only the fallback.
+        aliases = self._allocator.symbol_aliases()
+        positions_mv: dict[str, float] = {}
+        for p in broker_positions:
+            mark = prices.get(p.symbol) or prices.get(aliases.get(p.symbol, ""))
+            positions_mv[p.symbol] = (
+                float(p.quantity) * float(mark) if mark else float(p.market_value or 0.0)
+            )
+        cash = account.get("cash")
+        if cash is not None:
+            nav = float(cash) + sum(positions_mv.values())
+            broker_equity = float(account.get("equity") or 0.0)
+            if broker_equity > 0 and abs(nav / broker_equity - 1.0) > 0.02:
+                log.warning(
+                    "Allocation: NAV at sanity-checked marks %.2f differs from broker equity %.2f "
+                    "by more than 2%% -- planning on the checked marks", nav, broker_equity,
+                )
+        else:
+            nav = float(account.get("equity") or 0.0) or self._portfolio.nav
         last_rebalance = self._allocation_last_rebalance()
         plan = self._allocator.plan(
             now, nav, positions_mv, prices, history, last_rebalance, quantities=quantities,
@@ -3007,6 +3209,25 @@ class LiveTradingEngine:
             ))
 
         orders = list(plan.orders)
+        # Backstop: projected gross at an INDEPENDENT reference (the last
+        # completed close, not the planning mark) must stay within the cap.
+        if orders:
+            ok, why = self._allocation_gross_ok(
+                orders, broker_positions, history, float(account.get("cash") or 0.0),
+            )
+            if not ok:
+                max_attempts = int(self._allocation_cfg.get("max_attempts_per_day", 3))
+                left = max_attempts - int(st.get("day_attempts") or 0)
+                log.error("Cycle %d: allocation backstop refused the plan -- %s", self._cycle_count, why)
+                result.alerts.append(self._emit_alert(
+                    "allocation_gross_backstop", "critical",
+                    f"Allocation plan refused by the leverage backstop ({why}) -- no orders sent. "
+                    + (f"{left} same-day attempt(s) left." if left > 0
+                       else "No attempts left today; next try is the next trading day."),
+                ))
+                st["day_status"] = "retry"
+                self._persist_allocation_state()
+                return
         result.orders_generated = len(orders)
         problem_symbols: set[str] = set()
         # Subset of problem_symbols that must NOT trigger a same-day retry
@@ -3033,7 +3254,9 @@ class LiveTradingEngine:
                 {
                     "order_id": s.order_id,
                     "symbol": s.symbol,
-                    "sleeves": plan.symbol_sleeves.get(o.get("symbol"), []),
+                    # Leftover (unmanaged) liquidations get a placeholder so a
+                    # rejection after acceptance still schedules a retry.
+                    "sleeves": plan.symbol_sleeves.get(o.get("symbol")) or ["_unmanaged"],
                 }
                 for s, _strategy, o in submitted
             ]
@@ -3107,6 +3330,12 @@ class LiveTradingEngine:
                 problem_symbols |= {o["symbol"] for o in auto_orders}
                 _finish([])
                 return
+            # Persist before routing: a crash between submission and _finish
+            # must not look like "today not yet allocated" on restart. On
+            # restart, "submitting" re-plans only once the open-orders gate
+            # above shows nothing still working.
+            st["day_status"] = "submitting"
+            self._persist_allocation_state()
             statuses, failed = self._execute_orders(
                 auto_orders, cycle_id=self._cycle_count, extended_hours=False,
             )

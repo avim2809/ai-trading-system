@@ -1009,6 +1009,26 @@ unchanged. Proposed config for the Alpaca instance: `config/live_alpaca_allocati
 - **API/UI**: `GET /api/live/status` → `strategy_mode` + `allocation` (sleeves, last plan,
   current weights from the last broker sync; no broker call). `components/AllocationPanel.tsx`
   on the Live Dashboard.
+- **BTC trend sleeve** (`allocation/btc_trend.py`): the pre-registered C1 rule, parity-tested
+  against the evaluation harness. Weekly review after the Sunday-UTC close; `drift_check=False`
+  (no mid-week NAV-band trades); trades at review only on an on/off flip or a within-sleeve gap
+  > `band_within` 0.10, sized against the sleeve's capital (weight × (1 − `cash_buffer`) × NAV).
+  Missing/short/stale history **raises** (allocator holds the position); a genuine trend-off
+  returns an explicit 0. Alpaca crypto: `BTC/USD` ↔ `BTCUSD` normalized, GTC, fractional to 9
+  decimals, daily bars from `CryptoHistoricalDataClient` (00:00-UTC-stamped UTC days, forming bar
+  dropped), Tiingo crypto fallback.
+- **Hardening after two adversarial reviews** (`tests/test_allocation_review_fixes.py`, 20 tests):
+  plans only while `is_market_open()` (force doesn't bypass, clock error fails closed); never while
+  any non-stop order is open (read failure fails closed; warning then critical alert if it persists);
+  every mark checked vs the last completed close (10%, 25% crypto) and holdings/NAV valued at the
+  checked marks; leverage backstop at last-close prices (risk-reducing plans always pass; untraded
+  unpriced positions carried at broker value; traded unpriced symbols fail closed); `submitting`
+  status persisted before routing (no double-buy after a crash); `approval_mode: full_auto`
+  enforced at start, in `PUT /live/config` and per cycle; `cash_buffer` keeps 1% of NAV in cash.
+- **Reference simulation**: `scripts/allocation_replay.py` replays the real allocator classes over
+  history (2015-02 → 2026-09, 92/8 + 1% cash: CAGR 12.0%, vol 10.1%, Sharpe 0.96 above T-bills,
+  max DD 19.2%). Deploy steps: `docs/allocation_deploy_runbook.md`. Forward test:
+  `scripts/allocation_forward_test_preregistered.py` + `docs/allocation_forward_test_plan.md`.
 
 ### Web UI surfaces (`frontend/src`)
 

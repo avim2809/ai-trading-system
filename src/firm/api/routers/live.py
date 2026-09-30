@@ -1559,6 +1559,12 @@ def update_live_config(body: ConfigUpdateRequest, request: Request) -> dict[str,
         raise HTTPException(status_code=400, detail="Engine not started")
 
     if body.approval_mode is not None:
+        if getattr(engine, "strategy_mode", "pipeline") == "allocation" and body.approval_mode != "full_auto":
+            raise HTTPException(
+                status_code=400,
+                detail="strategy_mode=allocation requires approval_mode=full_auto "
+                       "(the approval queue can't handle fractional crypto orders)",
+            )
         engine._approval_mode = body.approval_mode
     if body.strategies is not None:
         if body.strategies.auto_approve is not None:

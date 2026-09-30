@@ -106,7 +106,11 @@ def _make_engine(
     approval_mode: str = "full_auto",
 ) -> tuple[LiveTradingEngine, MockBroker, StubFeed, MagicMock]:
     broker = broker or AllocBroker()
-    feed = StubFeed(["AAPL", "MSFT"], _history(["SPY", "IEF", "TLT"]))
+    # Last closes consistent with AllocBroker's marks: the allocation-mode
+    # price sanity check replaces marks more than 10% from the last close.
+    feed = StubFeed(["AAPL", "MSFT"], {
+        **_history(["SPY"], price=500.0), **_history(["IEF"], price=95.0), **_history(["TLT"], price=90.0),
+    })
     config: dict[str, Any] = {
         "initial_capital": 100_000,
         "memory_log_path": str(tmp_path / "decisions.jsonl"),

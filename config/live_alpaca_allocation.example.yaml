@@ -74,10 +74,14 @@ allocation:
       weight: 0.92
       weights: {SPY: 0.6, IEF: 0.4}
       rebalance: monthly
-    # Satellite: BTC trend sleeve (firm.allocation.btc_trend.BtcTrendSleeve,
-    # built separately). Engine start FAILS LOUDLY if that module is
-    # missing -- remove this entry to run the core alone (the 8% then sits
-    # in cash). Its remaining keys are passed to BtcTrendSleeve(...).
+    # Satellite: BTC 4-week trend rule, exactly as pre-registered (C1 in
+    # scripts/alt_premia_preregistered_bars.py; Tier C, NOT a proven edge --
+    # a small forward paper test). firm.allocation.btc_trend.BtcTrendSleeve:
+    # reviewed weekly after the Sunday-UTC close; trades only on an on/off
+    # flip or a within-sleeve gap > 0.10; no mid-week drift trades; BTC/USD
+    # fractional GTC orders on Alpaca. Missing/stale BTC data holds the
+    # position (never sells). Remove this entry to run the core alone (the
+    # 8% then sits in cash).
     - name: btc_trend
       type: btc_trend
       weight: 0.08
@@ -88,6 +92,11 @@ allocation:
   min_order_notional: 100
   # Never lever: projected gross after the plan is capped at this x NAV.
   max_gross: 1.0
+  # Always keep this fraction of NAV in cash: every target is scaled by
+  # (1 - cash_buffer), so the 92/8 proportions are exact while Alpaca
+  # crypto buys (non-marginable, need settled cash) and whole-share ETF
+  # rounding always have headroom (review finding 2026-09-30).
+  cash_buffer: 0.01
   # true = the first allocation cycle sells/covers every position no
   # sleeve targets (the sleeved stock book: 21 names, 13 long / 8 short,
   # ~11% of NAV gross as of 2026-09-29's last snapshot).

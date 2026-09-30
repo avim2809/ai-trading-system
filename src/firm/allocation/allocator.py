@@ -82,6 +82,7 @@ class Allocator:
         min_order_notional: float = 100.0,
         liquidate_unmanaged: bool = False,
         max_gross: float = 1.0,
+        cash_buffer: float = 0.0,
     ) -> None:
         if not sleeves:
             raise SleeveConfigError("Allocator needs at least one sleeve")
@@ -100,6 +101,13 @@ class Allocator:
         self.min_order_notional = float(min_order_notional)
         self.liquidate_unmanaged = bool(liquidate_unmanaged)
         self.max_gross = float(max_gross)
+        # Fraction of NAV always kept in cash: every combined target is
+        # scaled by (1 - cash_buffer), so sleeve proportions are exact while
+        # non-marginable buys (Alpaca crypto needs settled cash) and
+        # whole-share rounding always have headroom.
+        if not 0.0 <= float(cash_buffer) < 0.5:
+            raise SleeveConfigError(f"cash_buffer must be in [0, 0.5), got {cash_buffer}")
+        self.cash_buffer = float(cash_buffer)
 
     def symbols(self) -> list[str]:
         """Union of every sleeve's declared symbols (stable order)."""
@@ -239,7 +247,7 @@ class Allocator:
             if sleeve.name not in sleeve_targets:
                 continue
             for sym, w in sleeve_targets[sleeve.name].items():
-                combined[sym] = combined.get(sym, 0.0) + sleeve.weight * w
+                combined[sym] = combined.get(sym, 0.0) + sleeve.weight * w * (1.0 - self.cash_buffer)
                 owners.setdefault(sym, []).append(sleeve.name)
         # A symbol shared with a sleeve that failed this run can't have a
         # trustworthy combined target -- hold it untouched.
@@ -321,9 +329,10 @@ class Allocator:
                 # |target - held| > band".
                 owner = owner_objs[0]
                 band_within = getattr(owner, "band_within", None)
-                if band_within is not None and owner.weight > 0:
+                sleeve_capital = owner.weight * (1.0 - self.cash_buffer)
+                if band_within is not None and sleeve_capital > 0:
                     flip = (target_w > _EPS) != (actual_w > _EPS)
-                    gap_within = abs(target_w - actual_w) / owner.weight
+                    gap_within = abs(target_w - actual_w) / sleeve_capital
                     if not flip and gap_within <= float(band_within) + _EPS:
                         log.info(
                             "Allocation %s: sleeve %s review, no flip and within-sleeve gap %.4f "
@@ -457,4 +466,5 @@ def build_allocator(allocation_cfg: dict[str, Any]) -> Allocator:
         min_order_notional=float(allocation_cfg.get("min_order_notional", 100.0)),
         liquidate_unmanaged=bool(allocation_cfg.get("liquidate_unmanaged", False)),
         max_gross=float(allocation_cfg.get("max_gross", 1.0)),
+        cash_buffer=float(allocation_cfg.get("cash_buffer", 0.0)),
     )

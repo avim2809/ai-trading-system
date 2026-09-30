@@ -36,3 +36,33 @@ Session 2026-09-29 → 30. The owner asked for "an approach that actually makes 
 **Owner context:** research briefs for non-equity instruments are in `docs/research_brief_new_instruments{,_standalone}.md`. See [[user-profile]].
 
 Related: [[project-optimal-combination-lockout-sep28]], [[feedback-out-of-box-fact-backed-research]].
+
+**Update 2026-09-30 (later): external research on non-equity instruments.**
+Owner ran `docs/research_brief_new_instruments.md` (repo-access version)
+against an external agent; full report + my corrections in
+`docs/research_findings_beyond_equities_2026_09_30.md`.
+
+- **Report's shortlist:** futures trend-following (strongest, but 36-54
+  person-days — no contract-multiplier/margin/roll concept anywhere in the
+  code), a passive bond/commodity sleeve (claimed cheapest at 2-4 days),
+  insider-purchase clustering (PEAD explicitly dead per Tier-1 evidence,
+  drop it), FX momentum (borderline; FX carry confirmed dead post-2008,
+  Sharpe 0.04-0.16), crypto carry beyond BTC (BIS: >50% of months would
+  hit forced liquidation at 10x — don't build). CFDs, VIX-futures basis,
+  covered-call/put-write variants, individual commodities, spin-offs,
+  ETF-structure arbitrage all landed on its "don't bother" list — same
+  premium as something already tested, or decayed post-2010.
+- **I corrected its #2 pick (the diversification sleeve) after a direct
+  repo read**, which the report itself flagged as unverified: `allocation_method:
+  risk_parity` (`agents/trader.py:256`) only reweights symbols the 11
+  strategies already signalled on that cycle — it cannot host an always-on
+  bond/commodity position. It needs the same standalone-allocator pattern
+  as the 60/40 proposal, not a config change.
+- **Quick empirical check** (cached Step 2 data, a 50/30/20 IEF/GLD/DBC
+  sleeve at 30% NAV vs. the real split-fixed book): the live book's beta is
+  already ~0, so it barely draws down on its own — in the 2022 selloff the
+  book was +6% and the sleeve dragged the blend down to +1.8%. The
+  "diversification helps in a crisis" argument doesn't obviously apply to
+  *this* book. Single scenario, not pre-registered.
+- Nothing here has been pre-registered or tested against the evaluation
+  standard yet. It's an input to that process, not a result of it.

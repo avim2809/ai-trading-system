@@ -36,8 +36,8 @@ classes the live engine runs (`scripts/allocation_replay.py`,
 
 | | Annual return | Volatility | Sharpe (above cash) | Worst drawdown |
 |---|---|---|---|---|
-| **This portfolio (92% 60/40 + 8% BTC trend)** | **+12.1%** | 10.3% | **0.96** | **19.4%** (Oct 2022) |
-| 60/40 alone (100%) | +8.7% | 10.5% | 0.65 | 21.2% |
+| **This portfolio (92% 60/40 + 8% BTC trend, 1% cash reserve)** | **+12.0%** | 10.1% | **0.96** | **19.2%** (Oct 2022) |
+| 60/40 alone (100%) | +8.7% | 10.4% | 0.65 | 21.0% |
 | SPY alone | +14.2% | 17.5% | 0.72 | 33.7% |
 
 Other figures from the replay:
@@ -65,7 +65,7 @@ That was sized for the old, near-cash stock-picking book. In the replay:
 | Drawdown threshold | Times it would have tripped, 2015–2026 |
 |---|---|
 | 8% | 4 (2022, 2020, 2018, early 2025) |
-| 12% / 15% | 2 (2022 at 19.4%, 2020 at 18.9%) |
+| 12% / 15% | 2 (2022 at about 19%, 2020 at about 19%) |
 | 20% | 0 |
 | 25% | 0 |
 
