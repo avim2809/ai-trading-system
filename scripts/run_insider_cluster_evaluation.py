@@ -205,31 +205,65 @@ def summarize(df: pd.DataFrame, col: str, seed: int) -> dict:
             "lb": float(np.quantile(boot, ALPHA)), "ub": float(np.quantile(boot, 1 - ALPHA))}
 
 
+def _positions(src: np.ndarray, target: np.ndarray) -> np.ndarray:
+    """Index of each ``src`` date in sorted ``target``, -1 where absent."""
+    pos = np.searchsorted(target, src)
+    ok = pos < len(target)
+    ok[ok] = target[pos[ok]] == src[ok]
+    return np.where(ok, pos, -1)
+
+
 def calendar_time(df: pd.DataFrame, cache: dict, benches: dict, bench_col: str,
-                  dates: pd.DatetimeIndex) -> pd.Series:
-    """Daily equal-weight excess return of all open positions (net of costs)."""
-    num = pd.Series(0.0, index=dates)
-    cnt = pd.Series(0.0, index=dates)
+                  dates: pd.DatetimeIndex, prep: dict | None = None) -> pd.Series:
+    """Daily equal-weight excess return of all open positions (net of costs).
+
+    Day 1 is adj_open -> close, later days close -> close, for stock and benchmark
+    alike; stock days without a benchmark bar (or with a missing price) count as
+    zero excess. Per-ticker arrays are built once, so each event is a slice.
+    """
+    cal = dates.to_numpy()
+    num = np.zeros(len(cal))
+    cnt = np.zeros(len(cal))
+    prep = {} if prep is None else prep   # shareable across calls with the same dates
     for r in df.itertuples(index=False):
-        d = cache[r.ticker].set_index("date")
         sym = r.bench_primary_sym if bench_col == "bench_primary" else "IWM"
-        b = benches[sym].set_index("date")
-        span = d.loc[r.entry_date:r.exit_date]
-        if len(span) < 2:
+        if r.ticker not in prep:
+            d = cache[r.ticker]
+            dd = d["date"].to_numpy()
+            prep[r.ticker] = (dd, d["adjusted_close"].pct_change().to_numpy(),
+                              (d["adjusted_close"] / d["adj_open"]).to_numpy() - 1,
+                              _positions(dd, cal), {})
+        dd, ret, day1, cal_pos, bmap = prep[r.ticker]
+        if sym not in bmap:
+            b = benches[sym]
+            bret = b["adjusted_close"].pct_change().to_numpy()
+            bday1 = (b["adjusted_close"] / b["adj_open"]).to_numpy() - 1
+            bpos = _positions(dd, b["date"].to_numpy())
+            bmap[sym] = (np.where(bpos >= 0, bret[bpos], np.nan), np.where(bpos >= 0, bday1[bpos], np.nan), bpos)
+        bs_all, bday1_all, bpos = bmap[sym]
+        e = int(np.searchsorted(dd, np.datetime64(r.entry_date)))
+        x = int(np.searchsorted(dd, np.datetime64(r.exit_date)))
+        if x - e + 1 < 2:
             continue
-        # day 1: adj_open -> close; afterwards close -> close
-        s = span["adjusted_close"].pct_change()
-        s.iloc[0] = span["adjusted_close"].iloc[0] / span["adj_open"].iloc[0] - 1
-        bs = b.loc[r.entry_date:r.exit_date, "adjusted_close"].pct_change()
-        if len(bs):
-            bs.iloc[0] = b.loc[r.entry_date, "adjusted_close"] / b.loc[r.entry_date, "adj_open"] - 1
-        xs = (s - bs.reindex(s.index)).fillna(0.0)
-        xs.iloc[0] -= r.cost / 2
-        xs.iloc[-1] -= r.cost / 2
-        idx = xs.index.intersection(dates)
-        num.loc[idx] += xs.loc[idx].to_numpy()
-        cnt.loc[idx] += 1
-    return (num / cnt.replace(0, np.nan)).fillna(0.0)
+        if bpos[e] < 0:
+            b = benches[sym]
+            if ((b["date"] >= r.entry_date) & (b["date"] <= r.exit_date)).any():
+                raise KeyError(f"{sym} has no bar on entry date {r.entry_date}")
+        s = ret[e:x + 1].copy()
+        s[0] = day1[e]
+        bs = bs_all[e:x + 1].copy()
+        bs[0] = bday1_all[e]
+        xs = s - bs
+        xs[np.isnan(xs)] = 0.0
+        xs[0] -= r.cost / 2
+        xs[-1] -= r.cost / 2
+        cp = cal_pos[e:x + 1]
+        m = cp >= 0
+        num[cp[m]] += xs[m]
+        cnt[cp[m]] += 1
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = np.where(cnt > 0, num / cnt, 0.0)
+    return pd.Series(out, index=dates)
 
 
 def placebo(df: pd.DataFrame, cache: dict, benches: dict, hold: int, real_events: pd.DataFrame,
@@ -331,6 +365,7 @@ def main() -> int:
     cal_dates = benches["IWM"]["date"]
     cal_dates = pd.DatetimeIndex(cal_dates[(cal_dates >= primary_start)])
     variants: dict[str, pd.Series] = {}
+    prep: dict = {}
     all_rows = []
     for hname, hold in HOLDS.items():
         ev_h = events[in_window].copy()
@@ -360,7 +395,7 @@ def main() -> int:
         for set_name, sub in (("strict", strict), ("covered", df)):
             for bcol in ("bench_primary", "bench_iwm"):
                 key = f"{hname}|{set_name}|{bcol}"
-                variants[key] = calendar_time(sub, cache, benches, bcol, cal_dates)
+                variants[key] = calendar_time(sub, cache, benches, bcol, cal_dates, prep)
         results["holds"][hname] = res
         log.info("%s: n=%d mean excess %.4f LB %.4f UB %.4f | placebo p95 %.4f | 2x cost %.4f | "
                  "delist stress %.4f | post-2013 %.4f", hname, res["primary"]["n"], res["primary"]["mean"],

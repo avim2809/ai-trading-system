@@ -93,3 +93,60 @@ def test_month_cluster_bootstrap_centres_on_mean():
     boot = ev.month_cluster_boot(v, months, 2000, seed=1)
     assert boot.mean() == pytest.approx(v.mean(), abs=0.002)
     assert np.quantile(boot, 0.01) < v.mean() < np.quantile(boot, 0.99)
+
+
+def _calendar_time_reference(df, cache, benches, bench_col, dates):
+    """The original per-event pandas implementation, kept to pin the fast one."""
+    num = pd.Series(0.0, index=dates)
+    cnt = pd.Series(0.0, index=dates)
+    for r in df.itertuples(index=False):
+        d = cache[r.ticker].set_index("date")
+        sym = r.bench_primary_sym if bench_col == "bench_primary" else "IWM"
+        b = benches[sym].set_index("date")
+        span = d.loc[r.entry_date:r.exit_date]
+        if len(span) < 2:
+            continue
+        s = span["adjusted_close"].pct_change()
+        s.iloc[0] = span["adjusted_close"].iloc[0] / span["adj_open"].iloc[0] - 1
+        bs = b.loc[r.entry_date:r.exit_date, "adjusted_close"].pct_change()
+        if len(bs):
+            bs.iloc[0] = b.loc[r.entry_date, "adjusted_close"] / b.loc[r.entry_date, "adj_open"] - 1
+        xs = (s - bs.reindex(s.index)).fillna(0.0)
+        xs.iloc[0] -= r.cost / 2
+        xs.iloc[-1] -= r.cost / 2
+        idx = xs.index.intersection(dates)
+        num.loc[idx] += xs.loc[idx].to_numpy()
+        cnt.loc[idx] += 1
+    return (num / cnt.replace(0, np.nan)).fillna(0.0)
+
+
+def test_fast_calendar_time_matches_reference_implementation():
+    rng = np.random.default_rng(3)
+    cache = {}
+    for i, t in enumerate(("A", "B", "C")):
+        d = _series(n=400, px=10.0 + i, vol=300_000.0)
+        d["adjusted_close"] = d["adjusted_close"] * np.cumprod(1 + rng.normal(0, 0.02, len(d)))
+        d["adj_open"] = d["adjusted_close"] * (1 + rng.normal(0, 0.005, len(d)))
+        cache[t] = d
+    cache["B"].loc[150, "adjusted_close"] = np.nan          # a missing price inside a hold
+    benches = {}
+    for s in ("IWC", "IWM", "IJH"):
+        b = _series(n=400, px=100.0, vol=1e7)
+        b["adjusted_close"] = b["adjusted_close"] * np.cumprod(1 + rng.normal(0, 0.01, len(b)))
+        b["adj_open"] = b["adjusted_close"] * (1 + rng.normal(0, 0.003, len(b)))
+        benches[s] = b
+    benches["IWC"] = benches["IWC"].drop(index=[130, 131, 260]).reset_index(drop=True)  # bench gaps
+    rows = []
+    for t, e, x, sym in (("A", 40, 102, "IWC"), ("A", 120, 182, "IWC"), ("B", 100, 225, "IWM"),
+                         ("C", 250, 312, "IJH"), ("C", 300, 362, "IWC"), ("B", 380, 399, "IJH")):
+        d = cache[t]
+        rows.append({"ticker": t, "entry_date": d["date"].iloc[e], "exit_date": d["date"].iloc[x],
+                     "cost": 0.006, "bench_primary_sym": sym})
+    df = pd.DataFrame(rows)
+    dates = pd.DatetimeIndex(benches["IWM"]["date"].iloc[60:])   # positions open before the calendar starts
+    prep: dict = {}
+    for bcol in ("bench_primary", "bench_iwm"):
+        fast = ev.calendar_time(df, cache, benches, bcol, dates, prep)
+        ref = _calendar_time_reference(df, cache, benches, bcol, dates)
+        np.testing.assert_allclose(fast.to_numpy(), ref.to_numpy(), rtol=0, atol=1e-15)
+        assert (fast.index == ref.index).all()
