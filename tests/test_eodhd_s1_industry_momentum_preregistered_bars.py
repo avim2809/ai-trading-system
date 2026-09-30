@@ -20,15 +20,15 @@ import eodhd_s1_industry_momentum_preregistered_bars as prereg  # noqa: E402
 
 class TestDraftStatus:
     def test_is_draft_not_frozen(self):
-        assert prereg.DRAFT is True
-        assert prereg.PREREGISTERED_AT is None
+        assert prereg.DRAFT is False
+        assert prereg.PREREGISTERED_AT == "2026-09-30T19:18:54Z"
 
     def test_no_return_computation_markers_present(self):
         # This is a design-only sanity check: the module must document that it
         # used availability, not returns, to fix its window/eligibility.
         assert "availability" in prereg.AVAILABILITY["source_scan"]
         assert prereg.AVAILABILITY["cleaning_fingerprint"] == (
-            "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd"
+            "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054"
         )
 
 

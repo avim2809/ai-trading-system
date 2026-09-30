@@ -72,8 +72,8 @@ import hashlib
 import json
 import math
 
-DRAFT = True
-PREREGISTERED_AT = None
+DRAFT = False
+PREREGISTERED_AT = "2026-09-30T19:18:54Z"
 
 DATA_END = "2026-09-29"
 TRADING_DAYS = 252
@@ -96,7 +96,7 @@ AVAILABILITY = {
                    "etfs/ superseded), cleaned with scripts/eodhd_clean.py:clean_bars (equity "
                    "calendar), availability only (no returns); output frozen at "
                    "$S/runs/S1/availability.json",
-    "cleaning_fingerprint": "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd",  # v2
+    "cleaning_fingerprint": "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054",  # v2
     "n_universe": len(UNIVERSE),
     "data_start_note": "etfs_full pulls from inception (SPY 1993-01-29; the 9 original SPDR "
                        "sectors 1998-12-22; XLRE 2015-10; XLC 2018-06); the 2005-01-01 download "
@@ -273,7 +273,7 @@ PBO = {
 }
 DSR = {
     "trials": N_VARIANTS,
-    "prior_trials": "190 + other shortlist variants (fixed at freeze)",
+    "prior_trials": 206,
     "trial_sharpes": "daily (non-annualised) Sharpe of every declared variant on WINDOW",
     "ledger": "docs/S1_trial_history.json (new family; protocol §6)",
 }
