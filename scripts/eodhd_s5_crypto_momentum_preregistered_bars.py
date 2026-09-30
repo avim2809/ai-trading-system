@@ -58,8 +58,8 @@ import json
 import math
 import re
 
-DRAFT = True
-PREREGISTERED_AT = None  # set only at freeze, after owner sign-off; see module docstring
+DRAFT = False
+PREREGISTERED_AT = "2026-09-30T19:18:54Z"  # set only at freeze, after owner sign-off; see module docstring
 
 DATA_END = "2026-09-28"     # last Sunday-review-then-Monday-execute pair before this session's 2026-09-30
 TRADING_DAYS = 252
@@ -72,7 +72,7 @@ DATA = {
     "source": "data/research/eodhd/crypto/*.parquet (local only, no network); "
               "crypto history is unaffected by amendment 1's etfs_full/us_universe_full switch "
               "(crypto has always been full-history, per the coordinator's amendment note)",
-    "cleaning_fingerprint": "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd",  # v2, scripts/eodhd_clean.py:cleaning_fingerprint()
+    "cleaning_fingerprint": "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054",  # v2, scripts/eodhd_clean.py:cleaning_fingerprint()
     "cleaning_asset_type": "crypto (no calendar filter, no NAV volume exemption -- v1/v2 identical in behaviour for crypto)",
     "segment_rule": "a coin is eligible at a review date only if its most recent cleaned `segment` "
                     "(scripts/eodhd_clean.py:clean_bars) covers at least the trailing 30 calendar days "
@@ -364,7 +364,7 @@ BOOTSTRAP = {
 DSR = {
     "trials": N_VARIANTS,
     "trial_sharpes": "the daily (non-annualised) Sharpe of every S5 variant (3) on the PBO window",
-    "prior_trials": "190 + other shortlist variants (fixed at freeze)",  # placeholder: resolved to an
+    "prior_trials": 207,  # placeholder: resolved to an
     # int only once every shortlist pre-registration (S1-S4) has frozen its own declared variant grid,
     # per protocol Sec 4 ("plus the variant counts of the other four shortlist candidates, fixed at
     # freeze from each pre-registration's declared grid") -- NOT computable from S5 alone

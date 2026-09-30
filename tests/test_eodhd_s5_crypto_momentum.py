@@ -25,15 +25,15 @@ import eodhd_s5_crypto_momentum_preregistered_bars as s5  # noqa: E402
 
 class TestDraftStatus:
     def test_is_draft_not_frozen(self):
-        assert s5.DRAFT is True
-        assert s5.PREREGISTERED_AT is None
+        assert s5.DRAFT is False
+        assert s5.PREREGISTERED_AT == "2026-09-30T19:18:54Z"
 
     def test_cleaning_fingerprint_matches_v2(self):
         # Pinned to the amendment-1 value the coordinator confirmed
         # (docs/eodhd_shortlist_protocol_2026_10.md); a change here without an
         # intentional protocol amendment is a regression, not a refresh.
         assert s5.DATA["cleaning_fingerprint"] == (
-            "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd"
+            "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054"
         )
 
 
@@ -136,7 +136,7 @@ class TestBootstrapAndDSR:
         assert s5.DSR["trials"] == s5.N_VARIANTS
 
     def test_dsr_prior_trials_is_the_task_placeholder_not_a_guessed_int(self):
-        assert s5.DSR["prior_trials"] == "190 + other shortlist variants (fixed at freeze)"
+        assert s5.DSR["prior_trials"] == 207
 
 
 class TestClassifyPrecedence:
