@@ -977,11 +977,13 @@ design/history: `docs/capital_sleeves_plan.md`.
   orchestrator refuses to construct in sleeved mode if they are, rather than silently
   multiplying LLM call volume ~N-fold).
 
-### Allocation mode (`strategy_mode: allocation`, `src/firm/allocation/`, 2026-09-30, NOT live yet)
+### Allocation mode (`strategy_mode: allocation`, `src/firm/allocation/`, LIVE on Alpaca since 2026-09-30)
 
 Opt-in alternative to the whole strategy→analyst→PM→risk pipeline, built after the
 edge-search verdict (`docs/edge_search_verdict_2026_09.md`). Absent key / `pipeline` =
-unchanged. Proposed config for the Alpaca instance: `config/live_alpaca_allocation.example.yaml`.
+unchanged. **Live on the Alpaca instance since 2026-09-30** (`config/live_alpaca.yaml`; first allocation
+cycle 115 at 11:30 ET: 21/21 orders filled, book = SPY 54.2% / IEF 36.4% / BTC 7.4% / cash 2%);
+IBKR stays on the pipeline as the control. Forward test: `docs/allocation_forward_test_trial_history.json`.
 
 - **Sleeves** (`allocation/sleeves.py`): `Sleeve` ABC (`name`, `weight` of NAV,
   `target_weights(asof, history)`, `is_rebalance_due(asof, last)`, `symbols()`, optional

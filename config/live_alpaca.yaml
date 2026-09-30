@@ -34,6 +34,99 @@ schedule_timezone: "US/Eastern"
 # (e.g. plain "auto") silently falls through to "everything needs approval".
 approval_mode: "full_auto"
 
+# ──────────────────────────────────────────────────────────────
+#  LIVE since 2026-09-30 (owner sign-off): allocation portfolio for this Alpaca
+#  instance. This file is config/live_alpaca.yaml plus ONLY this block and
+#  two comment notes (capital_allocation_mode, risk.kill_switch_drawdown).
+#  To adopt: copy this block into config/live_alpaca.yaml and restart
+#  ai-trading-alpaca. Why: docs/edge_search_verdict_2026_09.md (the
+#  11-strategy pipeline has no out-of-sample edge; plain market exposure
+#  earned far more).
+#
+#  strategy_mode: allocation bypasses the whole strategy -> analyst -> PM
+#  -> risk pipeline (it cannot hold a 60% SPY position under
+#  risk.max_position_pct 5% / max_net_exposure 0.5). Positions and NAV come
+#  from the broker every cycle; the allocator runs at most once per
+#  US/Eastern trading day (first regular-hours cycle; later cycles only if
+#  an order failed/was rejected/was news-guard-held). Orders still pass
+#  through FIRM_ALLOW_TRADING, the execution audit log, the per-order
+#  notional cap, the news guard, the daily trade/turnover budget, the
+#  drawdown kill switch and Discord alerts.
+#
+#  IGNORED in allocation mode (kept so reverting is a one-line change):
+#  strategies/strategy_params, capital_allocation_mode: sleeved (the dormant
+#  pipeline is forced blended; persisted sleeve books are left untouched),
+#  capital_reallocation, planning_cycle (planning cycles are skipped),
+#  extended_hours_trading, protective_orders, llm_open_close_only,
+#  signal_combination/allocation_method/conviction_*, costs.rebalance_*,
+#  pipeline_warmup (forced off), and every risk: key except the daily
+#  trade/turnover limits unless overridden below. The universe and its
+#  sp500_dynamic_universe/news_ingestion jobs still run but do not trade.
+# ──────────────────────────────────────────────────────────────
+strategy_mode: allocation
+allocation:
+  sleeves:
+    # Passive core: 60/40 SPY/IEF on 92% of NAV (55.2% SPY / 36.8% IEF),
+    # rebalanced on the first US trading day of each month (NYSE holidays
+    # respected; a missed first day rolls to the next trading day).
+    - name: core
+      type: static
+      weight: 0.92
+      weights: {SPY: 0.6, IEF: 0.4}
+      rebalance: monthly
+    # Satellite: BTC 4-week trend rule, exactly as pre-registered (C1 in
+    # scripts/alt_premia_preregistered_bars.py; Tier C, NOT a proven edge --
+    # a small forward paper test). firm.allocation.btc_trend.BtcTrendSleeve:
+    # reviewed weekly after the Sunday-UTC close; trades only on an on/off
+    # flip or a within-sleeve gap > 0.10; no mid-week drift trades; BTC/USD
+    # fractional GTC orders on Alpaca. Missing/stale BTC data holds the
+    # position (never sells). Remove this entry to run the core alone (the
+    # 8% then sits in cash).
+    - name: btc_trend
+      type: btc_trend
+      weight: 0.08
+  # Trade a symbol off-schedule when its actual weight drifts more than this
+  # (absolute) from target -- checked every trading day.
+  band_abs: 0.02
+  # Skip rebalancing trades smaller than this (liquidations are exempt).
+  min_order_notional: 100
+  # Never lever: projected gross after the plan is capped at this x NAV.
+  max_gross: 1.0
+  # Always keep this fraction of NAV in cash: every target is scaled by
+  # (1 - cash_buffer), so the 92/8 proportions are exact while Alpaca
+  # crypto buys (non-marginable, need settled cash) and whole-share ETF
+  # rounding always have headroom (review finding 2026-09-30).
+  cash_buffer: 0.01
+  # true = the first allocation cycle sells/covers every position no
+  # sleeve targets (the sleeved stock book: 21 names, 13 long / 8 short,
+  # ~11% of NAV gross as of 2026-09-29's last snapshot).
+  # false = they are left untouched (logged) and the core is bought only up
+  # to max_gross -- a half-migrated book. true is the intended cut-over.
+  liquidate_unmanaged: true
+  # Per-order hard notional cap in _execute_orders (replaces the pipeline's
+  # 2 x risk.max_position_pct x NAV = ~$10k, which would block every core
+  # order). Largest expected single order: ~55% of NAV into SPY on day 1.
+  max_order_notional: 70000
+  # Drawdown kill switch for this book (replaces risk.kill_switch_drawdown
+  # 0.08). A 60/40 portfolio drew down ~17-20% peak-to-trough in 2022
+  # (SPY ~-25%, IEF ~-15% at the lows), so 0.08 would halt it in any normal
+  # bear market and leave it frozen at the bottom. 0.25 still halts a
+  # genuinely broken book (bug, runaway order) well before ruin.
+  # NOTE: the peak equity in data_alpaca/kill_switch_state.json carries over
+  # from the pipeline era; if NAV is already below it, that drawdown counts.
+  kill_switch_drawdown: 0.25
+  # Daily budget overrides (risk.max_daily_turnover 0.25 / max_daily_trades
+  # 40 are sized for the old book). Cut-over day turnover ~= gross of the
+  # book being unwound (~0.11x NAV today, up to 1.5x under its risk caps)
+  # + ~1.0x NAV of buys. Under 0.25 the full_auto path pro-rata scales every
+  # order to 25% of NAV/day, so migrating would take ~4 trading days with
+  # the core sleeve staying "due" until done. 3.0 lets it migrate in one
+  # day; afterwards monthly turnover is a few % of NAV, far below either.
+  max_daily_turnover: 3.0
+  max_daily_trades: 80
+  # Same-day re-plan attempts after a failed/rejected/held order.
+  max_attempts_per_day: 3
+
 # Opt-in pre-open "planning" cycle -- runs the full analysis pipeline
 # (dry_run, no broker submission) 15 min before the 09:30 `open` leg, with
 # no clock pressure. Its orders park in the approval queue; if still fresh

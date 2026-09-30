@@ -1,0 +1,33 @@
+{
+  "family": "allocation_forward_test",
+  "entries": [
+    {
+      "prereg": "scripts/allocation_forward_test_preregistered.py",
+      "fingerprint": "20e25edb990e256fe7ceb1153cb7b154be3c7919c568c0292ff6bf54d24bb242",
+      "prereg_commit": "cb5688a",
+      "instance": "Alpaca paper (:8001, config/live_alpaca.yaml strategy_mode: allocation)",
+      "control": "IBKR paper (:8000, unchanged 11-strategy pipeline)",
+      "start_date": "2026-09-30",
+      "first_allocation_cycle": {
+        "cycle_id": 115,
+        "timestamp_utc": "2026-09-30T15:30:00Z",
+        "orders": 21,
+        "filled": 21,
+        "rejected": 0
+      },
+      "starting_state_after_fills": {
+        "equity": 97912.36,
+        "cash": 1989.35,
+        "weights": {
+          "SPY": 0.5419,
+          "IEF": 0.3642,
+          "BTC/USD": 0.0736
+        }
+      },
+      "kill_switch": {
+        "threshold": 0.25,
+        "peak_carried_over": 103061.72
+      }
+    }
+  ]
+}
