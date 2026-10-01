@@ -1,0 +1,118 @@
+{
+ "validated_at": "2026-10-01T08:14:46.936604+00:00",
+ "n_dates": 11,
+ "all_pass": true,
+ "rule": "before the first check counts, the live pipeline must reproduce the frozen builder's breadth (docs: review artifacts S2/breadth_full.parquet) on >= 5 overlapping historical session dates to within 0.5 percentage points and eligible count within 3%",
+ "rows": [
+  {
+   "asof": "2026-04-30",
+   "live_breadth": 0.6293436293436293,
+   "frozen_breadth": 0.6335111390021965,
+   "diff_pp": 0.4167509658567159,
+   "live_eligible": 3108,
+   "frozen_eligible": 3187,
+   "eligible_diff_pct": 2.4788202070913083,
+   "pass": true
+  },
+  {
+   "asof": "2026-05-29",
+   "live_breadth": 0.6306334699023006,
+   "frozen_breadth": 0.6330133168163518,
+   "diff_pp": 0.23798469140511314,
+   "live_eligible": 3173,
+   "frozen_eligible": 3229,
+   "eligible_diff_pct": 1.7342830597708268,
+   "pass": true
+  },
+  {
+   "asof": "2026-06-30",
+   "live_breadth": 0.662903731577297,
+   "frozen_breadth": 0.6642923505729328,
+   "diff_pp": 0.13886189956358042,
+   "live_eligible": 3189,
+   "frozen_eligible": 3229,
+   "eligible_diff_pct": 1.2387736141220191,
+   "pass": true
+  },
+  {
+   "asof": "2026-07-31",
+   "live_breadth": 0.6609305289993627,
+   "frozen_breadth": 0.6613722998729352,
+   "diff_pp": 0.04417708735725556,
+   "live_eligible": 3138,
+   "frozen_eligible": 3148,
+   "eligible_diff_pct": 0.3176620076238882,
+   "pass": true
+  },
+  {
+   "asof": "2026-08-31",
+   "live_breadth": 0.6603832862079799,
+   "frozen_breadth": 0.660175879396985,
+   "diff_pp": 0.020740681099495895,
+   "live_eligible": 3183,
+   "frozen_eligible": 3184,
+   "eligible_diff_pct": 0.031407035175879394,
+   "pass": true
+  },
+  {
+   "asof": "2026-09-22",
+   "live_breadth": 0.5536050156739812,
+   "frozen_breadth": 0.5536050156739812,
+   "diff_pp": 0.0,
+   "live_eligible": 3190,
+   "frozen_eligible": 3190,
+   "eligible_diff_pct": 0.0,
+   "pass": true
+  },
+  {
+   "asof": "2026-09-23",
+   "live_breadth": 0.5244094488188976,
+   "frozen_breadth": 0.5244094488188976,
+   "diff_pp": 0.0,
+   "live_eligible": 3175,
+   "frozen_eligible": 3175,
+   "eligible_diff_pct": 0.0,
+   "pass": true
+  },
+  {
+   "asof": "2026-09-24",
+   "live_breadth": 0.5157232704402516,
+   "frozen_breadth": 0.5157232704402516,
+   "diff_pp": 0.0,
+   "live_eligible": 3180,
+   "frozen_eligible": 3180,
+   "eligible_diff_pct": 0.0,
+   "pass": true
+  },
+  {
+   "asof": "2026-09-25",
+   "live_breadth": 0.5226700251889169,
+   "frozen_breadth": 0.5226700251889169,
+   "diff_pp": 0.0,
+   "live_eligible": 3176,
+   "frozen_eligible": 3176,
+   "eligible_diff_pct": 0.0,
+   "pass": true
+  },
+  {
+   "asof": "2026-09-28",
+   "live_breadth": 0.5055152852190357,
+   "frozen_breadth": 0.5055152852190357,
+   "diff_pp": 0.0,
+   "live_eligible": 3173,
+   "frozen_eligible": 3173,
+   "eligible_diff_pct": 0.0,
+   "pass": true
+  },
+  {
+   "asof": "2026-09-29",
+   "live_breadth": 0.4924575738529227,
+   "frozen_breadth": 0.4924575738529227,
+   "diff_pp": 0.0,
+   "live_eligible": 3182,
+   "frozen_eligible": 3182,
+   "eligible_diff_pct": 0.0,
+   "pass": true
+  }
+ ]
+}

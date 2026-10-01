@@ -1326,3 +1326,10 @@ Full verdict: `docs/edge_search_verdict_2026_09.md`. Plan: `docs/edge_search_pla
 - **Host clock:** Asia/Jerusalem (UTC+3). Log lines are local time; audit timestamps come from `date -u` or git.
 - **Test isolation:** `tests/test_api.py` needs `.env` (Alpaca key) in the working tree, and fails when `FIRM_DATA_DIR` is set.
 
+## 2026-10-01: S2 breadth-overlay shadow forward test
+
+- **Shadow ledger only** (no orders, no live config change). Plan and links: `docs/s2_forward_test_plan.md`. Frozen design `scripts/s2_forward_preregistered.py` (`a5142f2`); tracker `scripts/s2_forward_shadow.py`.
+- **First check 2026-10-01:** breadth 47.8% → cut state (shadow SPY 30 / IEF 70). Launch validation vs the frozen builder passed on 11 dates (max 0.42 pp).
+- **Timer not installed** (blocked pending owner approval): `deploy/s2-forward-shadow.{service,timer}`. Until then run `scripts/s2_forward_shadow.py run` daily.
+- **Data dependency:** EODHD is a one-month subscription. A lapse means missed checks, never silent replacement.
+

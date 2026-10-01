@@ -19,6 +19,7 @@ output.
 | `edge_search_verdict_2026_09.md` | Why the 11-strategy system was replaced: nothing tested beats the benchmarks |
 | `allocation_deploy_runbook.md` | How the Alpaca allocation portfolio was deployed, the exact config, and rollback |
 | `allocation_forward_test_plan.md` | How the live allocation portfolio is judged (plain language) |
+| `s2_forward_test_plan.md` | Shadow forward test of the S2 breadth overlay (running; paper ledger only) |
 | `capital_sleeves_plan.md` | Per-strategy capital sleeves (pipeline mode; used by the IBKR/pipeline code path) |
 
 ## Decisions and verdicts (settled, with evidence)

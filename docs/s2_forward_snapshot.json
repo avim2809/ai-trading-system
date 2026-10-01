@@ -1,0 +1,26 @@
+{
+ "exported_at": "2026-10-01T08:24:30.242085+00:00",
+ "forward_fingerprint": "cbd6ad32ad87751fe39063261e7871c17a80746ab5724017f198879a49f655b1",
+ "decisions": [
+  {
+   "check_day": "2026-10-01",
+   "signal_asof": "2026-09-30",
+   "status": "ok",
+   "reason": "ok",
+   "breadth": 0.4782608695652174,
+   "eligible": 3174,
+   "with_bar": 5914,
+   "cut": {
+    "overlay_v1": true,
+    "overlay_v3": false
+   },
+   "weights_v1": {
+    "SPY": 0.3,
+    "IEF": 0.7
+   },
+   "forward_fingerprint": "cbd6ad32ad87751fe39063261e7871c17a80746ab5724017f198879a49f655b1",
+   "computed_at": "2026-10-01T08:23:37.423771+00:00"
+  }
+ ],
+ "nav": []
+}

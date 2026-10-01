@@ -43,3 +43,4 @@
 - [EODHD data & insider verdict 9/30](project_eodhd_data_and_insider_verdict_sep30.md) — EODHD bought + full history from 1985 downloaded; insider clusters Tier C; 10/1: shortlist S1-S5 all Tier C (S2 breadth overlay near miss); cleaning v2 misses 999999.9999 sentinel, freeze v3 first
 - [Host clock is local time](feedback_host_clock_is_local_time.md) — VPS/log timestamps are Asia/Jerusalem (UTC+3); take audit UTC times from date -u or git, never log lines
 - [External review package](feedback_external_review_package.md) — owner wants data+scripts+results preserved for 3rd-party review; use scripts/build_review_package.py, merge branches, bundle licensed data privately
+- [S2 shadow forward test 10/1](project_s2_forward_test_oct01.md) — paper ledger only, first check cut state (47.8%); timer install awaits owner; needs EODHD for monthly pulls
