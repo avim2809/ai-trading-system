@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily S2 shadow forward-test run (frozen design: scripts/s2_forward_preregistered.py)
+
+[Timer]
+# 07:00 UTC = 03:00 US/Eastern (04:00 in winter): after EODHD has published the prior session
+# and ~6.5 h before the US open, so a first-trading-day check is recorded before that day's open.
+# This server's local zone is Asia/Jerusalem; OnCalendar is pinned to UTC on purpose.
+OnCalendar=*-*-* 07:00:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

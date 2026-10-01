@@ -1,0 +1,16 @@
+[Unit]
+Description=S2 breadth-overlay SHADOW forward test (paper ledger only: places no orders, touches no live config)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/local/store/git/ai-trading-system
+EnvironmentFile=/local/store/git/ai-trading-system/.env
+# Monthly check days pull ~6k tickers (~8 min at 12 req/s). Keep it behind the live services.
+Nice=10
+MemoryMax=1500M
+TimeoutStartSec=3h
+Environment=PYTHONPATH=/local/store/git/ai-trading-system/src
+ExecStart=/local/store/git/ai-trading-system/.venv/bin/python3 /local/store/git/ai-trading-system/scripts/s2_forward_shadow.py run
