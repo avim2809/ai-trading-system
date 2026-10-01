@@ -83,3 +83,13 @@ PBO rises to 0.80. Once the tail is tamed there is nothing left: the median is n
 - Insider clusters join the standalone strategies and the alternative premia as tested and rejected. Nothing changes live.
 - The allocation portfolio on Alpaca and the IBKR control carry on as before.
 - The EODHD data stays useful for the owner's shortlist in `research_brief_eodhd_findings.md`: sector/industry ETF momentum, a breadth overlay, bond/commodity trend, 52-week-high proximity, and crypto cross-sectional momentum. Each needs its own pre-registration, including the cleaning rule above.
+
+## Erratum: the freeze timestamp label
+
+`PREREGISTERED_AT = "2026-09-30T17:15:00Z"` in the frozen pre-registration is wrong. The host clock runs on Israel time (UTC+3), and a local time was written as UTC.
+
+The authoritative record is git:
+- the freeze commit `d6013c5` is 2026-09-30T16:57:30Z;
+- the evaluation's log opens at 16:57:44Z, 14 seconds later.
+
+So the order, freeze before run, holds. The label is left as it is, because editing it would change the frozen fingerprint `f355b075`.
