@@ -1,0 +1,29 @@
+{
+  "family": "S4",
+  "entries": [
+    {
+      "date": "2026-10-01",
+      "fingerprint": "99361527bf621ef06c538461aca94a7ce0832d6ab3bde36ca1fdb7265d7ab9e4",
+      "n_trials": 4,
+      "trials": [
+        "S4_p1_6mo_N500",
+        "S4_p2_6mo_N1000",
+        "S4_p3_1mo_N500",
+        "S4_p4_1mo_N1000"
+      ],
+      "trial_daily_sharpes": [
+        0.033779277928501494,
+        0.03528395837541555,
+        0.0196085917191094,
+        0.022576593460171167
+      ],
+      "tiers": {
+        "S4_p1_6mo_N500": "C",
+        "S4_p2_6mo_N1000": "C",
+        "S4_p3_1mo_N500": "D",
+        "S4_p4_1mo_N1000": "C"
+      }
+    }
+  ],
+  "cumulative_trials": 4
+}

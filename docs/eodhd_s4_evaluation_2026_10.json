@@ -1,0 +1,852 @@
+{
+  "generated_at": "2026-10-01T00:22:05.081270+00:00",
+  "fingerprint": "99361527bf621ef06c538461aca94a7ce0832d6ab3bde36ca1fdb7265d7ab9e4",
+  "prereg_at": "2026-09-30T19:18:54Z",
+  "window": {
+    "start": "1999-01-31",
+    "end": "2026-09-29",
+    "midpoint": "2012-11-30",
+    "n_month_ends": 332,
+    "protocol_floor_note": "protocol \u00a73's absolute floor is 1993-02-01 (SPY inception); this window starts far later, purely because the eligible population before 1999 is thin and survivor-tilted (see credible_coverage_transition and topN_delisted_fraction_by_year above), not because of the protocol floor itself",
+    "n_eligible_min_in_window": 3300,
+    "n_eligible_max_in_window": 4862,
+    "N_primary_and_N_variant_supported_throughout": true
+  },
+  "alpha_one_sided": 0.01,
+  "pbo": 0.5428571428571428,
+  "dsr_trials": 4,
+  "candidates": {
+    "S4_p1_6mo_N500": {
+      "eval_start": "1999-02-01",
+      "eval_end": "2026-09-29",
+      "sharpe": 0.5362294131968881,
+      "cagr": 0.07965682448749023,
+      "vol": 0.16995970038055744,
+      "max_dd": 0.45857362846865346,
+      "n_slots": 16531,
+      "placebo_p95": 0.3701435502748222,
+      "placebo_median": 0.33854895732788814,
+      "dsr": 0.837088790531599,
+      "delist_stress_mean_gt_base_mean": false,
+      "vs": {
+        "PRIMARY_liquid_universe_ewbh": {
+          "sharpe_c": 0.5362294131968881,
+          "sharpe_b": 0.24975040354667627,
+          "gap": 0.28647900965021184,
+          "lb": 0.07071172864301835,
+          "ub": 0.5103515617090719,
+          "gap_half1": 0.33033016013028604,
+          "gap_half2": 0.1848083183125614,
+          "n_days": 6958,
+          "A1": true,
+          "A4": true,
+          "D": false,
+          "A5": true
+        },
+        "BM1_SPY": {
+          "sharpe_c": 0.5362294131968881,
+          "sharpe_b": 0.5229919022809276,
+          "gap": 0.013237510915960482,
+          "lb": -0.20815647896211856,
+          "ub": 0.2576335819381974,
+          "gap_half1": 0.18627425083042506,
+          "gap_half2": -0.22584201770801282,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": true
+        },
+        "BM2_60_40": {
+          "sharpe_c": 0.5362294131968881,
+          "sharpe_b": 0.571799579859226,
+          "gap": -0.03557016666233792,
+          "lb": -0.28751570447295266,
+          "ub": 0.23508367649068246,
+          "gap_half1": 0.05594486195269194,
+          "gap_half2": -0.15268597804717032,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": true
+        },
+        "BM3_SPY_VT": {
+          "sharpe_c": 0.5362294131968881,
+          "sharpe_b": 0.6742001471064325,
+          "gap": -0.1379707339095444,
+          "lb": -0.4170883232561098,
+          "ub": 0.1629543017713105,
+          "gap_half1": 0.056790221557820875,
+          "gap_half2": -0.3220697955857794,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        }
+      },
+      "bars": {
+        "A1": true,
+        "A2": false,
+        "A3": true,
+        "A4": false,
+        "A5": false,
+        "A6": false,
+        "A7": "PENDING"
+      },
+      "tier_d_condition": false,
+      "tier_b": {
+        "B_a": true,
+        "B_b": false
+      },
+      "tier": "C",
+      "tier_reported": "C",
+      "top10_contributors": [
+        {
+          "ticker": "SNCA",
+          "pnl_contribution": -0.049491096287965775,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "AAPL",
+          "pnl_contribution": 0.0348481684923172,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "YRCW",
+          "pnl_contribution": -0.03354185074567795,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "QCOM",
+          "pnl_contribution": 0.028072070330381393,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "CHKP",
+          "pnl_contribution": 0.02535266987979412,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "TMBR",
+          "pnl_contribution": -0.024583622813224792,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "WDC",
+          "pnl_contribution": 0.02393876202404499,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "BXRX",
+          "pnl_contribution": -0.023320266976952553,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "AMZN",
+          "pnl_contribution": 0.02291850373148918,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "RXII",
+          "pnl_contribution": -0.022890418767929077,
+          "adjusted_close_sentinel_gap_affected": true
+        }
+      ]
+    },
+    "S4_p2_6mo_N1000": {
+      "eval_start": "1999-02-01",
+      "eval_end": "2026-09-29",
+      "sharpe": 0.5601154747878249,
+      "cagr": 0.0858878610459124,
+      "vol": 0.17436531827823978,
+      "max_dd": 0.5015164102434395,
+      "n_slots": 33047,
+      "placebo_p95": 0.42547203648797666,
+      "placebo_median": 0.402426527963037,
+      "dsr": 0.8654402360330138,
+      "delist_stress_mean_gt_base_mean": false,
+      "vs": {
+        "PRIMARY_liquid_universe_ewbh": {
+          "sharpe_c": 0.5601154747878249,
+          "sharpe_b": 0.29314809369184924,
+          "gap": 0.2669673810959756,
+          "lb": 0.06306966633805709,
+          "ub": 0.4801454770227304,
+          "gap_half1": 0.25982706778177145,
+          "gap_half2": 0.2582075201180196,
+          "n_days": 6958,
+          "A1": true,
+          "A4": true,
+          "D": false,
+          "A5": true
+        },
+        "BM1_SPY": {
+          "sharpe_c": 0.5601154747878249,
+          "sharpe_b": 0.5229919022809276,
+          "gap": 0.03712357250689724,
+          "lb": -0.16247847109678892,
+          "ub": 0.25784223840238973,
+          "gap_half1": 0.2053931999507844,
+          "gap_half2": -0.18871464880063915,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": true
+        },
+        "BM2_60_40": {
+          "sharpe_c": 0.5601154747878249,
+          "sharpe_b": 0.571799579859226,
+          "gap": -0.011684105071401163,
+          "lb": -0.24826121507943724,
+          "ub": 0.2557541408174408,
+          "gap_half1": 0.07506381107305127,
+          "gap_half2": -0.11555860913979665,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": true
+        },
+        "BM3_SPY_VT": {
+          "sharpe_c": 0.5601154747878249,
+          "sharpe_b": 0.6742001471064325,
+          "gap": -0.11408467231860764,
+          "lb": -0.3946956236341826,
+          "ub": 0.18123588369324975,
+          "gap_half1": 0.0759091706781802,
+          "gap_half2": -0.28494242667840575,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        }
+      },
+      "bars": {
+        "A1": true,
+        "A2": false,
+        "A3": true,
+        "A4": false,
+        "A5": false,
+        "A6": false,
+        "A7": "PENDING"
+      },
+      "tier_d_condition": false,
+      "tier_b": {
+        "B_a": true,
+        "B_b": false
+      },
+      "tier": "C",
+      "tier_reported": "C",
+      "top10_contributors": [
+        {
+          "ticker": "SNCA",
+          "pnl_contribution": -0.024987876415252686,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "AAPL",
+          "pnl_contribution": 0.017346912994980812,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "YRCW",
+          "pnl_contribution": -0.016770925372838974,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "AZO",
+          "pnl_contribution": 0.016085319221019745,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "BXRX",
+          "pnl_contribution": -0.016047704964876175,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "QCOM",
+          "pnl_contribution": 0.015648553147912025,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "CHKP",
+          "pnl_contribution": 0.014649821445345879,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "GLG",
+          "pnl_contribution": -0.01433426421135664,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "TEVA",
+          "pnl_contribution": 0.013119138777256012,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "TMBR",
+          "pnl_contribution": -0.012852792628109455,
+          "adjusted_close_sentinel_gap_affected": true
+        }
+      ]
+    },
+    "S4_p3_1mo_N500": {
+      "eval_start": "1999-02-01",
+      "eval_end": "2026-09-29",
+      "sharpe": 0.3112767434937838,
+      "cagr": 0.03867292579164161,
+      "vol": 0.1666819718650059,
+      "max_dd": 0.5709615935777006,
+      "n_slots": 16531,
+      "placebo_p95": 0.31143161663875196,
+      "placebo_median": 0.24293670213569446,
+      "dsr": 0.42426532770254943,
+      "delist_stress_mean_gt_base_mean": false,
+      "vs": {
+        "PRIMARY_liquid_universe_ewbh": {
+          "sharpe_c": 0.3112767434937838,
+          "sharpe_b": 0.24975040354667627,
+          "gap": 0.061526339947107545,
+          "lb": -0.22249924830643972,
+          "ub": 0.3465682691384272,
+          "gap_half1": 0.04691884934629317,
+          "gap_half2": 0.02313544798992051,
+          "n_days": 6958,
+          "A1": false,
+          "A4": true,
+          "D": false,
+          "A5": true
+        },
+        "BM1_SPY": {
+          "sharpe_c": 0.3112767434937838,
+          "sharpe_b": 0.5229919022809276,
+          "gap": -0.2117151587871438,
+          "lb": -0.5305686875561046,
+          "ub": 0.07949260613996584,
+          "gap_half1": -0.09713705995356782,
+          "gap_half2": -0.3875148880306537,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        },
+        "BM2_60_40": {
+          "sharpe_c": 0.3112767434937838,
+          "sharpe_b": 0.571799579859226,
+          "gap": -0.2605228363654422,
+          "lb": -0.5814672451259365,
+          "ub": 0.06461615251348574,
+          "gap_half1": -0.22746644883130096,
+          "gap_half2": -0.3143588483698112,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        },
+        "BM3_SPY_VT": {
+          "sharpe_c": 0.3112767434937838,
+          "sharpe_b": 0.6742001471064325,
+          "gap": -0.3629234036126487,
+          "lb": -0.6801122061570428,
+          "ub": -0.03280599225534037,
+          "gap_half1": -0.22662108922617202,
+          "gap_half2": -0.4837426659084203,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": true,
+          "A5": false
+        }
+      },
+      "bars": {
+        "A1": false,
+        "A2": false,
+        "A3": false,
+        "A4": false,
+        "A5": false,
+        "A6": false,
+        "A7": "PENDING"
+      },
+      "tier_d_condition": true,
+      "tier_b": {
+        "B_a": true,
+        "B_b": false
+      },
+      "tier": "D",
+      "tier_reported": "D",
+      "top10_contributors": [
+        {
+          "ticker": "AAPL",
+          "pnl_contribution": 0.04655083641409874,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "NVDA",
+          "pnl_contribution": 0.04171735793352127,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "SNCA",
+          "pnl_contribution": -0.0368683785200119,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "YRCW",
+          "pnl_contribution": -0.0353877916932106,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "ANDV",
+          "pnl_contribution": 0.03495751693844795,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "SNDK_old",
+          "pnl_contribution": 0.02946130931377411,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "QCOM",
+          "pnl_contribution": 0.02873297594487667,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "SBER",
+          "pnl_contribution": 0.028509845957159996,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "SSNT",
+          "pnl_contribution": -0.02813919447362423,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "AMZN",
+          "pnl_contribution": 0.02694612182676792,
+          "adjusted_close_sentinel_gap_affected": false
+        }
+      ]
+    },
+    "S4_p4_1mo_N1000": {
+      "eval_start": "1999-02-01",
+      "eval_end": "2026-09-29",
+      "sharpe": 0.3583923104797208,
+      "cagr": 0.04666937430013052,
+      "vol": 0.16576682663385675,
+      "max_dd": 0.5458368708424057,
+      "n_slots": 33047,
+      "placebo_p95": 0.3480615214476845,
+      "placebo_median": 0.2881364499834699,
+      "dsr": 0.5220411997776568,
+      "delist_stress_mean_gt_base_mean": false,
+      "vs": {
+        "PRIMARY_liquid_universe_ewbh": {
+          "sharpe_c": 0.3583923104797208,
+          "sharpe_b": 0.29314809369184924,
+          "gap": 0.06524421678787157,
+          "lb": -0.20652598155934132,
+          "ub": 0.3173972515331915,
+          "gap_half1": -0.024386228409196492,
+          "gap_half2": 0.1461305968782376,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": true
+        },
+        "BM1_SPY": {
+          "sharpe_c": 0.3583923104797208,
+          "sharpe_b": 0.5229919022809276,
+          "gap": -0.1645995918012068,
+          "lb": -0.4503238239758318,
+          "ub": 0.09588558456145917,
+          "gap_half1": -0.07882009624018355,
+          "gap_half2": -0.3007915720404212,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        },
+        "BM2_60_40": {
+          "sharpe_c": 0.3583923104797208,
+          "sharpe_b": 0.571799579859226,
+          "gap": -0.21340726937950522,
+          "lb": -0.49686792345221203,
+          "ub": 0.06487901246236503,
+          "gap_half1": -0.20914948511791667,
+          "gap_half2": -0.22763553237957868,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        },
+        "BM3_SPY_VT": {
+          "sharpe_c": 0.3583923104797208,
+          "sharpe_b": 0.6742001471064325,
+          "gap": -0.3158078366267117,
+          "lb": -0.6358813859590555,
+          "ub": 0.02309540993561329,
+          "gap_half1": -0.20830412551278774,
+          "gap_half2": -0.39701934991818777,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        }
+      },
+      "bars": {
+        "A1": false,
+        "A2": false,
+        "A3": true,
+        "A4": false,
+        "A5": false,
+        "A6": false,
+        "A7": "PENDING"
+      },
+      "tier_d_condition": false,
+      "tier_b": {
+        "B_a": true,
+        "B_b": false
+      },
+      "tier": "C",
+      "tier_reported": "C",
+      "top10_contributors": [
+        {
+          "ticker": "NVDA",
+          "pnl_contribution": 0.023648031055927277,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "AAPL",
+          "pnl_contribution": 0.022477079182863235,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "SNCA",
+          "pnl_contribution": -0.01988816075026989,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "QCOM",
+          "pnl_contribution": 0.019429627805948257,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "AZO",
+          "pnl_contribution": 0.018848657608032227,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "GLG",
+          "pnl_contribution": -0.018664611503481865,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "CBMX",
+          "pnl_contribution": -0.018530411645770073,
+          "adjusted_close_sentinel_gap_affected": true
+        },
+        {
+          "ticker": "ANDV",
+          "pnl_contribution": 0.018138529732823372,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "AMCC",
+          "pnl_contribution": 0.018134163692593575,
+          "adjusted_close_sentinel_gap_affected": false
+        },
+        {
+          "ticker": "YRCW",
+          "pnl_contribution": -0.0176938958466053,
+          "adjusted_close_sentinel_gap_affected": true
+        }
+      ]
+    }
+  },
+  "sanity_checks": {
+    "BM1_SPY": {
+      "sharpe": 0.5229919022809276,
+      "cagr": 0.08535354509097415,
+      "vol": 0.19181430986289855,
+      "max_dd": 0.5518910194097939
+    },
+    "BM2_60_40": {
+      "sharpe": 0.571799579859226,
+      "cagr": 0.05838999416000523,
+      "vol": 0.10978712627563429,
+      "max_dd": 0.3089095830552241
+    },
+    "big_moves_gt_15pct": {
+      "S4_p1_6mo_N500": [],
+      "S4_p2_6mo_N1000": [],
+      "S4_p3_1mo_N500": [],
+      "S4_p4_1mo_N1000": [],
+      "BM1_SPY": [],
+      "BM2_60_40": [],
+      "BM3_SPY_VT": []
+    },
+    "nan_days": {
+      "S4_p1_6mo_N500": 0,
+      "S4_p2_6mo_N1000": 0,
+      "S4_p3_1mo_N500": 0,
+      "S4_p4_1mo_N1000": 0,
+      "BM1_SPY": 0,
+      "BM2_60_40": 0,
+      "BM3_SPY_VT": 0
+    },
+    "turnover_per_year": {
+      "S4_p1_6mo_N500": 3.991388329979879,
+      "S4_p2_6mo_N1000": 3.9895774647887325,
+      "S4_p3_1mo_N500": 23.948329979879276,
+      "S4_p4_1mo_N1000": 23.937464788732395
+    }
+  },
+  "prereg_issues": [
+    "No explicit cash/risk-free subtraction step is stated for the Sharpe-gap computation; every series already carries its own cash drag internally (BM3 on days it under-invests, any slot's early-exit residual), so raw net daily returns are compared directly -- subtracting rf again would double count it.",
+    "Early-exit capital (delisting or a segment break mid-hold) is parked in cash until that slot's cohort next reforms, not redistributed pro-rata to the other names still held in that cohort -- the frozen file says only 'closed out ... no assumption of recovery', with no redistribution rule.",
+    "S4's own frozen COSTS block restates only the stock ADV-bucket table, not an ETF rate for BM1/BM2/BM3/PRIMARY's own legs (SPY/IEF/VFITX) -- protocol Sec.2's general ETF rule (3bps/side, all clear the $50M ADV bar) is used for those.",
+    "'Per side' is charged in full at both entry and exit (not split/halved across the round trip), reading the frozen COSTS key name literally.",
+    "Decile size = round(N*0.10): 50 for N=500, 100 for N=1000 -- not otherwise specified numerically in the frozen file beyond 'top decile'.",
+    "Every scheduled reformation (PRIMARY's monthly rebalance, the 1-month hold, each 6-month cohort) is modelled as a FRESH slot for every held name, with no netting of an unchanged continuing member's weight across reformations -- the conservative (higher-cost) reading of 'rebalanced monthly', applied symmetrically to candidate and PRIMARY so the GAP is not biased by it.",
+    "A3 compares the candidate's own raw daily Sharpe to the distribution of placebo raw daily Sharpes (not a benchmark-relative gap), per the protocol's literal wording, unlike A1/A4/A5 which are explicitly framed as gaps."
+  ],
+  "cleaning_fingerprint_v2_at_freeze": "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054",
+  "cleaning_fingerprint_v2_now": "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054",
+  "cleaning_note": "cleaning v2's label-only update (f62cb2e4 -> fc0690f0) changed only frozen_at's text; CLEANING_RULES (the actual behaviour) is unchanged, so phase-1's panel.parquet is valid input here.",
+  "cleaning_rule_gap_found": {
+    "description": "NOT a prereg ambiguity -- a defect in the SHARED, frozen scripts/eodhd_clean.py used by all 5 shortlist candidates, found while sanity-checking top-10 P&L contributors, reported to the coordinator and NOT patched here (patching it would retroactively change every other candidate's already-computed results too). clean_bars' segment-break detector only fires on a discrete one-day jump in adjusted_close; a CONSTANT vendor sentinel value (999999.9999, an apparent overflow in EODHD's own split-adjustment-factor computation) held for extended stretches produces no jump and so is never flagged.",
+    "n_tickers_in_this_run_affected": 69,
+    "n_tickers_in_this_run_total": 4911,
+    "affected_tickers_sample": [
+      "ADMP",
+      "AIKI",
+      "AKER",
+      "AMDA",
+      "ARDM",
+      "AWEB",
+      "BAS",
+      "BIOC",
+      "BMNR",
+      "BURG",
+      "BXRX",
+      "CALL",
+      "CBMX",
+      "CFRX",
+      "CHFS",
+      "CHKAQ",
+      "CRDS",
+      "CYTX",
+      "DCAR",
+      "DCIX",
+      "DPSI",
+      "DPW",
+      "DRL",
+      "DRYS",
+      "EGLE_old",
+      "ETRM",
+      "FBNK",
+      "GIFT_old",
+      "GIX-UN",
+      "GLG"
+    ],
+    "note": "ratio_52wk is a within-segment RATIO, so a constant multiplicative mis-adjustment cancels out of it exactly; adv63/adv20 dollar-volume is NOT scale-invariant, so an affected name's liquidity can be overstated, letting it into the top-N cut. See each candidate's top10_contributors[].adjusted_close_sentinel_gap_affected flag."
+  },
+  "harness_log": [
+    {
+      "run": 1,
+      "harness_commit": "6e6320a",
+      "log_file": "full_run.log",
+      "utc_start": "2026-09-30T19:48:15Z",
+      "fix_before_this_run": "none -- first real-data run of this harness",
+      "fix_after_this_run": "schedule_slots' default weight was 1/decile_size regardless of hold length, missing the 1/hold_months book-fraction divisor: each 6-month cohort's names got a full 1/decile_size of the book instead of (1/6)/decile_size, so ~6 concurrently open cohorts summed to ~5.76x invested weight and produced a fabricated -68% single-day loss on 2020-03-16 (real SPY that day: -12%). Fixed at the single default-weight formula in schedule_slots (commit f0fa1cb) -- this IMPLEMENTS HOLD_STRUCTURES['6_month_overlapping']'s own frozen text ('a new cohort ... 1/6 of the book each month'), it does not change what the frozen file says.",
+      "results": {
+        "S4_p1_6mo_N500": {
+          "sharpe": 0.529,
+          "tier": "C",
+          "bars": {
+            "A1": true,
+            "A2": false,
+            "A3": true,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        },
+        "S4_p2_6mo_N1000": {
+          "sharpe": 0.553,
+          "tier": "C",
+          "bars": {
+            "A1": true,
+            "A2": false,
+            "A3": true,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        },
+        "S4_p3_1mo_N500": {
+          "sharpe": 0.311,
+          "tier": "D",
+          "bars": {
+            "A1": false,
+            "A2": false,
+            "A3": true,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        },
+        "S4_p4_1mo_N1000": {
+          "sharpe": 0.358,
+          "tier": "C",
+          "bars": {
+            "A1": false,
+            "A2": false,
+            "A3": true,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        }
+      }
+    },
+    {
+      "run": 2,
+      "harness_commit": "f0fa1cb",
+      "log_file": "full_run2.log",
+      "utc_start": "2026-09-30T22:02:10Z",
+      "fix_before_this_run": "run 1's 1/hold_months weight-divisor fix (see run 1 entry)",
+      "fix_after_this_run": "a held position whose ticker hit a SEGMENT BREAK mid-hold (e.g. a phantom reverse-split adjustment-factor reset) was clipped only to last_pos_of (the ticker's LAST bar in its WHOLE file), never to the end of the segment it was actually entered in -- found while sanity-checking this run's top-10 P&L contributors (all 4 non-mega-cap names were later found to carry the cleaning-rule sentinel-gap signature, see cleaning_rule_gap_found below). Fixed via seg_starts_of/segment_last_pos (commit ba52b36) -- this IMPLEMENTS the frozen file's own existing rule ('no return may be computed across a segment boundary: a holding that spans one is closed at the last close before it'), it does not change what the frozen file says.",
+      "results": {
+        "S4_p1_6mo_N500": {
+          "sharpe": 0.535,
+          "tier": "C",
+          "bars": {
+            "A1": true,
+            "A2": false,
+            "A3": true,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        },
+        "S4_p2_6mo_N1000": {
+          "sharpe": 0.559,
+          "tier": "C",
+          "bars": {
+            "A1": true,
+            "A2": false,
+            "A3": true,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        },
+        "S4_p3_1mo_N500": {
+          "sharpe": 0.311,
+          "tier": "D",
+          "bars": {
+            "A1": false,
+            "A2": false,
+            "A3": false,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        },
+        "S4_p4_1mo_N1000": {
+          "sharpe": 0.358,
+          "tier": "C",
+          "bars": {
+            "A1": false,
+            "A2": false,
+            "A3": true,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        }
+      }
+    },
+    {
+      "run": 3,
+      "harness_commit": "ba52b36",
+      "log_file": null,
+      "utc_start": "2026-09-30T23:16:54Z",
+      "fix_before_this_run": "run 2's segment-boundary-exit fix (see run 2 entry) -- this run's own code had no fix pending before it; it is the governing (most recent, final) result",
+      "fix_after_this_run": "none yet -- this is the governing (most recent) run",
+      "results": {
+        "S4_p1_6mo_N500": {
+          "sharpe": 0.5362294131968881,
+          "tier": "C",
+          "bars": {
+            "A1": true,
+            "A2": false,
+            "A3": true,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        },
+        "S4_p2_6mo_N1000": {
+          "sharpe": 0.5601154747878249,
+          "tier": "C",
+          "bars": {
+            "A1": true,
+            "A2": false,
+            "A3": true,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        },
+        "S4_p3_1mo_N500": {
+          "sharpe": 0.3112767434937838,
+          "tier": "D",
+          "bars": {
+            "A1": false,
+            "A2": false,
+            "A3": false,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        },
+        "S4_p4_1mo_N1000": {
+          "sharpe": 0.3583923104797208,
+          "tier": "C",
+          "bars": {
+            "A1": false,
+            "A2": false,
+            "A3": true,
+            "A4": false,
+            "A5": false,
+            "A6": false,
+            "A7": "PENDING"
+          }
+        }
+      }
+    }
+  ]
+}
