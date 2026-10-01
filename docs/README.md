@@ -25,6 +25,7 @@ output.
 
 | Doc | Verdict |
 |---|---|
+| `eodhd_shortlist_verdict_2026_10.md` | EODHD shortlist S1-S5 (industry momentum, breadth overlay, bond/commodity trend, 52-week high, crypto momentum): all Tier C; S2 a near miss |
 | `insider_cluster_verdict_2026_09.md` | SEC insider-purchase clusters: Tier C, no edge (median event loses; EODHD bad-bar issues documented) |
 | `optimal_combination_fix_2026_09.md` | Signal-combination methods: FAIL (re-measured on the fixed engine, still FAIL) |
 | `pattern_ml_final_verdict_2026_09.md` | Pattern-recognition ML layer: stays off |
@@ -60,7 +61,19 @@ output.
 | Standalone strategies | `standalone_strategy_trial_history.json` | `standalone_strategy_evaluation_2026_09.json` |
 | Alternative premia | `alt_premia_trial_history.json` | `alt_premia_evaluation_2026_09.json`, `alt_premia_power_analysis_2026_09.json` |
 | Insider clusters | `insider_cluster_trial_history.json` | `insider_cluster_evaluation_2026_09.json` (primary), `insider_cluster_recompute_2026_09.json` (independent recompute + post-hoc) |
+| EODHD shortlist S1-S5 | `S1_trial_history.json`, `S2_trial_history.json`, `S3_trial_history.json`, S4/S5 per their pre-registrations | `eodhd_s{1..5}_evaluation_2026_10.json`; shared rules `eodhd_shortlist_protocol_2026_10.md`; S5 data gate `eodhd_s5_crypto_gate_2026_10.md` |
 | Allocation forward test | `allocation_forward_test_trial_history.json` | `allocation_replay_2026_09.json` (reference simulation); `allocation_portfolio_backtest_2026_09.json` (first sanity backtest, superseded by the replay, kept because the frozen prereg cites it) |
+
+## External review
+
+`review/README.md` (repo root) is the entry point for a third-party reviewer. It covers:
+- every study's pre-registration, freeze commit, harness, tests and artifacts;
+- the UTC timeline;
+- the SHA-256 manifest of all input data;
+- the software environment;
+- errata.
+
+The exact input data are in a private bundle described in `review/DATA_BUNDLE.md`.
 
 ## Subfolders
 

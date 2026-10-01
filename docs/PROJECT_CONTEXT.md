@@ -1305,3 +1305,24 @@ Full verdict: `docs/edge_search_verdict_2026_09.md`. Plan: `docs/edge_search_pla
 - **EODHD price data has bad bars.** Examples: a phantom holiday bar (SMLP 2015-12-25, $0.0002), scale errors (XBKS), unadjusted reverse splits (ACRX, CERN), garbage quotes (QPAC). They faked the calendar-time DSR and PBO passes, and more remain unidentified. Any new EODHD pre-registration must freeze a cleaning rule before the run.
 - **Test isolation.** `tests/test_api.py::TestMemoryDecisionsAPI` fails when `FIRM_DATA_DIR` is set in the environment: the tests don't isolate from it. Run the suite without it, or fix the fixtures (follow-up).
 
+## 2026-09-30/10-01: EODHD shortlist (S1-S5) and the review package
+
+- **Result:** five pre-registered candidates from the owner's EODHD shortlist; **all Tier C**. Full verdict: `docs/eodhd_shortlist_verdict_2026_10.md`.
+  - All five were frozen 2026-09-30T19:18:54Z under a shared protocol (`docs/eodhd_shortlist_protocol_2026_10.md`: α 0.01, DSR prior 205-207 trials).
+  - **S1** industry-ETF momentum equals equal-weight holding of the same ETFs.
+  - **S2** breadth overlay on 60/40 is a near miss: it fails only A1 and one A4 half. Its effect is defensive (lower drawdown at the same return).
+  - **S3** bond/commodity trend equals buy-and-hold of the same assets.
+  - **S4** 52-week high matches SPY.
+  - **S5** crypto momentum is no better than random picks. Its benchmark, the live C1 BTC-trend rule, again beat BTC held.
+- **Data:** EODHD data was re-downloaded from 1985 into `data/research/eodhd/*_full/`. The first pulls were capped at 2005 by a fixed setting in the download script.
+  - Cash before BIL = FRED DTB3; the 60/40 bond leg before IEF = VFITX.
+  - Pre-1998 US stock coverage is thin (S2 and S4 start 2002 and 1999).
+- **Cleaning rule:** `scripts/eodhd_clean.py` (v2, `fc0690f0`) misses a constant 999999.9999 vendor sentinel (found by S4). A v3 must be frozen before any further EODHD test.
+- **External review:** `review/README.md` is the entry point. `scripts/build_review_package.py` regenerates it:
+  - the input-data SHA-256 manifest;
+  - artifacts and scratch scripts;
+  - the environment and the UTC timeline;
+  - a private data bundle outside git.
+- **Host clock:** Asia/Jerusalem (UTC+3). Log lines are local time; audit timestamps come from `date -u` or git.
+- **Test isolation:** `tests/test_api.py` needs `.env` (Alpaca key) in the working tree, and fails when `FIRM_DATA_DIR` is set.
+
