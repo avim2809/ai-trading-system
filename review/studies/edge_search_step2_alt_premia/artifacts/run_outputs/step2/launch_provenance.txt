@@ -1,0 +1,21 @@
+2026-09-29T11:03:27Z
+fingerprint 76598975432f3bc69b61b7f3d8a18484901c6d17f591818d02545e1df8992dec
+281aabff41b7fde2fb4ce58d4e5b39f018b1e637fe1fbaffbd2c8816e064a6a8  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt/scripts/alt_premia_preregistered_bars.py
+f56c69970f750beb3ebea0d0a080496529348ab86798d8087a31768d18e7f1d1  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt/scripts/run_alt_premia_evaluation.py
+c13cbabd762e1ee45f743e413350b1dd11eb896244e755dc9223a8b9fd8e2961  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt/scripts/alt_premia_data.py
+b343a1b0e63edc579c70ee2a6b204d363e607978265c8252c293077fcc85042c  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/cboe_PUT.parquet
+d8cd50bb4bc76fdfb5be51af53d0efb7e90e152f14d75615cdcc9f81d25131f7  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/cboe_VIX.parquet
+6dcbda758809a6a2b24410d40edc88add4c52e577bd76a020bb5ecd674dcadb2  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/cboe_VIX3M.parquet
+586b01053f74712e1f902bf487653bb0da6b35d6c6d7e2112c055b2f5ac05ab0  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/fomc_scheduled.parquet
+649b8efb1d505b20a2beb8bf7c6448d6735267dcea7bc757439311b55ba1e8c3  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/fred_DTB3.parquet
+7c935b7e6649976ac4992f9125e37b45cb9555ca9bbc80277a7e2486ce21b741  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/tiingo_BTCUSD.parquet
+66effcb2b017e6304d9d02dc0736b07eb7e4e044bf69653749b62d8d413f223e  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/tiingo_DBC.parquet
+a1804a17c3d96e13e230cfbafa441d85c0070654269fa5619c92fe0577b3a0bf  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/tiingo_EEM.parquet
+57cd0805896c458848c04269a2e69ec34863a5f8c2a917e156f4fbf393a4c791  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/tiingo_EFA.parquet
+34d884a26bf0ef60ed8170e16a6489d1f0273bf5e92b6ab5ec607bf28d9ffa90  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/tiingo_GLD.parquet
+0f4c84a165b4d7988a2b9b7b6a5409b0e23f304c4bae59f166cd3467ce31fc00  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/tiingo_IEF.parquet
+b5b5ce5f5d626aa1635948662c8a3dba01f1aaa07c7eeef06e62914db5f7e7b4  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/tiingo_SPY.parquet
+22613d8ff21518a51237eec9d2a4d6c15a4b764c1ea68f721dc30e0ffe17acd7  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/tiingo_SVXY.parquet
+11e1a1028f8f3be28c6ca79ff11f65d9f8d3c965b9cea568814a3a2574d47ec0  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/tiingo_TLT.parquet
+3daefb6cb280f3423299f51d826bbff7dbfe813ee51a0f3f557e70b416296f44  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/tiingo_VNQ.parquet
+256111cc05da1a353cd59fb9ef107c7e789d944dc550e43dd10967ca492c87e4  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/data/tiingo_VXX.parquet

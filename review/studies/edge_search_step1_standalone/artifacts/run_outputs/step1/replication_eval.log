@@ -1,0 +1,14 @@
+{
+  "C1_robust_attribution": {
+    "verdict": "FAIL",
+    "n_bars_passed": 2,
+    "oos_sharpe": -0.7307749411989439,
+    "dsr": 0.011271972348504078
+  },
+  "C2_robust_standalone": {
+    "verdict": "FAIL",
+    "n_bars_passed": 2,
+    "oos_sharpe": 0.3077175307135668,
+    "dsr": 0.21595833603577302
+  }
+}

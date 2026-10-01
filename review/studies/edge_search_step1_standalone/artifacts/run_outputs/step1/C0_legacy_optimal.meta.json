@@ -1,0 +1,38 @@
+{
+  "candidate": "C0_legacy_optimal",
+  "bars_fingerprint": "96bf26c8aa81b57db21adb8eba6dc3f7afd7dece24857d0195bb25aa8da5e9a2",
+  "standalone_fingerprint": "1d54517a2e1e68c09d88d78111fe9b6e8529cae482d7015c0b0c30f25f921b8d",
+  "seconds": 15174,
+  "n_days": 1631,
+  "n_book_rows": 272932,
+  "strategies_captured": [
+    "event_driven",
+    "mean_reversion",
+    "momentum",
+    "multi_factor",
+    "pattern_recognition",
+    "regime_hmm",
+    "seasonality",
+    "sentiment",
+    "stat_arb",
+    "trend",
+    "volatility_breakout"
+  ],
+  "portfolio": {
+    "total_return": 0.24623694973471055,
+    "cagr": 0.03459627824941758,
+    "annualized_volatility": 0.052936082753963214,
+    "sharpe_ratio": 0.6689889138186725,
+    "sortino_ratio": 0.6729844282913805,
+    "max_drawdown": 0.11187488622526116,
+    "calmar_ratio": 0.3092407904644268,
+    "hit_rate": 0.5260576333537706,
+    "cvar_95": 0.007428725424994827
+  },
+  "turnover": {
+    "avg_turnover": 0.018031288643140173,
+    "total_turnover": 29.37296919967534,
+    "rebalance_count": 1629
+  },
+  "finished_at": "2026-09-30T00:18:02.619365+00:00"
+}

@@ -1,0 +1,178 @@
+{
+  "meta": {
+    "window_start": "2002-01-02",
+    "data_end": "2026-09-29",
+    "midpoint": "2014-05-16",
+    "n_rebal_dates": 297,
+    "prior_trials": 206
+  },
+  "breadth_crosscheck": {
+    "n_ticker_files_scanned": 22732,
+    "n_ticker_files_usable": 22624,
+    "eligible_count_at_window_start_mine": 2154
+  },
+  "flip_check": {
+    "V1_primary": {
+      "n_flips": 38,
+      "n_on_episodes": 19,
+      "pct_on": 0.24915824915824916
+    },
+    "V2_cash_destination": {
+      "n_flips": 38,
+      "n_on_episodes": 19,
+      "pct_on": 0.24915824915824916
+    },
+    "V3_stricter_threshold": {
+      "n_flips": 30,
+      "n_on_episodes": 15,
+      "pct_on": 0.16161616161616163
+    },
+    "V4_alt_measure": {
+      "n_flips": 146,
+      "n_on_episodes": 73,
+      "pct_on": 0.38047138047138046
+    }
+  },
+  "benchmarks": {
+    "BM1": {
+      "sharpe": 0.5948086337195514,
+      "cagr": 0.09920173718911407,
+      "max_dd": 0.5518910194097935,
+      "calmar": 0.1797487795601439
+    },
+    "BM2": {
+      "sharpe": 0.7513186913874157,
+      "cagr": 0.07713861832811375,
+      "max_dd": 0.3252466952811759,
+      "calmar": 0.23716956835311542
+    },
+    "BM3": {
+      "sharpe": 0.755219262429521,
+      "cagr": 0.08448355194376433,
+      "max_dd": 0.3050915216921223,
+      "calmar": 0.2769121589324905
+    }
+  },
+  "variants": {
+    "V1_primary": {
+      "sharpe": 0.8976059367346553,
+      "cagr": 0.07172244644695369,
+      "max_dd": 0.2038706061925032,
+      "calmar": 0.3518037631144842,
+      "gap_vs_bm2": 0.14628724534723958,
+      "boot_lb_1pct": -0.05555328999763092,
+      "boot_ub_99pct": 0.35049324598296944,
+      "dsr": 0.9996055308840245,
+      "placebo_p95": 0.8741355146437687,
+      "A1": false,
+      "A2": true,
+      "A3": true,
+      "A4": true,
+      "A5": true,
+      "A8": true,
+      "tier_d": false,
+      "tier": "B"
+    },
+    "V2_cash_destination": {
+      "sharpe": 0.751925291541121,
+      "cagr": 0.06052795130346467,
+      "max_dd": 0.22968078862350794,
+      "calmar": 0.2635307535567631,
+      "gap_vs_bm2": 0.0006066001537052834,
+      "boot_lb_1pct": -0.24364368963438254,
+      "boot_ub_99pct": 0.21875499712426316,
+      "dsr": 0.9957861497746623,
+      "placebo_p95": 0.7380588958375882,
+      "A1": false,
+      "A2": true,
+      "A3": true,
+      "A4": false,
+      "A5": false,
+      "A8": true,
+      "tier_d": false,
+      "tier": "C"
+    },
+    "V3_stricter_threshold": {
+      "sharpe": 0.9233182640135368,
+      "cagr": 0.07742212821357564,
+      "max_dd": 0.20073271114592695,
+      "calmar": 0.38569761635557226,
+      "gap_vs_bm2": 0.1719995726261211,
+      "boot_lb_1pct": 0.0035647828062974497,
+      "boot_ub_99pct": 0.34068371838663153,
+      "dsr": 0.9997482184990443,
+      "placebo_p95": 0.8462049967908066,
+      "A1": true,
+      "A2": true,
+      "A3": true,
+      "A4": true,
+      "A5": true,
+      "A8": true,
+      "tier_d": false,
+      "tier": "A"
+    },
+    "V4_alt_measure": {
+      "sharpe": 0.8950564839539464,
+      "cagr": 0.07063210432285572,
+      "max_dd": 0.21660684869982272,
+      "calmar": 0.3260843539658288,
+      "gap_vs_bm2": 0.14373779256653074,
+      "boot_lb_1pct": -0.09058385928494286,
+      "boot_ub_99pct": 0.3675285805065694,
+      "dsr": 0.999577388035817,
+      "placebo_p95": 0.875329312154245,
+      "A1": false,
+      "A2": true,
+      "A3": true,
+      "A4": false,
+      "A5": true,
+      "A8": true,
+      "tier_d": false,
+      "tier": "C"
+    }
+  },
+  "pbo": 0.0,
+  "pbo_pass_a6": true,
+  "candidate_tier_per_V1_primary": "B",
+  "reconciliation_excess_vs_bm2_convention": {
+    "note": "Primary harness computes A2 (DSR) and A3 (placebo) on EXCESS-vs-BM2 daily returns (run_eodhd_s2_evaluation.py L555-574), not the raw variant return series. My first-pass recompute used raw-variant Sharpe for A2/A3 (see variants.*.dsr/placebo_p95 above). Redoing A2/A3 on the SAME excess-vs-BM2 basis (s2_excess_check.py) reproduces the primary's A3=False for all 4 variants exactly, and lands DSR in the same near-zero range (both fail A2).",
+    "V1_primary": {
+      "real_excess_sharpe": -0.1506,
+      "placebo_p95_excess": 0.064,
+      "A3_excess_convention": false,
+      "dsr_excess": 0.003
+    },
+    "V2_cash_destination": {
+      "real_excess_sharpe": -0.3858,
+      "placebo_p95_excess": -0.2409,
+      "A3_excess_convention": false,
+      "dsr_excess": 4e-05
+    },
+    "V3_stricter_threshold": {
+      "real_excess_sharpe": -0.0402,
+      "placebo_p95_excess": 0.0804,
+      "A3_excess_convention": false,
+      "dsr_excess": 0.0139
+    },
+    "V4_alt_measure": {
+      "real_excess_sharpe": -0.167,
+      "placebo_p95_excess": -0.0402,
+      "A3_excess_convention": false,
+      "dsr_excess": 0.00234
+    },
+    "primary_dsr_for_comparison": {
+      "V1_primary": 0.005805138116147246,
+      "V2_cash_destination": 0.000206239759580229,
+      "V3_stricter_threshold": 0.025303156506906233,
+      "V4_alt_measure": 0.00319418951742112
+    },
+    "primary_A3_for_comparison": {
+      "V1_primary": false,
+      "V2_cash_destination": false,
+      "V3_stricter_threshold": false,
+      "V4_alt_measure": false
+    },
+    "conclusion": "Once A2/A3 use the primary's (protocol-consistent) excess-vs-BM2 convention, every variant fails A3 and A2 in both runs; no variant reaches Tier B or A; candidate tier = C, matching primary's tier_conditional_on_A7=C for all 4 variants."
+  },
+  "known_limitation_V2": "V2_cash_destination: my simulate_two_asset engine is a strict 2-asset (SPY + one destination leg) engine, so V2 used BIL as the sole non-SPY leg THROUGHOUT (both on- and off-state months). The primary's decide() uses IEF for the off-state in EVERY variant (including V2) and only routes the incremental weight to BIL during on-state months -- i.e. V2 should hold SPY/IEF 60/40 off, SPY/BIL 30/70 on. This is a genuine gap in my V2 implementation (not present for V1/V3/V4, whose destination is IEF -- identical to the off-state leg, so the 2-asset shortcut is exact for them) and explains most of the V2 maxDD/Calmar/A5 mismatch against the primary's V2 numbers. Does not change the overall conclusion: V2 lands in Tier C in both runs either way."
+}

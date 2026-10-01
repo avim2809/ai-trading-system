@@ -1,0 +1,14 @@
+2026-09-29T20:05:00Z
+worktree HEAD adb8919bde17c9349df2cfdae6314f590d5f50e9
+?? docs/alt_premia_evaluation_2026_09.json
+?? docs/alt_premia_power_analysis_2026_09.json
+?? docs/alt_premia_trial_history.json
+standalone fp 1d54517a2e1e68c09d88d78111fe9b6e8529cae482d7015c0b0c30f25f921b8d
+combination fp 96bf26c8aa81b57db21adb8eba6dc3f7afd7dece24857d0195bb25aa8da5e9a2
+55b159707dd949223d476f3c663208c4d726674672a69de5723ecb6ed2b42103  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt/scripts/standalone_strategy_preregistered_bars.py
+c8c4edaa9b269e84a81560f7eff9585e46c6a317b4b8a4f15d4fb2fb0a87c179  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt/scripts/run_standalone_strategy_evaluation.py
+f56e3e1e97d388a4503323d484b9d7cfb191978c447e8b97f5b6bcb2d0b45b6c  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt/scripts/combination_preregistered_bars.py
+510ea0f5949abb8d0689746ef47ed26ede137fd0ceafd3eb0018356db27dc5d0  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt/scripts/run_combination_evaluation.py
+118b19f7b2bf6555d9fdbea2a9ef471cee8d1bcf44a97fb3b0c100979d47decb  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt/src/firm/backtest/datafeeds.py
+9a4cc7680c865a5628c3d12d9aaa9064b44f561ee78133c64bd2aa5520540628  /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt/src/firm/backtest/run.py
+2026-09-30T00:18:04Z

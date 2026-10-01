@@ -1,0 +1,48 @@
+2026-09-30 22:38:31,575 INFO fingerprint 287294d0552396299b2e4fbe916a92a9adef564d53dbb6458c4a591941c8b359 (frozen 2026-09-30T19:18:54Z)
+2026-09-30 22:38:33,724 WARNING XLI: 1 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,724 WARNING XLRE: 5 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,724 WARNING XSD: 4 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING XPH: 24 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING KIE: 9 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING XRT: 2 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING XOP: 1 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING OIH: 1 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING XME: 1 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING XTN: 35 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING XAR: 124 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING IGV: 7 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING FDN: 14 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING IYR: 5 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING PBJ: 4 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING XHS: 68 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING IYZ: 1 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:38:33,725 WARNING VFITX: 8 missing sessions within its own clean domain (returns spanning them are dropped)
+2026-09-30 22:39:00,179 INFO placebo draw 0/500
+2026-09-30 22:41:54,656 INFO placebo draw 100/500
+2026-09-30 22:44:48,102 INFO placebo draw 200/500
+2026-09-30 22:47:42,152 INFO placebo draw 300/500
+2026-09-30 22:50:37,065 INFO placebo draw 400/500
+2026-09-30 22:53:28,942 INFO ==> S1 tier: C  bars={'A1': False, 'A2': False, 'A3': False, 'A4': False, 'A5': False, 'A6': False}  D=False  B={'B': False}
+	Command being timed: "/local/store/git/ai-trading-system/.venv/bin/python3 scripts/run_eodhd_s1_evaluation.py evaluate --out /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/runs/S1 --report docs/eodhd_s1_evaluation_2026_10.json"
+	User time (seconds): 893.33
+	System time (seconds): 1.48
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 14:59.84
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 428464
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 69938
+	Voluntary context switches: 1172
+	Involuntary context switches: 12598
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

@@ -1,0 +1,2494 @@
+[
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C0_legacy_optimal.config.json",
+  "bytes": 4021,
+  "sha256": "07eb4f5728dfdf993cfa1c6e2d48335ae90db5a095eebce2ef9ca5e8296566d5",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C0_legacy_optimal.config.json"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C0_legacy_optimal.log",
+  "bytes": 45916025,
+  "sha256": "4479429b80d18b6118a0953fb93ae900564e052976bde675110a9709a519418e",
+  "location": "bundle:runs/step1/C0_legacy_optimal.log"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C0_legacy_optimal.meta.json",
+  "bytes": 1099,
+  "sha256": "775494d711a26938d350a5e7587fff8d96b7337a275b4778ff98c423521b3c44",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C0_legacy_optimal.meta.json"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C0_legacy_optimal.returns.parquet",
+  "bytes": 31209,
+  "sha256": "0a6fb0ae8799795a353b36bff0e5a4802ee64897fcdfda219248e7d5f77327f9",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C0_legacy_optimal.returns.parquet"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C1_robust_attribution.config.json",
+  "bytes": 4130,
+  "sha256": "c6e9742e4893e970c93976cdb082b661fb0c463e1c0b98825d579a47c358e355",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C1_robust_attribution.config.json"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C1_robust_attribution.log",
+  "bytes": 48658107,
+  "sha256": "45939167b27967162b8b449df96296bea4e7e91eef1884cb5c74b855dbcdfa59",
+  "location": "bundle:runs/step1/C1_robust_attribution.log"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C1_robust_attribution.meta.json",
+  "bytes": 737,
+  "sha256": "b4f7b84f671c8f32b1207e9525ac055eabd18f96d2b70b468ab649a9fc365cc8",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C1_robust_attribution.meta.json"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C1_robust_attribution.returns.parquet",
+  "bytes": 31209,
+  "sha256": "56620ad139ec57929f035e751dad0a06cd2d376057b508e98e9e105c1de3c28d",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C1_robust_attribution.returns.parquet"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C2_robust_standalone.config.json",
+  "bytes": 4129,
+  "sha256": "7c72e3019c7076c072cdaba25921727285c353b7c1d8d43c2f47a7f6e807df1a",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C2_robust_standalone.config.json"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C2_robust_standalone.log",
+  "bytes": 44612064,
+  "sha256": "96e6e3fd5bd838e042e8d7ccea5a20dc8ba9524029f59f9bb0b1e47d2f7bf95d",
+  "location": "bundle:runs/step1/C2_robust_standalone.log"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C2_robust_standalone.meta.json",
+  "bytes": 734,
+  "sha256": "4cd69e2fcbbb425574fbb20ac72013ee06dccf6ba26dd714540c273c1d108f1f",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C2_robust_standalone.meta.json"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C2_robust_standalone.returns.parquet",
+  "bytes": 31209,
+  "sha256": "f3fd3b26dfd612b7be7c5ad068e8b61f123a406152cd431d5cb5af48f2aa9090",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C2_robust_standalone.returns.parquet"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C3_confidence.config.json",
+  "bytes": 4024,
+  "sha256": "06d01efed499c76b950aa30c49da243a75a693dd54392cc1a9e861e938347bf1",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C3_confidence.config.json"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C3_confidence.log",
+  "bytes": 45813168,
+  "sha256": "d032c62037e1b22ca080b4866b7364b8d75773b5c6aa14059922628601791ff4",
+  "location": "bundle:runs/step1/C3_confidence.log"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C3_confidence.meta.json",
+  "bytes": 728,
+  "sha256": "c0cec34276b24434ab902067876acf00ef3615e2f47bbe42ec3fa71fc2ae3b5a",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C3_confidence.meta.json"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/C3_confidence.returns.parquet",
+  "bytes": 31209,
+  "sha256": "b977cbf7c87577b8af54f66e29c551c0e82d3c6d26254153b10815ab80255cbc",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/C3_confidence.returns.parquet"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/P_random_weights.config.json",
+  "bytes": 4043,
+  "sha256": "2d37b0019f78e99acc1244537db86fc8d62c3d41139601bf25c77e83dc6b114a",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/P_random_weights.config.json"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/P_random_weights.log",
+  "bytes": 44106964,
+  "sha256": "6af5b8089f6ca89a126428394163bee3f120b7a8fb09fcb22a768b1eed0ca3b3",
+  "location": "bundle:runs/step1/P_random_weights.log"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/P_random_weights.meta.json",
+  "bytes": 731,
+  "sha256": "47425f7876cc4fbc271f2332666601fb145d28ea355f5f8b04a487839bbe3b95",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/P_random_weights.meta.json"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/P_random_weights.returns.parquet",
+  "bytes": 31209,
+  "sha256": "d4466c0a595437e2018f071e08672c09928eb5607a1885f3cb406ae0974b6d17",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/P_random_weights.returns.parquet"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/attribution_signal_returns.parquet",
+  "bytes": 156077,
+  "sha256": "e31e53d770bfa6c66be17debd72464c2d4d1f4469c5068897a7a8d8a3f49c990",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/attribution_signal_returns.parquet"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/launch_provenance.txt",
+  "bytes": 1612,
+  "sha256": "89f12d2fc28bb08003bff3501115ba9eaf18b7de11a697d9489517c3e4ea10be",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/launch_provenance.txt"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/replication_eval.log",
+  "bytes": 304,
+  "sha256": "5531fc005c7f928aaf4e8f93fe43cf44c0fc25910c386391a88d78366ee9efc3",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/replication_eval.log"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/signal_books.parquet",
+  "bytes": 2154171,
+  "sha256": "f4271677390af3d5c687859f170aefe8a05a68b9ceb39f4b10e17e5369a75bde",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/signal_books.parquet"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/standalone_eval.log",
+  "bytes": 3699,
+  "sha256": "abbd52ffda0aeea538f77595590f9ff0b16f45de44ceddfa5d1cfcd9a51a8329",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/standalone_eval.log"
+ },
+ {
+  "study": "edge_search_step1_standalone",
+  "scratch_path": "runs/step1/standalone_report.json",
+  "bytes": 12240,
+  "sha256": "6db282acbc6815f248c21ed7f13e6032fdb3ceb9c352cf5e2fce66d109b734fa",
+  "location": "review/studies/edge_search_step1_standalone/artifacts/run_outputs/step1/standalone_report.json"
+ },
+ {
+  "study": "edge_search_step2_alt_premia",
+  "scratch_path": "runs/step2/alt_premia_preregistered_bars.py",
+  "bytes": 14993,
+  "sha256": "281aabff41b7fde2fb4ce58d4e5b39f018b1e637fe1fbaffbd2c8816e064a6a8",
+  "location": "review/studies/edge_search_step2_alt_premia/artifacts/run_outputs/step2/alt_premia_preregistered_bars.py"
+ },
+ {
+  "study": "edge_search_step2_alt_premia",
+  "scratch_path": "runs/step2/evaluate.log",
+  "bytes": 116980,
+  "sha256": "647f5e64ee933ac1e2fc1213dc874ad2323f346623d28c583ca6b3b73521f569",
+  "location": "review/studies/edge_search_step2_alt_premia/artifacts/run_outputs/step2/evaluate.log"
+ },
+ {
+  "study": "edge_search_step2_alt_premia",
+  "scratch_path": "runs/step2/launch_provenance.txt",
+  "bytes": 3696,
+  "sha256": "56753c3777694875a0fb5c5d09d66ec898c1bd9e3305e07221a6dee4c69b8dc7",
+  "location": "review/studies/edge_search_step2_alt_premia/artifacts/run_outputs/step2/launch_provenance.txt"
+ },
+ {
+  "study": "edge_search_step2_alt_premia",
+  "scratch_path": "runs/step2/placebo_sharpes.parquet",
+  "bytes": 32225,
+  "sha256": "0b4d370ca1d64b3f6b1616a3dd40ae2510d0e3d5d7a1e6377953c21e85abfc32",
+  "location": "review/studies/edge_search_step2_alt_premia/artifacts/run_outputs/step2/placebo_sharpes.parquet"
+ },
+ {
+  "study": "edge_search_step2_alt_premia",
+  "scratch_path": "runs/step2/power_analysis.json",
+  "bytes": 5390,
+  "sha256": "01dc9d22e5822b888eb78701c0bff6dd03fa6dd8fb616e2dfa97d4d9f2438064",
+  "location": "review/studies/edge_search_step2_alt_premia/artifacts/run_outputs/step2/power_analysis.json"
+ },
+ {
+  "study": "edge_search_step2_alt_premia",
+  "scratch_path": "runs/step2/report.json",
+  "bytes": 38513,
+  "sha256": "7a69328d152252daeea81626d3dbb48502385da903955648adff2b78d6486ee8",
+  "location": "review/studies/edge_search_step2_alt_premia/artifacts/run_outputs/step2/report.json"
+ },
+ {
+  "study": "edge_search_step2_alt_premia",
+  "scratch_path": "runs/step2/returns_base.parquet",
+  "bytes": 698222,
+  "sha256": "5d755e6946f3a655427a6d8da169dae091b3d1a1e697a06a2b8a96c75c35abd5",
+  "location": "review/studies/edge_search_step2_alt_premia/artifacts/run_outputs/step2/returns_base.parquet"
+ },
+ {
+  "study": "edge_search_step2_alt_premia",
+  "scratch_path": "runs/step2/returns_stress.parquet",
+  "bytes": 698222,
+  "sha256": "46fbd7cfc1bdde37a945c194a59edf1118eae981cfbb28c69d58531303040afe",
+  "location": "review/studies/edge_search_step2_alt_premia/artifacts/run_outputs/step2/returns_stress.parquet"
+ },
+ {
+  "study": "edge_search_step2_alt_premia",
+  "scratch_path": "runs/step2/run_alt_premia_evaluation.py",
+  "bytes": 39335,
+  "sha256": "f56c69970f750beb3ebea0d0a080496529348ab86798d8087a31768d18e7f1d1",
+  "location": "review/studies/edge_search_step2_alt_premia/artifacts/run_outputs/step2/run_alt_premia_evaluation.py"
+ },
+ {
+  "study": "edge_search_step2_alt_premia",
+  "scratch_path": "runs/step2/selfcheck.log",
+  "bytes": 8070,
+  "sha256": "d88a8c301ef4b89c2ddfdc23e5dbb8ddf33be14c885dc06afba85da390779d09",
+  "location": "review/studies/edge_search_step2_alt_premia/artifacts/run_outputs/step2/selfcheck.log"
+ },
+ {
+  "study": "edge_search_step2_alt_premia",
+  "scratch_path": "runs/step2/tail_exposure.parquet",
+  "bytes": 171756,
+  "sha256": "055c6156b0c79af6d252953f00be3420872078cd49c99394ac3b7c6e6bcee070",
+  "location": "review/studies/edge_search_step2_alt_premia/artifacts/run_outputs/step2/tail_exposure.parquet"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider/calendar_time.parquet",
+  "bytes": 411219,
+  "sha256": "06064d3428a366779983a553552d49b26d6f5df0cc6c4d119a80980c240836bd",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider/calendar_time.parquet"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider/event_coverage.parquet",
+  "bytes": 737216,
+  "sha256": "8d29a52092ebdb55d8639a458175016825c25d25e199ee7e4d75d43b89052c3e",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider/event_coverage.parquet"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider/events_evaluated.parquet",
+  "bytes": 1837201,
+  "sha256": "f5716b24dfd095d71801677b4f5ed59daa1fc32fcf4467565510aca1f0564e37",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider/events_evaluated.parquet"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider/placebo_3_month.parquet",
+  "bytes": 6287,
+  "sha256": "6b2b61da47ed63189b0374a92b116c35a2dc87238577ffc14cd57b848617dd8b",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider/placebo_3_month.parquet"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider/placebo_6_month.parquet",
+  "bytes": 6287,
+  "sha256": "0e0b8707d861b22dff21c58d31f5a2db372b63a20d0d237c29342763b97c91a0",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider/placebo_6_month.parquet"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider/report.json",
+  "bytes": 9023,
+  "sha256": "3207823aff91409a525447f7907bcfd2410bbbf85c3a65bb3cdc468fe986f4cc",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider/report.json"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/bad_tickers.json",
+  "bytes": 16,
+  "sha256": "806c28ca9ab6474c512e54606ffc6ae42039017bff5fc8c683f3783a038aa384",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/bad_tickers.json"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/calendar_time.parquet",
+  "bytes": 411219,
+  "sha256": "b04295f2c428509ffc33dc194230d781c43e825643a27d2ae7d54027798d52ed",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/calendar_time.parquet"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/diagnose.py",
+  "bytes": 9140,
+  "sha256": "5a2ae0f4c8f12807f590292cdad714a307e1e37a80565b2d2fa63b3f6141937c",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/diagnose.py"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/diagnose2.py",
+  "bytes": 6812,
+  "sha256": "bd867e8af06ebb4542d1889d6d292000c05eddfd7c953f9ac9e030e6b28bc94a",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/diagnose2.py"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/event_coverage.parquet",
+  "bytes": 737216,
+  "sha256": "8d29a52092ebdb55d8639a458175016825c25d25e199ee7e4d75d43b89052c3e",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/event_coverage.parquet"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/events_evaluated.parquet",
+  "bytes": 1709213,
+  "sha256": "e4528f368cfd01a67065e0405f2b695302539c6a5604e35345bbdf22202768ef",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/events_evaluated.parquet"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/offenders_classified.json",
+  "bytes": 14589,
+  "sha256": "06beba27a3fc3acc6bd045d34d87c0338096d14724da2d67cdf0fb7c88258640",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/offenders_classified.json"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/offenders_raw.json",
+  "bytes": 11209,
+  "sha256": "0984dc8afe589a3136b295d0980b5a6119204214eefcce536ce04490921bf88a",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/offenders_raw.json"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/offenders_v2.json",
+  "bytes": 10436,
+  "sha256": "369cb2b9cab4d033379ba7e408b32125314d977189fff683464f02d78f3a002d",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/offenders_v2.json"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/placebo_3_month.parquet",
+  "bytes": 6287,
+  "sha256": "a0b34b2a03deb1c40ec994172883d1011a5ab2d6c71d58c1b304aee71310cdd3",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/placebo_3_month.parquet"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/placebo_6_month.parquet",
+  "bytes": 6287,
+  "sha256": "7db89dca33e2433a8f83a79a771a2915f307158b8b28f7bd7e003fc89045a0b9",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/placebo_6_month.parquet"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/posthoc_diagnostic.json",
+  "bytes": 679,
+  "sha256": "5716e7e263d4919ad56a3beb4cc1b50f3c24d018e8c7c7c3776abd5cd06dc420",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/posthoc_diagnostic.json"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/posthoc_full.json",
+  "bytes": 1623,
+  "sha256": "f8697963cf2e9afd1371de3a02cb298c0bd040f824c24d0712028242a52c3516",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/posthoc_full.json"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/posthoc_full.py",
+  "bytes": 5730,
+  "sha256": "3fab3e91b10bb609dbbc5620daeca4e5941c64acbecad5acacd8f033771b3778",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/posthoc_full.py"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/posthoc_run.log",
+  "bytes": 2017,
+  "sha256": "d53b8873da74007116d7761c4a66f0414fa2be8c513ed47f22172ee0c1655c94",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/posthoc_run.log"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/recompute.json",
+  "bytes": 15922,
+  "sha256": "ebb0438d62de018a29b6fc6f2d72b98163f14316b016819af77f8f70aeaa2a0d",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/recompute.json"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/recompute.py",
+  "bytes": 24599,
+  "sha256": "ec89c377b501620ff4eafe58b1ef8510cf80a86d9703117e28373509f6d10c51",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/recompute.py"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/recompute_report.md",
+  "bytes": 17482,
+  "sha256": "c6507958fe9c99630fe6b79c386d2cf8d3fb0e695941c54d45f2dc0926f6f13f",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/recompute_report.md"
+ },
+ {
+  "study": "insider_clusters",
+  "scratch_path": "runs/insider_recompute/run.log",
+  "bytes": 599,
+  "sha256": "8c16fd1b9fd3ced3566e8d16b23a1cd86b76322d2d939ec0fdca592cdbfa9009",
+  "location": "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/run.log"
+ },
+ {
+  "study": "shortlist_S1_industry_momentum",
+  "scratch_path": "runs/S1/availability.json",
+  "bytes": 166215,
+  "sha256": "4920990648fb9ef1b6cf5f8b532dcd7b5914c3b779eb086bef3d4d4d457a5525",
+  "location": "review/studies/shortlist_S1_industry_momentum/artifacts/run_outputs/S1/availability.json"
+ },
+ {
+  "study": "shortlist_S1_industry_momentum",
+  "scratch_path": "runs/S1/placebo_sharpes.parquet",
+  "bytes": 6283,
+  "sha256": "befd368725d05ef8de54ed7aef3a389181157b7f406082d9d3fad34151171760",
+  "location": "review/studies/shortlist_S1_industry_momentum/artifacts/run_outputs/S1/placebo_sharpes.parquet"
+ },
+ {
+  "study": "shortlist_S1_industry_momentum",
+  "scratch_path": "runs/S1/report.json",
+  "bytes": 8253,
+  "sha256": "45f048abee36bde12f7edba6c9e4ed377a2501aade84046b3ce6c39cf8248211",
+  "location": "review/studies/shortlist_S1_industry_momentum/artifacts/run_outputs/S1/report.json"
+ },
+ {
+  "study": "shortlist_S1_industry_momentum",
+  "scratch_path": "runs/S1/returns.parquet",
+  "bytes": 356754,
+  "sha256": "ea85537013850fe2a888279c30fa0f3df2b79f6c311d9a84d6bb431210094b88",
+  "location": "review/studies/shortlist_S1_industry_momentum/artifacts/run_outputs/S1/returns.parquet"
+ },
+ {
+  "study": "shortlist_S1_industry_momentum",
+  "scratch_path": "runs/S1/run.log",
+  "bytes": 3688,
+  "sha256": "3ef13aadfba669adf8599f639c0cd9f1bc53b3dbb7c471caaac3cbdf05af7960",
+  "location": "review/studies/shortlist_S1_industry_momentum/artifacts/run_outputs/S1/run.log"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/breadth.parquet",
+  "bytes": 338487,
+  "sha256": "dbb1da918ddcc3b1a6bb269a159fda56ab68324c4ca12181bf3fb09f27defb00",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/breadth.parquet"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/breadth_full.parquet",
+  "bytes": 338487,
+  "sha256": "dbb1da918ddcc3b1a6bb269a159fda56ab68324c4ca12181bf3fb09f27defb00",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/breadth_full.parquet"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/build.log",
+  "bytes": 1139,
+  "sha256": "e7a614cf7c9ea95e24d24b92032acd1a71383836807077373ca23090f5b91317",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/build.log"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/build_full.log",
+  "bytes": 1313,
+  "sha256": "03801ce72b1be914a9eed436b530609227fc0f9bd3de0ecb77038e0e682ffe94",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/build_full.log"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/eval/overlay_state.parquet",
+  "bytes": 58798,
+  "sha256": "08ccef6c12db0a2db423fe9cb1cff98307eef371fcb52ab4279996fca028f962",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/eval/overlay_state.parquet"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/eval/placebo_sharpes.parquet",
+  "bytes": 21907,
+  "sha256": "486576a16d752be8b35230929d8b10f892520c2c8523c4b563924711891e73b1",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/eval/placebo_sharpes.parquet"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/eval/placebo_sharpes_cash_excess.parquet",
+  "bytes": 21907,
+  "sha256": "0ace6c86228f029c5dc05e454f7966fd1c8b364ac51cae5b8e37dfc3e6559c00",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/eval/placebo_sharpes_cash_excess.parquet"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/eval/report.json",
+  "bytes": 19992,
+  "sha256": "5b4d083233550a06fa0eedeaf3bf8d4ace81e5142b2a2a2b0ae2aeea8f1ebbf4",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/eval/report.json"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/eval/returns_base.parquet",
+  "bytes": 479005,
+  "sha256": "1a966f375fcf1378ac9d47b4066e99df41c05880ef03e7cb64c81c8948633985",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/eval/returns_base.parquet"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/eval/returns_stress.parquet",
+  "bytes": 479005,
+  "sha256": "42b787b0e8ae2edc74cb8fd2c9afe2c962ff96da3701b77a7ae355c6b91a8c32",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/eval/returns_stress.parquet"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/eval_run.log",
+  "bytes": 4582,
+  "sha256": "5c49acc7130f3e446934066feeded01f7fd088868092f486981e619b7bc42119",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/eval_run.log"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/eval_run2.log",
+  "bytes": 4402,
+  "sha256": "7b55b3fc3165619049c867fca85582f6507bca7aa03130ded9600fbb71f5677c",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/eval_run2.log"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2/eval_run3.log",
+  "bytes": 4562,
+  "sha256": "d725f4aa37d9769d5c4e9e5a4c46bfae5d66247a20f5cdaa72d07a17038233cd",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2/eval_run3.log"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2_recompute/breadth_mine.parquet",
+  "bytes": 408606,
+  "sha256": "ef6fd12afbbac396132b5ed885520feea0518d735abed2549069f611344c6ae2",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2_recompute/breadth_mine.parquet"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2_recompute/build_breadth.log",
+  "bytes": 1491,
+  "sha256": "0b77b7e0f4706e5e2020af9eda8a2044a2dd1d820cd855529b2b026a80216ddb",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2_recompute/build_breadth.log"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2_recompute/build_breadth.py",
+  "bytes": 7143,
+  "sha256": "f71091c3d538e5b99d8b955dd70b7be21b028e40ca8dd2a8dc9bf16d52e0cf39",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2_recompute/build_breadth.py"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2_recompute/recompute.json",
+  "bytes": 6156,
+  "sha256": "f08e7401f1b1e0d3f654aa0d24fd5ecb8a942083fc09baadb8640682b6f9476f",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2_recompute/recompute.json"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2_recompute/recompute_report.md",
+  "bytes": 7918,
+  "sha256": "1a4708ef5dcac48ad554d453dc8884e222d39a1893349e03feb4f67560322687",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2_recompute/recompute_report.md"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2_recompute/s2_excess_check.py",
+  "bytes": 4882,
+  "sha256": "03c25f02df4a7ee08d9377906a52968719ab0d0f0868b53a3db1918e04bbf46e",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2_recompute/s2_excess_check.py"
+ },
+ {
+  "study": "shortlist_S2_breadth_overlay",
+  "scratch_path": "runs/S2_recompute/s2_recompute.py",
+  "bytes": 31227,
+  "sha256": "7c20d5a4f4746a5edb2cdb89d510499844745bafbd7a10de4ed393fc892b241f",
+  "location": "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2_recompute/s2_recompute.py"
+ },
+ {
+  "study": "shortlist_S3_bond_commodity_trend",
+  "scratch_path": "runs/S3/availability.json",
+  "bytes": 12947,
+  "sha256": "1d632cc1016fa62133971937fdf93afa753dd994fc4d80a374d93dcaf43f88c0",
+  "location": "review/studies/shortlist_S3_bond_commodity_trend/artifacts/run_outputs/S3/availability.json"
+ },
+ {
+  "study": "shortlist_S3_bond_commodity_trend",
+  "scratch_path": "runs/S3/evaluate_log.txt",
+  "bytes": 5201,
+  "sha256": "ffc5e2e1d45bfd7ab036733291a0448d6b0ce1b427caa5287c8033ab8b25bb66",
+  "location": "review/studies/shortlist_S3_bond_commodity_trend/artifacts/run_outputs/S3/evaluate_log.txt"
+ },
+ {
+  "study": "shortlist_S3_bond_commodity_trend",
+  "scratch_path": "runs/S3/placebo_sharpes.parquet",
+  "bytes": 16486,
+  "sha256": "5bee59dae93846982ea0e96df750a43ac4874c13c6b1b488ad602c315d422a31",
+  "location": "review/studies/shortlist_S3_bond_commodity_trend/artifacts/run_outputs/S3/placebo_sharpes.parquet"
+ },
+ {
+  "study": "shortlist_S3_bond_commodity_trend",
+  "scratch_path": "runs/S3/report.json",
+  "bytes": 14992,
+  "sha256": "b0eb7c6894850dac85d8b27cf3f279cffcc562904199fb1eb46ced5449b54778",
+  "location": "review/studies/shortlist_S3_bond_commodity_trend/artifacts/run_outputs/S3/report.json"
+ },
+ {
+  "study": "shortlist_S3_bond_commodity_trend",
+  "scratch_path": "runs/S3/returns_base.parquet",
+  "bytes": 902352,
+  "sha256": "3bd77fe785d31791dd3901d608c7b278c20fea12ed97395b1c1f30739d264073",
+  "location": "review/studies/shortlist_S3_bond_commodity_trend/artifacts/run_outputs/S3/returns_base.parquet"
+ },
+ {
+  "study": "shortlist_S3_bond_commodity_trend",
+  "scratch_path": "runs/S3/returns_stress.parquet",
+  "bytes": 902344,
+  "sha256": "3ca81320e570441030818830e64df428d645a13784c0eee8e2d8c8573d382148",
+  "location": "review/studies/shortlist_S3_bond_commodity_trend/artifacts/run_outputs/S3/returns_stress.parquet"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/build.log",
+  "bytes": 383,
+  "sha256": "b3d8ee69c5cb60e103a3b915ea5adc19ba16f053320ae6685b053fb6ed978463",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/build.log"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/build_full.log",
+  "bytes": 1375,
+  "sha256": "65a67c02ef3342464e6615d2a6aa4e830cd5be371d04cd27f71577883228d473",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/build_full.log"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/eligibility_summary.parquet",
+  "bytes": 22823,
+  "sha256": "c1bf2be88369aa20f67d30ef534579dd1645dea16f744f2ad9a31f4828da2ee1",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/eligibility_summary.parquet"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/full_run.log",
+  "bytes": 4866,
+  "sha256": "7e691183a006d2b2d224474480d29c8a5189a98419554dfa6ff5f962443e1d18",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/full_run.log"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/full_run2.log",
+  "bytes": 4868,
+  "sha256": "e108a1ce808ade4904efe01e00516c3312082f1d0ee069c0e4ec414b18acdc90",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/full_run2.log"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/full_run3.log",
+  "bytes": 4973,
+  "sha256": "0e379797f064c633c1236f630a348325126afc7b2e253b631a629d8afe2a02e7",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/full_run3.log"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/panel.parquet",
+  "bytes": 21691952,
+  "sha256": "93e2d381ebf52a99dde70efb4b7baedd4cca95281bcbdc5bfdea5462044ce27f",
+  "location": "bundle:runs/S4/panel.parquet"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/placebo_sharpes.parquet",
+  "bytes": 21859,
+  "sha256": "0ae5ea34f139839a9cce402533c123a610ee27c96f369b0bd7900704881f8f55",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/placebo_sharpes.parquet"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/report.json",
+  "bytes": 28068,
+  "sha256": "d758f4c72079685d4b135ed1e2b29c82cadd119eb5b1d12de839b546ed1af4cc",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/report.json"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/returns_base.parquet",
+  "bytes": 664021,
+  "sha256": "c552e272bdb6ff0c25f2e4a112b22cbf3ca9c14e15c4a8bb02c19ce9463f781f",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/returns_base.parquet"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/smoke/placebo_sharpes.parquet",
+  "bytes": 3615,
+  "sha256": "ab906e7f2f0756bef6e51488bf94b1392b4dfda0ff873b41457a829e0a155620",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/smoke/placebo_sharpes.parquet"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/smoke/report.json",
+  "bytes": 21899,
+  "sha256": "3b5feabfd4a4ee18cc3a171b879bb067c245e2d9322e8ac33360bf7f15c8f729",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/smoke/report.json"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/smoke/returns_base.parquet",
+  "bytes": 659449,
+  "sha256": "1d0f4c431fc8f53afde68632ec21d048e3d5dd2b684c08819d9474a4fa82ed83",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/smoke/returns_base.parquet"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/smoke.log",
+  "bytes": 3525,
+  "sha256": "f66039684d6f0747a5c9c551c6894bd27e4e71b786ab919026bfcd418005682f",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/smoke.log"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/us_universe_full_scan.parquet",
+  "bytes": 299681,
+  "sha256": "e28e4e2ff8539fcf710004104e570ae3507072aaa3598eda084c12042ae02ead",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/us_universe_full_scan.parquet"
+ },
+ {
+  "study": "shortlist_S4_52wk_high",
+  "scratch_path": "runs/S4/us_universe_scan.parquet",
+  "bytes": 288730,
+  "sha256": "3b17601cdaff741b8a76fc304413762fde47351e1ce3578844679ff75422d22d",
+  "location": "review/studies/shortlist_S4_52wk_high/artifacts/run_outputs/S4/us_universe_scan.parquet"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/build_meta.json",
+  "bytes": 167,
+  "sha256": "ea20ce6f836e0fb2a4af652f63031dd1741343c6baead73eec44ad1603ffe583",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/build_meta.json"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/42-USD.npz",
+  "bytes": 64826,
+  "sha256": "8e32a1aa168d4c09f1db2f44ca0a7468e69855b740db83a6d6f719ac3e032291",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/42-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/AAPLX-USD.npz",
+  "bytes": 10146,
+  "sha256": "af1c03a153114a7641d6588a5f1e1af7d2c722273c29e9a2f845e3274afc3d0e",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/AAPLX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/AAVE-USD.npz",
+  "bytes": 44706,
+  "sha256": "181eae5cae65f17dfae7d4ce4090fab6cb4ad6e7d6279ff0e0cd0444b4aa7719",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/AAVE-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ADABULL-USD.npz",
+  "bytes": 17746,
+  "sha256": "a56f52569a0752b66e893d8942380f7efd0278e23830235edac0dc1f65a9066f",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ADABULL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/AE-USD.npz",
+  "bytes": 69146,
+  "sha256": "7b41f22d7fe3afd8cb7c67169b4e28bd9b0144498d014625c58cd1acfc2aab4f",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/AE-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/AMZNX-USD.npz",
+  "bytes": 10086,
+  "sha256": "ec56f8a02129362dd868f7e2e26fbefbce548f0bd2968e688df73768ba151151",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/AMZNX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ANT-USD.npz",
+  "bytes": 58746,
+  "sha256": "a7d0b09e9c0016726e34070aae3a79fef5a40673704598ee54d626ec96af8067",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ANT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/APE18876-USD.npz",
+  "bytes": 34166,
+  "sha256": "8520d90988ebd9d0da334b65b4c04d8f9f32b3c20d584b7fa34cc2b045a58678",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/APE18876-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/APE3-USD.npz",
+  "bytes": 34166,
+  "sha256": "8520d90988ebd9d0da334b65b4c04d8f9f32b3c20d584b7fa34cc2b045a58678",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/APE3-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/APT21794-USD.npz",
+  "bytes": 29846,
+  "sha256": "3990bec40e7faaa7702498b34f5fad1f54c82686522c464a47bb662e0ce01d64",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/APT21794-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/AR-USD.npz",
+  "bytes": 47326,
+  "sha256": "9a4aa7acce23281bbcf756c93dd247a11a582a7934806fa4461b2824e4d87767",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/AR-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ARB11841-USD.npz",
+  "bytes": 26746,
+  "sha256": "cb47a62fbb92834f61142a023e6d0a6da4d2084972761016945132deb3411663",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ARB11841-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ARK-USD.npz",
+  "bytes": 70566,
+  "sha256": "2d5ff70a1041dab6f2d1b25444f065e9bfcd85df03ff109bcc3579a05e197873",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ARK-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ASTER36341-USD.npz",
+  "bytes": 8586,
+  "sha256": "fef4710293cd7cbabd23e41260a3d16260c2b04ca77ce79fce01917752dd9395",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ASTER36341-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ATOM-USD.npz",
+  "bytes": 56126,
+  "sha256": "95545679a8a4ecb034da1381ece45d9cf302ea9bb84b42dd897857759da611e7",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ATOM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/AUCTION-USD.npz",
+  "bytes": 41846,
+  "sha256": "5d3ec5153394fb0cf7f049d3c933e1ab0af704691ea344def190e086a086d324",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/AUCTION-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/AUTO1-USD.npz",
+  "bytes": 37766,
+  "sha256": "f73ec81126888f3682f38dba31170f4240d78794339fbb3cb3be836f837bafd8",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/AUTO1-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/AUTOFARM-USD.npz",
+  "bytes": 37766,
+  "sha256": "f73ec81126888f3682f38dba31170f4240d78794339fbb3cb3be836f837bafd8",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/AUTOFARM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/AVAX-USD.npz",
+  "bytes": 45906,
+  "sha256": "6559a1db9c4c47a4f843ead60f7689d455173d904de9fb448b51d0671dc76ec6",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/AVAX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/AXS-USD.npz",
+  "bytes": 44126,
+  "sha256": "ae9b9900a95fdb0cf4960cd2165d8e0cb47573b12a2a60d62235482beadafb27",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/AXS-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/B2X-USD.npz",
+  "bytes": 19166,
+  "sha256": "dc808e72f223c12ee5dc3dc24b4bc372423325c938edf9c780d0a8318149aa38",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/B2X-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BAL-USD.npz",
+  "bytes": 46766,
+  "sha256": "ecae47fbffb30dcad67235180a6ead49bb31ad8db217b884fc77155de1ee953c",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BAL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BANANA28066-USD.npz",
+  "bytes": 23126,
+  "sha256": "f57cc722944d78b767c5bb0801df1c892cd194b5d0d54d65a06043070cb3c5ac",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BANANA28066-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BAND-USD.npz",
+  "bytes": 52386,
+  "sha256": "7c1dd3e6c02c0f85b0038edc7d163ac71bc994811bb16233d43cfb9c7c0516c4",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BAND-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BAS-USD.npz",
+  "bytes": 29306,
+  "sha256": "c773a3899beb1cbd1bf18866ab9b1500118faf2006f0db273e01cd6684e18d1d",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BAS-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BCD-USD.npz",
+  "bytes": 56846,
+  "sha256": "6c44ddf99cf014b2d2095c54b0459d96ab920c5af62a8d9eabdbe1c3488041e3",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BCD-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BCH-USD.npz",
+  "bytes": 68106,
+  "sha256": "2465037af1ed815b1f869d4e8940a544a40ddba72c7b6bdbb68d8a124273daba",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BCH-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BEAM-USD.npz",
+  "bytes": 57166,
+  "sha256": "9292f85fe2141379adf90aba9b720a1d66f691301bee0d18c93cd03a89f60fba",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BEAM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BERA-USD.npz",
+  "bytes": 13046,
+  "sha256": "1058806f51a0a5fb4003b6c72fec0591249f11eeb2a5b96caef23d7857f45f98",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BERA-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BETH-USD.npz",
+  "bytes": 42426,
+  "sha256": "891031d6de40effa5580c000542def24581d52d414ae850b8afdceb0de487529",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BETH-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BGB-USD.npz",
+  "bytes": 36386,
+  "sha256": "57d7f036c66f97851ac86b41eaa8a8e4e3fb67ce5c60d5eb22517ba378557f04",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BGB-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BHD-USD.npz",
+  "bytes": 33326,
+  "sha256": "759aa5a6f1d1c73646d1a69cca48ab7d778d1a4eae525de7203aca911b0983e9",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BHD-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BIFI1-USD.npz",
+  "bytes": 13846,
+  "sha256": "03985109816a7deedfbbe81745235288aa48d56648686c23db3845912645fb7c",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BIFI1-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BIFI7311-USD.npz",
+  "bytes": 42846,
+  "sha256": "060ca7901309e48c4026d4392eac3d54aadce72e5eeac16b3cc2d096fb054dca",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BIFI7311-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BITCOIN-CLASSIC-USD.npz",
+  "bytes": 19606,
+  "sha256": "677b5e9f99872b2eb041a230f77c2bef2555b88c3711bcd2ef373d092f203b2a",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BITCOIN-CLASSIC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BLOCK-USD.npz",
+  "bytes": 71966,
+  "sha256": "fcad6b57ef4fcff415ebf6dfe287a7f9dfc62bc776b024b396ea47863d329c60",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BLOCK-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BNB-USD.npz",
+  "bytes": 68066,
+  "sha256": "0f2040a5e953101981701feff09eca3174a2b60cf268f0c5503eb8aa56f08f93",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BNB-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BNBBULL-USD.npz",
+  "bytes": 20246,
+  "sha256": "aa91797dfdbdf57961cc1ace4ae12c26839a3894ac704d58125164d048c33b76",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BNBBULL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BNBUP-USD.npz",
+  "bytes": 26226,
+  "sha256": "ae78e30f30090761055c366d6516bfc9e973bd738bd513cf5239a6a7e614a6f6",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BNBUP-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BNT-USD.npz",
+  "bytes": 68806,
+  "sha256": "203d36371a6e92a1d7725b5bebce2ac5735cb0dd8d5247841f488903ac36a051",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BNT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BNX-USD.npz",
+  "bytes": 34866,
+  "sha256": "7bc265091eba3fb413931be277b76765301af33942fa05336d4c426073a02248",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BNX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BSV-USD.npz",
+  "bytes": 58646,
+  "sha256": "c85d511fa6a75495a2c79302cbc677164872f59dedd88a29265123bcabcee5a2",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BSV-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BTC-USD.npz",
+  "bytes": 114526,
+  "sha256": "4fd8dd742cbee15e8eb22b7d4df18cdd6fd74a718f1cafb23b7561bbb263604a",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BTC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BTG-USD.npz",
+  "bytes": 64046,
+  "sha256": "bbe84cbc3aeab55f37263e70ee79901b7df238958f679ecb443a9eb4346afef8",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BTG-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BTRFLY-USD.npz",
+  "bytes": 8726,
+  "sha256": "34c5554f62d4fd562769599257d93c84d8934f458a4d4cbffede7195c497c3cb",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BTRFLY-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BTS-USD.npz",
+  "bytes": 90066,
+  "sha256": "9a81f276e38d4624b36afacdf69e7f684a4191610bd6c02d55f780e96c7b1080",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BTS-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BTX-USD.npz",
+  "bytes": 57566,
+  "sha256": "43073d2693b711fd5a037b6dda06d02702a861e36331f8e9b254d84bf5b7db39",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BTX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/BVOL-USD.npz",
+  "bytes": 19806,
+  "sha256": "874c68165776a6b2c060304a2dcf46e84cede5d650cbb3e3257cac324affc4c9",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/BVOL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/CKUSD-USD.npz",
+  "bytes": 21426,
+  "sha256": "0af7ef052e663ccf7770e35680721a891a4ed23e7d18727fdeb089461ae4eabc",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/CKUSD-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/CLAM-USD.npz",
+  "bytes": 49386,
+  "sha256": "3e431d080e11409711f95178ea778435084d476a2cb599ae61048c8e5af76f9d",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/CLAM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/CLANKER-USD.npz",
+  "bytes": 14066,
+  "sha256": "ebce5a18829cc2ec6cd11850f3d91794af89de6fe17fa092c138c7df6c90e5ea",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/CLANKER-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/CN50-USD.npz",
+  "bytes": 15626,
+  "sha256": "9e10a239186480b6085df0573b6ce8e3ba5fb77956e15457186073e49c80ed55",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/CN50-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/CNRG-USD.npz",
+  "bytes": 15866,
+  "sha256": "5db34e7385698b04de6a016318d41d126ecf1248e4fb548c5c91daa0c7755fab",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/CNRG-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/COMP-USD.npz",
+  "bytes": 46946,
+  "sha256": "3133a9b80810c824a7884f95a01ee39c0a932a476099ff2656fe06b2f85ebef4",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/COMP-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/COMP1-USD.npz",
+  "bytes": 17926,
+  "sha256": "6d4c524be20e05d0f81baf84779525b0c1b39aee7f1600e361dff5858197a2d4",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/COMP1-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/CORE-USD.npz",
+  "bytes": 32506,
+  "sha256": "22196aa02175989bbed13b4f34950d8f8032ac921cd4c9b30fbc99f357b5db5b",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/CORE-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/DASH-USD.npz",
+  "bytes": 93206,
+  "sha256": "17fcfd361fc93a7e537ca0dcd847e524edaebb737e192c2e71f2406d767ef655",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/DASH-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/DCR-USD.npz",
+  "bytes": 78686,
+  "sha256": "1ee6c9f2342be193d4aa33ecd44cf9ea32b80227a80679431417b80dd01e179b",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/DCR-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/DDK-USD.npz",
+  "bytes": 32846,
+  "sha256": "88a5579956665284323dcc06b858dfa0f0779bdc07c02a43ecb43596e64ccb08",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/DDK-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/DEXE-USD.npz",
+  "bytes": 44526,
+  "sha256": "22acc7ce4de40faf2b098548743829f2947d755a0a32f37a2aef347c4fb924a3",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/DEXE-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/DGD-USD.npz",
+  "bytes": 38126,
+  "sha256": "261017d7687b55e8d10a0002642d2db0fe1ae925563aa5953d23a61820cfafe1",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/DGD-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/DGX-USD.npz",
+  "bytes": 39506,
+  "sha256": "6d49aac305f8e7afe8c1572190d6bdddda830a6e26a6d5c4d570128ecf56453c",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/DGX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/DIFY-FINANCE-USD.npz",
+  "bytes": 12226,
+  "sha256": "d168b6cf23f80d7315cf16493f5b555b44db91d11f6efb71527dad044a936387",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/DIFY-FINANCE-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/DOGEBULL-USD.npz",
+  "bytes": 17366,
+  "sha256": "547abac113ca8f343f05b92a4b5fab621230989c0f20135b40885d97974ec114",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/DOGEBULL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/DOT-USD.npz",
+  "bytes": 45626,
+  "sha256": "fab6b83ed584cc397efcd0e35f0a770e418302b2755be10a28b90dca2d1b8218",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/DOT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/EGLD-USD.npz",
+  "bytes": 45326,
+  "sha256": "972b8eca3ce2632ad493ff460e9e9ee2ef189eef2f2dd75bf2515dc295a23290",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/EGLD-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ELA-USD.npz",
+  "bytes": 57926,
+  "sha256": "0fdd7ca0755380325ac4b6abfaf91b636d04cdb3c53148bbce0111a3598832db",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ELA-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ENS-USD.npz",
+  "bytes": 36706,
+  "sha256": "26dcb6a0fd52c355c59c6c3ee4a549f1ac3dcffe04ee11c951a1e56858d69d07",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ENS-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/EOS-USD.npz",
+  "bytes": 68546,
+  "sha256": "d85ba2d241755d1de78d60bc7d264f33b9c28f448854f0a89948850431904d7b",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/EOS-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ETC-USD.npz",
+  "bytes": 75386,
+  "sha256": "30f1774bd1094f9c03eb041a2cc62d4f2fdfddbc8d62e60b671a6c75b5cc344b",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ETC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ETH-USD.npz",
+  "bytes": 82466,
+  "sha256": "d4e5ba046b3ff3210dc45063240310efd734e2ab8811b5eb4ceef34f9ece8556",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ETH-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ETHBEAR-USD.npz",
+  "bytes": 21766,
+  "sha256": "c727e226e89cbd1a3a7149abf10d973a2cbee60692674c95cdeb1ffb8f9b2e79",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ETHBEAR-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ETHBULL-USD.npz",
+  "bytes": 21826,
+  "sha256": "a7abc589c924b56b9a1a56a263289d4989cf148cde0661c5de75ae27097df54a",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ETHBULL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ETHX-USD.npz",
+  "bytes": 17086,
+  "sha256": "782c8ec3afee3285ac9aa3495144f2ebc785495d2dc4023beb8d80e345bfe1d0",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ETHX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ETP-USD.npz",
+  "bytes": 58206,
+  "sha256": "8b87ad5fa09bc202e1696f361dbce31f22b1aa806948fc069ac637f6a3d57199",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ETP-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/EXP-USD.npz",
+  "bytes": 65766,
+  "sha256": "25c6b055ece0d8ecf99ac0f041e4ab6f8b3f486a5f3271d3398da5d30f5a39c0",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/EXP-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/FCT-USD.npz",
+  "bytes": 37226,
+  "sha256": "134a4bd6f182a0f71da5bc4103a29241709ba0e9136a67f96059fb6ced359616",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/FCT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/FIL-USD.npz",
+  "bytes": 65266,
+  "sha256": "aacb092a106a2d184d42ef2469825420c30f6a9d351bdb13fb607046a9f0bff9",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/FIL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/FIRO-USD.npz",
+  "bytes": 73926,
+  "sha256": "f96224d1f7c4b6c515ca53233942d8d5c763140b145cbfd180e0c7ca2f4b549d",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/FIRO-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/FLEX-USD.npz",
+  "bytes": 28146,
+  "sha256": "40660be9695a6e37a1328ece842468587883be5286137bcf20e57c7550cd5088",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/FLEX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/FOIN-USD.npz",
+  "bytes": 27706,
+  "sha256": "ec6422ab7742397ea3c8a862a0f69ce64630eaf37cb069b406cd07196fba5609",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/FOIN-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/FRST-USD.npz",
+  "bytes": 24726,
+  "sha256": "212f5d501fbbe90bc551c9ef2f3cbdd4d541c51c4bd3c5a59d0f01a77a92bfe0",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/FRST-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/FTT-USD.npz",
+  "bytes": 53346,
+  "sha256": "ad1c532c114555b09624bd09073d21ab9ff4c8651e249fc92f23f7bb4d553d02",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/FTT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GAS-USD.npz",
+  "bytes": 68446,
+  "sha256": "c9dd5268383a29c173b79ce77af58feee14f21f75173d360ee02fce6c375ee97",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GAS-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GBYTE-USD.npz",
+  "bytes": 71346,
+  "sha256": "ac4fe22aff6c86aaac3490102dadb1ba5bb1eb7b20e2b3fbc1c00a4dc6252d36",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GBYTE-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GFARM2-USD.npz",
+  "bytes": 34326,
+  "sha256": "12362eb1ba2457547c72739f5667ee95f1ec1bfe02667f706708e646a038952c",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GFARM2-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GLM-USD.npz",
+  "bytes": 73066,
+  "sha256": "c4d955271b43c4b7f521a1949b02741cf795c39eb3ffcb5fe75a1c74961c75f4",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GLM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GMX11857-USD.npz",
+  "bytes": 37686,
+  "sha256": "e97d7f65c081ea42b23a0b7bc63302137ba8d5816f2fcd467eb40ce7ba72ceee",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GMX11857-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GNO-USD.npz",
+  "bytes": 69766,
+  "sha256": "6307b0e7ace395badd3eeac55937265f10c8f536ccdd0f6ba28637cb68e8de92",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GNO-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GOHM-USD.npz",
+  "bytes": 31766,
+  "sha256": "ff0fdac12164f2113bd86938ec27dae6ea8e6b9adc61144ce6c6769f76206161",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GOHM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GOLD-COIN-RESERVE-USD.npz",
+  "bytes": 13526,
+  "sha256": "5ca7d6ae606290dce008219ea736b980b94fb462bc858dad6ca37a9aa0a6a097",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GOLD-COIN-RESERVE-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GOOGLON-USD.npz",
+  "bytes": 8866,
+  "sha256": "e4d6bde09f76e0d9f91372472a0e03d5ed479cb118b12d69ed5269dd9999b400",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GOOGLON-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GOOGLX-USD.npz",
+  "bytes": 10146,
+  "sha256": "8b79103a0f69b18792e13bc06a02d0440b0630361381ec6a1307ecd13760ef21",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GOOGLX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GRIN-USD.npz",
+  "bytes": 57246,
+  "sha256": "7c5f02f1869f5db49ae39578d5e0e39236e4b96ff78772a98bf8c0ab57ebbdef",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GRIN-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/GVT-USD.npz",
+  "bytes": 39966,
+  "sha256": "4e547b9c7d4b5857d735616901b5c3698dabe9966667b0cd839ab6f2969b325e",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/GVT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/HAKKA-USD.npz",
+  "bytes": 33726,
+  "sha256": "1050209875db5fe6802aa20e9539a4349d88800e927b07d96c6a7a72c00dc8ea",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/HAKKA-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/HBTC-USD.npz",
+  "bytes": 28126,
+  "sha256": "9231762df431e31438912a72af7e65214e18bf41f40a402bad913f403c594b71",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/HBTC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/HC1-USD.npz",
+  "bytes": 36066,
+  "sha256": "685332433ac287e79652de5fcbb69b750499f626091bddd5e3985fd77321caf9",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/HC1-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/HEI-USD.npz",
+  "bytes": 93946,
+  "sha256": "08d99a693fd41724b2e60e9898bf789baa3ff80d35fbbff0b9271ff07c3b314f",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/HEI-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/HT-USD.npz",
+  "bytes": 63766,
+  "sha256": "9c2c340fa0a0f6fef36ced8eefc32b3e6be8548793f28001e8c7741f26f496a3",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/HT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/HYPE32196-USD.npz",
+  "bytes": 14386,
+  "sha256": "09ec4d27aabacc21f15aa0a7c02cc310cae8f1f29086c3e581c671b80a1be090",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/HYPE32196-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ICP-USD.npz",
+  "bytes": 40406,
+  "sha256": "1b81c73d9ec962ff26fc56a3a0bbe4e7020a218152a104bb769925952919fa3e",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ICP-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ICX-USD.npz",
+  "bytes": 66186,
+  "sha256": "b4c527a6f076170626153a4d80338a55f6a0eec602c4f313949edaaabcbcd47f",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ICX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ILV-USD.npz",
+  "bytes": 41186,
+  "sha256": "d0af4a39fb1642802f0e4c5a7f4adcd1fa040d570cb3d238ba98189418a20274",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ILV-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/INF-USD.npz",
+  "bytes": 36166,
+  "sha256": "52e3ca062d934984e9e6955010c00489261a6a768f7247c662f73e7c50a85474",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/INF-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/INJ-USD.npz",
+  "bytes": 44406,
+  "sha256": "84bc05a3ba40de5d6ca59f44bdd801f3e3fb1fa1524e944fdc5e4ff8b7a4dd42",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/INJ-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/IOTA-USD.npz",
+  "bytes": 68926,
+  "sha256": "03f659cc7dd4f0fe3bd484451b636326e38b460f3dba1136f3b1783c23977481",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/IOTA-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/JADE1-USD.npz",
+  "bytes": 7446,
+  "sha256": "8fe896707403baeec8d2bcedabb92091df52755f667f390d6ce633cfb2a423cd",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/JADE1-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/JITOSOL-USD.npz",
+  "bytes": 29526,
+  "sha256": "49612ad522274e901f92f8d0ae9d33895df667204c2dadbbe9a86b0601d77881",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/JITOSOL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/KLIMA-USD.npz",
+  "bytes": 33006,
+  "sha256": "ac6262880b21685b98eed02888e2c6ac23cd1a58693fcbc0543900778d73796f",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/KLIMA-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/KP3R-USD.npz",
+  "bytes": 43866,
+  "sha256": "19766e10b026ccdd8f04652759a1cbfc22d8abcace0cc80cabfd03747492716d",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/KP3R-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/KSM-USD.npz",
+  "bytes": 50666,
+  "sha256": "3d2a2301529f2ddbcd84a0fd0c854be74d3e71fc4c05062a15899d0e4ae2ce70",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/KSM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/KWENTA-USD.npz",
+  "bytes": 23306,
+  "sha256": "6db4e9d46a24abdb84bc55f01f5a4f719066cae6e6e0bafcd25402d97c320cf2",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/KWENTA-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/LBTC-USD.npz",
+  "bytes": 54406,
+  "sha256": "94abadc9b0e973664de7c500a20829e6382960031a19ebafebae680b65288769",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/LBTC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/LEASH-USD.npz",
+  "bytes": 40466,
+  "sha256": "fc54d36bdcaf3acb7add250105cf0a8e5732fbcd19ded15446bde90af4d3ca31",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/LEASH-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/LINK-USD.npz",
+  "bytes": 66946,
+  "sha256": "fc0b7c2c9ddf00694f7d984173f9a085fb64b422302af1a1668f356fd6c7bf78",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/LINK-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/LINKBULL-USD.npz",
+  "bytes": 17706,
+  "sha256": "a396102b13d620cfdd479f1e27a18d092087b5430f22403cba024498aea76a59",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/LINKBULL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/LSK-USD.npz",
+  "bytes": 77486,
+  "sha256": "752827dd2a9b41430c44ebfee587a766e3194d69b4541969bf563e164cc1f648",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/LSK-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/LTC-USD.npz",
+  "bytes": 94206,
+  "sha256": "d254f65c299a0f455868066163b21fd23a279751a7922174aa7a9a0698b640ce",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/LTC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/LTCBEAR-USD.npz",
+  "bytes": 19926,
+  "sha256": "da1041f45e72d75f852986dcb2dc2010e667c98edb23b59ee5f1a0a37bc19db4",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/LTCBEAR-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/LUNC-USD.npz",
+  "bytes": 53446,
+  "sha256": "87a99042696cf12c07ff2341830cac5f6bfd8f79e9498c938e828f5360aeed5b",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/LUNC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MAPR-USD.npz",
+  "bytes": 27546,
+  "sha256": "e459627bfd9a8fb8e632f4fdc57766b94880bf2ad1aa2e742e7242879fb058fa",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MAPR-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MCDX-USD.npz",
+  "bytes": 9966,
+  "sha256": "b757d9faf76a6841ac70d8322ead4f92b07072edfec83b1c6e4c02fed5875b89",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MCDX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MCO-USD.npz",
+  "bytes": 30986,
+  "sha256": "20e07950472d993ec20fe971adc80f1745bb6a69a31b306e20681b89b8cbad1f",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MCO-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MEME1-USD.npz",
+  "bytes": 16666,
+  "sha256": "20a438df4ea4d7c138193893d21469d4068f2bc74693ca102989f0503eed3f96",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MEME1-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/METIS-USD.npz",
+  "bytes": 40326,
+  "sha256": "faf8d27f91fea09224d32e17388ac4b8c2df4cb447074bde2ecf3d21fed39db9",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/METIS-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MIOTA-USD.npz",
+  "bytes": 68926,
+  "sha256": "03f659cc7dd4f0fe3bd484451b636326e38b460f3dba1136f3b1783c23977481",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MIOTA-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MITH-USD.npz",
+  "bytes": 59566,
+  "sha256": "296307b32a977f6de36291e92841210c9c34ba613936561b5672f99d50b2e775",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MITH-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MKR-USD.npz",
+  "bytes": 66026,
+  "sha256": "f733f0b956d55da8ed91e64d117d449efea394d63d66b9257a46e5c1da356894",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MKR-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MLN-USD.npz",
+  "bytes": 71126,
+  "sha256": "06927a775f78c3c087833a271cd0f3a3d9f6366e7e4e5bb0143b11f631f3136f",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MLN-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MONA-USD.npz",
+  "bytes": 91846,
+  "sha256": "ee11179436e0efee21ad4dc0719fd0d0e3cb5b106c241afd21e403643970235f",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MONA-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MSHARE1-USD.npz",
+  "bytes": 3686,
+  "sha256": "2fe6a892c347c8564f0556abf064dc26cd41d59808c4e2b2d4964a541300a4a6",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MSHARE1-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MSOL-USD.npz",
+  "bytes": 37146,
+  "sha256": "38f242abf9786e665159c38f5fb212be43c97cf544b4a2a1b13de4c77022b8d6",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MSOL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/MTL-USD.npz",
+  "bytes": 68386,
+  "sha256": "1d62b0ac53e695ce9127e6601831898a858df1f70372e06b33bd733f9fa3ef85",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/MTL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/NANO-USD.npz",
+  "bytes": 37086,
+  "sha256": "9103acff3ac9c3b3bf8c4117c2a1be2e8ed75b2d5a3651ba85d470b78ead25ca",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/NANO-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/NANOX-USD.npz",
+  "bytes": 27226,
+  "sha256": "bffafd0d3ffb22a9c601275d8b75508fd7f051a5a8ca155efe98ce2cb7020823",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/NANOX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/NAS-USD.npz",
+  "bytes": 59326,
+  "sha256": "5a5dc1dea8b94e8bd9d3b197232ae142e61645cd5dca8e0ec036b8d1b7a45f9a",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/NAS-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/NEAR-USD.npz",
+  "bytes": 44546,
+  "sha256": "39ed93e0408452b601cd68af954e13f249f1abbc5ff0e19480fe53f7669c9ac2",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/NEAR-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/NEBL-USD.npz",
+  "bytes": 57666,
+  "sha256": "5190a33393afe11003a6e2fbf6b084311746a25efb4edfd2317d6a2c47a8b491",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/NEBL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/NEO-USD.npz",
+  "bytes": 74306,
+  "sha256": "5672d2c0b09a5920b50c3d64f0293755b088676f9636be51daaf229a9e682955",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/NEO-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/NMC-USD.npz",
+  "bytes": 94066,
+  "sha256": "0aa38a6c21f148575edfb7cf585e76d4ece3cef3596ee6fd634ff8286a088443",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/NMC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/NMR-USD.npz",
+  "bytes": 68666,
+  "sha256": "8c0c505190bc00c1ecde49251ab356c14c2b3396607caed746ed43b79469b659",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/NMR-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/NVC-USD.npz",
+  "bytes": 62166,
+  "sha256": "5d70c8eb77d581503359cda3251ebda2212b5f47acf1802bd2c70073b6d7c877",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/NVC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/NVDAX-USD.npz",
+  "bytes": 10146,
+  "sha256": "c4850e61da541173cf677b37a41458801b010eabb5e8a717707801520def25c3",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/NVDAX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/NXM-USD.npz",
+  "bytes": 20586,
+  "sha256": "9e8a5aae8c56808188357ce21c147707eb936d752669116ef4d294c21a4e246e",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/NXM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/OETH-USD.npz",
+  "bytes": 23126,
+  "sha256": "6dbc5aef3031792d51495d4dc7f84140655872e11f5c055840d94577964656c7",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/OETH-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/OHM-USD.npz",
+  "bytes": 40026,
+  "sha256": "06c3f6d5f568685f879eddf2f13ca7ae5214ce03ae25dc29fefa545b0265b924",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/OHM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/OKB-USD.npz",
+  "bytes": 57266,
+  "sha256": "f9f916d7def760094e6ea0ef5576251105780ae3abe87c635197242f7fc676d5",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/OKB-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/OMG-USD.npz",
+  "bytes": 68286,
+  "sha256": "7f02480f638585de0a9266548727cf57b3b1401a6a8e51bf2d7f69c706c0df3e",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/OMG-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ONT-USD.npz",
+  "bytes": 63566,
+  "sha256": "38d1b837fb5f452b757c9ed1e3504c6304e47e1ad75174715e10e21d6649a03c",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ONT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ORDI-USD.npz",
+  "bytes": 25726,
+  "sha256": "a0a9203e054ea1e371e2f6b8bb430bc5b0d2c7b34a95c8cdf26ef5072de0c838",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ORDI-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/OTN-USD.npz",
+  "bytes": 22906,
+  "sha256": "0235859bcd72208aa2490f2d9df0ce09418ffea8edb08bc5d58c151d0e4a8712",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/OTN-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/PAX-USD.npz",
+  "bytes": 30626,
+  "sha256": "5a647b9130055a8ca8643825d5b287d96ffb38f4436e92de08fb2f1b48550a00",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/PAX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/PAY-USD.npz",
+  "bytes": 59026,
+  "sha256": "6f03d59e07b20ce6f8ec48bf49c7011c3de7dda48578a7f0921a47b6782eb848",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/PAY-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/PBT-USD.npz",
+  "bytes": 30306,
+  "sha256": "1765145cea2bb0eb122f2e54a36a007f24815c1a9426f1989131b8cab95f6a56",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/PBT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/PBTC-USD.npz",
+  "bytes": 32366,
+  "sha256": "59cd801fc892edbbdfc409f664187a9fcd43fcf94fee7b0ed8c156c6393febd3",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/PBTC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/PEARL-USD.npz",
+  "bytes": 21306,
+  "sha256": "088cc5ae709956fa46428bb1728a491458a973158ec699b70b63d19ed142ce21",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/PEARL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/PIVX-USD.npz",
+  "bytes": 78606,
+  "sha256": "3eb5246e18ecd7fd5d9e6fc5213ea0bf5b7b49a23faecf0dd787d151a2166d43",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/PIVX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/PLC-USD.npz",
+  "bytes": 45806,
+  "sha256": "39e8fb27911e96e7c57ce319526f42cfaa329c1e59eba6dc7179ef09f5248e14",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/PLC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/PLCU-USD.npz",
+  "bytes": 17906,
+  "sha256": "e0585bb9668dd936a30900de5a443f79534efe34d7721b1420063724620e7245",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/PLCU-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/PPC-USD.npz",
+  "bytes": 94206,
+  "sha256": "5276acb1bb014f39a973e0c41ae9410bc4621ae525d36365075963150c4d9569",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/PPC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/PPT-USD.npz",
+  "bytes": 58586,
+  "sha256": "769bb3360effcd27d70b746b68170dcaac74ef6bdf8b06a9b37e7e9174266be2",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/PPT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/QNT-USD.npz",
+  "bytes": 60466,
+  "sha256": "2b779ee563335fdb2e58708b8ef8eec28fc0fe9c949a640ea034163bdb76e69a",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/QNT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/QQQX-USD.npz",
+  "bytes": 10086,
+  "sha256": "b906b648d094e359fd37a3f46e5c05e7d917f403c0659b91fb0e2fa4993dd0a0",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/QQQX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/QTUM-USD.npz",
+  "bytes": 69306,
+  "sha256": "79fbd3125c1cbcf9bc97966fd7915782fd5ff4e4c6975ef721adaf069018d286",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/QTUM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/QUICK-USD.npz",
+  "bytes": 41846,
+  "sha256": "e5b2288514f0ed0318d62ab697504eee5d91f90a7de5c25e54293c5cc859b335",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/QUICK-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/RBTC-USD.npz",
+  "bytes": 47746,
+  "sha256": "c1bab1148bd2b34a50ecedfaed57a96984cbe24d4190c9a99e4cb8502241fdc6",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/RBTC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/REC-USD.npz",
+  "bytes": 19566,
+  "sha256": "0a13387e23d817a463577cb89b2c341db46c7f6676c4d66238236a0b32af738e",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/REC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/RENDER-USD.npz",
+  "bytes": 47046,
+  "sha256": "6fe1f056555c9813311769f139ca5af1ffdc2cfaf537550b184ae692a2b6c2ba",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/RENDER-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/REP-USD.npz",
+  "bytes": 77486,
+  "sha256": "29424e439a1964547e37474f5e718873d8aa2bd767a02a4d1b3c868032b748d2",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/REP-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/RNDR-USD.npz",
+  "bytes": 47026,
+  "sha256": "d62bf77d3594a2d84f02d81b3f19bcef5152528103a65caab6e696cf8a1dd84e",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/RNDR-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/RUNE-USD.npz",
+  "bytes": 53206,
+  "sha256": "986cc553dd1c6129eb51528b192b0aae8c3d230df10cbc2fdda48041b5227d86",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/RUNE-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SALT-USD.npz",
+  "bytes": 55626,
+  "sha256": "578699e2dafc11e57d852337485d5d203623647eeecaf96a213d91c7d0ab68c6",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SALT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SBDO-USD.npz",
+  "bytes": 12646,
+  "sha256": "ad3f7775b6c3b92dd2b3839fd3f4e46cef4125d09f0bdc4995c25c8bf97b8b13",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SBDO-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SBTC-USD.npz",
+  "bytes": 36206,
+  "sha256": "b0395dcc24023f210e36e93e6c52077a38e599d14b59917a562ab7d89b6e8fe8",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SBTC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SETH1-USD.npz",
+  "bytes": 13726,
+  "sha256": "9832d3f6e621a90be2d4767b0223b5202aead134e45b5076685da8c4cb2cecab",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SETH1-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SFI-USD.npz",
+  "bytes": 43546,
+  "sha256": "0610025ad2e5b98afd56a3c45d00259554d679d9a2de19141bf7d1a8841d1a61",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SFI-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SLS-USD.npz",
+  "bytes": 48626,
+  "sha256": "52b1ef49c2870506371623c402fba0f3021d3b181298648b6e56898bf1367504",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SLS-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SOCKS-USD.npz",
+  "bytes": 23106,
+  "sha256": "f640f6931f8481a9d3722a96c51c8c4c10dead70cd81ca097358f82d7246e496",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SOCKS-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SOL-USD.npz",
+  "bytes": 48266,
+  "sha256": "a731e709547c26299ce8cc46171d3715036e191f0f2482dd228f73b529812166",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SOL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SPYX-USD.npz",
+  "bytes": 10106,
+  "sha256": "f7b40d669171814753dc21f7e8a3fa74761e857128247c5e029dc3b563d3a9c6",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SPYX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SSV-USD.npz",
+  "bytes": 37086,
+  "sha256": "ba772a717d6cf0d40d9805da126b5653d8a6c127a9e797101cd6e43b17f6f87b",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SSV-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/STEEM-USD.npz",
+  "bytes": 77346,
+  "sha256": "9e46ede44b5a743ff4bc792df3ad69dcfbb4b015bed0367e9ab544fe53b6aeb5",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/STEEM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/STRAX-USD.npz",
+  "bytes": 75026,
+  "sha256": "bec0690a1bcd44d703b603953ec0dc12b7bfdfe3724c4fe98338afe7f947e313",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/STRAX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SUI20947-USD.npz",
+  "bytes": 25926,
+  "sha256": "05d8bbd92a3645fe1a03cae0a91460255e412e7ed06d4291f7a50db7e236b900",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SUI20947-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SUSHI-USD.npz",
+  "bytes": 45466,
+  "sha256": "7b6c35e0507dc8f50a5e68b00b58ff2c280a5a95ceacc5e6f526c205f9148a7e",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SUSHI-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SXP-USD.npz",
+  "bytes": 51246,
+  "sha256": "2c20c8f06aefa0cec7e702fa3aaafb00e5d9407a45dd01e3d1ee0fa01be87758",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SXP-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SZC-USD.npz",
+  "bytes": 33866,
+  "sha256": "eddbd85f3c3da45fd3b3efec0750b7c940c102cd5205c3df35719ee0a60d2bfd",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SZC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/SZCB-USD.npz",
+  "bytes": 33926,
+  "sha256": "1565d87a91f44c9092c8e61e9ac5085fa5de0532f37f7fa5ec354d503df2b841",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/SZCB-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TAO-USD.npz",
+  "bytes": 27106,
+  "sha256": "fead8aad31b114bffac17ac296247a1a44d215c80ec511bf3198106f378e1251",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TAO-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/THR-USD.npz",
+  "bytes": 26566,
+  "sha256": "29c855c50bb473788158b8b204351c873430d56541e86267540d603623c4f3da",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/THR-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/THX-USD.npz",
+  "bytes": 18106,
+  "sha256": "72ad361ac04b2b0c20afc3c301bf886edae8e9e66d0e7c65f1aed8e5e23ba8d4",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/THX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TIA-USD.npz",
+  "bytes": 22286,
+  "sha256": "fca50c84d82518333df3e1e554d2efbb475b2828391849679a5d3798610fe2ce",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TIA-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TIA22861-USD.npz",
+  "bytes": 11546,
+  "sha256": "9ed39e97d64c5c7eddf86725fbd2dcf1b1efa46776aabdb9c854a9ca148b20b3",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TIA22861-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TIME-USD.npz",
+  "bytes": 70366,
+  "sha256": "d52b02419ab3e2331f53a00e1ca0d9bf7468aa3d07d90811e95b122817da2bfd",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TIME-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TIME1-USD.npz",
+  "bytes": 9026,
+  "sha256": "d7da9198920879de03f5d76b949a8440994deae5f6833d5aea4d401b36669e62",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TIME1-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TMCN-USD.npz",
+  "bytes": 7526,
+  "sha256": "8070100eb3827d71ead2ca4f7531c0397996f762c901070a82630b9bb5c60288",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TMCN-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TON11419-USD.npz",
+  "bytes": 38226,
+  "sha256": "8f8ed45ef84092b8edd1db23d9d8b3e94976c67b483d8e30dc5c0a3ba7393de1",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TON11419-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TRB-USD.npz",
+  "bytes": 51126,
+  "sha256": "6d56d2506ba83e95047f4c4729387a06fb7f33c71af1dd45c7fc2564f12144f6",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TRB-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TRUE-USD.npz",
+  "bytes": 41746,
+  "sha256": "205de7f243cd8b6d10729c5d5193424cca6864e2494a14f0e5e5b00021fece78",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TRUE-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TRUMP-OFFICIAL-USD.npz",
+  "bytes": 13386,
+  "sha256": "81e896154b390748ee164ecd951be9f3c264d45279aa5809e1c401b73cb7ea98",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TRUMP-OFFICIAL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TRUMP35336-USD.npz",
+  "bytes": 13426,
+  "sha256": "3c7ffdccd6c528ed65abb3c3ca999f67c9eaaf909fdbf1a0c8082fd47108f134",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TRUMP35336-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/TSLAX-USD.npz",
+  "bytes": 10106,
+  "sha256": "9bfbc07b10bd0af2b2b46fa42be962ab70d83fb25abc8442757954821b2f6997",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/TSLAX-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ULTIMA-USD.npz",
+  "bytes": 22426,
+  "sha256": "4da92cbeaca465d28f2a85f45a20fd09559574a34571e1010f6c51443a3f5cf4",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ULTIMA-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/UNI7083-USD.npz",
+  "bytes": 45026,
+  "sha256": "38d23d97f0fecee3409f1e7e9884de590705098db082899c64265901ee316a27",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/UNI7083-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/UNIBOT27009-USD.npz",
+  "bytes": 24126,
+  "sha256": "527258c720c6a11716293bb6944e220683661f825b407950fa57b56688972996",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/UNIBOT27009-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/UNO-USD.npz",
+  "bytes": 86646,
+  "sha256": "e2daf0e632b662a2fb4f3cfc2f810175fb327d0be08bae821bef1c067b15548d",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/UNO-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/USD136148-USD.npz",
+  "bytes": 11726,
+  "sha256": "2c3c959ec581cc7695a5b3c7d3f27b3f90e6d181c742ade31e73cb606ec922a8",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/USD136148-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/VAL-USD.npz",
+  "bytes": 79086,
+  "sha256": "93b52f8c9291d8c09ddffb97249c7f3f4df00c24e34275712257ee0f51883529",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/VAL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/VERI-USD.npz",
+  "bytes": 59906,
+  "sha256": "35c98cf1460658f2e5f910aea4743551f7d249244929efb712c37e07ad436c35",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/VERI-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/VET-USD.npz",
+  "bytes": 67466,
+  "sha256": "569d6e3090407429eb100cd7de372a4e4aa95994325c11f054684fb43e7efced",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/VET-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/VTC-USD.npz",
+  "bytes": 93566,
+  "sha256": "9cf5314881b3f56e6a7727dbb10121e841d3ada20897defd630410d01a5a0d2d",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/VTC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/WANBTC-USD.npz",
+  "bytes": 2426,
+  "sha256": "14a4945a42c745dc95a358528c2b7f35ce4799bd445c9ebb95586cc75fd388f2",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/WANBTC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/WAVES-USD.npz",
+  "bytes": 76426,
+  "sha256": "427e8e4c3fe30a5b7a8fcde7b3e4bc38e6efd41841f0836de3d1ab512d0f72cd",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/WAVES-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/WBT-USD.npz",
+  "bytes": 30946,
+  "sha256": "038e2117fd9c8e8ece5e7c5269ebd5bc6f2ba98497b3a264795f867515ff8e85",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/WBT-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/WEGLD-USD.npz",
+  "bytes": 34426,
+  "sha256": "1b6975c0016339035eeaa20849b95ab2f1b9a72fffa226710cea0407f094bfdd",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/WEGLD-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/WHITE-USD.npz",
+  "bytes": 26546,
+  "sha256": "22290f8bd1b367b5c46fc5881d4b34321e8aa49e96cdc408efef3dc79c65295b",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/WHITE-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/WIF-USD.npz",
+  "bytes": 21886,
+  "sha256": "dc9dbb287f51203c2a8feb85dfcbe0e20af3cdb0db5b240cf8c81bbd3c1484f8",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/WIF-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/WLD-USD.npz",
+  "bytes": 24266,
+  "sha256": "72410a51b5b8235e6555624c50975483de58b8a54589a84265821c4dc5948b5a",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/WLD-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/WMEMO-USD.npz",
+  "bytes": 25046,
+  "sha256": "f4f100eedfc3f0124e3bb8831e528466a88f2428b1e4d12c70d16f3fdb5c5760",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/WMEMO-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/WNXM-USD.npz",
+  "bytes": 44686,
+  "sha256": "24f38bc53b9e98edd26c380db03c78a0e30eb7f5aaddba1b6e303b41dbd63da7",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/WNXM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/WTC-USD.npz",
+  "bytes": 49626,
+  "sha256": "5754046e19cdb334a7c0580ea2c6a73da62affcd8ff8d73ec6adb7cd9e284494",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/WTC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XBC-USD.npz",
+  "bytes": 81506,
+  "sha256": "2202d5e354559deeb0d0cfcf554ea658fab3e51e24b529373b9f01f43209a8d7",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XBC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XCH-USD.npz",
+  "bytes": 40546,
+  "sha256": "12f6a316e0ede1c2d21093bd0e6be92c6391f44ccecd4e60dfb316c32dc71308",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XCH-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XCP-USD.npz",
+  "bytes": 85906,
+  "sha256": "1b5b43503c6d001561570dc240a9748370bcbc761f84bf96262b1a135030493e",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XCP-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XEM-USD.npz",
+  "bytes": 84986,
+  "sha256": "674d2f10da3be63e6c4e3ac915a2084de6c669cccfd28dbe4a8f61a9a7ed298a",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XEM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XIN1-USD.npz",
+  "bytes": 35346,
+  "sha256": "4850e53397f7fdb4c6cf7501ce19b6affac956228bcdaa8cc116af2d15592b98",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XIN1-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XIN2349-USD.npz",
+  "bytes": 51266,
+  "sha256": "b8ed778c46d6575b5c28b1eaea365346b46e673b843fe21aa996f654b139dc99",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XIN2349-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XLM-USD.npz",
+  "bytes": 89766,
+  "sha256": "aff7d421eea03e8c046791a6ba83ac7d2f02340da6730508fdf79301424224a5",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XLM-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XMON-USD.npz",
+  "bytes": 34746,
+  "sha256": "526de174574f6424f5f08a853092d37cbc5f5c262cf4a8c2d836c5bc1913612d",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XMON-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XMR-USD.npz",
+  "bytes": 91266,
+  "sha256": "dc9346f39da56dac920c7a4322e094a542ed7c138469f7af9408e412bc4d3ad4",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XMR-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XNO-USD.npz",
+  "bytes": 70406,
+  "sha256": "7309f9d615c32b8c28882b021c7b6f6638a60b1cd74e7b85ad7e7df7ff7524f5",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XNO-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XRP-USD.npz",
+  "bytes": 94206,
+  "sha256": "ca3132b8c0a88825004401899ef31a7f29a495bbae8fbd2cf9838da503b9aa73",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XRP-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/XTZ-USD.npz",
+  "bytes": 66706,
+  "sha256": "c826d22ddadc9fe07c8136f78ef068f6cd1d0e2cc72badccc2a4801bd5ad197e",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/XTZ-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/YF-DAI-USD.npz",
+  "bytes": 42546,
+  "sha256": "7dd3cce5034e3d984379e3d95e29c969b3ee20fb2e90a75753276fff82d032dd",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/YF-DAI-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/YFI-USD.npz",
+  "bytes": 46226,
+  "sha256": "2a1b8d6c72baf5185e9ceae7b8ff0565bf4f03d195ce8dd75439054c1378c2fb",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/YFI-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/YFII-USD.npz",
+  "bytes": 46006,
+  "sha256": "2c46be14abe6d5490df30977b9ba5db664f6f6898bc8352222e7358809867821",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/YFII-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/YFL-USD.npz",
+  "bytes": 17926,
+  "sha256": "6aabcfcdc4843d112acad8b8aced24cb3bccb165c18e860a94f2f44d1d37ce5e",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/YFL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/YO-USD.npz",
+  "bytes": 28386,
+  "sha256": "1277eec10b50562aec6eb116bd1840f7b9438f287942a06bd9d396ff6b005cce",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/YO-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ZCL-USD.npz",
+  "bytes": 53826,
+  "sha256": "9ea1bf8d2166746fac9b40d09a685890f65246f900394db0e558feb01285e0ed",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ZCL-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ZEC-USD.npz",
+  "bytes": 73366,
+  "sha256": "2fe104c81e91eb2b57af76084659d2e766e14b765c317938daa142d5f4b61f24",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ZEC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ZEN-USD.npz",
+  "bytes": 69146,
+  "sha256": "bb3c20216417c034bef89c3119ba65acc9591fe06e81fc4a187dbc8db91bc2d1",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ZEN-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/ZK29779-USD.npz",
+  "bytes": 19506,
+  "sha256": "162d4cfbf4c69864463d0d285ccb7d0df02cf986555282c425960cd8f78aede0",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/ZK29779-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/ohlc/imBTC-USD.npz",
+  "bytes": 13346,
+  "sha256": "14da65102b7c560698db47bd6f3c995ee868839b7c37ce43e0a64d126e36ae1d",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/ohlc/imBTC-USD.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/s5_tables.npz",
+  "bytes": 2190186,
+  "sha256": "13817d62ba753789b90c58a2682ec3fa429d0d40eaf63c210e26eeb2764b7aa8",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/s5_tables.npz"
+ },
+ {
+  "study": "shortlist_S5_crypto_momentum",
+  "scratch_path": "runs/S5/union_pool_codes.json",
+  "bytes": 3023,
+  "sha256": "69c4b150d56e6c0714edc90d5979c682b9b2d93c2a17d5e0441dd29a73b984b5",
+  "location": "review/studies/shortlist_S5_crypto_momentum/artifacts/run_outputs/S5/union_pool_codes.json"
+ }
+]

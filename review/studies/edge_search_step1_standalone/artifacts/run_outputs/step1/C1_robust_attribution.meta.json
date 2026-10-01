@@ -1,0 +1,23 @@
+{
+  "candidate": "C1_robust_attribution",
+  "bars_fingerprint": "96bf26c8aa81b57db21adb8eba6dc3f7afd7dece24857d0195bb25aa8da5e9a2",
+  "seconds": 15069,
+  "n_days": 1631,
+  "portfolio": {
+    "total_return": 0.17802835981507936,
+    "cagr": 0.025637805578462958,
+    "annualized_volatility": 0.05224865078046549,
+    "sharpe_ratio": 0.5106558230264485,
+    "sortino_ratio": 0.5036692919954359,
+    "max_drawdown": 0.09969769930015893,
+    "calmar_ratio": 0.2571554384748183,
+    "hit_rate": 0.5162477007970571,
+    "cvar_95": 0.0076530078142366485
+  },
+  "turnover": {
+    "avg_turnover": 0.021906640588759168,
+    "total_turnover": 35.68591751908868,
+    "rebalance_count": 1629
+  },
+  "finished_at": "2026-09-30T00:16:16.120756+00:00"
+}

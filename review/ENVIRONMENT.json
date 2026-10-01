@@ -1,0 +1,9 @@
+{
+ "python": "3.14.4 (main, Aug 20 2026, 10:41:58) [GCC 15.2.0]",
+ "platform": "Linux-7.0.0-31-generic-x86_64-with-glibc2.43",
+ "machine": "x86_64",
+ "cpu_count": 6,
+ "git_head": "5c5575792cf604628cce599ad9f5e39c8a882596",
+ "host_timezone": "Asia/Jerusalem (UTC+3 on 2026-09-30); log timestamps are local time",
+ "requirements_lock": "review/requirements-lock.txt"
+}

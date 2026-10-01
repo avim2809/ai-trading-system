@@ -1,0 +1,194 @@
+{
+  "start_date": "2020-01-01",
+  "end_date": "2026-06-30",
+  "initial_capital": 1000000.0,
+  "commission_pct": 0.0005,
+  "slippage_pct": 0.0005,
+  "spread_pct": 0.0002,
+  "short_borrow_annual_pct": 0.003,
+  "market_impact_coefficient": 0.005,
+  "market_impact_crossover_participation": null,
+  "rebalance_band_pct": 0.05,
+  "rebalance_fraction": 0.7,
+  "rebalance_frequency": "daily",
+  "strategies": [
+    "momentum",
+    "trend",
+    "mean_reversion",
+    "stat_arb",
+    "multi_factor",
+    "sentiment",
+    "event_driven",
+    "volatility_breakout",
+    "seasonality",
+    "regime_hmm",
+    "pattern_recognition"
+  ],
+  "strategy_params": {
+    "stat_arb": {
+      "require_cointegration": true,
+      "coint_pvalue": 0.1,
+      "max_pairs": 5,
+      "entry_z": 2.0,
+      "exit_z": 0.5,
+      "lookback_days": 60,
+      "predefined_pairs": [
+        [
+          "SPY",
+          "QQQ"
+        ],
+        [
+          "SPY",
+          "IWM"
+        ],
+        [
+          "AAPL",
+          "MSFT"
+        ],
+        [
+          "JPM",
+          "BAC"
+        ],
+        [
+          "XOM",
+          "CVX"
+        ],
+        [
+          "GOOG",
+          "META"
+        ]
+      ]
+    },
+    "pattern_recognition": {
+      "cnn_scoring_enabled": false
+    }
+  },
+  "kill_switch_drawdown": 0.08,
+  "max_daily_trades": 40,
+  "max_daily_turnover": 0.25,
+  "max_position_pct": 0.05,
+  "max_gross_exposure": 1.5,
+  "max_net_exposure": 0.5,
+  "max_sector_pct": 0.25,
+  "vol_target": 0.12,
+  "vol_targeting_enabled": true,
+  "vol_lookback_days": 60,
+  "max_drawdown_pct": 0.15,
+  "max_participation_pct": 0.1,
+  "adv_lookback_days": 20,
+  "correlation_threshold": 0.75,
+  "max_correlated_pair_pct": 0.25,
+  "correlation_lookback_days": 60,
+  "sector_map": {
+    "AAPL": "technology",
+    "MSFT": "technology",
+    "NVDA": "technology",
+    "GOOG": "communication",
+    "AMZN": "consumer_discretionary",
+    "META": "communication",
+    "TSLA": "consumer_discretionary",
+    "AVGO": "technology",
+    "AMD": "technology",
+    "CRM": "technology",
+    "NFLX": "communication",
+    "ADBE": "technology",
+    "JPM": "financials",
+    "GS": "financials",
+    "BAC": "financials",
+    "V": "financials",
+    "MA": "financials",
+    "JNJ": "healthcare",
+    "UNH": "healthcare",
+    "LLY": "healthcare",
+    "XOM": "energy",
+    "CVX": "energy",
+    "SPY": "etf",
+    "QQQ": "etf",
+    "IWM": "etf"
+  },
+  "regime_overlay": {
+    "enabled": true,
+    "benchmark_symbol": "SPY",
+    "n_states": 3,
+    "retrain_frequency": 5,
+    "lookback_days": 252,
+    "ensemble": false,
+    "exposure_map": {
+      "Bull": 1.3,
+      "Bear": 0.4,
+      "Chop": 0.7
+    },
+    "min_state_separation": 0.5,
+    "separation_damping_floor": 0.15
+  },
+  "overlay_scale_floor": 0.25,
+  "allocation_method": "conviction_weighted",
+  "kelly_fraction": 0.5,
+  "conviction_smoothing_enabled": true,
+  "conviction_smoothing_halflife_days": 3.0,
+  "strategy_circuit_breaker": {
+    "enabled": false,
+    "lookback_days": 60,
+    "min_track_record_days": 20,
+    "trigger_sharpe": -0.5,
+    "full_cutoff_sharpe": -1.5,
+    "damping_floor": 0.25
+  },
+  "strategy_regime_weights": {
+    "enabled": false,
+    "ensemble": false,
+    "benchmark_symbol": "SPY",
+    "lookback_days": 252,
+    "retrain_frequency": 21,
+    "weights": {
+      "Bull": {
+        "momentum": 1.2,
+        "trend": 1.2,
+        "mean_reversion": 0.8
+      },
+      "Bear": {
+        "stat_arb": 1.2,
+        "mean_reversion": 1.1,
+        "momentum": 0.7,
+        "trend": 0.7
+      },
+      "Chop": {
+        "regime_hmm": 0.5,
+        "volatility_breakout": 0.8
+      }
+    }
+  },
+  "signal_combination": {
+    "method": "random_weights",
+    "seed": 0
+  },
+  "data_source": "cache",
+  "universe_symbols": [
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "GOOG",
+    "AMZN",
+    "META",
+    "TSLA",
+    "AVGO",
+    "AMD",
+    "CRM",
+    "NFLX",
+    "ADBE",
+    "JPM",
+    "GS",
+    "BAC",
+    "V",
+    "MA",
+    "JNJ",
+    "UNH",
+    "LLY",
+    "XOM",
+    "CVX",
+    "SPY",
+    "QQQ",
+    "IWM"
+  ],
+  "seed": 42
+}

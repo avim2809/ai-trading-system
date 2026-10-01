@@ -1,0 +1,8 @@
+fingerprint (frozen design): f355b0756683cf6fb1a3ac5b2db47cc891a0d9e0a1a2076dd575142278693a74
+data_end (last IWM bar): 2026-09-29 00:00:00
+coverage: {'covered': 28477, 'no_price_data': 1727, 'series_not_spanning_event': 1632, 'unmappable_ticker': 1422}
+3_month: placebo 500 draws ...
+3_month: n=8373 mean=0.0087 lb=-0.0064 placebo_p95=0.0656
+6_month: placebo 500 draws ...
+6_month: n=7222 mean=0.0120 lb=-0.0146 placebo_p95=0.9545
+bars {'A1': False, 'A2': True, 'A3': False, 'A4': False, 'A5': True, 'A6': True, 'A7': True} tierD False tierB {'B_a': True, 'B_b': False} => C PBO 0.07142857142857142

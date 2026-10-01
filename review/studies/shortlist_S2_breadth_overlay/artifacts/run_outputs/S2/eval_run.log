@@ -1,0 +1,29 @@
+2026-09-30 22:36:04,337 INFO fingerprint 4fd97659e9affce3c2fb6391daba522ad83d8c36be4698f2370e78c39ff7b6ab (PREREGISTERED_AT 2026-09-30T19:18:54Z)
+2026-09-30 22:36:08,085 INFO sanity: {'spy_cagr': 0.0996614144239718, 'spy_vol': 0.18911425776324273, 'spy_max_dd': 0.5518910194097941, 'bm2_cagr': 0.0776614234374704, 'bm2_vol': 0.10629441978531319, 'bm2_max_dd': 0.32177378714040195, 'n_days_abs_ret_gt_15pct': {'V1_primary': {'n': 0, 'dates': [], 'values': []}, 'V2_cash_destination': {'n': 0, 'dates': [], 'values': []}, 'V3_stricter_threshold': {'n': 0, 'dates': [], 'values': []}, 'V4_alt_measure': {'n': 0, 'dates': [], 'values': []}, 'BM1_SPY': {'n': 0, 'dates': [], 'values': []}, 'BM2_60_40': {'n': 0, 'dates': [], 'values': []}, 'BM3_SPY_VT': {'n': 0, 'dates': [], 'values': []}}, 'n_nan_days': {'V1_primary': 0, 'V2_cash_destination': 0, 'V3_stricter_threshold': 0, 'V4_alt_measure': 0, 'BM1_SPY': 0, 'BM2_60_40': 0, 'BM3_SPY_VT': 0}, 'pct_time_defensive_by_variant': {'V1_primary': 0.2657028112449799, 'V2_cash_destination': 0.2657028112449799, 'V3_stricter_threshold': 0.16096385542168676, 'V4_alt_measure': 0.38345381526104416}}
+2026-09-30 22:36:08,085 INFO placebos: 500 draws x 4 variants
+2026-09-30 22:36:09,195 INFO placebo draw 0/500
+2026-09-30 22:37:50,410 INFO placebo draw 100/500
+2026-09-30 22:39:30,349 INFO placebo draw 200/500
+2026-09-30 22:41:11,522 INFO placebo draw 300/500
+2026-09-30 22:42:51,476 INFO placebo draw 400/500
+2026-09-30 22:44:29,549 INFO PBO 0.000 over 7 series x 6225 days; DSR trial daily Sharpes [-0.00920795 -0.02178866 -0.00198212 -0.01179849]
+2026-09-30 22:44:31,686 INFO V1_primary               vs BM1_SPY      SR 0.91 vs 0.60 gap +0.31 [LB +0.03, UB +0.56] halves +0.50/+0.08 stress +0.30
+2026-09-30 22:44:33,583 INFO V1_primary               vs BM2_60_40    SR 0.91 vs 0.76 gap +0.15 [LB -0.06, UB +0.36] halves +0.26/+0.02 stress +0.15
+2026-09-30 22:44:35,174 INFO V1_primary               vs BM3_SPY_VT   SR 0.91 vs 0.77 gap +0.14 [LB -0.08, UB +0.37] halves +0.28/-0.00 stress +0.14
+2026-09-30 22:44:35,174 INFO ==> V1_primary tier(conditional on A7)=C bars={'A1': False, 'A2': False, 'A3': True, 'A4': False, 'A5': True, 'A6': True, 'A8': True}
+2026-09-30 22:44:36,749 INFO V2_cash_destination      vs BM1_SPY      SR 0.82 vs 0.60 gap +0.22 [LB +0.03, UB +0.39] halves +0.33/+0.09 stress +0.22
+2026-09-30 22:44:38,343 INFO V2_cash_destination      vs BM2_60_40    SR 0.82 vs 0.76 gap +0.06 [LB -0.13, UB +0.24] halves +0.09/+0.03 stress +0.06
+2026-09-30 22:44:39,902 INFO V2_cash_destination      vs BM3_SPY_VT   SR 0.82 vs 0.77 gap +0.05 [LB -0.12, UB +0.23] halves +0.11/+0.01 stress +0.05
+2026-09-30 22:44:39,902 INFO ==> V2_cash_destination tier(conditional on A7)=B bars={'A1': False, 'A2': False, 'A3': True, 'A4': True, 'A5': True, 'A6': True, 'A8': True}
+2026-09-30 22:44:41,490 INFO V3_stricter_threshold    vs BM1_SPY      SR 0.93 vs 0.60 gap +0.33 [LB +0.10, UB +0.56] halves +0.42/+0.21 stress +0.33
+2026-09-30 22:44:43,191 INFO V3_stricter_threshold    vs BM2_60_40    SR 0.93 vs 0.76 gap +0.17 [LB -0.00, UB +0.35] halves +0.19/+0.15 stress +0.17
+2026-09-30 22:44:44,815 INFO V3_stricter_threshold    vs BM3_SPY_VT   SR 0.93 vs 0.77 gap +0.16 [LB -0.04, UB +0.38] halves +0.21/+0.12 stress +0.17
+2026-09-30 22:44:44,815 INFO ==> V3_stricter_threshold tier(conditional on A7)=B bars={'A1': False, 'A2': False, 'A3': True, 'A4': True, 'A5': True, 'A6': True, 'A8': True}
+/local/store/git/ai-trading-system/.venv/lib/python3.14/site-packages/numpy/lib/_nanfunctions_impl.py:1396: RuntimeWarning: All-NaN slice encountered
+  return _nanquantile_unchecked(
+2026-09-30 22:44:46,560 INFO V4_alt_measure           vs BM1_SPY      SR 0.89 vs 0.60 gap +0.29 [LB -0.03, UB +0.57] halves +0.47/+0.07 stress +0.28
+2026-09-30 22:44:48,231 INFO V4_alt_measure           vs BM2_60_40    SR 0.89 vs 0.76 gap +0.13 [LB -0.10, UB +0.35] halves +0.23/+0.01 stress +0.12
+2026-09-30 22:44:49,937 INFO V4_alt_measure           vs BM3_SPY_VT   SR 0.89 vs 0.77 gap +0.12 [LB -0.17, UB +0.44] halves +0.25/-0.01 stress +0.11
+2026-09-30 22:44:49,938 INFO ==> V4_alt_measure tier(conditional on A7)=C bars={'A1': False, 'A2': False, 'A3': False, 'A4': False, 'A5': True, 'A6': True, 'A8': True}
+2026-09-30 22:44:49,940 INFO ledger updated: /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt_S2/docs/S2_trial_history.json (cumulative 4)
+2026-09-30 22:44:49,940 INFO tiers (conditional on A7): {'V1_primary': 'C', 'V2_cash_destination': 'B', 'V3_stricter_threshold': 'B', 'V4_alt_measure': 'C'}

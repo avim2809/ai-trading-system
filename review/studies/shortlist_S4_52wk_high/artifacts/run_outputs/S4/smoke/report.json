@@ -1,0 +1,748 @@
+{
+  "generated_at": "2026-09-30T19:47:14.529767+00:00",
+  "fingerprint": "99361527bf621ef06c538461aca94a7ce0832d6ab3bde36ca1fdb7265d7ab9e4",
+  "prereg_at": "2026-09-30T19:18:54Z",
+  "window": {
+    "start": "1999-01-31",
+    "end": "2026-09-29",
+    "midpoint": "2012-11-30",
+    "n_month_ends": 332,
+    "protocol_floor_note": "protocol \u00a73's absolute floor is 1993-02-01 (SPY inception); this window starts far later, purely because the eligible population before 1999 is thin and survivor-tilted (see credible_coverage_transition and topN_delisted_fraction_by_year above), not because of the protocol floor itself",
+    "n_eligible_min_in_window": 3300,
+    "n_eligible_max_in_window": 4862,
+    "N_primary_and_N_variant_supported_throughout": true
+  },
+  "alpha_one_sided": 0.01,
+  "pbo": 0.5285714285714286,
+  "dsr_trials": 4,
+  "candidates": {
+    "S4_p1_6mo_N500": {
+      "eval_start": "1999-02-01",
+      "eval_end": "2026-09-29",
+      "sharpe": 0.5286669384591713,
+      "cagr": -0.004742697294614628,
+      "vol": 1.0199156564748164,
+      "max_dd": 0.999451472417985,
+      "n_slots": 16531,
+      "placebo_p95": 0.33447194536707286,
+      "placebo_median": 0.32872974065461746,
+      "dsr": 0.8414425289443768,
+      "delist_stress_mean_gt_base_mean": false,
+      "vs": {
+        "PRIMARY_liquid_universe_ewbh": {
+          "sharpe_c": 0.5286669384591713,
+          "sharpe_b": 0.24938400217487983,
+          "gap": 0.2792829362842915,
+          "lb": 0.06415086438123056,
+          "ub": 0.5033886680975428,
+          "gap_half1": 0.31837544490852665,
+          "gap_half2": 0.18314753772739623,
+          "n_days": 6958,
+          "A1": true,
+          "A4": true,
+          "D": false,
+          "A5": true
+        },
+        "BM1_SPY": {
+          "sharpe_c": 0.5286669384591713,
+          "sharpe_b": 0.5229919022809276,
+          "gap": 0.00567503617824372,
+          "lb": -0.21343256472109803,
+          "ub": 0.24902470338961935,
+          "gap_half1": 0.17375192936633213,
+          "gap_half2": -0.22758848946693155,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        },
+        "BM2_60_40": {
+          "sharpe_c": 0.5286669384591713,
+          "sharpe_b": 0.571799579859226,
+          "gap": -0.04313264140005468,
+          "lb": -0.2950230650230937,
+          "ub": 0.2263333210338888,
+          "gap_half1": 0.043422540488599004,
+          "gap_half2": -0.15443244980608906,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": true
+        },
+        "BM3_SPY_VT": {
+          "sharpe_c": 0.5286669384591713,
+          "sharpe_b": 0.6742001471064325,
+          "gap": -0.14553320864726116,
+          "lb": -0.42480617857638214,
+          "ub": 0.15347712083602666,
+          "gap_half1": 0.04426790009372794,
+          "gap_half2": -0.32381626734469815,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        }
+      },
+      "bars": {
+        "A1": true,
+        "A2": false,
+        "A3": true,
+        "A4": false,
+        "A5": false,
+        "A6": false,
+        "A7": "PENDING"
+      },
+      "tier_d_condition": false,
+      "tier_b": {
+        "B_a": true,
+        "B_b": false
+      },
+      "tier": "C",
+      "tier_reported": "C",
+      "top10_contributors": [
+        {
+          "ticker": "SNCA",
+          "pnl_contribution": -0.29694658517837524
+        },
+        {
+          "ticker": "YRCW",
+          "pnl_contribution": -0.25012144446372986
+        },
+        {
+          "ticker": "AAPL",
+          "pnl_contribution": 0.2090890109539032
+        },
+        {
+          "ticker": "QCOM",
+          "pnl_contribution": 0.16843242943286896
+        },
+        {
+          "ticker": "CHKP",
+          "pnl_contribution": 0.15211601555347443
+        },
+        {
+          "ticker": "TMBR",
+          "pnl_contribution": -0.14750173687934875
+        },
+        {
+          "ticker": "WDC",
+          "pnl_contribution": 0.14363257586956024
+        },
+        {
+          "ticker": "BXRX",
+          "pnl_contribution": -0.13992160558700562
+        },
+        {
+          "ticker": "AMZN",
+          "pnl_contribution": 0.1375110000371933
+        },
+        {
+          "ticker": "RXII",
+          "pnl_contribution": -0.13734251260757446
+        }
+      ]
+    },
+    "S4_p2_6mo_N1000": {
+      "eval_start": "1999-02-01",
+      "eval_end": "2026-09-29",
+      "sharpe": 0.5526271477793055,
+      "cagr": -0.0011087484019268734,
+      "vol": 1.0463046069328759,
+      "max_dd": 0.9989309426306271,
+      "n_slots": 33047,
+      "placebo_p95": 0.39377165033115913,
+      "placebo_median": 0.3918034519552701,
+      "dsr": 0.8693514011433733,
+      "delist_stress_mean_gt_base_mean": false,
+      "vs": {
+        "PRIMARY_liquid_universe_ewbh": {
+          "sharpe_c": 0.5526271477793055,
+          "sharpe_b": 0.2930193408315157,
+          "gap": 0.25960780694778984,
+          "lb": 0.05696140134729317,
+          "ub": 0.47291734543730457,
+          "gap_half1": 0.24876912197126066,
+          "gap_half2": 0.255278151962346,
+          "n_days": 6958,
+          "A1": true,
+          "A4": true,
+          "D": false,
+          "A5": true
+        },
+        "BM1_SPY": {
+          "sharpe_c": 0.5526271477793055,
+          "sharpe_b": 0.5229919022809276,
+          "gap": 0.029635245498377927,
+          "lb": -0.17083965838870363,
+          "ub": 0.24736768294239514,
+          "gap_half1": 0.1941553017950027,
+          "gap_half2": -0.19168473994554436,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": true
+        },
+        "BM2_60_40": {
+          "sharpe_c": 0.5526271477793055,
+          "sharpe_b": 0.571799579859226,
+          "gap": -0.019172432079920476,
+          "lb": -0.2553805066394177,
+          "ub": 0.24532876030434142,
+          "gap_half1": 0.06382591291726958,
+          "gap_half2": -0.11852870028470186,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": true
+        },
+        "BM3_SPY_VT": {
+          "sharpe_c": 0.5526271477793055,
+          "sharpe_b": 0.6742001471064325,
+          "gap": -0.12157299932712695,
+          "lb": -0.401274232296743,
+          "ub": 0.17406013965509629,
+          "gap_half1": 0.06467127252239852,
+          "gap_half2": -0.28791251782331095,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        }
+      },
+      "bars": {
+        "A1": true,
+        "A2": false,
+        "A3": true,
+        "A4": false,
+        "A5": false,
+        "A6": false,
+        "A7": "PENDING"
+      },
+      "tier_d_condition": false,
+      "tier_b": {
+        "B_a": true,
+        "B_b": false
+      },
+      "tier": "C",
+      "tier_reported": "C",
+      "top10_contributors": [
+        {
+          "ticker": "SNCA",
+          "pnl_contribution": -0.1499272584915161
+        },
+        {
+          "ticker": "YRCW",
+          "pnl_contribution": -0.12506072223186493
+        },
+        {
+          "ticker": "AAPL",
+          "pnl_contribution": 0.10408146679401398
+        },
+        {
+          "ticker": "AZO",
+          "pnl_contribution": 0.09651189297437668
+        },
+        {
+          "ticker": "BXRX",
+          "pnl_contribution": -0.09628622978925705
+        },
+        {
+          "ticker": "QCOM",
+          "pnl_contribution": 0.09389130026102066
+        },
+        {
+          "ticker": "CHKP",
+          "pnl_contribution": 0.08789890259504318
+        },
+        {
+          "ticker": "GLG",
+          "pnl_contribution": -0.08600557595491409
+        },
+        {
+          "ticker": "TEVA",
+          "pnl_contribution": 0.07871482521295547
+        },
+        {
+          "ticker": "TMBR",
+          "pnl_contribution": -0.07711675018072128
+        }
+      ]
+    },
+    "S4_p3_1mo_N500": {
+      "eval_start": "1999-02-01",
+      "eval_end": "2026-09-29",
+      "sharpe": 0.31054728219301586,
+      "cagr": 0.038546690206731515,
+      "vol": 0.16668220477250603,
+      "max_dd": 0.5709615935777006,
+      "n_slots": 16531,
+      "placebo_p95": 0.26900542398461336,
+      "placebo_median": 0.2488661483830897,
+      "dsr": 0.4453149404859889,
+      "delist_stress_mean_gt_base_mean": false,
+      "vs": {
+        "PRIMARY_liquid_universe_ewbh": {
+          "sharpe_c": 0.31054728219301586,
+          "sharpe_b": 0.24938400217487983,
+          "gap": 0.061163280018136035,
+          "lb": -0.22336825205114,
+          "ub": 0.34612122292848313,
+          "gap_half1": 0.046124656331273606,
+          "gap_half2": 0.023221139163674076,
+          "n_days": 6958,
+          "A1": false,
+          "A4": true,
+          "D": false,
+          "A5": true
+        },
+        "BM1_SPY": {
+          "sharpe_c": 0.31054728219301586,
+          "sharpe_b": 0.5229919022809276,
+          "gap": -0.21244462008791176,
+          "lb": -0.5310423771004001,
+          "ub": 0.07886895352645973,
+          "gap_half1": -0.09849885921092094,
+          "gap_half2": -0.3875148880306537,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        },
+        "BM2_60_40": {
+          "sharpe_c": 0.31054728219301586,
+          "sharpe_b": 0.571799579859226,
+          "gap": -0.26125229766621016,
+          "lb": -0.5827410094421369,
+          "ub": 0.0645524108036163,
+          "gap_half1": -0.22882824808865407,
+          "gap_half2": -0.3143588483698112,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        },
+        "BM3_SPY_VT": {
+          "sharpe_c": 0.31054728219301586,
+          "sharpe_b": 0.6742001471064325,
+          "gap": -0.36365286491341664,
+          "lb": -0.6809959010618283,
+          "ub": -0.03351812899672821,
+          "gap_half1": -0.22798288848352513,
+          "gap_half2": -0.4837426659084203,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": true,
+          "A5": false
+        }
+      },
+      "bars": {
+        "A1": false,
+        "A2": false,
+        "A3": true,
+        "A4": false,
+        "A5": false,
+        "A6": false,
+        "A7": "PENDING"
+      },
+      "tier_d_condition": true,
+      "tier_b": {
+        "B_a": true,
+        "B_b": false
+      },
+      "tier": "D",
+      "tier_reported": "D",
+      "top10_contributors": [
+        {
+          "ticker": "AAPL",
+          "pnl_contribution": 0.04655083641409874
+        },
+        {
+          "ticker": "NVDA",
+          "pnl_contribution": 0.04171735793352127
+        },
+        {
+          "ticker": "YRCW",
+          "pnl_contribution": -0.03873860090970993
+        },
+        {
+          "ticker": "SNCA",
+          "pnl_contribution": -0.0368683785200119
+        },
+        {
+          "ticker": "ANDV",
+          "pnl_contribution": 0.03495751693844795
+        },
+        {
+          "ticker": "SNDK_old",
+          "pnl_contribution": 0.02946130931377411
+        },
+        {
+          "ticker": "QCOM",
+          "pnl_contribution": 0.02873297594487667
+        },
+        {
+          "ticker": "SBER",
+          "pnl_contribution": 0.028509845957159996
+        },
+        {
+          "ticker": "SSNT",
+          "pnl_contribution": -0.02813919447362423
+        },
+        {
+          "ticker": "AMZN",
+          "pnl_contribution": 0.02694612182676792
+        }
+      ]
+    },
+    "S4_p4_1mo_N1000": {
+      "eval_start": "1999-02-01",
+      "eval_end": "2026-09-29",
+      "sharpe": 0.3580254376174961,
+      "cagr": 0.04660576090363833,
+      "vol": 0.16576698721054492,
+      "max_dd": 0.5458368708424057,
+      "n_slots": 33047,
+      "placebo_p95": 0.32455817906452156,
+      "placebo_median": 0.29252364467442793,
+      "dsr": 0.5440198352157766,
+      "delist_stress_mean_gt_base_mean": false,
+      "vs": {
+        "PRIMARY_liquid_universe_ewbh": {
+          "sharpe_c": 0.3580254376174961,
+          "sharpe_b": 0.2930193408315157,
+          "gap": 0.0650060967859804,
+          "lb": -0.20733180142826138,
+          "ub": 0.31717168662977824,
+          "gap_half1": -0.024884987585427926,
+          "gap_half2": 0.14617131986746917,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": true
+        },
+        "BM1_SPY": {
+          "sharpe_c": 0.3580254376174961,
+          "sharpe_b": 0.5229919022809276,
+          "gap": -0.1649664646634315,
+          "lb": -0.45078041163053356,
+          "ub": 0.09508036869202065,
+          "gap_half1": -0.07949880776168589,
+          "gap_half2": -0.3007915720404212,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        },
+        "BM2_60_40": {
+          "sharpe_c": 0.3580254376174961,
+          "sharpe_b": 0.571799579859226,
+          "gap": -0.21377414224172991,
+          "lb": -0.4974502403371413,
+          "ub": 0.06456859782431396,
+          "gap_half1": -0.209828196639419,
+          "gap_half2": -0.22763553237957868,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        },
+        "BM3_SPY_VT": {
+          "sharpe_c": 0.3580254376174961,
+          "sharpe_b": 0.6742001471064325,
+          "gap": -0.3161747094889364,
+          "lb": -0.6366787164828814,
+          "ub": 0.022961235847883586,
+          "gap_half1": -0.20898283703429008,
+          "gap_half2": -0.39701934991818777,
+          "n_days": 6958,
+          "A1": false,
+          "A4": false,
+          "D": false,
+          "A5": false
+        }
+      },
+      "bars": {
+        "A1": false,
+        "A2": false,
+        "A3": true,
+        "A4": false,
+        "A5": false,
+        "A6": false,
+        "A7": "PENDING"
+      },
+      "tier_d_condition": false,
+      "tier_b": {
+        "B_a": true,
+        "B_b": false
+      },
+      "tier": "C",
+      "tier_reported": "C",
+      "top10_contributors": [
+        {
+          "ticker": "NVDA",
+          "pnl_contribution": 0.023648031055927277
+        },
+        {
+          "ticker": "AAPL",
+          "pnl_contribution": 0.022477079182863235
+        },
+        {
+          "ticker": "SNCA",
+          "pnl_contribution": -0.01988816075026989
+        },
+        {
+          "ticker": "QCOM",
+          "pnl_contribution": 0.019429627805948257
+        },
+        {
+          "ticker": "YRCW",
+          "pnl_contribution": -0.019369300454854965
+        },
+        {
+          "ticker": "AZO",
+          "pnl_contribution": 0.018848657608032227
+        },
+        {
+          "ticker": "GLG",
+          "pnl_contribution": -0.018664611503481865
+        },
+        {
+          "ticker": "CBMX",
+          "pnl_contribution": -0.018530411645770073
+        },
+        {
+          "ticker": "ANDV",
+          "pnl_contribution": 0.018138529732823372
+        },
+        {
+          "ticker": "AMCC",
+          "pnl_contribution": 0.018134163692593575
+        }
+      ]
+    }
+  },
+  "sanity_checks": {
+    "BM1_SPY": {
+      "sharpe": 0.5229919022809276,
+      "cagr": 0.08535354509097415,
+      "vol": 0.19181430986289855,
+      "max_dd": 0.5518910194097939
+    },
+    "BM2_60_40": {
+      "sharpe": 0.571799579859226,
+      "cagr": 0.05838999416000523,
+      "vol": 0.10978712627563429,
+      "max_dd": 0.3089095830552241
+    },
+    "big_moves_gt_15pct": {
+      "S4_p1_6mo_N500": [
+        {
+          "date": "1999-09-03",
+          "ret": 0.1785118198586133
+        },
+        {
+          "date": "1999-10-28",
+          "ret": 0.17331108861344546
+        },
+        {
+          "date": "1999-10-29",
+          "ret": 0.17606611293002966
+        },
+        {
+          "date": "2000-01-04",
+          "ret": -0.28602910717563645
+        },
+        {
+          "date": "2000-01-07",
+          "ret": 0.23782731027313275
+        },
+        {
+          "date": "2000-01-10",
+          "ret": 0.2909463430478354
+        },
+        {
+          "date": "2000-01-13",
+          "ret": 0.1562755552440649
+        },
+        {
+          "date": "2000-01-28",
+          "ret": -0.18968024698940805
+        },
+        {
+          "date": "2000-02-03",
+          "ret": 0.17025089693197515
+        },
+        {
+          "date": "2000-02-29",
+          "ret": 0.1639800225708424
+        },
+        {
+          "date": "2000-03-03",
+          "ret": 0.16303875611811236
+        },
+        {
+          "date": "2000-03-13",
+          "ret": -0.1578609053594846
+        },
+        {
+          "date": "2000-03-14",
+          "ret": -0.18939245240471791
+        },
+        {
+          "date": "2000-03-16",
+          "ret": 0.20443177390502068
+        },
+        {
+          "date": "2000-03-20",
+          "ret": -0.1801686860362679
+        },
+        {
+          "date": "2000-03-22",
+          "ret": 0.19224713021685602
+        },
+        {
+          "date": "2000-03-29",
+          "ret": -0.202333582121355
+        },
+        {
+          "date": "2000-03-30",
+          "ret": -0.15925846753816586
+        },
+        {
+          "date": "2000-04-03",
+          "ret": -0.28349679150414886
+        },
+        {
+          "date": "2000-04-06",
+          "ret": 0.2167242934829119
+        }
+      ],
+      "S4_p2_6mo_N1000": [
+        {
+          "date": "1999-09-03",
+          "ret": 0.15558232534021954
+        },
+        {
+          "date": "2000-01-04",
+          "ret": -0.24081823586038809
+        },
+        {
+          "date": "2000-01-07",
+          "ret": 0.2087728237556803
+        },
+        {
+          "date": "2000-01-10",
+          "ret": 0.22318314908352477
+        },
+        {
+          "date": "2000-01-28",
+          "ret": -0.17280832211208183
+        },
+        {
+          "date": "2000-02-03",
+          "ret": 0.15134411822691618
+        },
+        {
+          "date": "2000-03-03",
+          "ret": 0.16923832168777153
+        },
+        {
+          "date": "2000-03-14",
+          "ret": -0.18766041378239606
+        },
+        {
+          "date": "2000-03-16",
+          "ret": 0.20468594660620612
+        },
+        {
+          "date": "2000-03-20",
+          "ret": -0.20120929873519344
+        },
+        {
+          "date": "2000-03-22",
+          "ret": 0.18133125664917316
+        },
+        {
+          "date": "2000-03-29",
+          "ret": -0.18558110424340965
+        },
+        {
+          "date": "2000-03-30",
+          "ret": -0.15146219376151748
+        },
+        {
+          "date": "2000-04-03",
+          "ret": -0.29310874624934513
+        },
+        {
+          "date": "2000-04-06",
+          "ret": 0.22598099457081844
+        },
+        {
+          "date": "2000-04-10",
+          "ret": -0.25585101730575843
+        },
+        {
+          "date": "2000-04-12",
+          "ret": -0.2717191081957379
+        },
+        {
+          "date": "2000-04-14",
+          "ret": -0.49270632563586025
+        },
+        {
+          "date": "2000-04-17",
+          "ret": 0.21233480228680593
+        },
+        {
+          "date": "2000-04-18",
+          "ret": 0.44419811719512836
+        }
+      ],
+      "S4_p3_1mo_N500": [],
+      "S4_p4_1mo_N1000": [],
+      "BM1_SPY": [],
+      "BM2_60_40": [],
+      "BM3_SPY_VT": []
+    },
+    "nan_days": {
+      "S4_p1_6mo_N500": 0,
+      "S4_p2_6mo_N1000": 0,
+      "S4_p3_1mo_N500": 0,
+      "S4_p4_1mo_N1000": 0,
+      "BM1_SPY": 0,
+      "BM2_60_40": 0,
+      "BM3_SPY_VT": 0
+    },
+    "turnover_per_year": {
+      "S4_p1_6mo_N500": 23.948329979879276,
+      "S4_p2_6mo_N1000": 23.937464788732395,
+      "S4_p3_1mo_N500": 23.948329979879276,
+      "S4_p4_1mo_N1000": 23.937464788732395
+    }
+  },
+  "prereg_issues": [
+    "No explicit cash/risk-free subtraction step is stated for the Sharpe-gap computation; every series already carries its own cash drag internally (BM3 on days it under-invests, any slot's early-exit residual), so raw net daily returns are compared directly -- subtracting rf again would double count it.",
+    "Early-exit capital (delisting or a segment break mid-hold) is parked in cash until that slot's cohort next reforms, not redistributed pro-rata to the other names still held in that cohort -- the frozen file says only 'closed out ... no assumption of recovery', with no redistribution rule.",
+    "S4's own frozen COSTS block restates only the stock ADV-bucket table, not an ETF rate for BM1/BM2/BM3/PRIMARY's own legs (SPY/IEF/VFITX) -- protocol Sec.2's general ETF rule (3bps/side, all clear the $50M ADV bar) is used for those.",
+    "'Per side' is charged in full at both entry and exit (not split/halved across the round trip), reading the frozen COSTS key name literally.",
+    "Decile size = round(N*0.10): 50 for N=500, 100 for N=1000 -- not otherwise specified numerically in the frozen file beyond 'top decile'.",
+    "Every scheduled reformation (PRIMARY's monthly rebalance, the 1-month hold, each 6-month cohort) is modelled as a FRESH slot for every held name, with no netting of an unchanged continuing member's weight across reformations -- the conservative (higher-cost) reading of 'rebalanced monthly', applied symmetrically to candidate and PRIMARY so the GAP is not biased by it.",
+    "A3 compares the candidate's own raw daily Sharpe to the distribution of placebo raw daily Sharpes (not a benchmark-relative gap), per the protocol's literal wording, unlike A1/A4/A5 which are explicitly framed as gaps."
+  ],
+  "cleaning_fingerprint_v2_at_freeze": "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054",
+  "cleaning_fingerprint_v2_now": "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054",
+  "cleaning_note": "cleaning v2's label-only update (f62cb2e4 -> fc0690f0) changed only frozen_at's text; CLEANING_RULES (the actual behaviour) is unchanged, so phase-1's panel.parquet is valid input here."
+}

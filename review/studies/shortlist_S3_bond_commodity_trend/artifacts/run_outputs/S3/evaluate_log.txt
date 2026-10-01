@@ -1,0 +1,61 @@
+2026-09-30 22:44:44,182 INFO fingerprint 8baa2481ce901eede120977917d15de90eca5840c8b9d7934fae13c9e47ac9ff draft=False prereg_at=2026-09-30T19:18:54Z
+2026-09-30 22:44:44,273 INFO BIL    clean rows=4865 segments=1 first=2007-05-30 last=2026-09-29
+2026-09-30 22:44:44,318 INFO DBA    clean rows=4964 segments=1 first=2007-01-05 last=2026-09-29
+2026-09-30 22:44:44,369 INFO DBB    clean rows=4964 segments=1 first=2007-01-05 last=2026-09-29
+2026-09-30 22:44:44,419 INFO DBE    clean rows=4964 segments=1 first=2007-01-05 last=2026-09-29
+2026-09-30 22:44:44,473 INFO GLD    clean rows=5499 segments=1 first=2004-11-18 last=2026-09-29
+2026-09-30 22:44:44,515 INFO IEF    clean rows=6083 segments=1 first=2002-07-26 last=2026-09-29
+2026-09-30 22:44:44,559 INFO SHY    clean rows=6083 segments=1 first=2002-07-26 last=2026-09-29
+2026-09-30 22:44:44,596 INFO SLV    clean rows=5137 segments=1 first=2006-04-28 last=2026-09-29
+2026-09-30 22:44:44,643 INFO SPY    clean rows=8474 segments=1 first=1993-01-29 last=2026-09-29
+2026-09-30 22:44:44,686 INFO TLT    clean rows=6083 segments=1 first=2002-07-26 last=2026-09-29
+2026-09-30 22:44:44,739 INFO USO    clean rows=5150 segments=1 first=2006-04-10 last=2026-09-29
+2026-09-30 22:44:44,792 INFO VFITX  clean rows=8466 segments=1 first=1993-01-29 last=2026-09-29
+2026-09-30 22:44:44,853 INFO cash proxy: BIL from 2007-05-31; FRED DTB3 before that (3610 days)
+2026-09-30 22:45:05,163 INFO placebos: 500 draws
+2026-09-30 22:45:08,938 INFO placebo draw 0
+2026-09-30 22:47:58,592 INFO placebo draw 100
+2026-09-30 22:50:47,024 INFO placebo draw 200
+2026-09-30 22:53:33,889 INFO placebo draw 300
+2026-09-30 22:56:21,996 INFO placebo draw 400
+2026-09-30 22:59:08,545 INFO PBO 0.200 over 8 cols x 8474 days (1993-01-29 .. 2026-09-29)
+2026-09-30 22:59:10,504 INFO bond      vs primary    (bond_bh) SR 0.18 vs 0.21 gap -0.03 [LB -0.36 UB +0.33] halves -0.24/+0.18 stress -0.10
+2026-09-30 22:59:12,091 INFO bond      vs BM1_SPY    (BM1_SPY) SR 0.18 vs 0.59 gap -0.40 [LB -1.10 UB +0.23] halves -0.17/-0.66 stress -0.48
+2026-09-30 22:59:13,674 INFO bond      vs BM2_60_40  (BM2_60_40) SR 0.18 vs 0.67 gap -0.49 [LB -1.11 UB +0.08] halves -0.34/-0.63 stress -0.56
+2026-09-30 22:59:15,417 INFO bond      vs BM3_SPY_VT (BM3_SPY_VT) SR 0.18 vs 0.72 gap -0.53 [LB -1.16 UB +0.11] halves -0.38/-0.69 stress -0.60
+2026-09-30 22:59:15,418 INFO ==> bond tier C (conditional on A7)
+2026-09-30 22:59:16,730 INFO commodity vs primary    (commodity_bh) SR 0.26 vs 0.27 gap -0.01 [LB -0.41 UB +0.36] halves +0.13/-0.23 stress -0.02
+2026-09-30 22:59:18,086 INFO commodity vs BM1_SPY    (BM1_SPY) SR 0.26 vs 0.55 gap -0.29 [LB -0.87 UB +0.24] halves -0.26/-0.36 stress -0.30
+2026-09-30 22:59:19,549 INFO commodity vs BM2_60_40  (BM2_60_40) SR 0.26 vs 0.63 gap -0.36 [LB -0.97 UB +0.21] halves -0.45/-0.30 stress -0.38
+2026-09-30 22:59:20,913 INFO commodity vs BM3_SPY_VT (BM3_SPY_VT) SR 0.26 vs 0.69 gap -0.42 [LB -1.04 UB +0.16] halves -0.41/-0.46 stress -0.43
+2026-09-30 22:59:20,913 INFO ==> commodity tier C (conditional on A7)
+2026-09-30 22:59:22,207 INFO combined  vs primary    (combined_bh) SR 0.65 vs 0.64 gap +0.01 [LB -0.04 UB +0.05] halves +0.01/+0.00 stress +0.00
+2026-09-30 22:59:23,954 INFO combined  vs BM1_SPY    (BM1_SPY) SR 0.65 vs 0.55 gap +0.09 [LB -0.07 UB +0.25] halves +0.20/-0.04 stress +0.09
+2026-09-30 22:59:25,515 INFO combined  vs BM2_60_40  (BM2_60_40) SR 0.65 vs 0.63 gap +0.02 [LB -0.04 UB +0.08] halves +0.01/+0.02 stress +0.01
+2026-09-30 22:59:26,954 INFO combined  vs BM3_SPY_VT (BM3_SPY_VT) SR 0.65 vs 0.69 gap -0.04 [LB -0.32 UB +0.24] halves +0.05/-0.14 stress -0.04
+2026-09-30 22:59:26,968 INFO ==> combined tier C (conditional on A7)
+2026-09-30 22:59:33,628 INFO wrote /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt_S3/docs/eodhd_s3_evaluation_2026_10.json
+2026-09-30 22:59:33,628 INFO tiers: {'bond': 'C (conditional on A7)', 'commodity': 'C (conditional on A7)', 'combined': 'C (conditional on A7)'}
+	Command being timed: "/local/store/git/ai-trading-system/.venv/bin/python3 scripts/run_eodhd_s3_evaluation.py evaluate --data /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt_S3 --out /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/runs/S3 --report /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt_S3/docs/eodhd_s3_evaluation_2026_10.json"
+	User time (seconds): 884.02
+	System time (seconds): 2.94
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 14:52.57
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 398056
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 2
+	Minor (reclaiming a frame) page faults: 270848
+	Voluntary context switches: 493
+	Involuntary context switches: 12602
+	Swaps: 0
+	File system inputs: 160
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

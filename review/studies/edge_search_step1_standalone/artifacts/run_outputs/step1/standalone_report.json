@@ -1,0 +1,431 @@
+{
+  "generated_at": "2026-09-30T00:19:33.158902+00:00",
+  "fingerprint": "1d54517a2e1e68c09d88d78111fe9b6e8529cae482d7015c0b0c30f25f921b8d",
+  "folds": [
+    [
+      "2020-01-01",
+      "2021-02-19",
+      "2021-02-20",
+      "2021-08-16"
+    ],
+    [
+      "2021-08-16",
+      "2022-10-05",
+      "2022-10-06",
+      "2023-04-01"
+    ],
+    [
+      "2023-04-01",
+      "2024-05-20",
+      "2024-05-21",
+      "2024-11-14"
+    ],
+    [
+      "2024-11-14",
+      "2026-01-03",
+      "2026-01-04",
+      "2026-06-30"
+    ]
+  ],
+  "cost_bps_per_side": 12.0,
+  "alpha_one_sided": 0.004545454545454546,
+  "strategies": {
+    "momentum": {
+      "oos_days": 491,
+      "sharpe_oos_hedged_net": -0.20087557010238513,
+      "lb_one_sided": -1.8764137911064378,
+      "fold_sharpes": [
+        -1.1162609538293302,
+        -2.3310809057817816,
+        0.2741010709182495,
+        2.845034197921068
+      ],
+      "betas": [
+        0.5059163675672346,
+        0.2883316104172777,
+        1.0660314433346643,
+        0.5099234148533345
+      ],
+      "sharpe_oos_hedged_gross": -0.062360735545313156,
+      "sharpe_oos_hedged_net_lag0": -0.295061278660849,
+      "sharpe_full_net_unhedged": 0.9798165087000358,
+      "mean_daily_turnover": 0.11178891626117818,
+      "days_with_book": 1631,
+      "placebo_p95": 0.3932818620593098,
+      "placebo_median": -0.7413364304619683,
+      "dsr": 0.0016870732203057015,
+      "bars": {
+        "S1": false,
+        "S2": false,
+        "S3": false,
+        "S4": false
+      },
+      "survives": false,
+      "fidelity_vs_attribution_lag0_gross": {
+        "max_abs_diff": 1.3877787807814457e-16,
+        "corr": 0.9999999999999998
+      }
+    },
+    "trend": {
+      "oos_days": 491,
+      "sharpe_oos_hedged_net": -0.5560951535572682,
+      "lb_one_sided": -2.254516725556241,
+      "fold_sharpes": [
+        -0.7890272518819287,
+        -1.5073821377213577,
+        -0.5078873245409756,
+        0.7838178795190645
+      ],
+      "betas": [
+        0.3805811769991734,
+        -0.14669443976239208,
+        1.1335031506770574,
+        0.2630816155150291
+      ],
+      "sharpe_oos_hedged_gross": -0.5119832220926187,
+      "sharpe_oos_hedged_net_lag0": -0.523296927597276,
+      "sharpe_full_net_unhedged": 0.8906967038449711,
+      "mean_daily_turnover": 0.024352634583117216,
+      "days_with_book": 1631,
+      "placebo_p95": 0.7535222172212807,
+      "placebo_median": -0.2604320465733,
+      "dsr": 0.00028053569303965187,
+      "bars": {
+        "S1": false,
+        "S2": false,
+        "S3": false,
+        "S4": false
+      },
+      "survives": false,
+      "fidelity_vs_attribution_lag0_gross": {
+        "max_abs_diff": 1.1102230246251565e-16,
+        "corr": 0.9999999999999999
+      }
+    },
+    "mean_reversion": {
+      "oos_days": 491,
+      "sharpe_oos_hedged_net": -1.5556280652923824,
+      "lb_one_sided": -3.1551560227747952,
+      "fold_sharpes": [
+        -1.5279525645321845,
+        -2.8629324128431195,
+        -0.7909094523625679,
+        -0.8252548717948233
+      ],
+      "betas": [
+        0.18000582068996843,
+        0.26457689389199124,
+        -0.2060160441346565,
+        0.33663641243291226
+      ],
+      "sharpe_oos_hedged_gross": -0.7274939397500815,
+      "sharpe_oos_hedged_net_lag0": -1.3806895367957073,
+      "sharpe_full_net_unhedged": -1.2640997294754295,
+      "mean_daily_turnover": 0.7766826879669297,
+      "days_with_book": 1631,
+      "placebo_p95": -0.6228422946716073,
+      "placebo_median": -1.6430799591384027,
+      "dsr": 6.048308355821597e-07,
+      "bars": {
+        "S1": false,
+        "S2": false,
+        "S3": false,
+        "S4": false
+      },
+      "survives": false,
+      "fidelity_vs_attribution_lag0_gross": {
+        "max_abs_diff": 1.8041124150158794e-16,
+        "corr": 1.0
+      }
+    },
+    "volatility_breakout": {
+      "oos_days": 491,
+      "sharpe_oos_hedged_net": -3.11412334913006,
+      "lb_one_sided": -4.5110434592846165,
+      "fold_sharpes": [
+        -3.0662166830229762,
+        -1.3706188275028475,
+        -3.4131236612692337,
+        -4.412280887113218
+      ],
+      "betas": [
+        0.0001197516477780451,
+        -0.062419784126304306,
+        0.020404349319196834,
+        0.009005084174316641
+      ],
+      "sharpe_oos_hedged_gross": -1.3389597762474565,
+      "sharpe_oos_hedged_net_lag0": -1.4559432310218856,
+      "sharpe_full_net_unhedged": -1.7565777676643677,
+      "mean_daily_turnover": 0.6540747821115461,
+      "days_with_book": 571,
+      "placebo_p95": -0.36333775599062756,
+      "placebo_median": -1.4708473570769787,
+      "dsr": 1.7436052601738083e-13,
+      "bars": {
+        "S1": false,
+        "S2": false,
+        "S3": false,
+        "S4": false
+      },
+      "survives": false,
+      "fidelity_vs_attribution_lag0_gross": {
+        "max_abs_diff": 2.220446049250313e-16,
+        "corr": 1.0
+      }
+    },
+    "stat_arb": {
+      "oos_days": 491,
+      "sharpe_oos_hedged_net": -3.4091389853846565,
+      "lb_one_sided": -5.149351710198998,
+      "fold_sharpes": [
+        -3.8130704093903547,
+        -3.0161730061862935,
+        -4.332664170763215,
+        -2.7850823683243933
+      ],
+      "betas": [
+        0.008162493041730981,
+        -0.027755956564239126,
+        -0.03525008200279914,
+        -0.011190402328597228
+      ],
+      "sharpe_oos_hedged_gross": -0.8932304291835725,
+      "sharpe_oos_hedged_net_lag0": -3.070966499527458,
+      "sharpe_full_net_unhedged": -2.6428226962141332,
+      "mean_daily_turnover": 0.6113775132449446,
+      "days_with_book": 1128,
+      "placebo_p95": -0.060350507831461474,
+      "placebo_median": -1.1826465812832558,
+      "dsr": 9.43689570931383e-16,
+      "bars": {
+        "S1": false,
+        "S2": false,
+        "S3": false,
+        "S4": false
+      },
+      "survives": false,
+      "fidelity_vs_attribution_lag0_gross": {
+        "max_abs_diff": 1.1102230246251565e-16,
+        "corr": 0.9999999999999999
+      }
+    },
+    "seasonality": {
+      "oos_days": 491,
+      "sharpe_oos_hedged_net": -2.6826718440636403,
+      "lb_one_sided": -4.228267143895028,
+      "fold_sharpes": [
+        -3.6334174858172306,
+        -2.133047655790329,
+        -1.758764646296717,
+        -3.7043084041312233
+      ],
+      "betas": [
+        0.5223945361324426,
+        0.1634886757481619,
+        0.21909169920787838,
+        0.5667815895929204
+      ],
+      "sharpe_oos_hedged_gross": -1.0193742989344838,
+      "sharpe_oos_hedged_net_lag0": -2.002439432649525,
+      "sharpe_full_net_unhedged": -0.9399330589014128,
+      "mean_daily_turnover": 1.0012262415695892,
+      "days_with_book": 1631,
+      "placebo_p95": -2.6826718440636403,
+      "placebo_median": -2.6826718440636403,
+      "dsr": 1.1832179680482113e-10,
+      "bars": {
+        "S1": false,
+        "S2": false,
+        "S3": false,
+        "S4": false
+      },
+      "survives": false,
+      "fidelity_vs_attribution_lag0_gross": {
+        "max_abs_diff": 4.163336342344337e-17,
+        "corr": 1.0
+      }
+    },
+    "multi_factor": {
+      "oos_days": 491,
+      "sharpe_oos_hedged_net": 0.09524578981680883,
+      "lb_one_sided": -2.1188136532375865,
+      "fold_sharpes": [
+        -1.0930547143568243,
+        -1.8871129992701126,
+        1.0013773471155423,
+        2.861919772604458
+      ],
+      "betas": [
+        0.4043563904584087,
+        -0.3136900822886282,
+        -0.28538473040718443,
+        -0.1060296767731485
+      ],
+      "sharpe_oos_hedged_gross": 0.27879521240541605,
+      "sharpe_oos_hedged_net_lag0": 0.020800890125507454,
+      "sharpe_full_net_unhedged": 0.405127375650991,
+      "mean_daily_turnover": 0.07341401847067426,
+      "days_with_book": 1631,
+      "placebo_p95": 0.7211121156188117,
+      "placebo_median": -0.36828158936301714,
+      "dsr": 0.00570115019664208,
+      "bars": {
+        "S1": false,
+        "S2": false,
+        "S3": false,
+        "S4": false
+      },
+      "survives": false,
+      "fidelity_vs_attribution_lag0_gross": {
+        "max_abs_diff": 1.6653345369377348e-16,
+        "corr": 0.9999999999999998
+      }
+    },
+    "event_driven": {
+      "oos_days": 491,
+      "sharpe_oos_hedged_net": -1.1252164848609203,
+      "lb_one_sided": -3.0396928608021248,
+      "fold_sharpes": [
+        -0.7475998672513967,
+        -0.6170616105268332,
+        -1.3344722280322352,
+        -1.8456169413771724
+      ],
+      "betas": [
+        -0.2743302592391781,
+        0.12123904274597437,
+        0.26669411373246066,
+        0.08761901647371868
+      ],
+      "sharpe_oos_hedged_gross": -0.6614908687575598,
+      "sharpe_oos_hedged_net_lag0": -0.14044499182775377,
+      "sharpe_full_net_unhedged": 0.013930152742278882,
+      "mean_daily_turnover": 0.25085554280696415,
+      "days_with_book": 1565,
+      "placebo_p95": 0.563164216018424,
+      "placebo_median": -0.5581614741790588,
+      "dsr": 1.1778311107546457e-05,
+      "bars": {
+        "S1": false,
+        "S2": false,
+        "S3": false,
+        "S4": false
+      },
+      "survives": false,
+      "fidelity_vs_attribution_lag0_gross": {
+        "max_abs_diff": 1.8041124150158794e-16,
+        "corr": 0.9999999999999999
+      }
+    },
+    "sentiment": {
+      "oos_days": 491,
+      "sharpe_oos_hedged_net": -2.591065897894694,
+      "lb_one_sided": NaN,
+      "fold_sharpes": [
+        NaN,
+        NaN,
+        NaN,
+        -5.404760368678748
+      ],
+      "betas": [
+        0.0,
+        0.0,
+        0.0,
+        0.004781709799490949
+      ],
+      "sharpe_oos_hedged_gross": -0.8498202253138336,
+      "sharpe_oos_hedged_net_lag0": -1.0681392609027758,
+      "sharpe_full_net_unhedged": -1.5461757940432708,
+      "mean_daily_turnover": 0.13277728947717785,
+      "days_with_book": 135,
+      "placebo_p95": -0.6299048891517,
+      "placebo_median": -1.6594625349181051,
+      "dsr": 3.431921413721284e-12,
+      "bars": {
+        "S1": false,
+        "S2": false,
+        "S3": false,
+        "S4": false
+      },
+      "survives": false,
+      "fidelity_vs_attribution_lag0_gross": {
+        "max_abs_diff": 6.938893903907228e-18,
+        "corr": 1.0
+      }
+    },
+    "regime_hmm": {
+      "oos_days": 491,
+      "sharpe_oos_hedged_net": -1.4095859246750866,
+      "lb_one_sided": -3.4341269530348018,
+      "fold_sharpes": [
+        -0.7683751381815134,
+        -0.8491665740442518,
+        -1.4008339097866611,
+        -2.4853823638088244
+      ],
+      "betas": [
+        -0.0567989222872495,
+        -0.050966174810579634,
+        0.0648214346178319,
+        -0.06891676005065987
+      ],
+      "sharpe_oos_hedged_gross": 0.8816845506010066,
+      "sharpe_oos_hedged_net_lag0": -0.8936601741719544,
+      "sharpe_full_net_unhedged": -1.5185823574242148,
+      "mean_daily_turnover": 0.679585820110429,
+      "days_with_book": 1631,
+      "placebo_p95": -1.7852043187839262,
+      "placebo_median": -2.830286002036046,
+      "dsr": 3.181279435382489e-06,
+      "bars": {
+        "S1": false,
+        "S2": true,
+        "S3": false,
+        "S4": false
+      },
+      "survives": false,
+      "fidelity_vs_attribution_lag0_gross": {
+        "max_abs_diff": 4.7271214720367993e-17,
+        "corr": 0.9999999999999999
+      }
+    },
+    "pattern_recognition": {
+      "oos_days": 491,
+      "sharpe_oos_hedged_net": -1.6718116139293888,
+      "lb_one_sided": -3.3726611460845684,
+      "fold_sharpes": [
+        -0.9139943334676133,
+        -0.7636428251174536,
+        -2.712924003918694,
+        -2.2608340810935004
+      ],
+      "betas": [
+        0.04160031451845921,
+        -0.0831505688389642,
+        -0.0033281545981025166,
+        -0.05465256999524891
+      ],
+      "sharpe_oos_hedged_gross": -0.7652447112121716,
+      "sharpe_oos_hedged_net_lag0": -0.03512331302698464,
+      "sharpe_full_net_unhedged": -0.6630889574256368,
+      "mean_daily_turnover": 0.560130380947044,
+      "days_with_book": 927,
+      "placebo_p95": -0.22759229638849035,
+      "placebo_median": -1.3002638328119989,
+      "dsr": 4.849437090226338e-07,
+      "bars": {
+        "S1": false,
+        "S2": false,
+        "S3": false,
+        "S4": false
+      },
+      "survives": false,
+      "fidelity_vs_attribution_lag0_gross": {
+        "max_abs_diff": 2.220446049250313e-16,
+        "corr": 1.0
+      }
+    }
+  },
+  "survivors": []
+}

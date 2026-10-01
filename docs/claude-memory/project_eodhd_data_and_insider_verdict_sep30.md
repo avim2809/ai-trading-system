@@ -32,3 +32,15 @@ More remain: the 6m placebo p95 is still +75% after exclusions, and there are ex
 
 **Why:** these faked results and are easy to miss.
 **How to apply:** every new EODHD pre-registration (owner's shortlist in `docs/research_brief_eodhd_findings.md`) must freeze a cleaning rule before the run: drop zero-volume and off-calendar bars, drop reverting single-day spikes, and check split jumps in the adj/close ratio. Related: [[project-edge-search-sep29]], [[project-allocation-portfolio-build-sep30]], [[feedback-verify-before-trusting-a-heuristic]].
+
+**Update 2026-10-01: EODHD shortlist S1-S5, all Tier C** (`docs/eodhd_shortlist_verdict_2026_10.md`).
+- Frozen 19:18:54Z on 9/30 under a shared protocol.
+- **S1 (industry ETF momentum):** equals the equal-weight ETFs.
+- **S2 (breadth overlay on 60/40):** a near miss. It fails only A1 and one A4 half, and the effect is defensive. The non-primary V3 would be Tier B, but choosing it after the fact is cherry-picking. It's a candidate for a forward paper test if the owner wants one.
+- **S3 (bond/commodity trend):** equals buy-and-hold.
+- **S4 (52-week high):** matches SPY.
+- **S5 (crypto momentum):** no better than random. C1 BTC-trend beat BTC held again (Sharpe 1.13 vs 0.89, 2017-26).
+- **Full history:** data re-downloaded from 1985 into `*_full/` (the first pulls were capped at 2005).
+- **Cleaning v2 gap:** v2 (fc0690f0) misses the constant 999999.9999 sentinel. **Freeze a v3 before any new EODHD test.**
+- **Agent lesson:** agents' "inferred" conventions can deviate from the literal frozen text. S2's harness computed A2/A3 vs BM2 although the text says the variant's Sharpe. Always check the bar definitions against the frozen text when a recompute disagrees.
+- **Review package:** `review/README.md` + `scripts/build_review_package.py`; the private data bundle is under /local/store/review_bundles/. See [[feedback-external-review-package]].

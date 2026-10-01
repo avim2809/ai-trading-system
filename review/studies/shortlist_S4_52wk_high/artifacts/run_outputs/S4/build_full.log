@@ -1,0 +1,15 @@
+2026-09-30 21:50:37,831 INFO S4 panel build: 22732 ticker files, 405 month-ends (1993-01-29 -> 2026-09-29)
+2026-09-30 21:52:23,441 INFO   2000/22732 tickers processed (105.6s)
+2026-09-30 21:54:06,753 INFO   4000/22732 tickers processed (208.9s)
+2026-09-30 21:55:42,290 INFO   6000/22732 tickers processed (304.5s)
+2026-09-30 21:57:20,052 INFO   8000/22732 tickers processed (402.2s)
+2026-09-30 21:58:50,784 INFO   10000/22732 tickers processed (493.0s)
+2026-09-30 22:00:29,434 INFO   12000/22732 tickers processed (591.6s)
+2026-09-30 22:02:07,714 INFO   14000/22732 tickers processed (689.9s)
+2026-09-30 22:03:43,577 INFO   16000/22732 tickers processed (785.7s)
+2026-09-30 22:05:19,086 INFO   18000/22732 tickers processed (881.3s)
+2026-09-30 22:07:07,465 INFO   20000/22732 tickers processed (989.6s)
+2026-09-30 22:08:52,447 INFO   22000/22732 tickers processed (1094.6s)
+2026-09-30 22:09:31,199 INFO processed 22732 tickers in 1133.4s
+2026-09-30 22:10:08,861 INFO compact panel: 1487750 rows (of 2250035 raw month-end hits) pass bars>=252 and price>=$5
+2026-09-30 22:10:10,469 INFO wrote /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/runs/S4/panel.parquet (1487750 rows) and /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/runs/S4/eligibility_summary.parquet (405 months)

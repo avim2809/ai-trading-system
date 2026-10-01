@@ -1,0 +1,516 @@
+{
+  "generated_at": "2026-09-30",
+  "amendment": "protocol_amendment_1 adopted (etfs_full/, cleaning v2, BIL+DTB3 cash, VFITX BM2 pre-IEF leg)",
+  "purpose": "Phase-1 data-availability snapshot for S3 (bond duration momentum + commodity dual momentum) pre-registration design, after Amendment 1 and the coordinator's review. No candidate/benchmark/placebo return computed.",
+  "cleaning_fingerprint": "f62cb2e4a139ea1d3cf240ce938f1d6f573d6208a9e2c004cedee66a47d07ccd",
+  "bond_buckets": {
+    "SHY": {
+      "present": true,
+      "first_clean_date": "2002-07-26",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 6083,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 6083,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 6083
+      },
+      "adv20_latest_usd": 419870217.61
+    },
+    "IEF": {
+      "present": true,
+      "first_clean_date": "2002-07-26",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 6083,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 6083,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 6083
+      },
+      "adv20_latest_usd": 829515406.64
+    },
+    "TLT": {
+      "present": true,
+      "first_clean_date": "2002-07-26",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 6083,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 6083,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 6083
+      },
+      "adv20_latest_usd": 3230380081.01
+    }
+  },
+  "commodity_basket": {
+    "DBA": {
+      "present": true,
+      "first_clean_date": "2007-01-05",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4964,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4964,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4964
+      },
+      "adv20_latest_usd": 42583049.69
+    },
+    "DBB": {
+      "present": true,
+      "first_clean_date": "2007-01-05",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4964,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4964,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4964
+      },
+      "adv20_latest_usd": 5957707.6
+    },
+    "DBE": {
+      "present": true,
+      "first_clean_date": "2007-01-05",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4964,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4964,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4964
+      },
+      "adv20_latest_usd": 2206726.25
+    },
+    "USO": {
+      "present": true,
+      "first_clean_date": "2006-04-10",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 5150,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 5150,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 5150
+      },
+      "adv20_latest_usd": 986606133.19
+    },
+    "GLD": {
+      "present": true,
+      "first_clean_date": "2004-11-18",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 5499,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 5499,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 5499
+      },
+      "adv20_latest_usd": 3816395731.43
+    },
+    "SLV": {
+      "present": true,
+      "first_clean_date": "2006-04-28",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 5137,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 5137,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 5137
+      },
+      "adv20_latest_usd": 894764733.07
+    }
+  },
+  "cash_proxies": {
+    "BIL": {
+      "present": true,
+      "first_clean_date": "2007-05-30",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4865,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4865,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4865
+      },
+      "adv20_latest_usd": 1032730214.74
+    }
+  },
+  "core": {
+    "SPY": {
+      "present": true,
+      "first_clean_date": "1993-01-29",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 8474,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 8474,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 8474
+      },
+      "adv20_latest_usd": 33559100273.26
+    },
+    "IEF": {
+      "present": true,
+      "first_clean_date": "2002-07-26",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 6083,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 6083,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 6083
+      },
+      "adv20_latest_usd": 829515406.64
+    }
+  },
+  "bm2_pre_ief_bond_leg_nav": {
+    "VFITX": {
+      "present": true,
+      "first_clean_date": "1993-01-29",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 8466,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 8824,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 358,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 8466
+      }
+    }
+  },
+  "considered_and_excluded": {
+    "IEI": {
+      "present": true,
+      "first_clean_date": "2007-01-11",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4960,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4960,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4960
+      },
+      "adv20_latest_usd": 280903566.16
+    },
+    "TLH": {
+      "present": true,
+      "first_clean_date": "2007-01-11",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4960,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4960,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4960
+      },
+      "adv20_latest_usd": 216023404.46
+    },
+    "VGIT": {
+      "present": true,
+      "first_clean_date": "2009-11-23",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4234,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4237,
+        "price": 0,
+        "zero_volume": 3,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4234
+      },
+      "adv20_latest_usd": 283595615.28
+    },
+    "VGLT": {
+      "present": true,
+      "first_clean_date": "2009-11-24",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4221,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4229,
+        "price": 0,
+        "zero_volume": 8,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4221
+      },
+      "adv20_latest_usd": 182316256.96
+    },
+    "GOVT": {
+      "present": true,
+      "first_clean_date": "2012-02-24",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 3661,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 3661,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 3661
+      },
+      "adv20_latest_usd": 238708525.94
+    },
+    "PALL": {
+      "present": true,
+      "first_clean_date": "2010-01-08",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4206,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4206,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4206
+      },
+      "adv20_latest_usd": 20640830.1
+    },
+    "PPLT": {
+      "present": true,
+      "first_clean_date": "2010-01-08",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4206,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4206,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4206
+      },
+      "adv20_latest_usd": 36371331.51
+    },
+    "DBC": {
+      "present": true,
+      "first_clean_date": "2006-02-03",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 5195,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 5195,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 5195
+      },
+      "adv20_latest_usd": 28586688.15
+    },
+    "GSG": {
+      "present": true,
+      "first_clean_date": "2006-07-21",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 5079,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 5079,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 5079
+      },
+      "adv20_latest_usd": 67779204.17
+    },
+    "DJP": {
+      "present": true,
+      "first_clean_date": "2006-06-07",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 5108,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 5110,
+        "price": 0,
+        "zero_volume": 2,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 5108
+      },
+      "adv20_latest_usd": 2494675.09
+    },
+    "DBP": {
+      "present": true,
+      "first_clean_date": "2007-01-05",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4963,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4963,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4963
+      },
+      "adv20_latest_usd": 1084478.62
+    },
+    "CORN": {
+      "present": true,
+      "first_clean_date": "2010-06-09",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4102,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4102,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4102
+      },
+      "adv20_latest_usd": 9791121.6
+    },
+    "SOYB": {
+      "present": true,
+      "first_clean_date": "2011-09-19",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 3760,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 3760,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 3760
+      },
+      "adv20_latest_usd": 1744947.12
+    },
+    "WEAT": {
+      "present": true,
+      "first_clean_date": "2011-09-19",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 3772,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 3772,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 3772
+      },
+      "adv20_latest_usd": 15233036.96
+    },
+    "CPER": {
+      "present": true,
+      "first_clean_date": "2011-11-15",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 3409,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 3738,
+        "price": 0,
+        "zero_volume": 329,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 3409
+      },
+      "adv20_latest_usd": 23122153.57
+    },
+    "UNG": {
+      "present": true,
+      "first_clean_date": "2007-04-18",
+      "last_clean_date": "2026-09-29",
+      "n_clean_bars": 4894,
+      "n_segments": 1,
+      "clean_report": {
+        "n_in": 4894,
+        "price": 0,
+        "zero_volume": 0,
+        "off_calendar": 0,
+        "spike_reversal": 0,
+        "segment_breaks": 0,
+        "n_out": 4894
+      },
+      "adv20_latest_usd": 274035427.11
+    }
+  },
+  "fred_dtb3": {
+    "first_date": "1954-01-04",
+    "last_date": "2026-09-28",
+    "n_rows": 18976,
+    "used_for": "cash accrual before BIL's 2007-05-30 first bar only"
+  }
+}

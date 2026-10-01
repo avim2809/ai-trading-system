@@ -1,0 +1,7 @@
+dataset,licence,files,bytes
+alt_premia_inputs,"mixed: Tiingo (licensed), CBOE, FRED, FOMC calendar (public)",16,2477218
+eodhd,licensed: EODHD Historian (no redistribution without the owner's decision),73899,4790423789
+fred,public: FRED,1,202284
+sec_form4_derived,public: derived from SEC EDGAR Form 4,3,44875443
+sec_form4_source,public: SEC EDGAR Form 4 fetch + parse,252,1023633189
+system_cache,licensed: vendor prices cached by the system (edge-search step 1 input),27,10859302

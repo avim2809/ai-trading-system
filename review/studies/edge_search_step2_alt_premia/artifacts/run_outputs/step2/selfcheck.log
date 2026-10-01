@@ -1,0 +1,68 @@
+/local/store/git/ai-trading-system/.venv/lib/python3.14/site-packages/numpy/lib/_nanfunctions_impl.py:1997: RuntimeWarning: Degrees of freedom <= 0 for slice.
+  var = nanvar(a, axis=axis, dtype=dtype, out=out, ddof=ddof,
+/local/store/git/ai-trading-system/.venv/lib/python3.14/site-packages/numpy/lib/_nanfunctions_impl.py:1997: RuntimeWarning: Degrees of freedom <= 0 for slice.
+  var = nanvar(a, axis=axis, dtype=dtype, out=out, ddof=ddof,
+2026-09-29 14:11:02,425 INFO look-ahead check cutoff=2012-06-15 V1_short_vol_timed     max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:02,425 INFO look-ahead check cutoff=2012-06-15 V2_put_write           max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:02,426 INFO look-ahead check cutoff=2012-06-15 K1_calendar            max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:02,426 INFO look-ahead check cutoff=2012-06-15 C1_btc_trend           max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:02,426 INFO look-ahead check cutoff=2012-06-15 T2_cross_asset_trend   max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:02,427 INFO look-ahead check cutoff=2012-06-15 M1_combo               max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:02,427 INFO look-ahead check cutoff=2012-06-15 M2_combo_crypto        max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:02,427 INFO look-ahead check cutoff=2012-06-15 BM1_SPY                max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:02,428 INFO look-ahead check cutoff=2012-06-15 BM2_60_40              max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:02,428 INFO look-ahead check cutoff=2012-06-15 BM3_SPY_VT             max|diff| on/before cutoff = 0 OK
+/local/store/git/ai-trading-system/.venv/lib/python3.14/site-packages/numpy/lib/_nanfunctions_impl.py:1997: RuntimeWarning: Degrees of freedom <= 0 for slice.
+  var = nanvar(a, axis=axis, dtype=dtype, out=out, ddof=ddof,
+2026-09-29 14:11:05,094 INFO look-ahead check cutoff=2016-03-31 V1_short_vol_timed     max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:05,095 INFO look-ahead check cutoff=2016-03-31 V2_put_write           max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:05,095 INFO look-ahead check cutoff=2016-03-31 K1_calendar            max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:05,096 INFO look-ahead check cutoff=2016-03-31 C1_btc_trend           max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:05,096 INFO look-ahead check cutoff=2016-03-31 T2_cross_asset_trend   max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:05,097 INFO look-ahead check cutoff=2016-03-31 M1_combo               max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:05,097 INFO look-ahead check cutoff=2016-03-31 M2_combo_crypto        max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:05,097 INFO look-ahead check cutoff=2016-03-31 BM1_SPY                max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:05,098 INFO look-ahead check cutoff=2016-03-31 BM2_60_40              max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:05,098 INFO look-ahead check cutoff=2016-03-31 BM3_SPY_VT             max|diff| on/before cutoff = 0 OK
+/local/store/git/ai-trading-system/.venv/lib/python3.14/site-packages/numpy/lib/_nanfunctions_impl.py:1997: RuntimeWarning: Degrees of freedom <= 0 for slice.
+  var = nanvar(a, axis=axis, dtype=dtype, out=out, ddof=ddof,
+2026-09-29 14:11:07,713 INFO look-ahead check cutoff=2018-02-02 V1_short_vol_timed     max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:07,713 INFO look-ahead check cutoff=2018-02-02 V2_put_write           max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:07,714 INFO look-ahead check cutoff=2018-02-02 K1_calendar            max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:07,714 INFO look-ahead check cutoff=2018-02-02 C1_btc_trend           max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:07,715 INFO look-ahead check cutoff=2018-02-02 T2_cross_asset_trend   max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:07,716 INFO look-ahead check cutoff=2018-02-02 M1_combo               max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:07,717 INFO look-ahead check cutoff=2018-02-02 M2_combo_crypto        max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:07,717 INFO look-ahead check cutoff=2018-02-02 BM1_SPY                max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:07,718 INFO look-ahead check cutoff=2018-02-02 BM2_60_40              max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:07,718 INFO look-ahead check cutoff=2018-02-02 BM3_SPY_VT             max|diff| on/before cutoff = 0 OK
+/local/store/git/ai-trading-system/.venv/lib/python3.14/site-packages/numpy/lib/_nanfunctions_impl.py:1997: RuntimeWarning: Degrees of freedom <= 0 for slice.
+  var = nanvar(a, axis=axis, dtype=dtype, out=out, ddof=ddof,
+2026-09-29 14:11:10,374 INFO look-ahead check cutoff=2020-03-11 V1_short_vol_timed     max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:10,375 INFO look-ahead check cutoff=2020-03-11 V2_put_write           max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:10,375 INFO look-ahead check cutoff=2020-03-11 K1_calendar            max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:10,376 INFO look-ahead check cutoff=2020-03-11 C1_btc_trend           max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:10,376 INFO look-ahead check cutoff=2020-03-11 T2_cross_asset_trend   max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:10,377 INFO look-ahead check cutoff=2020-03-11 M1_combo               max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:10,377 INFO look-ahead check cutoff=2020-03-11 M2_combo_crypto        max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:10,378 INFO look-ahead check cutoff=2020-03-11 BM1_SPY                max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:10,378 INFO look-ahead check cutoff=2020-03-11 BM2_60_40              max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:10,379 INFO look-ahead check cutoff=2020-03-11 BM3_SPY_VT             max|diff| on/before cutoff = 0 OK
+/local/store/git/ai-trading-system/.venv/lib/python3.14/site-packages/numpy/lib/_nanfunctions_impl.py:1997: RuntimeWarning: Degrees of freedom <= 0 for slice.
+  var = nanvar(a, axis=axis, dtype=dtype, out=out, ddof=ddof,
+2026-09-29 14:11:13,113 INFO look-ahead check cutoff=2024-08-02 V1_short_vol_timed     max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:13,114 INFO look-ahead check cutoff=2024-08-02 V2_put_write           max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:13,115 INFO look-ahead check cutoff=2024-08-02 K1_calendar            max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:13,115 INFO look-ahead check cutoff=2024-08-02 C1_btc_trend           max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:13,116 INFO look-ahead check cutoff=2024-08-02 T2_cross_asset_trend   max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:13,116 INFO look-ahead check cutoff=2024-08-02 M1_combo               max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:13,117 INFO look-ahead check cutoff=2024-08-02 M2_combo_crypto        max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:13,118 INFO look-ahead check cutoff=2024-08-02 BM1_SPY                max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:13,118 INFO look-ahead check cutoff=2024-08-02 BM2_60_40              max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:13,119 INFO look-ahead check cutoff=2024-08-02 BM3_SPY_VT             max|diff| on/before cutoff = 0 OK
+2026-09-29 14:11:13,691 INFO lag check V1 VIX spike on 2012-06-15: returns<=t 0, position@t 0, day t+1 7.38e-05 (cost bound 0.001) OK
+2026-09-29 14:11:14,246 INFO lag check V1 VIX spike on 2016-03-31: returns<=t 0, position@t 0, day t+1 9.79e-05 (cost bound 0.001) OK
+2026-09-29 14:11:14,863 INFO lag check V1 VIX spike on 2018-02-02: returns<=t 0, position@t 0, day t+1 0 (cost bound 0.001) OK
+2026-09-29 14:11:15,387 INFO lag check V1 VIX spike on 2020-03-11: returns<=t 0, position@t 0, day t+1 0 (cost bound 0.001) OK
+2026-09-29 14:11:15,978 INFO lag check V1 VIX spike on 2024-08-02: returns<=t 0, position@t 0, day t+1 0 (cost bound 0.001) OK
+2026-09-29 14:11:15,978 INFO selfcheck: PASS

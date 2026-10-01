@@ -1,0 +1,58 @@
+{
+  "bad_tickers_excluded": [
+    "ACRX",
+    "CERN",
+    "SMLP",
+    "QPAC",
+    "XBKS"
+  ],
+  "holds": {
+    "3_month": {
+      "n_before_exclusion": 8373,
+      "n_after_exclusion": 8363,
+      "n_excluded_events": 10,
+      "mean": 0.005575058522063402,
+      "median": -0.015504013117023763,
+      "lb": -0.00753427608845626,
+      "ub": 0.022372263893645793,
+      "winsor_1_99_mean": 0.0010622325829766819,
+      "max_xs_net": 5.586831507822365,
+      "min_xs_net": -2.961211304296237,
+      "placebo_p95": 0.06451033937800453,
+      "placebo_median": -0.014064162756845803,
+      "placebo_frac_above_0.5": 0.042
+    },
+    "6_month": {
+      "n_before_exclusion": 7222,
+      "n_after_exclusion": 7213,
+      "n_excluded_events": 9,
+      "mean": 0.004245070094702342,
+      "median": -0.03255464774097039,
+      "lb": -0.017760971753771466,
+      "ub": 0.02972258307262038,
+      "winsor_1_99_mean": -0.004559075449965079,
+      "max_xs_net": 11.823545700564594,
+      "min_xs_net": -2.728119831995818,
+      "placebo_p95": 0.748338408021428,
+      "placebo_median": -0.025542819156731976,
+      "placebo_frac_above_0.5": 0.092
+    }
+  },
+  "pbo_excl": 0.8,
+  "calendar_time_excl": {
+    "3_month": {
+      "ann_mean_excess": 0.040294128215550194,
+      "ann_vol": 0.10194161442145973,
+      "sharpe": 0.39526672639263094,
+      "dsr": 0.9182503315909578,
+      "days_with_positions": 4713
+    },
+    "6_month": {
+      "ann_mean_excess": 0.027482993173115127,
+      "ann_vol": 0.09114806568416219,
+      "sharpe": 0.30152031166900073,
+      "dsr": 0.8347156667282828,
+      "days_with_positions": 4715
+    }
+  }
+}

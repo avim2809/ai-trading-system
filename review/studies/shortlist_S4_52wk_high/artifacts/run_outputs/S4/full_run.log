@@ -1,0 +1,69 @@
+2026-09-30 22:48:15,764 INFO fingerprint 99361527bf621ef06c538461aca94a7ce0832d6ab3bde36ca1fdb7265d7ab9e4
+2026-09-30 22:48:15,826 INFO EVAL_DATES: 6958 days, 1999-02-01 -> 2026-09-29
+2026-09-30 22:48:21,398 INFO building matrices for 4911 tickers
+2026-09-30 22:48:59,545 INFO   matrices: 1000/4911 tickers (38.1s)
+2026-09-30 22:49:37,419 INFO   matrices: 2000/4911 tickers (76.0s)
+2026-09-30 22:50:18,633 INFO   matrices: 3000/4911 tickers (117.2s)
+2026-09-30 22:50:59,266 INFO   matrices: 4000/4911 tickers (157.8s)
+2026-09-30 22:51:34,573 INFO matrices built: T=6958 M=4911 in 193.1s
+2026-09-30 22:51:37,993 INFO S4_p1_6mo_N500 built: 16531 slots, sharpe 0.529
+2026-09-30 22:51:45,282 INFO S4_p2_6mo_N1000 built: 33047 slots, sharpe 0.553
+2026-09-30 22:51:48,561 INFO S4_p3_1mo_N500 built: 16531 slots, sharpe 0.311
+2026-09-30 22:51:55,240 INFO S4_p4_1mo_N1000 built: 33047 slots, sharpe 0.358
+2026-09-30 22:52:18,693 INFO PRIMARY_N500 built: sharpe 0.249
+2026-09-30 22:53:05,529 INFO PRIMARY_N1000 built: sharpe 0.293
+2026-09-30 22:53:05,843 INFO build_all done in 290.1s
+2026-09-30 22:53:06,996 INFO   placebo S4_p1_6mo_N500 draw 0/500
+2026-09-30 22:55:08,392 INFO   placebo S4_p1_6mo_N500 draw 100/500
+2026-09-30 22:57:09,544 INFO   placebo S4_p1_6mo_N500 draw 200/500
+2026-09-30 22:59:13,399 INFO   placebo S4_p1_6mo_N500 draw 300/500
+2026-09-30 23:01:21,460 INFO   placebo S4_p1_6mo_N500 draw 400/500
+2026-09-30 23:03:28,537 INFO placebo S4_p1_6mo_N500 done in 622.7s (n=500)
+2026-09-30 23:03:31,313 INFO   placebo S4_p2_6mo_N1000 draw 0/500
+2026-09-30 23:07:48,947 INFO   placebo S4_p2_6mo_N1000 draw 100/500
+2026-09-30 23:12:02,541 INFO   placebo S4_p2_6mo_N1000 draw 200/500
+2026-09-30 23:16:13,846 INFO   placebo S4_p2_6mo_N1000 draw 300/500
+2026-09-30 23:20:31,468 INFO   placebo S4_p2_6mo_N1000 draw 400/500
+2026-09-30 23:24:31,676 INFO placebo S4_p2_6mo_N1000 done in 1263.1s (n=500)
+2026-09-30 23:24:32,839 INFO   placebo S4_p3_1mo_N500 draw 0/500
+2026-09-30 23:26:32,913 INFO   placebo S4_p3_1mo_N500 draw 100/500
+2026-09-30 23:28:29,170 INFO   placebo S4_p3_1mo_N500 draw 200/500
+2026-09-30 23:30:24,909 INFO   placebo S4_p3_1mo_N500 draw 300/500
+2026-09-30 23:32:21,818 INFO   placebo S4_p3_1mo_N500 draw 400/500
+2026-09-30 23:34:19,250 INFO placebo S4_p3_1mo_N500 done in 587.6s (n=500)
+2026-09-30 23:34:21,766 INFO   placebo S4_p4_1mo_N1000 draw 0/500
+2026-09-30 23:38:13,893 INFO   placebo S4_p4_1mo_N1000 draw 100/500
+2026-09-30 23:42:05,850 INFO   placebo S4_p4_1mo_N1000 draw 200/500
+2026-09-30 23:45:52,407 INFO   placebo S4_p4_1mo_N1000 draw 300/500
+2026-09-30 23:49:38,766 INFO   placebo S4_p4_1mo_N1000 draw 400/500
+2026-09-30 23:53:27,135 INFO placebo S4_p4_1mo_N1000 done in 1147.9s (n=500)
+2026-09-30 23:53:27,188 INFO PBO 0.529 over 7 series x 6958 days
+2026-09-30 23:53:34,594 INFO ==> S4_p1_6mo_N500 tier C  bars={'A1': True, 'A2': False, 'A3': True, 'A4': False, 'A5': False, 'A6': False, 'A7': 'PENDING'}
+2026-09-30 23:53:42,243 INFO ==> S4_p2_6mo_N1000 tier C  bars={'A1': True, 'A2': False, 'A3': True, 'A4': False, 'A5': False, 'A6': False, 'A7': 'PENDING'}
+2026-09-30 23:53:49,307 INFO ==> S4_p3_1mo_N500 tier D  bars={'A1': False, 'A2': False, 'A3': True, 'A4': False, 'A5': False, 'A6': False, 'A7': 'PENDING'}
+2026-09-30 23:53:56,651 INFO ==> S4_p4_1mo_N1000 tier C  bars={'A1': False, 'A2': False, 'A3': True, 'A4': False, 'A5': False, 'A6': False, 'A7': 'PENDING'}
+2026-09-30 23:53:56,684 INFO ledger updated: /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt_S4/docs/S4_trial_history.json (cumulative 4)
+2026-09-30 23:53:56,684 INFO tiers: {'S4_p1_6mo_N500': 'C', 'S4_p2_6mo_N1000': 'C', 'S4_p3_1mo_N500': 'D', 'S4_p4_1mo_N1000': 'C'}
+	Command being timed: "nice -n 10 /local/store/git/ai-trading-system/.venv/bin/python3 scripts/run_eodhd_s4_evaluation.py --panel /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/runs/S4/panel.parquet --out /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/runs/S4 --report docs/eodhd_s4_evaluation_2026_10.json --append-ledger"
+	User time (seconds): 3902.14
+	System time (seconds): 21.99
+	Percent of CPU this job got: 99%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:05:44
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 941860
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 470208
+	Voluntary context switches: 112594
+	Involuntary context switches: 69564
+	Swaps: 0
+	File system inputs: 352792
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

@@ -1,0 +1,14 @@
+2026-09-30 21:51:05,246 INFO breadth build: 2000/22732 tickers scanned (1990 used)
+2026-09-30 21:52:43,319 INFO breadth build: 4000/22732 tickers scanned (3983 used)
+2026-09-30 21:54:17,205 INFO breadth build: 6000/22732 tickers scanned (5967 used)
+2026-09-30 21:55:42,921 INFO breadth build: 8000/22732 tickers scanned (7960 used)
+2026-09-30 21:57:04,882 INFO breadth build: 10000/22732 tickers scanned (9948 used)
+2026-09-30 21:58:31,024 INFO breadth build: 12000/22732 tickers scanned (11940 used)
+2026-09-30 22:00:01,072 INFO breadth build: 14000/22732 tickers scanned (13933 used)
+2026-09-30 22:01:39,371 INFO breadth build: 16000/22732 tickers scanned (15927 used)
+2026-09-30 22:03:09,711 INFO breadth build: 18000/22732 tickers scanned (17917 used)
+2026-09-30 22:04:40,260 INFO breadth build: 20000/22732 tickers scanned (19905 used)
+2026-09-30 22:06:12,280 INFO breadth build: 22000/22732 tickers scanned (21898 used)
+2026-09-30 22:06:47,534 INFO scanned 22732 tickers, 22624 usable after cleaning, 0 skipped entirely
+2026-09-30 22:06:47,571 INFO wrote /tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/runs/S2/breadth_full.parquet (8474 rows)
+2026-09-30 22:06:47,577 INFO eligible_count: min=352 max=3726 median=2880, first nonzero date=1993-11-11 00:00:00

@@ -1,0 +1,5 @@
+2026-09-30 21:16:37,407 INFO S4 panel build: 19096 ticker files, 261 month-ends (2005-01-31 -> 2026-09-29)
+2026-09-30 21:18:33,259 INFO   2000/19096 tickers processed (115.9s)
+2026-09-30 21:20:11,103 INFO   4000/19096 tickers processed (213.7s)
+2026-09-30 21:22:19,568 INFO   6000/19096 tickers processed (342.2s)
+2026-09-30 21:24:06,319 INFO   8000/19096 tickers processed (448.9s)
