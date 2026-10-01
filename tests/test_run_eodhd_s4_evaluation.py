@@ -338,8 +338,33 @@ class TestHalves:
 
 
 # ---------------------------------------------------------------------------
-# ADV20 sparse lookup + build_matrices plumbing
+# Harness run log (for external review -- every real-data run, not just the last)
 # ---------------------------------------------------------------------------
+
+class TestBuildHarnessLog:
+    def test_includes_both_prior_runs_plus_the_current_one(self):
+        current_results = {"S4_p1_6mo_N500": {"sharpe": 0.5, "tier": "C", "bars": {"A1": True}}}
+        log_ = r.build_harness_log(current_results, "deadbee", "2026-10-01T00:00:00Z", "none")
+        assert len(log_) == 3
+        assert [e["run"] for e in log_] == [1, 2, 3]
+        assert log_[0]["harness_commit"] == "6e6320a"
+        assert log_[1]["harness_commit"] == "f0fa1cb"
+        assert log_[2]["harness_commit"] == "deadbee"
+        assert log_[2]["results"] == current_results
+
+    def test_prior_run_1_to_2_only_p3_a3_changed(self):
+        # The exact fact the coordinator asked to have verified.
+        r1 = r.HARNESS_LOG_PRIOR_RUNS[0]["results"]
+        r2 = r.HARNESS_LOG_PRIOR_RUNS[1]["results"]
+        for cand in r1:
+            diffs = {k for k in r1[cand]["bars"] if r1[cand]["bars"][k] != r2[cand]["bars"][k]}
+            if cand == "S4_p3_1mo_N500":
+                assert diffs == {"A3"}
+                assert r1[cand]["bars"]["A3"] is True and r2[cand]["bars"]["A3"] is False
+            else:
+                assert diffs == set()
+            assert r1[cand]["tier"] == r2[cand]["tier"]   # no tier moved between runs 1 and 2
+
 
 class TestAdv20Lookup:
     def test_looks_up_value_at_or_before_the_requested_position(self):

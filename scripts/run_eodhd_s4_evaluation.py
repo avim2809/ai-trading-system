@@ -136,6 +136,88 @@ ALPHA = prereg.BOOTSTRAP["alpha_one_sided"]
 ADV20_WINDOW = 20
 
 
+# ---------------------------------------------------------------------------
+# Harness run log -- for external review: every real-data run this session, not
+# just the governing (last) one. Runs 1 and 2 predate this feature (they ran under
+# an earlier commit of this file), so their facts are recorded here as data, taken
+# from their saved logs (full_run.log, full_run2.log) and from the report.json each
+# one produced before being superseded. Local log timestamps are UTC+3; utc_start
+# below is already converted (local - 3h).
+# ---------------------------------------------------------------------------
+HARNESS_LOG_PRIOR_RUNS = [
+    {
+        "run": 1, "harness_commit": "6e6320a", "log_file": "full_run.log",
+        "utc_start": "2026-09-30T19:48:15Z",
+        "fix_before_this_run": "none -- first real-data run of this harness",
+        "fix_after_this_run": (
+            "schedule_slots' default weight was 1/decile_size regardless of hold "
+            "length, missing the 1/hold_months book-fraction divisor: each 6-month "
+            "cohort's names got a full 1/decile_size of the book instead of "
+            "(1/6)/decile_size, so ~6 concurrently open cohorts summed to ~5.76x "
+            "invested weight and produced a fabricated -68% single-day loss on "
+            "2020-03-16 (real SPY that day: -12%). Fixed at the single default-weight "
+            "formula in schedule_slots (commit f0fa1cb) -- this IMPLEMENTS "
+            "HOLD_STRUCTURES['6_month_overlapping']'s own frozen text ('a new cohort "
+            "... 1/6 of the book each month'), it does not change what the frozen "
+            "file says."
+        ),
+        "results": {
+            "S4_p1_6mo_N500": {"sharpe": 0.529, "tier": "C", "bars": {
+                "A1": True, "A2": False, "A3": True, "A4": False, "A5": False, "A6": False, "A7": "PENDING"}},
+            "S4_p2_6mo_N1000": {"sharpe": 0.553, "tier": "C", "bars": {
+                "A1": True, "A2": False, "A3": True, "A4": False, "A5": False, "A6": False, "A7": "PENDING"}},
+            "S4_p3_1mo_N500": {"sharpe": 0.311, "tier": "D", "bars": {
+                "A1": False, "A2": False, "A3": True, "A4": False, "A5": False, "A6": False, "A7": "PENDING"}},
+            "S4_p4_1mo_N1000": {"sharpe": 0.358, "tier": "C", "bars": {
+                "A1": False, "A2": False, "A3": True, "A4": False, "A5": False, "A6": False, "A7": "PENDING"}},
+        },
+    },
+    {
+        "run": 2, "harness_commit": "f0fa1cb", "log_file": "full_run2.log",
+        "utc_start": "2026-09-30T22:02:10Z",
+        "fix_before_this_run": "run 1's 1/hold_months weight-divisor fix (see run 1 entry)",
+        "fix_after_this_run": (
+            "a held position whose ticker hit a SEGMENT BREAK mid-hold (e.g. a "
+            "phantom reverse-split adjustment-factor reset) was clipped only to "
+            "last_pos_of (the ticker's LAST bar in its WHOLE file), never to the end "
+            "of the segment it was actually entered in -- found while sanity-checking "
+            "this run's top-10 P&L contributors (all 4 non-mega-cap names were later "
+            "found to carry the cleaning-rule sentinel-gap signature, see "
+            "cleaning_rule_gap_found below). Fixed via seg_starts_of/segment_last_pos "
+            "(commit ba52b36) -- this IMPLEMENTS the frozen file's own existing rule "
+            "('no return may be computed across a segment boundary: a holding that "
+            "spans one is closed at the last close before it'), it does not change "
+            "what the frozen file says."
+        ),
+        "results": {
+            "S4_p1_6mo_N500": {"sharpe": 0.535, "tier": "C", "bars": {
+                "A1": True, "A2": False, "A3": True, "A4": False, "A5": False, "A6": False, "A7": "PENDING"}},
+            "S4_p2_6mo_N1000": {"sharpe": 0.559, "tier": "C", "bars": {
+                "A1": True, "A2": False, "A3": True, "A4": False, "A5": False, "A6": False, "A7": "PENDING"}},
+            "S4_p3_1mo_N500": {"sharpe": 0.311, "tier": "D", "bars": {
+                "A1": False, "A2": False, "A3": False, "A4": False, "A5": False, "A6": False, "A7": "PENDING"}},
+            "S4_p4_1mo_N1000": {"sharpe": 0.358, "tier": "C", "bars": {
+                "A1": False, "A2": False, "A3": True, "A4": False, "A5": False, "A6": False, "A7": "PENDING"}},
+        },
+    },
+]
+
+
+def build_harness_log(current_results: dict, current_commit: str, current_utc_start: str,
+                      fix_before_this_run: str) -> list[dict]:
+    """HARNESS_LOG_PRIOR_RUNS plus the current run, in the same shape, for the
+    report's "harness_log" key -- one entry per real-data run this session."""
+    current = {
+        "run": len(HARNESS_LOG_PRIOR_RUNS) + 1, "harness_commit": current_commit,
+        "log_file": None, "utc_start": current_utc_start,
+        "fix_before_this_run": fix_before_this_run,
+        "fix_after_this_run": "none yet -- this is the governing (most recent) run",
+        "results": {cand: {"sharpe": res["sharpe"], "tier": res["tier"], "bars": res["bars"]}
+                   for cand, res in current_results.items()},
+    }
+    return HARNESS_LOG_PRIOR_RUNS + [current]
+
+
 def adv_bucket_bps(adv: float) -> float:
     if not np.isfinite(adv):
         return STOCK_COST["adv_gt_20m"]     # should not occur: eligibility requires a trading history
@@ -841,7 +923,18 @@ def two_day_lag_variant(built: dict, cand: str) -> np.ndarray:
 # CLI
 # ---------------------------------------------------------------------------
 
+def current_git_commit() -> str:
+    import subprocess
+    try:
+        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=_ROOT,
+                             capture_output=True, text=True, timeout=5, check=True)
+        return out.stdout.strip()
+    except Exception:
+        return "unknown"
+
+
 def cmd_evaluate(args: argparse.Namespace) -> int:
+    run_started_utc = datetime.now(timezone.utc).isoformat()
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -957,6 +1050,11 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
                    "overstated, letting it into the top-N cut. See each candidate's "
                    "top10_contributors[].adjusted_close_sentinel_gap_affected flag.",
         },
+        "harness_log": build_harness_log(
+            results, current_git_commit(), run_started_utc,
+            fix_before_this_run="run 2's segment-boundary-exit fix (see run 2 entry) -- "
+                                "this run's own code has no fix pending before it; it is "
+                                "the governing (most recent) result"),
     }
     (out_dir / "report.json").write_text(json.dumps(report, indent=2, default=float))
     if args.report:
