@@ -3,6 +3,9 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # The owner commits straight to main, so PR-only CI almost never ran (ticket P0-04, OD-06).
+  push:
+    branches: [main]
 
 # Cancel any in-progress run for the same branch/PR when a new one starts.
 concurrency:
@@ -14,7 +17,10 @@ jobs:
     name: Backend (ruff + pytest + coverage)
     runs-on: ubuntu-latest
     steps:
+      # Full history: tests/integrity compares against pinned baseline commits (git show <rev>:file).
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       # Must track `requires-python` in pyproject.toml — pip refuses to
       # install the package (and every dependency resolves against the

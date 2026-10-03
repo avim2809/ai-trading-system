@@ -1,0 +1,100 @@
+{
+  "permissions": {
+    "disableBypassPermissionsMode": "disable",
+    "deny": [
+      "Read(./data/research/s2_forward/**)",
+      "Read(./data/forward_monitors/**)",
+      "Read(./data/cache/**)",
+      "Read(./data_alpaca/**)",
+      "Read(./research/monitoring_sealed/**)",
+      "Read(./docs/s2_forward_snapshot.json)",
+      "Read(./data/logs/**)",
+      "Read(./data/live_state.db)",
+      "Read(./data/cycle_history.json)",
+      "Read(./data/order_history.json)",
+      "Read(./data/execution_audit.jsonl)",
+      "Read(./data/memory/**)",
+      "Read(./data/llm_cache*.db)",
+      "Read(//local/store/git/ai-trading-system/data/research/s2_forward/**)",
+      "Read(//local/store/git/ai-trading-system/data/forward_monitors/**)",
+      "Read(//local/store/git/ai-trading-system/data/cache/**)",
+      "Read(//local/store/git/ai-trading-system/data_alpaca/**)",
+      "Read(//local/store/git/ai-trading-system/research/monitoring_sealed/**)",
+      "Read(//local/store/git/ai-trading-system/docs/s2_forward_snapshot.json)",
+      "Read(//local/store/git/ai-trading-system/data/logs/**)",
+      "Read(//local/store/git/ai-trading-system/data/live_state.db)",
+      "Read(//local/store/git/ai-trading-system/data/cycle_history.json)",
+      "Read(//local/store/git/ai-trading-system/data/order_history.json)",
+      "Read(//local/store/git/ai-trading-system/data/execution_audit.jsonl)",
+      "Read(//local/store/git/ai-trading-system/data/memory/**)",
+      "Read(//local/store/git/ai-trading-system/data/llm_cache*.db)",
+      "Read(./.env)",
+      "Read(//local/store/git/ai-trading-system/.env)",
+      "Bash(systemctl *)",
+      "Bash(sudo *)",
+      "Bash(chattr *)",
+      "Bash(setfacl *)",
+      "Bash(curl *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(*HOLDOUT_UNSEAL*)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "allowUnsandboxedCommands": false,
+    "filesystem": {
+      "denyRead": [
+        "./data/research/s2_forward",
+        "./data/forward_monitors",
+        "./data/cache",
+        "./data_alpaca",
+        "./research/monitoring_sealed",
+        "./docs/s2_forward_snapshot.json",
+        "./data/logs",
+        "./data/live_state.db",
+        "./data/cycle_history.json",
+        "./data/order_history.json",
+        "./data/execution_audit.jsonl",
+        "./data/memory",
+        "./data/llm_cache*.db",
+        "/local/store/git/ai-trading-system/data/research/s2_forward",
+        "/local/store/git/ai-trading-system/data/forward_monitors",
+        "/local/store/git/ai-trading-system/data/cache",
+        "/local/store/git/ai-trading-system/data_alpaca",
+        "/local/store/git/ai-trading-system/research/monitoring_sealed",
+        "/local/store/git/ai-trading-system/docs/s2_forward_snapshot.json",
+        "/local/store/git/ai-trading-system/data/logs",
+        "/local/store/git/ai-trading-system/data/live_state.db",
+        "/local/store/git/ai-trading-system/data/cycle_history.json",
+        "/local/store/git/ai-trading-system/data/order_history.json",
+        "/local/store/git/ai-trading-system/data/execution_audit.jsonl",
+        "/local/store/git/ai-trading-system/data/memory",
+        "/local/store/git/ai-trading-system/data/llm_cache*.db"
+      ]
+    }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/etc/claude-code/hooks/deny_holdout.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/etc/claude-code/hooks/stop_integrity.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

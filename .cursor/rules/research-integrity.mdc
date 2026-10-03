@@ -1,0 +1,26 @@
+---
+description: Research-integrity rules for the credibility plan (holdout seal, ledger, pre-registration, protected files)
+alwaysApply: true
+---
+
+# Research integrity (credibility plan)
+
+Cursor does not enforce these (only the research unix user, ACLs and root-owned settings do), so follow them by hand.
+Full text: `AGENTS.md` (hard rules 1-13 and session types), `docs/HOLDOUT_POLICY.md`, `PLAN.md`.
+
+- **Two session types.** OPS (live paper instances `:8000` IBKR control, `:8001` Alpaca allocation 92/8) keeps routine config edits and
+  restarts, never by editing the running checkout in place. RESEARCH (`src/firm/{validation,research,signals,costs,risk,monitoring,
+  lifecycle,reporting}`, `research/`, `plan/tickets/`) never restarts services, never edits `config/live*.yaml`, `config/llm_ab_*.yaml`
+  or `deploy/`, and never pushes to `main`.
+- **Holdout seal.** Data from `seal_date` (2026-10-01) is sealed; everything up to 2026-09-30 is burned. Never read the `deny_paths` of
+  `config/research_freeze.yaml` (`data/cache`, `data_alpaca`, `data/research/s2_forward`, `data/forward_monitors`,
+  `research/monitoring_sealed`, `docs/s2_forward_snapshot.json`, IBKR state under `data/`). Read pre-seal inputs only through
+  `firm.research.data_access`.
+- **Ledger and pre-registration.** Backtests go through the ledger wrapper (P1-01 onwards); parameters come only from the pre-registered
+  grid; `scripts/*_preregistered*.py` are frozen and `docs/*_trial_history.json` are append-only.
+- **Protected files (propose, do not edit):** `tests/integrity/`, `tests/test_live_import_isolation.py`, `config/gates.yaml`,
+  `config/research_freeze.yaml`, `research/preregistration|charters|approvals/`, `.claude/`, the `deploy/claude-*` templates,
+  `.github/CODEOWNERS`, `AGENTS.md`.
+- **Live import graph.** `firm.live`, `firm.api`, `firm.runtime` and `firm.data.pit_store` never import `firm.research` or any new research
+  module (`tests/test_live_import_isolation.py`). Work in a worktree of the research clone, never in the live checkout.
+- Failure (Tier C/D, the passive outcome) is an accepted result. Do not engineer around a gate.

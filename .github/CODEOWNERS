@@ -1,0 +1,25 @@
+# CODEOWNERS (ticket P0-04). ADVISORY: owner decision OD-06(a) records that no branch protection, GitHub ruleset or
+# second agent identity exists (the research user shares the owner's GitHub identity), so GitHub does not enforce
+# review of these paths. Real enforcement is the research unix user, file ACLs, the root-owned settings/hooks in
+# /etc/claude-code and the root-owned local pre-push hook (blocks main, master and tags). Agent sessions treat every
+# path below as human-owned (AGENTS.md rule 5): they propose, the owner commits. Appends to docs/*trial_history.json are
+# allowed but reviewed (tests/integrity/test_trial_history_append_only.py).
+#
+# The owner handle below is taken from the remote URL (github.com/avim2809); correct it if it is not the intended owner.
+
+/AGENTS.md                                   @avim2809
+/CLAUDE.md                                   @avim2809
+/.claude/                                    @avim2809
+/deploy/claude-managed-settings.json         @avim2809
+/deploy/claude-research-user-settings.json   @avim2809
+/deploy/claude-research-hooks/               @avim2809
+/tests/integrity/                            @avim2809
+/tests/test_live_import_isolation.py         @avim2809
+/config/gates.yaml                           @avim2809
+/config/research_freeze.yaml                 @avim2809
+/research/preregistration/                   @avim2809
+/research/charters/                          @avim2809
+/research/approvals/                         @avim2809
+/scripts/*_preregistered*.py                 @avim2809
+/docs/*trial_history.json                    @avim2809
+/.github/                                    @avim2809

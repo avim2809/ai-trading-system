@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(./.claude/settings.json)",
+      "Write(./.claude/settings.json)",
+      "Edit(./.claude/settings.local.json)",
+      "Write(./.claude/settings.local.json)",
+      "Edit(./.claude/hooks/**)",
+      "Write(./.claude/hooks/**)",
+      "Edit(./tests/integrity/**)",
+      "Write(./tests/integrity/**)",
+      "Edit(./tests/test_live_import_isolation.py)",
+      "Write(./tests/test_live_import_isolation.py)",
+      "Edit(./config/gates.yaml)",
+      "Write(./config/gates.yaml)",
+      "Edit(./config/research_freeze.yaml)",
+      "Write(./config/research_freeze.yaml)",
+      "Edit(./research/preregistration/**)",
+      "Write(./research/preregistration/**)",
+      "Edit(./research/charters/**)",
+      "Write(./research/charters/**)",
+      "Edit(./research/approvals/**)",
+      "Write(./research/approvals/**)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)"
+    ]
+  }
+}

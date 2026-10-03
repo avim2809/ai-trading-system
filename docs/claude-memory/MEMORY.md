@@ -45,3 +45,4 @@
 - [External review package](feedback_external_review_package.md) — owner wants data+scripts+results preserved for 3rd-party review; use scripts/build_review_package.py, merge branches, bundle licensed data privately
 - [S2 shadow forward test 10/1](project_s2_forward_test_oct01.md) — paper ledger only, first check cut state (47.8%); timer install awaits owner; needs EODHD for monthly pulls
 - [Credibility plan 10/2](project_credibility_plan_oct02.md) — external trend+carry/DSR-gates plan reconciled into PLAN.md + 56 tickets + 20 owner decisions (branch plan/credibility-2026-10, unmerged); DSR at N≈460 makes Tier A ~unreachable
+- [Research sessions scope](feedback_research_sessions_scope.md) — credibility-plan research sessions run as the `research` user in a separate clone: no service restarts, no live-config edits, sealed paths unreadable, branches only; "run on your own" and autonomous-restart grants apply to OPS sessions only

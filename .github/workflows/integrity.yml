@@ -1,0 +1,53 @@
+name: Integrity
+
+# Research-integrity checks (ticket P0-04). Runs on every push to main (the owner's direct commits and any hotfix get a
+# post-hoc run) and on pull requests. Integrity tests use synthetic fixtures only: CI has no holdout data. Later tickets add
+# their named checks (ledger mirror prefix-extension, reports reference verified trial_ids, no new scripts/run_*.py
+# without firm.research) as tests under tests/integrity/, which this job picks up automatically.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integrity:
+    name: Research integrity (tests/integrity + live-import isolation)
+    runs-on: ubuntu-latest
+    env:
+      FIRM_INTEGRITY_CI: "1"
+    steps:
+      # Full history: the append-only ledger check resolves pinned baseline commits.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Cache venv
+        id: cache-venv
+        uses: actions/cache@v6
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.14-${{ hashFiles('pyproject.toml') }}
+
+      - name: Install
+        run: |
+          python -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,api,llm,live]"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Integrity tests
+        run: pytest -q tests/integrity tests/test_live_import_isolation.py

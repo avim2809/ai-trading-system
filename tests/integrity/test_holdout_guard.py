@@ -10,7 +10,6 @@ import ast
 import datetime as dt
 import sys
 import types
-from pathlib import Path
 
 import pandas as pd
 import pytest

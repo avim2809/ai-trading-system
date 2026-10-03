@@ -1,0 +1,24 @@
+{
+  "seal_date": "2026-10-01",
+  "allow_roots": [
+    "data/research/eodhd",
+    "data/research/fred",
+    "data/research/insider",
+    "/local/store/research-ledger/returns"
+  ],
+  "deny_paths": [
+    "data/research/s2_forward",
+    "data/forward_monitors",
+    "data/cache",
+    "data_alpaca",
+    "research/monitoring_sealed",
+    "docs/s2_forward_snapshot.json",
+    "data/logs",
+    "data/live_state.db",
+    "data/cycle_history.json",
+    "data/order_history.json",
+    "data/execution_audit.jsonl",
+    "data/memory",
+    "data/llm_cache*.db"
+  ]
+}
