@@ -483,3 +483,28 @@ All verified present: `scripts/*_preregistered*.py` (13 files, section 7), `scri
 - `.gitignore` globally ignores `*.parquet`; that is now intended for ledger returns (they stay on the host, P1-01), and `research/monitoring_sealed/` needs an explicit ignore (P0-06).
 - `data/holdout/` has never existed; an explicit ignore rule is needed so a CSV there is not committed.
 - The Stop-hook and tests must use the worktree's own interpreter or the shared research venv `/local/store/research-venvs/<depset>/`. The main `.venv` editable install points at the live `src/`.
+
+## 12. Worktree and venv policy (P0-06)
+
+- **Never edit, test in, or `git worktree add` inside the live checkout** (`/local/store/git/ai-trading-system`): the
+  two firm-api services run from it with `Restart=always`, and worktrees share the parent's refs, config and hooks.
+  Research agents work in their own clone, `/local/store/research/ai-trading-system` (owned by the `research` user,
+  OD-07), one worktree per ticket at `<clone>/.claude/worktrees/<ID>`. The owner merges and pulls into the live checkout.
+- Create a worktree with `scripts/new_research_worktree.sh <TICKET_ID> [dependency-set] [--create-venv]`. It refuses to run
+  when the toplevel is the live checkout, when `/` has less than `FIRM_MIN_FREE_GB` (default 20) GB free, or when the
+  worktree exists; it writes `<worktree>/.research-depset` and prints the test command. `.claude/worktrees/` and
+  `.research-depset` are in `.gitignore`.
+- Worktrees do not inherit gitignored files (`.env`, `.venv`, `data/`, `data_alpaca/`, `.claude/settings.local.json`), so
+  tests that need data must skip; never copy `.env` into a worktree.
+- **Interpreter.** The live `.venv` has an editable install pointing at the live `src/`; it must never be used to test a
+  worktree without `PYTHONPATH=<worktree>/src`, and nothing is ever installed into it. Use a shared, non-editable research
+  venv per dependency set at `/local/store/research-venvs/<set>/` (only the owner or `--create-venv` creates it; `pytest-xdist` is
+  installed there only, not in `pyproject.toml`), run with `PYTHONPATH=<worktree>/src`, and check that `firm.__file__`
+  is under the worktree.
+- **Resources (6 cores, about 11 GB RAM, shared with IB Gateway and two firm-api processes).** At most 3 research agents at
+  once; pytest under `nice -n 10 ionice -c3`, xdist `-n 2` at most; heavy runs (P1-08, P3-08, P3-11) outside 09:15 ET and outside the
+  allocation rebalance windows, optionally under `prlimit --as=<bytes>`; at least 20 GB free before creating a worktree.
+- **Live import graph.** `tests/test_live_import_isolation.py` (CODEOWNERS-protected) proves no new research module is
+  imported by `firm.runtime`, `firm.live.engine` or `firm.api.app`; `scripts/live_import_smoke.py` proves both live configs
+  still build (fresh interpreter, temp `FIRM_DATA_DIR`, temp cwd, config copy with state paths in the temp dir, no network,
+  no broker connect, no `.env`). Both are part of the LIVE-IMPORT-PATH protocol (PLAN.md section 8).

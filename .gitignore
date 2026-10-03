@@ -60,6 +60,15 @@ node_modules/
 frontend/dist/
 trading-suite/
 .claude/settings.local.json
+# Per-ticket research worktrees (scripts/new_research_worktree.sh); also ignored by the
+# runtime-written .git/info/exclude, but a fresh clone or CI checkout has no such file.
+.claude/worktrees/
+.research-depset
+# Post-seal / forward data never enters git (PLAN.md section 8, OD-04/OD-05).
+# (research/ledger/returns/**/*.parquet stays ignored by the global *.parquet rule on purpose.)
+data/holdout/
+data/forward_monitors/
+research/monitoring_sealed/
 # Third-party review package: its derived artifacts are committed on purpose
 # (scripts/build_review_package.py; raw vendor data stays in the private bundle).
 !review/**/*.parquet
