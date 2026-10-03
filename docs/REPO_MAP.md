@@ -52,7 +52,7 @@ Status vocabulary used in the reconciliation table:
 | `.github/workflows/ci.yml` | The only workflow (section 9) |
 | `AGENTS.md` (23 lines), `CLAUDE.md` (70 lines) | Agent instructions; they have drifted apart. `CLAUDE.md` holds the only "Rules of thumb" block |
 | `.cursor/rules/*.mdc` | `frontend`, `ibkr-integration`, `live-trading`, `logging`, `project-context`, `strategies` |
-| Absent today (as of b4580c9; `PLAN.md` at repo root, `plan/OWNER_DECISIONS.md` and `plan/tickets/` (56 files) exist and are tracked since fc14f79) | `research/`, `.github/CODEOWNERS`, `.claude/settings.json`, `.claude/hooks/`, `tests/integrity/`, `config/research_freeze.yaml`, `data/holdout/`, `docs/HOLDOUT_POLICY.md`, `docs/DEPRECATIONS.md`, `docs/LLM_POLICY.md` |
+| Absent today (as of b4580c9; `PLAN.md` at repo root, `plan/OWNER_DECISIONS.md` and `plan/tickets/` (56 files) exist and are tracked since fc14f79) | `research/`, `.github/CODEOWNERS`, `.claude/settings.json`, `.claude/hooks/`, `tests/integrity/`, `config/research_freeze.yaml`, `data/holdout/`, `docs/HOLDOUT_POLICY.md`, `docs/DEPRECATIONS.md`, `docs/LLM_POLICY.md` (since 2026-10-04 `p0/foundation` adds `.github/CODEOWNERS`, `.claude/settings.json`, `tests/integrity/`, `config/research_freeze.yaml`, `docs/HOLDOUT_POLICY.md`, `docs/GUARDRAIL_REDTEAM.md` and `src/firm/research/`; still absent: `research/`, `.claude/hooks/` (hooks are templates under `deploy/claude-research-hooks/`), `data/holdout/`, `docs/DEPRECATIONS.md`, `docs/LLM_POLICY.md`) |
 
 ## 2. Package map: `src/firm/`
 
