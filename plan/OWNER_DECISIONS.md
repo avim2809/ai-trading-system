@@ -49,7 +49,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks only.** P2-07, the P3-08 path choice, P6-01, P7-01's path decision (not the tool itself), P7-02 (no real capital is committed before this is answered), and P3-04 research use only (P3-04 is a pure fixture-tested function and is scheduled right after P3-01).
 
-**Decision:** 
+**Decision:** (a) under $25k: passive only. Recorded 2026-10-03. Consequence: per P7-01 a bespoke system is not run live at this size; P0-P1 validation tooling and the P3-08 research verdict remain useful, live phases (P6-P7) are not planned. Revisit if capital grows.
 
 ---
 
@@ -92,7 +92,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P0-07, P6-03
 
-**Decision:** 
+**Decision:** (b) keep as untouched control; retire later via P0-07. Recorded 2026-10-03.
 
 ---
 
@@ -113,7 +113,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P0-02, P0-08, P3-10, P3-11, P3-08
 
-**Decision:** 
+**Decision:** (a) accepted as recommended. Recorded 2026-10-03.
 
 ---
 
@@ -134,7 +134,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P0-02, P0-04, P3-10, P5-06
 
-**Decision:** 
+**Decision:** Accepted as recommended. Recorded 2026-10-03.
 
 ---
 
@@ -155,7 +155,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P0-04, P0-08, P1-09
 
-**Decision:** 
+**Decision:** (b) separate GitHub machine account/PAT for research agents + rulesets, owner bypass for hotfixes. Recorded 2026-10-03.
 
 ---
 
@@ -176,7 +176,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P0-02 (its `allow_roots`/`deny_paths` are the research user's ACL basis), P0-04
 
-**Decision:** 
+**Decision:** (b)+(c) non-root research user + managed settings, as recommended. Recorded 2026-10-03.
 
 ---
 
@@ -197,7 +197,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P0-04
 
-**Decision:** 
+**Decision:** (b) accepted as recommended. Recorded 2026-10-03.
 
 ---
 
@@ -218,7 +218,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P0-05, P1-01, P0-08, P3-08
 
-**Decision:** 
+**Decision:** Raw count of all trials (about 460), Gann at about 145, as recommended. Recorded 2026-10-03.
 
 ---
 
@@ -240,7 +240,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P1-01, P1-12
 
-**Decision:** 
+**Decision:** Host-level JSONL ledger at /local/store/research-ledger/, as recommended. Recorded 2026-10-03.
 
 ---
 
@@ -303,7 +303,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P1-09, P2-01
 
-**Decision:** 
+**Decision:** Supersede; file stays frozen and untouched. Recorded 2026-10-03.
 
 ---
 
@@ -323,7 +323,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P2-08, P2-02, P3-11
 
-**Decision:** 
+**Decision:** Freeze v3 now as a new module. Recorded 2026-10-03.
 
 ---
 
@@ -427,7 +427,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P5-06
 
-**Decision:** 
+**Decision:** (a) loopback GET-only allowlist, alert-only, as recommended. Recorded 2026-10-03.
 
 ---
 
