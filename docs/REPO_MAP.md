@@ -1,6 +1,7 @@
 # REPO_MAP
 
-Ticket P0-01 deliverable (draft, produced read-only on 2026-10-02 from main @ c2bd5cd).
+Ticket P0-01 deliverable. Drafted read-only on 2026-10-02 from main @ c2bd5cd; verified and corrected on 2026-10-04
+against `p0/foundation` @ b4580c9 (counts, line references and `exists`/`extend` paths re-checked with `test -e` and grep).
 Purpose: a verified map of what exists in this repo, and a table that maps every path the
 credibility plan proposes to the real path. Anything marked "(new)" does not exist today.
 
@@ -37,21 +38,21 @@ Status vocabulary used in the reconciliation table:
 | Path | What it is |
 |---|---|
 | `src/firm/` | The only Python package (see section 2) |
-| `scripts/` | 73 entries: CLIs, frozen pre-registrations, evaluation harnesses, ops shell scripts |
+| `scripts/` | 72 entries: CLIs, frozen pre-registrations, evaluation harnesses, ops shell scripts |
 | `tests/` | Flat pytest suite (about 3400 tests); `conftest.py` isolates `FIRM_EXECUTION_AUDIT` per test |
 | `config/` | `settings.yaml` (backtest defaults, `strategies: []` = all registered), `live.yaml` (IBKR), `live_alpaca.yaml` (Alpaca), `live_alpaca_allocation.example.yaml`, `llm.yaml`, `llm_ab_llm.yaml`, `llm_ab_quant.yaml`, `experiments/`, `strategies/cross_sectional_momentum.yaml` |
-| `docs/` | 62 entries: `PROJECT_CONTEXT.md`, verdicts, evaluation JSONs, trial histories, plans, `claude-memory/`, `archive/`, `prompts/`. Indexed by `docs/README.md` |
+| `docs/` | 63 entries (62 plus this file): `PROJECT_CONTEXT.md`, verdicts, evaluation JSONs, trial histories, plans, `claude-memory/`, `archive/`, `prompts/`. Indexed by `docs/README.md` |
 | `deploy/` | systemd units and nginx config (section 9) |
 | `review/` | Third-party review package (section 8): `README.md`, `ARTIFACT_INDEX.json`, `DATA_BUNDLE.md`, `ENVIRONMENT.json`, `TIMELINE.md`, `data/`, `studies/`, `requirements-lock.txt`, `session_scratch_scripts/` |
 | `data/` | Live runtime state for IBKR (`live_state.db`, `kill_switch_state.json`, `execution_audit.jsonl`, `cache/`, `models/`, `vectordb/`, `logs/`) and `data/research/{eodhd,fred,insider,s2_forward}` (licensed vendor data; gitignored). Contains post-2026-09-30 data |
 | `data_alpaca/` | Runtime state for the Alpaca instance (gitignored) |
 | `runs/` | Gitignored `RunRegistry` output (about 38 dirs, 2026-09-25..28 only) |
 | `frontend/` | React UI; API contract in `frontend/src/api/{types,client}.ts` |
-| `.claude/` | Only `settings.local.json` (gitignored) and an empty `worktrees/` |
+| `.claude/` | Live checkout: only `settings.local.json` (gitignored) and an empty `worktrees/`. The research clone has no `.claude/` until its first worktree is created (`.claude/worktrees/<ID>`); no tracked file lives there yet |
 | `.github/workflows/ci.yml` | The only workflow (section 9) |
 | `AGENTS.md` (23 lines), `CLAUDE.md` (70 lines) | Agent instructions; they have drifted apart. `CLAUDE.md` holds the only "Rules of thumb" block |
 | `.cursor/rules/*.mdc` | `frontend`, `ibkr-integration`, `live-trading`, `logging`, `project-context`, `strategies` |
-| Absent today (as of c2bd5cd; `PLAN.md` at repo root, `plan/OWNER_DECISIONS.md` and `plan/tickets/` (56 files) now exist, untracked) | `research/`, `.github/CODEOWNERS`, `.claude/settings.json`, `.claude/hooks/`, `tests/integrity/`, `config/research_freeze.yaml`, `data/holdout/`, `docs/HOLDOUT_POLICY.md`, `docs/DEPRECATIONS.md`, `docs/LLM_POLICY.md` |
+| Absent today (as of b4580c9; `PLAN.md` at repo root, `plan/OWNER_DECISIONS.md` and `plan/tickets/` (56 files) exist and are tracked since fc14f79) | `research/`, `.github/CODEOWNERS`, `.claude/settings.json`, `.claude/hooks/`, `tests/integrity/`, `config/research_freeze.yaml`, `data/holdout/`, `docs/HOLDOUT_POLICY.md`, `docs/DEPRECATIONS.md`, `docs/LLM_POLICY.md` |
 
 ## 2. Package map: `src/firm/`
 
@@ -302,7 +303,7 @@ shortlist_S1..S5}`). The licensed-data bundle lives outside the repo
 | `AGENTS.md`, `CLAUDE.md` | same | extend | Merge, not verbatim. Fold CLAUDE.md "Rules of thumb" into AGENTS.md first (OD-08) |
 | `docs/HOLDOUT_POLICY.md`, `DEPRECATIONS.md`, `LLM_POLICY.md`, `JURISDICTION_NOTES.md`, `GUARDRAIL_REDTEAM.md` | same | new | Top-level `docs/`, each indexed in `docs/README.md` |
 | `docs/REPO_MAP.md` | this file | new | P0-01 |
-| `PLAN.md`, `tickets/` | `PLAN.md` (repo root; untracked) and `plan/tickets/<ID>.md` (56 files), plus `plan/OWNER_DECISIONS.md` and `plan/drafts/<ID>/` | new | Design said `plan/PLAN.md`; DECIDED 2026-10-02: root `PLAN.md`, and every plan file now cites the root path |
+| `PLAN.md`, `tickets/` | `PLAN.md` (repo root; tracked) and `plan/tickets/<ID>.md` (56 files), plus `plan/OWNER_DECISIONS.md` and `plan/drafts/<ID>/` | new | Design said `plan/PLAN.md`; DECIDED 2026-10-02: root `PLAN.md`, and every plan file now cites the root path |
 
 ### 10.2 Design `actual_paths` by ticket (existence verified on 2026-10-02)
 
@@ -311,7 +312,7 @@ Legend: E = exists today, N = new.
 | Ticket | Path | E/N | Status | Note |
 |---|---|---|---|---|
 | P0-01 | `docs/REPO_MAP.md` | N | new | This file |
-| P0-01 | `PLAN.md` (repo root, exists, untracked; design said `plan/PLAN.md`), `plan/OWNER_DECISIONS.md` (E, untracked), `plan/tickets/` (E, 56 files) | E | review | Root location decided; P0-01 reviews and reconciles |
+| P0-01 | `PLAN.md` (repo root, exists, tracked; design said `plan/PLAN.md`), `plan/OWNER_DECISIONS.md` (E, tracked), `plan/tickets/` (E, 56 files) | E | review | Root location decided; P0-01 reviews and reconciles |
 | P0-01 | `docs/README.md` | E | extend | Add index rows only |
 | P0-06 | `tests/test_live_import_isolation.py` | N | new | Subprocess, fresh interpreter, `FIRM_DATA_DIR=tmp` |
 | P0-06 | `scripts/live_import_smoke.py` | N | new | Runs `build_orchestrator` via `resolve_live_startup` on both live configs |

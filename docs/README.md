@@ -21,6 +21,8 @@ output.
 | `allocation_forward_test_plan.md` | How the live allocation portfolio is judged (plain language) |
 | `s2_forward_test_plan.md` | Shadow forward test of the S2 breadth overlay (running; paper ledger only) |
 | `capital_sleeves_plan.md` | Per-strategy capital sleeves (pipeline mode; used by the IBKR/pipeline code path) |
+| `REPO_MAP.md` | Verified map of the repo (packages, entry points, engines, data, frozen paths) and the credibility-plan path reconciliation table |
+| `../PLAN.md` | Credibility plan (repo root): realistic expectations, gates, phases, ticket index; tickets in `../plan/tickets/`, owner decisions in `../plan/OWNER_DECISIONS.md` |
 
 ## Decisions and verdicts (settled, with evidence)
 
