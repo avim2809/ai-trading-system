@@ -7,6 +7,7 @@ logic is available without going through argparse.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import pandas as pd
@@ -16,6 +17,19 @@ from firm.config import Settings
 from firm.data.pit_store import PointInTimeDataStore
 
 log = logging.getLogger(__name__)
+
+# Research-seal hook (credibility plan, ticket P0-02). None in every live process; only
+# ``firm.research.seal.install_guards()`` sets it, and live modules never import ``firm.research``.
+# Each ``load_*`` helper calls it first (cache-dir check) and passes what it loaded through it.
+_ACCESS_GUARD: Callable[[str, dict], None] | None = None
+
+
+def _guarded_frame(kind: str, result, date_cols: tuple[str, ...] = ("date",)):
+    """Pass a loaded frame (or dict of frames) through the research guard; no-op when none is installed."""
+    if _ACCESS_GUARD is not None and result is not None:
+        frames = result if isinstance(result, dict) else {"result": result}
+        _ACCESS_GUARD(kind, {"frames": frames, "date_cols": date_cols})
+    return result
 
 
 def _maybe_wrap(agent, role_key: str, llm_cls_path: str, agent_modes: dict, config: dict, llm_config: dict):
@@ -189,20 +203,22 @@ def load_prices(settings: Settings) -> pd.DataFrame:
     it never did, so `data_source="cache"` never had any real data to read
     after following the documented `fetch-data` workflow.
     """
+    if _ACCESS_GUARD is not None:
+        _ACCESS_GUARD("load_prices", {"settings": settings})
     from firm.data.cache import ParquetCache
 
     cache = ParquetCache(settings.data.cache_dir)
     df = cache.get("combined/prices")
     if df is not None and not df.empty:
-        return df
+        return _guarded_frame("load_prices", df)
 
     cache_dir = Path(settings.data.cache_dir)
     prices_path = cache_dir / "prices.parquet"
     if prices_path.exists():
-        return pd.read_parquet(prices_path)
+        return _guarded_frame("load_prices", pd.read_parquet(prices_path))
     csv_path = cache_dir / "prices.csv"
     if csv_path.exists():
-        return pd.read_csv(csv_path)
+        return _guarded_frame("load_prices", pd.read_csv(csv_path))
     raise FileNotFoundError(
         f"No cached price data found. Run fetch-data first. "
         f"Looked in ParquetCache key 'combined/prices' and {prices_path}, {csv_path}"
@@ -216,13 +232,15 @@ def load_fundamentals(settings: Settings) -> pd.DataFrame | None:
     ``fundamentals`` for older cache layouts. Returns ``None`` when absent so
     callers can degrade gracefully (mirrors optional FRED macro loading).
     """
+    if _ACCESS_GUARD is not None:
+        _ACCESS_GUARD("load_fundamentals", {"settings": settings})
     from firm.data.cache import ParquetCache
 
     cache = ParquetCache(settings.data.cache_dir)
     for key in ("combined/fundamentals", "fundamentals"):
         df = cache.get(key)
         if df is not None and not df.empty:
-            return _expand_fundamental_symbol_aliases(df)
+            return _guarded_frame("load_fundamentals", _expand_fundamental_symbol_aliases(df))
     return None
 
 
@@ -237,6 +255,8 @@ def load_macro(settings: Settings) -> dict[str, pd.DataFrame] | None:
     empty" (an empty dict) -- only the former should trigger the live-fetch
     fallback in :func:`run_backtest_from_config`.
     """
+    if _ACCESS_GUARD is not None:
+        _ACCESS_GUARD("load_macro", {"settings": settings})
     from firm.data.cache import ParquetCache
     from firm.data.providers.fred import macro_bundle_from_cache
 
@@ -244,7 +264,7 @@ def load_macro(settings: Settings) -> dict[str, pd.DataFrame] | None:
     df = cache.get("combined/macro")
     if df is None:
         return None
-    return macro_bundle_from_cache(df)
+    return _guarded_frame("load_macro", macro_bundle_from_cache(df))
 
 
 def load_sentiment(settings: Settings) -> pd.DataFrame | None:
@@ -257,12 +277,14 @@ def load_sentiment(settings: Settings) -> pd.DataFrame | None:
     (``PitView.sentiment()`` has nothing to aggregate), silently diverging
     from live where the same strategy is fully active.
     """
+    if _ACCESS_GUARD is not None:
+        _ACCESS_GUARD("load_sentiment", {"settings": settings})
     from firm.data.cache import ParquetCache
 
     cache = ParquetCache(settings.data.cache_dir)
     df = cache.get("combined/sentiment")
     if df is not None and not df.empty:
-        return df
+        return _guarded_frame("load_sentiment", df)
     return None
 
 
@@ -274,12 +296,14 @@ def load_analyst_ratings(settings: Settings) -> pd.DataFrame | None:
     absent so callers degrade gracefully (the ``investing_analyst_ratings``
     strategy simply emits no signals, same as ``sentiment`` does today).
     """
+    if _ACCESS_GUARD is not None:
+        _ACCESS_GUARD("load_analyst_ratings", {"settings": settings})
     from firm.data.cache import ParquetCache
 
     cache = ParquetCache(settings.data.cache_dir)
     df = cache.get("combined/analyst_ratings")
     if df is not None and not df.empty:
-        return df
+        return _guarded_frame("load_analyst_ratings", df)
     return None
 
 
@@ -291,12 +315,14 @@ def load_ai_scores(settings: Settings) -> pd.DataFrame | None:
     degrade gracefully (the ``danelfin_ai_score`` strategy simply emits no
     signals).
     """
+    if _ACCESS_GUARD is not None:
+        _ACCESS_GUARD("load_ai_scores", {"settings": settings})
     from firm.data.cache import ParquetCache
 
     cache = ParquetCache(settings.data.cache_dir)
     df = cache.get("combined/ai_scores")
     if df is not None and not df.empty:
-        return df
+        return _guarded_frame("load_ai_scores", df)
     return None
 
 
@@ -314,12 +340,14 @@ def load_market_percentile(settings: Settings) -> pd.DataFrame | None:
     callers degrade gracefully (the ``danelfin_market_percentile``
     strategy simply emits no signals).
     """
+    if _ACCESS_GUARD is not None:
+        _ACCESS_GUARD("load_market_percentile", {"settings": settings})
     from firm.data.cache import ParquetCache
 
     cache = ParquetCache(settings.data.cache_dir)
     df = cache.get("combined/market_percentile")
     if df is not None and not df.empty:
-        return df
+        return _guarded_frame("load_market_percentile", df)
     return None
 
 
@@ -334,16 +362,20 @@ def load_universe_membership(settings: Settings) -> pd.DataFrame | None:
     :meth:`firm.data.universe.UniverseResolver.from_static` — see
     ``build_universe_resolver``.
     """
+    if _ACCESS_GUARD is not None:
+        _ACCESS_GUARD("load_universe_membership", {"settings": settings})
     from firm.data.cache import ParquetCache
 
     cache = ParquetCache(settings.data.cache_dir)
     df = cache.get("combined/universe_membership")
     if df is not None and not df.empty:
-        return df
+        return _guarded_frame("load_universe_membership", df, ("added_date", "removed_date"))
 
     csv_path = Path(settings.data.cache_dir) / "universe_membership.csv"
     if csv_path.exists():
-        return pd.read_csv(csv_path)
+        return _guarded_frame(
+            "load_universe_membership", pd.read_csv(csv_path), ("added_date", "removed_date")
+        )
     return None
 
 

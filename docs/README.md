@@ -23,6 +23,7 @@ output.
 | `capital_sleeves_plan.md` | Per-strategy capital sleeves (pipeline mode; used by the IBKR/pipeline code path) |
 | `REPO_MAP.md` | Verified map of the repo (packages, entry points, engines, data, frozen paths) and the credibility-plan path reconciliation table |
 | `../PLAN.md` | Credibility plan (repo root): realistic expectations, gates, phases, ticket index; tickets in `../plan/tickets/`, owner decisions in `../plan/OWNER_DECISIONS.md` |
+| `HOLDOUT_POLICY.md` | Forward-data seal (seal_date 2026-10-01, history burned through 2026-09-30): enforcement layers, every on-host post-seal location, unseal rules, residual risks. Config: `../config/research_freeze.yaml` |
 
 ## Decisions and verdicts (settled, with evidence)
 

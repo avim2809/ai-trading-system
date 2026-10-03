@@ -8,11 +8,17 @@ eliminating future-data leakage.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta
 
 import pandas as pd
 
 log = logging.getLogger("firm.data.pit_store")
+
+# Research-seal hook (credibility plan, ticket P0-02). None in every live process; only
+# ``firm.research.seal.install_guards()`` sets it, and live modules never import ``firm.research``.
+# Each ``asof``/``start``-``end`` getter and ``load``/``load_macro`` calls it first when set.
+_ACCESS_GUARD: Callable[[str, dict], None] | None = None
 
 
 class PointInTimeDataStore:
@@ -54,6 +60,20 @@ class PointInTimeDataStore:
         market_percentile: pd.DataFrame | None = None,
     ) -> None:
         """Load all datasets. Called once at backtest start."""
+        if _ACCESS_GUARD is not None:
+            _ACCESS_GUARD("load", {
+                "frames": {
+                    "prices": prices,
+                    "fundamentals": fundamentals,
+                    "sentiment": sentiment,
+                    "corporate_actions": corporate_actions,
+                    "estimates": estimates,
+                    "ai_scores": ai_scores,
+                    "live_signals": live_signals,
+                    "best_stocks": best_stocks,
+                    "market_percentile": market_percentile,
+                }
+            })
         self._prices = self._ensure_date_col(prices)
         self._fundamentals = self._ensure_date_col(fundamentals) if fundamentals is not None else pd.DataFrame()
         self._sentiment = self._ensure_date_col(sentiment) if sentiment is not None else pd.DataFrame()
@@ -104,6 +124,8 @@ class PointInTimeDataStore:
         would silently under-deliver history (~252 trading days span ~365
         calendar days) and could disable long-lookback strategies entirely.
         """
+        if _ACCESS_GUARD is not None:
+            _ACCESS_GUARD("get_prices", {"asof": asof})
         if self._prices.empty:
             return pd.DataFrame()
         asof_ts = pd.Timestamp(asof)
@@ -136,6 +158,8 @@ class PointInTimeDataStore:
         to one row themselves via their own groupby("symbol").last(), so
         returning more history here doesn't change their behaviour.
         """
+        if _ACCESS_GUARD is not None:
+            _ACCESS_GUARD("get_fundamentals", {"asof": asof})
         if self._fundamentals.empty:
             return pd.DataFrame()
         asof_ts = pd.Timestamp(asof)
@@ -161,6 +185,8 @@ class PointInTimeDataStore:
         grades-historical is monthly, so a ~365-day default keeps roughly a
         year of consensus trend per symbol, unlike get_sentiment's 5-day
         default suited to a daily-cadence series)."""
+        if _ACCESS_GUARD is not None:
+            _ACCESS_GUARD("get_estimates", {"asof": asof})
         if self._estimates.empty:
             return pd.DataFrame()
         asof_ts = pd.Timestamp(asof)
@@ -183,6 +209,8 @@ class PointInTimeDataStore:
         series (unlike get_estimates' monthly-cadence default), so a ~30-day
         default is enough to compute a short-term level/trend without
         pulling in a whole year of daily rows."""
+        if _ACCESS_GUARD is not None:
+            _ACCESS_GUARD("get_ai_scores", {"asof": asof})
         if self._ai_scores.empty:
             return pd.DataFrame()
         asof_ts = pd.Timestamp(asof)
@@ -234,6 +262,8 @@ class PointInTimeDataStore:
         concatenated history — percentile only means something computed
         within one date's cross-section, not averaged across multiple.
         """
+        if _ACCESS_GUARD is not None:
+            _ACCESS_GUARD("get_market_percentile_pool", {"asof": asof})
         if self._market_percentile.empty:
             return pd.DataFrame()
         asof_ts = pd.Timestamp(asof)
@@ -252,6 +282,8 @@ class PointInTimeDataStore:
         lookback_days: int = 5,
     ) -> pd.DataFrame:
         """Return sentiment data where date <= asof within the lookback window."""
+        if _ACCESS_GUARD is not None:
+            _ACCESS_GUARD("get_sentiment", {"asof": asof})
         if self._sentiment.empty:
             return pd.DataFrame()
         asof_ts = pd.Timestamp(asof)
@@ -269,6 +301,8 @@ class PointInTimeDataStore:
         Each value must be a DataFrame with columns [date, <series_id>] as
         returned by :func:`firm.data.providers.fred.fetch_macro_bundle`.
         """
+        if _ACCESS_GUARD is not None:
+            _ACCESS_GUARD("load_macro", {"frames": bundle})
         for series_id, df in bundle.items():
             if df.empty:
                 continue
@@ -294,6 +328,8 @@ class PointInTimeDataStore:
             asof:          Point-in-time ceiling — no future data.
             lookback_days: How many calendar days of history to return.
         """
+        if _ACCESS_GUARD is not None:
+            _ACCESS_GUARD("get_macro", {"asof": asof})
         df = self._macro.get(series_id)
         if df is None or df.empty:
             return pd.Series(dtype=float, name=series_id)
@@ -313,6 +349,8 @@ class PointInTimeDataStore:
         symbol with price data on or before *asof* — which is **not**
         survivorship-aware (it reflects whatever names happen to be loaded).
         """
+        if _ACCESS_GUARD is not None:
+            _ACCESS_GUARD("get_universe", {"asof": asof})
         if self._universe_resolver is not None:
             return list(self._universe_resolver(asof))
         if self._prices.empty:
@@ -340,6 +378,8 @@ class PointInTimeDataStore:
         strictly between ``start`` and ``end``, which is a much narrower gap
         than not resolving membership changes at all.
         """
+        if _ACCESS_GUARD is not None:
+            _ACCESS_GUARD("get_universe_union", {"start": start, "end": end})
         resolver = self._universe_resolver
         if resolver is not None and hasattr(resolver, "symbols_between"):
             return list(resolver.symbols_between(start, end))

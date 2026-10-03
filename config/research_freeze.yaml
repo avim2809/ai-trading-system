@@ -1,0 +1,52 @@
+# Research freeze and forward-data seal (PLAN.md section 8, ticket P0-02; owner decisions OD-04, OD-05, OD-07).
+#
+# CODEOWNERS-protected: agents never edit this file (AGENTS.md rule 5). `firm.research.seal` and
+# `firm.research.data_access` read it, and fail closed (HoldoutAccessError) if it is missing or incoherent.
+# The research-user deny list in deploy/claude-research-user-settings.json (P0-04) must equal
+# allow_roots / deny_paths below (tests/integrity/test_guardrails_present.py checks it).
+#
+# Relative entries resolve against the checkout that contains this file; absolute entries are used as-is.
+# `*` globs are allowed in deny_paths only. Paths are compared after symlinks are resolved.
+# Timestamps for seal events come from `date -u` or git, never from log lines (host clock is Asia/Jerusalem).
+
+seal_date: 2026-10-01            # first SEALED day: forward data from this day on is the holdout
+burned_through: 2026-09-30       # last usable day = seal_date - 1; everything up to here is in-sample and burned,
+                                 # including the 2024-07..2026-06 Gann window and the whole 2020-01..2026-06-30 panel
+unseal_token_sha256: null        # PENDING: owner fills with the sha256 of a token only the owner holds. The agent never sees the preimage.
+
+# Pre-seal research inputs: the ONLY roots firm.research.data_access may read (allow-list).
+allow_roots:
+  - data/research/eodhd
+  - data/research/fred
+  - data/research/insider
+  - /local/store/research-ledger/returns
+
+# Second layer, checked after the allow-list. Post-seal data on this host (live services keep writing it):
+# the Alpaca instance, the data/cache refreshed by the live services, forward-test state and snapshots, the monitor
+# directories, and the IBKR instance's FIRM_DATA_DIR (data/) state: logs, live_state.db, cycle history, order history,
+# the execution audit, memory and the LLM caches.
+deny_paths:
+  - data/research/s2_forward
+  - data/forward_monitors
+  - data/cache
+  - data_alpaca
+  - research/monitoring_sealed
+  - docs/s2_forward_snapshot.json
+  - data/logs
+  - data/live_state.db
+  - data/cycle_history.json
+  - data/order_history.json
+  - data/execution_audit.jsonl
+  - data/memory
+  - data/llm_cache*.db
+
+# Forward-test monitors that read post-seal data by design (monitoring only, never research evidence).
+exempt_monitors:
+  - allocation_forward_test
+  - s2_forward
+
+unseal_log: []                   # one entry per family, written by the owner-run script (P3-10). Each family unseals once.
+
+# Reserved key (source P0-02 task 2): an optional owner-drawn sealed instrument set (random ~20% draw, seed recorded by
+# the human). Unused until P2-01 / OD-02.
+sealed_instruments: []
