@@ -19,6 +19,7 @@ output.
 | `edge_search_verdict_2026_09.md` | Why the 11-strategy system was replaced: nothing tested beats the benchmarks |
 | `allocation_deploy_runbook.md` | How the Alpaca allocation portfolio was deployed, the exact config, and rollback |
 | `allocation_forward_test_plan.md` | How the live allocation portfolio is judged (plain language) |
+| (code) `scripts/allocation_forward_monitor.py`, `src/firm/monitoring/allocation_forward.py` | P5-06 I1-I5 monitor of the allocation forward test (alert-only; timer not installed until OD-15; owner-run real-data steps) |
 | `s2_forward_test_plan.md` | Shadow forward test of the S2 breadth overlay (running; paper ledger only) |
 | `capital_sleeves_plan.md` | Per-strategy capital sleeves (pipeline mode; used by the IBKR/pipeline code path) |
 | `REPO_MAP.md` | Verified map of the repo (packages, entry points, engines, data, frozen paths) and the credibility-plan path reconciliation table |

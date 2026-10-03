@@ -1,0 +1,24 @@
+[Unit]
+Description=Allocation forward-test I1-I5 monitor (read-only: GET loopback + alerts; never halts, never trades)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Dedicated non-root user (owner creates it). NOT the repo .env: only the monitor's own variables
+# (TIINGO_API_KEY, FRED_API_KEY, ALERT_WEBHOOK_URL) live in a root-owned 0600 file (systemd reads it as root).
+User=allocmon
+EnvironmentFile=/etc/allocation-forward-monitor/credentials.env
+WorkingDirectory=/local/store/git/ai-trading-system
+Nice=10
+MemoryMax=1500M
+TimeoutStartSec=30min
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/local/store/git/ai-trading-system/data/forward_monitors/allocation
+Environment=PYTHONPATH=/local/store/git/ai-trading-system/src
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/local/store/git/ai-trading-system/.venv/bin/python3 /local/store/git/ai-trading-system/scripts/allocation_forward_monitor.py refresh-inputs
+ExecStart=/local/store/git/ai-trading-system/.venv/bin/python3 /local/store/git/ai-trading-system/scripts/allocation_forward_monitor.py run
