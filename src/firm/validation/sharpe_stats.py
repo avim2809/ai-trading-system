@@ -44,6 +44,7 @@ log = logging.getLogger(__name__)
 __all__ = [
     "EULER_GAMMA",
     "DegenerateInputError",
+    "PerPeriodSharpe",
     "SharpeUnitsError",
     "check_per_period",
     "dsr",
@@ -65,6 +66,14 @@ class SharpeUnitsError(ValueError):
 
 class DegenerateInputError(ValueError):
     """Raised on inputs for which the statistic is undefined."""
+
+
+class PerPeriodSharpe(float):
+    """Marker type: a Sharpe known to be per-period.
+
+    Annualised-only APIs (e.g. ``firm.risk.kelly``) reject it, because a small
+    per-period value cannot otherwise be told apart from a small annual one.
+    """
 
 
 def check_per_period(sr: float, *, max_abs: float = 0.5, name: str = "sr") -> None:
