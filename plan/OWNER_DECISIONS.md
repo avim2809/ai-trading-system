@@ -155,7 +155,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P0-04, P0-08, P1-09
 
-**Decision:** (b) separate GitHub machine account/PAT for research agents + rulesets, owner bypass for hotfixes. Recorded 2026-10-03.
+**Decision:** (a) advisory CODEOWNERS only. Amended 2026-10-03: no separate GitHub machine account; the research user shares the owner's GitHub identity and Claude login. Enforcement comes from the unix user, file ACLs, managed settings and a root-owned local pre-push hook that blocks pushes to main/master/tags; approval-identity checks (P5-01/P5-02) are advisory ('unverifiable'). No GitHub ruleset is created.
 
 ---
 
