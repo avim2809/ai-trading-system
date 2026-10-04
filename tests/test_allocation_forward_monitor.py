@@ -109,6 +109,9 @@ def test_data_end_override_does_not_leak(inputs):
 
 def _history(tmp_path, *, rule=True, pre_fill=None, fp=None):
     real = json.loads((ROOT / "docs" / "allocation_forward_test_trial_history.json").read_text())
+    # The real file now carries the owner's live_nav rule entry (OD-19); start from a copy without it so
+    # rule=True/False is decided only by this helper, not by the repo's current state.
+    real["entries"] = [e for e in real["entries"] if "live_nav_selection_rule" not in e]
     if fp:
         real["entries"][0]["fingerprint"] = fp
     if pre_fill:

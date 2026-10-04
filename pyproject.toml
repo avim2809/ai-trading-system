@@ -130,6 +130,9 @@ target-version = "py314"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: long-running statistical simulations (size/power, Monte Carlo); run in the full suite",
+]
 # Silence third-party deprecation warnings we can't fix from here, so CI logs
 # stay readable. Matched by message prefix, so our own warnings still surface.
 filterwarnings = [

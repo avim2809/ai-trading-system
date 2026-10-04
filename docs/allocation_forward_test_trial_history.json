@@ -28,6 +28,15 @@
         "threshold": 0.25,
         "peak_carried_over": 103061.72
       }
+    },
+    {
+      "live_nav_selection_rule": "last_snapshot_at_or_after_16:00_ET_per_us_trading_day",
+      "recorded": "2026-10-04",
+      "authority": "owner decision OD-19 (plan/OWNER_DECISIONS.md), recommendation accepted 2026-10-03",
+      "applies_to": "scripts/allocation_forward_test_preregistered.py (frozen bars I1-I5); measurement convention only, no bar or threshold changes",
+      "rule": "For each US trading day the live NAV is the LAST /api/live/portfolio-history snapshot at or after 16:00 America/New_York that day; days with no such snapshot are excluded and listed, never interpolated.",
+      "initial_nav_basis": "post_fill_equity 97912.36 (starting_state_after_fills); no pre_fill_nav was recorded, so I1/I2 for the first window carry an entry-cost offset, stated in every monitor output",
+      "monitor_role": "alert only; any halt is the owner's decision, never automatic (OD-19)"
     }
   ]
 }
