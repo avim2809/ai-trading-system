@@ -132,6 +132,7 @@ target-version = "py314"
 testpaths = ["tests"]
 markers = [
     "slow: long-running statistical simulations (size/power, Monte Carlo); run in the full suite",
+    "deprecated: exercises an ARCHIVED/DECOMMISSIONED strategy; see docs/DEPRECATIONS.md (no tests moved)",
     "real_data: reads licensed data under data/research (opt-in, owner-triggered); deselected by default",
 ]
 addopts = "-m 'not real_data'"

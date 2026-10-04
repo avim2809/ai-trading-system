@@ -766,7 +766,15 @@ class LiveTradingEngine:
     @staticmethod
     def _all_strategy_names() -> list[str]:
         from firm.strategies import list_strategies
-        return list_strategies()
+        try:
+            from firm.strategies.registry import list_allocatable as _default_names
+        except ImportError:  # old registry already loaded in this process
+            _default_names = list_strategies
+        names = _default_names()
+        skipped = [n for n in list_strategies() if n not in names]
+        if skipped:
+            log.warning("Default strategy list skips non-allocatable %s", skipped)
+        return names
 
     def _rebuild_orchestrator(self, new_config: dict[str, Any]) -> None:
         """Rebuild ``self._orchestrator`` from *new_config*, carrying over any

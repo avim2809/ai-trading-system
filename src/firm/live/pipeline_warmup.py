@@ -94,7 +94,11 @@ def _strategy_names(config: dict[str, Any]) -> set[str]:
     try:
         from firm.strategies import list_strategies
 
-        return set(list_strategies())
+        try:
+            from firm.strategies.registry import list_allocatable as _default_names
+        except ImportError:  # old registry already loaded in this process
+            _default_names = list_strategies
+        return set(_default_names())
     except Exception:
         return set()
 

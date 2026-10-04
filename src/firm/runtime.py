@@ -69,7 +69,19 @@ def _build_categorized_strategies(config: dict) -> dict[str, list]:
     """
     from firm.strategies import get, list_strategies
 
-    names = config.get("strategies") or list_strategies()
+    if config.get("strategies"):
+        names = config["strategies"]  # explicit list: honoured as before
+    else:
+        # Self-contained version-skew guard: an old registry may already be loaded.
+        try:
+            from firm.strategies.registry import list_allocatable as _default_names
+        except ImportError:
+            _default_names = list_strategies
+        all_names = list_strategies()
+        names = _default_names()
+        skipped = [n for n in all_names if n not in names]
+        if skipped:
+            log.warning("Default strategy list skips non-allocatable %s", skipped)
     params_map: dict = config.get("strategy_params", {}) or {}
 
     instances = []

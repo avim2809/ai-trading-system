@@ -1452,7 +1452,11 @@ def get_live_config(request: Request) -> dict[str, Any]:
         from firm.strategies.registry import list_strategies
         from firm.live.provider_utils import load_live_yaml_defaults
 
-        all_strategies = list_strategies()
+        try:
+            from firm.strategies.registry import list_allocatable as _default_names
+        except ImportError:  # old registry already loaded in this process
+            _default_names = list_strategies
+        all_strategies = _default_names()
         yaml_defaults = load_live_yaml_defaults()
         ng = yaml_defaults.get("news_guard") or {}
         return {
