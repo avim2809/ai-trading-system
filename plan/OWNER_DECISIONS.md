@@ -407,7 +407,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P3-10, P7-02
 
-**Decision:** 
+**Decision:** Report only (owner, 2026-10-04): the 12-month forward-data check is reported but not required before the first live step. Overrides the recommendation. Follow-up when gates.yaml is written: update G-LIVE-STEP in PLAN.md and ticket P7-02.
 
 ---
 
