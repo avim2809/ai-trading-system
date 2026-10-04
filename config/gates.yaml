@@ -1,0 +1,315 @@
+# config/gates.yaml: FROZEN research and promotion gates (ticket P0-08).
+#
+# Source of truth: docs/gate_deviation_register_2026_10.md, signed by the owner (commit b3dd32c, 2026-10-04T10:04:53Z).
+# Every value below cites the register row it freezes. Gates are fixed BEFORE any result is seen. A later change is a new signed
+# register version plus a new pre-registration; it is never an edit. CODEOWNERS-protected; agents must not edit this file.
+#
+# Integrity: sha256 of the canonical JSON of this file with the `meta` block removed (see scripts/gates_hash.py). The expected
+# value is recorded OUTSIDE this file, on the signed line of the register ("sha256 of config/gates.yaml ..."), so a threshold
+# cannot be edited and the hash field updated in the same file. tests/integrity/test_gates_frozen.py enforces it.
+# Values that no ticket or register row fixed are NOT invented here: they carry `defined_in:` naming the ticket that must freeze them
+# in its own pre-registration, and are listed under `deferred_values`.
+
+meta:
+  version: 1
+  register: docs/gate_deviation_register_2026_10.md
+  register_signed_commit: b3dd32c
+  signed_by: Avi Milner
+  signed_utc: "2026-10-04T10:04:53Z"
+  freeze_commit: PENDING            # filled by the owner step that records the hash (scripts/gates_hash.py)
+  all_data_to_2026_09_30_is_in_sample: true   # OD-04: no historical holdout exists; only forward data from 2026-10-01 is clean
+
+# ---- register row 2: number of trials for the DSR -------------------------------------------------------------
+n_rule: >-
+  N_gate is the number of trials in the time-series trend / carry family, defined by a rule written before any result: a strategy
+  whose signal is a function of an asset's own past price trend, or of a futures-curve or yield carry. Provisional membership 31:
+  standalone trend (1), all alt_premia variants (10), S3 bond/commodity trend (5), S5 crypto momentum (3), the never-run
+  futures_trend draft (0), and the core_v1 grid (up to 12). Cross-sectional momentum (S1, S4), Gann, pattern ML, signal
+  combination, pipeline construction, LLM and Danelfin trials are excluded from N_gate but remain in the raw count. Every verdict
+  also states the raw count (463; 210 ledgered-only) and the DSR at that count. A Tier A on family N is labelled family-N.
+  Effective-N estimates (ONC, Meucci ENB, participation ratio, MP eigenvalues) are reported, not gated. dsr() raises instead of
+  silently falling back to PSR(0).
+
+n_counts:
+  family_provisional: 31
+  raw_with_estimates: 463
+  ledgered_only_sensitivity: 210
+  family_membership_confirmed_by_owner: false   # owner confirms the exact list before the first core_v1 trial (register row 2)
+
+var_sr_family:          # register row 1: trials whose per-period Sharpes enter the cross-trial variance
+  - legacy_trend_standalone
+  - alt_premia_T2
+  - alt_premia_C1
+  - eodhd_s3_trial_1
+  - eodhd_s3_trial_2
+  - eodhd_s3_trial_3
+  - eodhd_s3_trial_4
+  - eodhd_s3_trial_5
+  - core_v1_grid
+prereg_family:          # used only by G-RESEARCH 8
+  - core_v1
+
+# ---- verdict (register row 10) ---------------------------------------------------------------------------------
+verdict:
+  tiers: {A: "pass: all 8 tests pass; the only paper-eligible tier", C: "insufficient evidence", D: "fail"}
+  combination:
+    all_gates_explicitly_pass: A
+    any_point_fail: D
+    no_point_fail_but_any_confidence_miss: C
+    missing_or_unmapped_gate_result: D          # fail closed
+  paper_eligible_tiers: [A]
+  passive_outcome_tiers: [C, D]
+  h4_enb_miss: {tier: D, reason: "H4 ENB miss"}
+
+# ---- G-RESEARCH 1-8 (register rows 1-9, 11) -------------------------------------------------------------------
+g_research:
+  dsr:                                   # test 1
+    threshold: 0.95
+    var_sr_rule: length_adjusted_floored_at_grid
+    var_sr_formula: "var_sr_adj = max(0, var(SR_i) - mean(sampling_var_i)) + sampling_var(T_cand), floored at the candidate grid variance"
+    sampling_variance: lo_mertens_se_at_each_trial_T
+    per_period_sharpes_only: true
+    refuse_mixed_periods_per_year: true
+    sensitivities: [unadjusted_var_sr, all_family_var_sr, raw_N_463, ledgered_N_210]
+    point_fail: "sharpe <= 0"
+    confidence_miss: "dsr < 0.95"
+  pbo:                                   # test 2
+    method: cscv
+    n_blocks_S: 16
+    threshold: 0.30
+    threshold_when_variants_exceed: {variant_count_threshold: 20, threshold: 0.20}
+    family_variant_count_basis: all_trend_family_trials
+    informativeness:
+      min_effective_grid_n: 4            # effective grid N <= 3 -> uninformative
+      max_median_pairwise_column_corr: 0.95
+      uninformative_result: insufficient # Tier C; never a pass, never a hard fail
+    point_fail: "pbo >= 0.5 AND prob_oos_loss >= 0.5, OR selected config median OOS sharpe <= 0"
+    confidence_miss: "pbo >= threshold (without the point_fail conjunction), OR pbo uninformative"
+    legacy_cscv_pbo_keeps_S: 8
+  cpcv:                                  # test 3
+    n_groups: 10
+    k_test_groups: 2
+    n_paths: 9
+    min_positive_paths: 7
+    median_path_sharpe_min_exclusive: 0
+    embargo_pct: 0.01
+    in_sample_procedure:
+      - "purge training observations whose labels overlap the test groups, plus embargo_pct = 0.01"
+      - "re-estimate the P3-11 constants (forecast scalars, speed-cost filter, FDM, IDM) on the training groups only; a constant that cannot be is listed as known leakage before any result"
+      - "select the grid config (forecast cap x buffer x speed subset, at most 12 configs) by training-group net Sharpe (pre-registered argmax rule)"
+      - "score the test groups with that config"
+    point_fail: "median cpcv path sharpe <= 0"
+    confidence_miss: "fewer than 7 of 9 paths positive"
+  cost_stress:                           # test 4
+    multipliers_reported: [1, 2, 3]
+    gate_multiplier: 2
+    scales: [commission, fees, half_spread, impact, roll]
+    net_sharpe_min_exclusive: 0
+    dsr_min: 0.90
+    flat_bps_for_comparison_only: true
+    point_fail: "net sharpe <= 0 at 2x"
+    confidence_miss: "dsr at 2x < 0.90"
+  stress:                                # test 5
+    max_loss_multiple_of_charter_max_dd: 1.5
+    reference: episode_length_bootstrap_p95   # max_dd_procedure below; never a resettable live peak
+    report_active_instruments_per_episode: true
+    min_active_fraction: {defined_in: P3-07, frozen_in: core_v1 prereg}
+    insufficient_below_min_active_fraction: true      # reported as insufficient, not a pass
+    periods: {source: config/stress_periods.yaml, defined_in: P3-07, hash_recorded_in: core_v1 prereg}
+    never_used_to_tune: true
+    point_fail: "any named episode loses more than 1.5x the reference"
+    confidence_miss: "an episode is insufficient (below min_active_fraction)"
+  robustness:                            # test 6
+    perturbation: 0.25
+    tolerance: 0.30
+    one_sided: true                      # a perturbation that improves Sharpe is not a breach
+    mode: one_parameter_at_a_time_both_directions
+    pass_if_perturbed_net_sharpe_at_least: 0.70    # x the chosen net Sharpe
+    integer_rounding: half_up_min_2
+    dependent_constants_rule: re-estimate the perturbed rule's scalar with the P3-11 procedure
+    max_fraction_of_days_at_gross_cap: 0.20       # OD-17
+    parameters_ref: robustness_parameters
+    point_fail: "perturbed net sharpe below 0.7 x chosen, for any parameter or direction; or gross-cap days above 20%"
+    confidence_miss: null
+  benchmark:                             # test 7
+    benchmark: BM2_60_40_SPY_IEF
+    rebalance: annual
+    sensitivity: monthly
+    uses_higher_after_tax_sharpe_of_the_two: true
+    after_cost_and_after_tax: true
+    tax_model: config/tax_il.yaml        # hash recorded in the core_v1 prereg
+    data: pre_seal_only
+    second_reference: core_only_100      # docs/allocation_replay_2026_09.json
+    live_alpaca_book_excluded: true      # it is post-seal
+    correlation_max: 0.30
+    mandatory_power_analysis:
+      reports: minimum_detectable_sharpe_gap
+      method: "Ledoit-Wolf 2008 studentised block bootstrap or Jobson-Korkie with the Memmel correction; paired bootstrap from P2-05"
+      alpha: 0.05
+      power: 0.80
+    margin: minimum_detectable_sharpe_gap_from_the_power_analysis   # rule, not a number; see deferred_values
+    decision_table:
+      - {case: "point estimate beats BM2 by at least the margin", outcome: pass}
+      - {case: "point estimate beats BM2 by less than the margin", outcome: "pass only if correlation <= 0.3 with the charter rationale, else Tier C"}
+      - {case: "point estimate fails vs BM2", outcome: "pass if correlation <= 0.3 with the charter rationale, else Tier D"}
+    point_fail: "fails the point-estimate branch and correlation > 0.3"
+    confidence_miss: "passes the point estimate by less than the margin and correlation > 0.3"
+  mechanism:                             # test 8
+    charter_path: research/charters/
+    written_by: owner
+    git_timestamp_must_precede: first_ledger_row_with_prereg_id_core_v1
+    point_fail: "charter missing or not timestamped before the first core_v1 ledger row"
+    confidence_miss: null
+
+# ---- G-RESEARCH 6: every numeric core parameter, no exemptions (register row 7) -----------------------------
+robustness_parameters:
+  # name -> {value as frozen by the ticket; null = value frozen in the named place before P3-11, never here}
+  vol_span: {value: 35, kind: integer, ticket: P3-01}
+  vol_blend_long_weight: {value: 0.3, kind: float, ticket: P3-01}          # 70/30 blend
+  vol_long_window_days: {value: 2520, kind: integer, ticket: P3-01}
+  vol_floor_percentile: {value: 0.05, kind: float, ticket: P3-01}
+  ewmac_fast_spans: {value: [2, 4, 8, 16, 32, 64], kind: integer_list, ticket: P3-02}   # slow = 4 x fast
+  ewmac_slow_to_fast_ratio: {value: 4, kind: integer, ticket: P3-02}
+  forecast_cap: {value: 20, kind: float, ticket: P3-02}
+  breakout_lookbacks_N: {value: [20, 40, 80, 160, 320], kind: integer_list, ticket: P3-03}
+  breakout_smoothing_fraction_of_N: {value: 0.25, kind: float, ticket: P3-03}            # N/4
+  fdm_cap: {value: 2.5, kind: float, ticket: P3-05}
+  idm_cap: {value: 2.5, kind: float, ticket: P3-06}
+  buffer_fraction: {value: 0.1, kind: float, ticket: P3-06}
+  tau: {value: null, kind: float, frozen_in: ETF charter (OD-17), ticket: P5-02}
+  gross_cap: {value: 1.0, kind: float, ticket: P4-03}                                    # ETF path, no leverage
+  speed_cost_max_fraction: {value: 0.3333333333333333, kind: float, ticket: P3-02}       # 1/3 of expected rule Sharpe
+  vol_ewma_span: {value: null, kind: integer, frozen_in: config/risk.yaml before P3-11, ticket: P4-03}
+  max_vol_scale: {value: 1.5, kind: float, ticket: P4-03}
+  instrument_risk_cap_multiple: {value: 2.0, kind: float, ticket: P4-03}                 # x weight share, solved by bisection
+
+# ---- charter / drawdown procedure (register rows 11, 19) ---------------------------------------------------------
+charter:
+  max_dd_procedure:
+    method: stationary_block_bootstrap
+    block_length: politis_white
+    draws: 10000
+    seed: recorded_in_prereg
+    path_length_trading_days: 2520
+    percentile: 95
+    basis: selected_config_1x_cost_backtest
+    full_sample_length_reported_as_sensitivity: true
+    rule_of_thumb_reported_alongside: {name: "2.5 tau", status: "plan rule of thumb, not an analytic bound"}
+  references:
+    stress_gate: {multiple: 1.5, basis: episode_length_bootstrap_p95}
+    survival_ref: "max(bootstrap p95 at 2520 days, 2.5 * tau)"      # kill switch, decommission, live-step envelope
+  kelly_tau_bound: {rule: "tau <= 0.5 x Kelly vol", enforce: true, sharpe_haircut: 0.5, deflated_sharpe_only: true}
+
+# ---- G-PAPER (register rows 12-14) ---------------------------------------------------------------------------------
+g_paper:
+  account: dedicated_candidate_account_only
+  embargo_weeks_before_start: 2
+  min_calendar_months: 6
+  min_review_events: 26                  # scheduled weekly review events, traded or not
+  fidelity:
+    daily_return_corr_min: 0.95
+    tracking_error_max_fraction_of_tau: 0.25
+    window_trading_days: 63
+    zero_exposure_day_rule: exclude_from_corr_and_tracking_error_and_report_count
+  realised_cost_max_multiple_of_modelled: 1.5
+  cost_test_min_fills: 30
+  cost_test_min_instruments: 10
+  cost_basis: [median_per_trade, aggregate]
+  commission_included: true
+  position_breaks: {max_unreconciled_trading_days: 1, durable_records: true}
+  missed_reviews: {allowed: 0, unless_documented_outage: true, stuck_working_order_counts_as_missed_unless_explained: true}
+  kill_switches: all_tiers_fault_injected_during_paper
+  max_pre_declared_reevaluation_dates: 1
+  allocation_forward_test: governed_only_by_its_own_frozen_bars_I1_I5_and_BAR_SLEEVE_DRIFT
+
+# ---- forward holdout (register row 15, amended by owner 2026-10-04) --------------------------------------------
+p3_10_forward_holdout:
+  min_months_of_post_seal_data: 12
+  required_before_first_live_step: false          # AMENDED by owner: reported, not required (was required under OD-18)
+  evaluated_once_per_family: true
+  label: no_contradiction_check_not_proof_of_edge
+  pass_criteria:
+    forward_net_sharpe_not_below: "5th percentile of the block-bootstrapped distribution of 12-month backtest Sharpes"
+    forward_max_dd_within: "survival_ref via the 12-month-horizon bootstrap p95"
+
+# ---- G-LIVE-STEP and G-DECOMMISSION (register row 18) --------------------------------------------------------
+g_live_step:
+  steps_fraction_of_planned_capital: [0.25, 0.50, 1.00]
+  min_months_per_step: 3
+  g_paper_criteria_that_must_hold_on_live_fills: [fidelity, realised_cost, position_breaks]
+  cost_test_min_fills: 30
+  cost_test_min_instruments: 10
+  dd_reference: survival_ref
+  dd_multiple: 1.0                                 # 1.5x is decommission, not a pass
+  cusum_not_alarmed: true
+  owner_signoff_committed_in: research/approvals/
+g_decommission:
+  triggers: [drawdown_above_1_5x_survival_ref, cusum_alarm, fidelity_breach_two_consecutive_months, mechanism_invalidated_owner_decision]
+  drawdown_multiple_of_survival_ref: 1.5
+  one_trigger: probation_and_review
+  two_triggers: target_weight_zero_until_owner_approves
+
+# ---- phase exits (register row 16) ---------------------------------------------------------------------------------
+phase_exits:
+  H4:
+    enb_method: meucci_pca_pnl_cov_on_asset_class_pnl
+    enb_min_etf: 2.5
+    enb_min_futures: 3.0
+    hard_exit: true
+    post_hoc_universe_changes_allowed: false
+    stress_correlation_flag_threshold: 0.7
+    stress_correlation_rolling_window: {defined_in: P4-02}
+  H5:
+    enforcement_test: dry_run_Allocator_plan
+    defined_in: P5-01
+
+# ---- monitoring (register row 19) ---------------------------------------------------------------------------------
+monitoring:
+  fidelity_window_trading_days: 63
+  zero_exposure_day_rule: exclude_from_corr_and_tracking_error_and_report_count
+  cusum: {arl0_target_years: 5, secondary_test: rolling_36_month_one_sided_t_test}
+kill_switch:
+  settings_file: config/kill_switch.yaml
+  hard_and_halt_block_new_orders_not_flatten: true
+  soft_alert_only: true
+  survival_ref_floor_multiple_of_tau: 2.5
+  soft_warning_multiple_of_charter_max_dd: 1.0
+  hard_kill_multiple_of_charter_max_dd: 1.5
+
+# ---- P1-08 acceptance (register row 17) -----------------------------------------------------------------------------
+p1_08_acceptance:                       # frozen BEFORE the harness is written; the harness may not be changed to pass
+  size:
+    alpha: 0.05
+    max_rejection_rate: 0.07
+    K: 50
+    n_sims: 500
+    applies_separately_to: [reality_check, spa, romano_wolf_fwer]
+  power:
+    single_test: {K: 1, annualised_sr: 1.0, years: 10, min_power: 0.80}
+    multiple_testing: {K: 50, true_strategy_annualised_sr: 1.3, min_power: 0.80, or_within_of_oracle_max_t: 0.05}
+    reported_only: {K: 50, true_strategy_annualised_sr: 1.0}
+  pbo:
+    noise_matrices: 200
+    noise_mean_pbo_range: [0.4, 0.6]
+    strong_drift: {N: 30, annualised_sr: 3.0, T: 1600, S: 16, min_seeds: 20, mean_pbo_max_exclusive: 0.1}
+  dsr:
+    null_false_pass_max: 0.05
+    two_sided_calibration: {psr0_single_null_uniform_ks_p_min: 0.01, strong_drift_pass_rate_within_mc_error_of_oracle: true}
+  scenarios:
+    dgp: garch11_student_t
+    T: 2520
+    periods_per_year: 252
+    garch: {omega: 5.0e-6, alpha: 0.05, beta: 0.90, nu: 6.0, mu: 0.0}    # from ticket P1-08 (unconditional daily vol 1%)
+    cross_correlation: {defined_in: P1-08}
+    bootstrap_B: 2000
+    master_seed: {defined_in: P1-08, recorded_before_first_run: true}
+
+# ---- values deliberately NOT set here (register: no number was fixed; the named ticket freezes it in its prereg) ---
+deferred_values:
+  - {key: g_research.stress.min_active_fraction, defined_in: P3-07}
+  - {key: g_research.stress.periods hash, defined_in: P3-07}
+  - {key: g_research.benchmark.margin (a rule is frozen; its numeric value comes from the power analysis), defined_in: P2-05 / P3-08}
+  - {key: robustness_parameters.tau, defined_in: P5-02 ETF charter (OD-17)}
+  - {key: robustness_parameters.vol_ewma_span, defined_in: config/risk.yaml before P3-11}
+  - {key: phase_exits.H4.stress_correlation_rolling_window, defined_in: P4-02}
+  - {key: p1_08_acceptance.scenarios.cross_correlation and master_seed, defined_in: P1-08, freeze_before: first_harness_run}
