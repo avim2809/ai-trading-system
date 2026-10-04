@@ -86,7 +86,7 @@ Nothing below is valid until you fill it in yourself. An agent must not sign.
 ```
 Rows approved as drafted:  17 of 19      Rows amended: 2      Rows reverted: 0
 Signed by: Avi Milner    Date/time (UTC, from `date -u`): 2026-10-04T10:04:53Z
-sha256 of config/gates.yaml with the meta block removed (filled in at freeze): ________________
+sha256 of config/gates.yaml with the meta block removed (filled in at freeze): f212120e7613372643aad3124977a4404a34dae26d0bb67bf2a8b820e5ce4869
 ```
 
 After you sign: ticket P0-08 writes `config/gates.yaml` from the signed rows, the integrity test pins its hash to the line above,
