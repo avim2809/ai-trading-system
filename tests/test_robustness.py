@@ -75,3 +75,93 @@ class TestSharpeConfidenceInterval:
         mc = MonteCarloAnalyzer()
         assert mc.sharpe_confidence_interval(pd.Series([0.01])) == {}
         assert mc.sharpe_confidence_interval(pd.Series([], dtype=float)) == {}
+
+
+# ---------------------------------------------------------------------------
+# P1-10: opt-in stationary bootstrap (default iid path must stay bit-identical)
+# ---------------------------------------------------------------------------
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _golden_input() -> np.ndarray:
+    return np.random.default_rng(0).normal(0.0005, 0.01, 100)
+
+
+def _ar1(rho: float, n: int, seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    eps = rng.normal(0.0, 0.01, n)
+    x = np.zeros(n)
+    for t in range(1, n):
+        x[t] = rho * x[t - 1] + eps[t]
+    return x
+
+
+def test_default_iid_bit_identical():
+    golden = np.load(_FIXTURES / "robustness_iid_golden.npy")
+    out = MonteCarloAnalyzer(n_simulations=50, seed=42).bootstrap_returns(_golden_input())
+    assert np.array_equal(out, golden)
+    # explicit method="iid" is the same stream
+    out2 = MonteCarloAnalyzer(n_simulations=50, seed=42, method="iid").bootstrap_returns(_golden_input())
+    assert np.array_equal(out2, golden)
+    expected = json.loads((_FIXTURES / "robustness_summary_golden.json").read_text())
+    got = json.loads(json.dumps(MonteCarloAnalyzer(n_simulations=50, seed=42).summary(_golden_input())))
+    assert got == expected
+
+
+def test_stationary_changes_drawdown_tail_on_autocorrelated():
+    x = _ar1(0.4, 1000, seed=3)
+    dd_iid = MonteCarloAnalyzer(n_simulations=1000, seed=7).analyze_drawdowns(x)
+    dd_sb = MonteCarloAnalyzer(n_simulations=1000, seed=7, method="stationary").analyze_drawdowns(x)
+    # drawdowns are negative fractions: a fatter tail is a MORE negative worst_95pct
+    assert dd_sb["worst_95pct"] < dd_iid["worst_95pct"]
+
+
+def test_stationary_shape_and_determinism():
+    x = _ar1(0.3, 300, seed=1)
+    a = MonteCarloAnalyzer(n_simulations=20, seed=5, method="stationary", block_len=5.0)
+    b = MonteCarloAnalyzer(n_simulations=20, seed=5, method="stationary", block_len=5.0)
+    sa = a.bootstrap_returns(x, 120)
+    assert sa.shape == (20, 120)
+    assert np.array_equal(sa, b.bootstrap_returns(x, 120))
+    # per-call override
+    over = MonteCarloAnalyzer(n_simulations=20, seed=5).bootstrap_returns(
+        x, 120, method="stationary", block_len=5.0
+    )
+    assert np.array_equal(over, sa)
+
+
+def test_stationary_empty_input_returns_zeros():
+    out = MonteCarloAnalyzer(n_simulations=4, method="stationary").bootstrap_returns(
+        np.array([np.nan])
+    )
+    assert out.shape == (4, 0) and not out.any()
+
+
+def test_stationary_not_imported_by_default():
+    code = (
+        "import sys, numpy as np\n"
+        "from firm.eval.robustness import MonteCarloAnalyzer\n"
+        "mc = MonteCarloAnalyzer(n_simulations=10)\n"
+        "mc.summary(np.random.default_rng(0).normal(0, 0.01, 200))\n"
+        "assert 'firm.validation.bootstrap' not in sys.modules\n"
+        "assert 'firm.validation' not in sys.modules\n"
+        "MonteCarloAnalyzer(n_simulations=10, method='stationary').bootstrap_returns(np.arange(50.0))\n"
+        "assert 'firm.validation.bootstrap' in sys.modules\n"
+    )
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
+def test_unknown_method_raises():
+    with pytest.raises(ValueError):
+        MonteCarloAnalyzer(method="nope").bootstrap_returns(_golden_input())
+    with pytest.raises(ValueError):
+        MonteCarloAnalyzer().bootstrap_returns(_golden_input(), method="nope")
