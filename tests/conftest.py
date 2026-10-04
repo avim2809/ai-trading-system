@@ -121,13 +121,15 @@ def _isolated_research_ledger(tmp_path):
     Wrapped backtest entry points append one capture line per outermost call, and the armed path
     writes ``unregistered`` rows into the append-only hash-chained ledger (no delete API), which
     would irreversibly inflate N on every full-suite run. Redirects ``FIRM_RESEARCH_LEDGER_ROOT``
-    to ``tmp_path`` (``inbox/`` and ``returns/`` pre-created) and resets the capture module state
+    to a temp dir beside ``tmp_path`` (``inbox/`` and ``returns/`` pre-created) and resets the capture module state
     afterwards. Same ``patch.dict`` style as ``_isolated_execution_audit`` (deliberately no
     ``monkeypatch``). Tests that set the env var themselves still win.
     """
     import sys
 
-    root = tmp_path / "research-ledger"
+    # A SIBLING of tmp_path, not a child: tests that assert on tmp_path's exact contents
+    # (e.g. test_allocation_forward_monitor) must not see the pre-created ledger dirs.
+    root = tmp_path.parent / f"{tmp_path.name}-research-ledger"
     (root / "inbox").mkdir(parents=True)
     (root / "returns").mkdir()
     try:
