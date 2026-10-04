@@ -31,7 +31,7 @@ LAST_USABLE = dt.date(2026, 9, 30)
 
 def _read_csv(src: str) -> pd.DataFrame:
     if src.startswith(("http://", "https://")):
-        with urllib.request.urlopen(src, timeout=60) as r:  # noqa: S310 - owner-supplied URL, owner-run script
+        with urllib.request.urlopen(src, timeout=60) as r:
             return pd.read_csv(io.BytesIO(r.read()))
     return pd.read_csv(src)
 

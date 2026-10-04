@@ -132,7 +132,7 @@ def test_pit_asof_property(env, seed):
 
 def test_spike_lookahead_not_used(env):
     # spike (+200%) starts at position p; reverts at p+4. asof = p+1 cannot see the reversal, the bar is kept.
-    d, uni, p, ra = _spike_fixture(env, spike_pos=100, revert_after=4)
+    d, uni, p, _ra = _spike_fixture(env, spike_pos=100, revert_after=4)
     asof_early = d[p + 1].date()
     asof_late = d[p + 8].date()
     early = _load(env, uni, asof_early)["AAA"].bars
@@ -176,7 +176,7 @@ def test_total_return_uses_adjusted_close_within_segments(env):
 def test_manifest_roundtrip_and_tamper(env):
     from firm.data.manifest import build_manifest, snapshot_id, verify_manifest, write_manifest
 
-    _d, _uni = _setup(env)
+    d, _ = _setup(env)
     paths = sorted((env.root / "etfs_full").glob("*.parquet"))
     m = build_manifest(paths, root=env.root, dataset="eodhd_etfs_full", licence="vendor")
     assert list(m.columns) == ["dataset", "licence", "path", "bytes", "sha256", "rows", "first_date", "last_date"]
