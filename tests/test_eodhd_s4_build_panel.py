@@ -162,6 +162,10 @@ class TestBuildPanelEndToEnd:
         _synthetic_bars(cal, dead).to_parquet(uni / "DEAD.parquet")
 
         monkeypatch.setattr(bp, "UNIVERSE_DIR", uni)
+        # build_panel takes its exchange calendar from the real SPY file under
+        # data/research/eodhd (licensed, gitignored, absent on a clean clone).
+        # This test is about the synthetic universe, so use the synthetic calendar.
+        monkeypatch.setattr(bp.ec, "equity_calendar", lambda *a, **k: cal)
         panel, summary = bp.build_panel(universe_dir=uni)
 
         assert set(panel["ticker"].unique()) <= {"GOOD", "DEAD"}
