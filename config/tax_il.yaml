@@ -1,0 +1,36 @@
+# Informational Israeli-resident tax assumptions for after-tax benchmark reporting (ticket P2-05).
+# INFORMATION ONLY, NOT TAX ADVICE, NOT THE OWNER'S LIABILITY. Every value is tagged by source status (as in
+# docs/JURISDICTION_NOTES.md section 4): `source-plan` = stated in the source plan as carried in plan/tickets/P2-05.md;
+# `repo-brief` = stated in the repo brief; `agent-knowledge` / `unset` = no repo document states it, modelled as a
+# labelled, switchable ASSUMPTION or left at a placeholder. Each open item maps to an adviser question (Qn) in the memo.
+# Conventions below are fixed ex ante and applied identically to system and BM2 (they are NOT free switches after results).
+version: 1
+informational_only: true
+rate_real_gain: 0.25            # source: repo-brief (L185) and source-plan; verify Q3, Q5
+surtax_rate_1: 0.03             # source: source-plan; verify Q6
+surtax_rate_2: 0.02             # source: source-plan (additional layer on capital income above the threshold); verify Q6
+surtax_threshold_ils: 721560    # source: source-plan, current-year value OPEN; verify Q6
+inflation_adjust: true          # source: source-plan wording "real gains"; exact statutory treatment unverified (Q5). Sensitivity: false
+loss_carryforward: false        # source: source-plan states in-year offsets only; carry-forward unset (Q12). Sensitivity: true
+foreign_tax_credit: false       # unset (Q11): withholding is treated as an extra cost with no Israeli credit (conservative)
+dividend_rate: null             # unset: Israeli rate on foreign dividends is not stated in any repo document; null = reuse rate_real_gain (assumption)
+withholding:                    # by fund domicile; UNSET (Q10): null is modelled as 0.0 and printed as a placeholder
+  US: null
+  IE: null                      # UCITS variant is a placeholder pending OD-12 follow-up (adviser answer); never guessed
+fx_translation: trade_date      # unset (Q7): trade-date translation is the P2-05 default assumption
+lot_method: fifo                # unset: FIFO unless config says otherwise
+convention: deferred_mtm        # fixed ex ante: accrue tax daily against a deferred-tax liability on unrealised real gains
+sensitivity_convention: terminal_liquidation   # reported as a sensitivity only
+source_status:
+  rate_real_gain: repo-brief+source-plan
+  surtax_rate_1: source-plan
+  surtax_rate_2: source-plan
+  surtax_threshold_ils: source-plan(current-year value open)
+  inflation_adjust: agent-knowledge(source-plan wording)
+  loss_carryforward: agent-knowledge
+  foreign_tax_credit: unset
+  dividend_rate: unset
+  withholding: unset
+  fx_translation: agent-knowledge
+  lot_method: agent-knowledge
+  convention: plan-fixed-ex-ante

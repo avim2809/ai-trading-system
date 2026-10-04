@@ -83,6 +83,11 @@ OD-12's direction is US-listed BM2 now with a UCITS placeholder. This memo does 
 | `withholding.US` | unset (open) | agent-knowledge | Q10 |
 | `withholding.IE` | unset (open) | agent-knowledge | Q10 |
 | foreign-tax-credit switch | unset | agent-knowledge | Q11 |
+| `foreign_tax_credit` (P2-05 config) | false (withholding is a cost, no Israeli credit; conservative placeholder) | agent-knowledge | Q11 |
+| `dividend_rate` (P2-05 config) | null = reuse `rate_real_gain` (not stated in any repo document) | agent-knowledge | Q3, Q10 |
+| `lot_method` (P2-05 config) | fifo | agent-knowledge | Q5 |
+| `convention` (P2-05 config) | `deferred_mtm` (fixed ex ante; `terminal_liquidation` is a sensitivity only) | plan-fixed-ex-ante | none |
+| surtax layers (P2-05 model) | both layers applied to the same capital-income base | source-plan (ambiguous) | Q6 |
 | FX translation convention | unset (trade-date translation is the P2-05 default assumption) | agent-knowledge | Q7 |
 | trader-status reclassification rate | unset (sensitivity only) | repo-brief (open question, L256) | Q3, Q4 |
 | futures P&L / funding character | unset | repo-brief (open question, L256) | Q13 |

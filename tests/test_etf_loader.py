@@ -267,3 +267,15 @@ def test_usd_ils_seal_and_sources(env):
     for bad in (dt.date(2026, 10, 1), dt.date(2026, 10, 2)):
         with pytest.raises(HoldoutAccessError):
             usd_ils(bad, il_macro_root=env.macro)
+
+
+def test_load_dividends_pit_and_unadjusted(env):
+    from firm.data.etf_loader import load_dividends
+
+    (env.root / "corporate_actions" / "dividends").mkdir(parents=True)
+    pd.DataFrame({"date": pd.to_datetime(["2026-03-20", "2026-09-20", "2026-10-20"]), "value": [0.4, 0.5, 0.6],
+                  "unadjustedValue": [0.41, 0.51, 0.61]}).to_parquet(env.root / "corporate_actions" / "dividends" / "AAA.parquet", index=False)
+    out = load_dividends(["AAA", "NOPE"], asof=LAST, data_root=env.root)
+    assert list(out["amount"]) == [0.41, 0.51]  # post-seal dividend dropped; unadjusted value used; missing file skipped
+    with pytest.raises(HoldoutAccessError):
+        load_dividends(["AAA"], asof=SEAL, data_root=env.root)

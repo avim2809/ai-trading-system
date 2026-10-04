@@ -16,6 +16,7 @@ Store layout under ``data_root`` (default ``data/research/eodhd``): ``etfs_full/
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,6 +25,8 @@ import yaml
 
 from firm.data.cleaning import clean_bars_v3, equity_calendar_v3
 from firm.research import data_access, seal
+
+log = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DATA_ROOT = _REPO_ROOT / "data" / "research" / "eodhd"
@@ -138,3 +141,24 @@ def il_cpi(asof: dt.date, *, il_macro_root: Path | None = None) -> pd.Series:
     kept = raw.loc[keep]
     seal.check_frame(kept, what=str(p))
     return pd.Series(kept["value"].to_numpy(dtype=float), index=pd.DatetimeIndex(kept["date"]), name="il_cpi")
+
+
+def load_dividends(symbols: list[str], *, asof: dt.date, data_root: Path | None = None) -> pd.DataFrame:
+    """Cash dividends per share from ``corporate_actions/dividends/<SYM>.parquet`` as ``date, symbol, amount`` (ex-date <= asof).
+
+    ``amount`` is the UNADJUSTED per-share value (``unadjustedValue`` when present, else ``value``): the column layout is
+    the EODHD dividend export and is unverified offline. Missing files are skipped and logged, not silently invented.
+    """
+    root = Path(data_root) if data_root is not None else DEFAULT_DATA_ROOT
+    frames = []
+    for sym in symbols:
+        p = root / "corporate_actions" / "dividends" / f"{sym}.parquet"
+        if not p.exists():
+            log.warning("no dividend file for %s", sym)
+            continue
+        df = _read_raw(p, asof)
+        col = "unadjustedValue" if "unadjustedValue" in df.columns else "value"
+        frames.append(pd.DataFrame({"date": df["date"], "symbol": sym, "amount": pd.to_numeric(df[col], errors="coerce")}))
+    if not frames:
+        return pd.DataFrame({"date": pd.to_datetime([]), "symbol": [], "amount": []})
+    return pd.concat(frames, ignore_index=True).dropna().sort_values(["date", "symbol"]).reset_index(drop=True)

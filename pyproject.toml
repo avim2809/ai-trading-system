@@ -132,7 +132,9 @@ target-version = "py314"
 testpaths = ["tests"]
 markers = [
     "slow: long-running statistical simulations (size/power, Monte Carlo); run in the full suite",
+    "real_data: reads licensed data under data/research (opt-in, owner-triggered); deselected by default",
 ]
+addopts = "-m 'not real_data'"
 # Silence third-party deprecation warnings we can't fix from here, so CI logs
 # stay readable. Matched by message prefix, so our own warnings still surface.
 filterwarnings = [
