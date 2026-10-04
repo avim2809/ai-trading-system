@@ -15,15 +15,18 @@ Write two or three sentences for each. No agent may write this section.
 
 **1a. Why should a diversified, volatility-scaled trend portfolio earn a premium?** (who is willing to pay, what risk or behaviour creates it)
 
-> ______________________________________________________________________________
+> **AGENT DRAFT (2026-10-04). Rewrite it in your own words, then delete this label; you are the author of record.**
+> Trends in asset prices persist at horizons of about one to twelve months, and a portfolio that goes long what has been rising and steps aside from what has been falling captures that persistence while avoiding some of the deepest falls. Two explanations are usually given. Behavioural: investors under-react to news and then herd, so prices drift in the direction of the news before they fully adjust (Moskowitz, Ooi and Pedersen 2012). Risk transfer: hedgers and other holders who care about something other than return make trends worth earning for those who accept the risk of being wrong. The evidence is strongest for a *diversified, volatility-scaled portfolio* across many markets (Hurst, Ooi and Pedersen 2017: positive in every decade since 1880, and in 8 of the 10 largest 60/40 drawdowns). It is weak market by market (Huang et al. 2020), and much of the benefit comes from volatility scaling (Kim, Tse and Wald 2016). So this charter claims a modest, diversifying premium, not a per-asset forecast.
 
 **1b. Who is on the other side of the trade, and why would they keep taking it?**
 
-> ______________________________________________________________________________
+> **AGENT DRAFT. Rewrite in your own words.**
+> The other side is made of participants who trade for reasons unrelated to expected return: hedgers and insurers who must hold or sell risk, index funds and rebalancers who buy after falls and sell after rises by mandate, and forced sellers (margin calls, redemptions, regulatory limits). They keep taking that side because their mandate or constraint compels them, not because they think it pays. In this long/flat ETF version there is no short leg, so the compensation is mostly the avoided drawdown and the diversification, not a short-side premium.
 
 **1c. Why should it persist, and what would make it stop?**
 
-> ______________________________________________________________________________
+> **AGENT DRAFT. Rewrite in your own words.**
+> It should persist as long as those constraints and the behavioural slow-reaction exist, and that is structural rather than a one-off pattern. It can fade: published premia lose about half their return after publication (McLean and Pontiff 2016), crowding can compress it, and trend followers have had long bad stretches (the SG Trend Index's worst rolling 12 months was -18.6% to spring 2025, and multi-year flat periods are normal). It would stop working if markets stopped trending after costs for a decade, if the avoided-drawdown benefit disappeared because falls became fast reversals (March 2023, August 2024, April 2025 were hostile episodes), or if costs and taxes consume the small edge at this account size.
 
 *Prompts, not answers.* Think about: investors who hold risk positions for reasons other than expected return (hedgers, index funds,
 forced sellers); slow-moving information and behavioural under-reaction versus risk-premium explanations; why diversification
@@ -80,7 +83,8 @@ here (it is what gate 7's correlation branch needs): ___________________________
 
 ## 7b. What would falsify the mechanism  **YOUR WORDS**
 
-> ______________________________________________________________________________
+> **AGENT DRAFT. Rewrite in your own words.**
+> The mechanism is falsified if, over the pre-seal research window and then forward, (a) the long/flat portfolio's net Sharpe after cost and tax is not above the 60/40 benchmark's in a majority of non-overlapping decades; (b) its returns are explained by static equity-and-bond beta with no timing contribution (so the "trend" adds nothing beyond buy-and-hold); (c) drawdowns exceed the survival reference `survival_dd`; or (d) the premium is only visible in one market or one sub-period rather than across the diversified universe.
 
 ## 8. Declarations (confirm by keeping them)
 
