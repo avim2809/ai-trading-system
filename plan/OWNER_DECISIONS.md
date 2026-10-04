@@ -218,7 +218,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P0-05, P1-01, P0-08, P3-08
 
-**Decision:** Raw count of all trials (about 460), Gann at about 145, as recommended. Recorded 2026-10-03.
+**Decision:** AMENDED 2026-10-04 (owner): the DSR gate uses a FAMILY-SCOPED N (time-series trend/carry trials, provisionally 31, list signed in gates.yaml) with the raw count 463 (210 ledgered-only) reported alongside in every verdict. Supersedes the 2026-10-03 answer (raw count 463 as the gate N). Gann stays counted at about 145 in the raw figure. See docs/gate_deviation_register_2026_10.md row 2.
 
 ---
 
