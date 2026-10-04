@@ -71,7 +71,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P2-07, P3-04
 
-**Decision:** 
+**Decision:** Defer / not applicable (owner, 2026-10-04): no futures data is bought; P2-07 stays deferred. Revisit only if OD-01 capital rises to at least about $100k and the ETF core earns it.
 
 ---
 
@@ -218,7 +218,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P0-05, P1-01, P0-08, P3-08
 
-**Decision:** AMENDED 2026-10-04 (owner): the DSR gate uses a FAMILY-SCOPED N (time-series trend/carry trials, provisionally 31, list signed in gates.yaml) with the raw count 463 (210 ledgered-only) reported alongside in every verdict. Supersedes the 2026-10-03 answer (raw count 463 as the gate N). Gann stays counted at about 145 in the raw figure. See docs/gate_deviation_register_2026_10.md row 2.
+**Decision:** AMENDED 2026-10-04 (owner): the DSR gate uses a FAMILY-SCOPED N (time-series trend/carry trials, provisionally 31, list signed in gates.yaml) with the raw count 463 (210 ledgered-only) reported alongside in every verdict. Supersedes the 2026-10-03 answer (raw count 463 as the gate N). Gann stays counted at about 145 in the raw figure. See docs/gate_deviation_register_2026_10.md row 2. CENSUS SIGNED OFF as drafted (owner, 2026-10-04): Gann at about 145, the seven estimate-only rows, gross N = 463 and 210 ledgered-only. The 31-trial trend/carry family list is CONFIRMED including S5 crypto momentum; the flag n_counts.family_membership_confirmed_by_owner in gates.yaml stays false only because that file is hash-pinned, and this line is the confirmation.
 
 ---
 
@@ -261,7 +261,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P6-01, P6-02, P6-03
 
-**Decision:** 
+**Decision:** Not applicable for now (owner, 2026-10-04): capital is under $25k, where the plan stays passive. Nothing is bought, provisioned or installed. Revisit if capital exceeds $25k or before any live step. No candidate paper account or :8002 instance; P6 stays unplanned.
 
 ---
 
@@ -282,7 +282,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks only.** the P2-05 UCITS variant and P7-01 (the US-listed BM2 P2-05 run is not blocked)
 
-**Decision:** 
+**Decision:** US-listed ETFs now (owner, 2026-10-04): research and BM2 run on owned US-listed history; the UCITS variant stays a placeholder. An Israeli tax adviser's answer (estate tax, withholding, reporting) is required before any live step. Information, not advice.
 
 ---
 
@@ -449,4 +449,4 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P7-02
 
-**Decision:** 
+**Decision:** Not applicable for now (owner, 2026-10-04): capital is under $25k, where the plan stays passive. Nothing is bought, provisioned or installed. Revisit if capital exceeds $25k or before any live step. No real-money broker, account or host is chosen; P7 stays unplanned.
