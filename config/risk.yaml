@@ -1,0 +1,18 @@
+# config/risk.yaml: CANDIDATE-ONLY limits for src/firm/risk/limits.py (ticket P4-03).
+# Not loaded by any live process (config/live*.yaml are untouched). If P6-01 ever loads it live it must go through
+# resolve_live_startup() in src/firm/live/provider_utils.py.
+#
+# tau and vol_ewma_span are DELIBERATELY null: tau is frozen by the approved ETF charter (P5-02, OD-17; working value
+# 9% is NOT copied here) and vol_ewma_span is frozen by the owner before P3-11 (gates.yaml deferred_values). load_limits()
+# raises until both are set. No value below was chosen from backtest results; the caps are the source plan's.
+tau: null
+vol_ewma_span: null
+instrument_type: etf          # etf | futures
+max_gross: 1.0                # etf <= 1.0 (no leverage), futures <= 4.0
+max_vol_scale: 1.5            # source leverage-scale cap; never tuned
+max_class_risk_share: 0.40    # per-asset-class risk-contribution cap
+max_instrument_risk_mult: 2.0 # instrument RC <= 2 x its P4-01 handcrafted share
+long_only: true
+margin_limit: null            # futures default 0.30 of equity; must stay null for etf
+margin_rate: null             # futures only: per-instrument initial margin fraction (P2-07)
+universe: config/universe_etf.yaml
