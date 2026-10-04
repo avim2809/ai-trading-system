@@ -6,9 +6,30 @@ See each fixture's docstring for what it guards against.
 from __future__ import annotations
 
 import os
+import tempfile
 from unittest.mock import patch
 
 import pytest
+
+# --- Hermetic test environment -------------------------------------------------
+# The suite must give the same result on a clean clone (CI, a restricted user,
+# a research worktree) as on the production checkout, so it may neither need
+# nor be able to read the developer's real .env or secrets. Must run before
+# any test module imports litellm or builds Settings.
+#
+# * LITELLM_MODE=PRODUCTION: litellm otherwise calls load_dotenv() at import,
+#   which walks up from the venv's location and opens the first .env it finds
+#   (the live checkout's, when the venv lives there).
+# * Placeholder broker keys: Settings.require("alpaca_api_key") is exercised by
+#   the /api/live/start tests. Unconditional on purpose, so tests never run
+#   with real credentials even when a real .env is present. The values are
+#   obviously fake and no test may rely on them reaching a network.
+# * MPLCONFIGDIR: matplotlib writes its cache under $HOME, which a restricted
+#   user may not own.
+os.environ["LITELLM_MODE"] = "PRODUCTION"
+os.environ["ALPACA_API_KEY"] = "test-alpaca-key-not-real"
+os.environ["ALPACA_SECRET_KEY"] = "test-alpaca-secret-not-real"
+os.environ.setdefault("MPLCONFIGDIR", tempfile.mkdtemp(prefix="mplconfig-"))
 
 
 @pytest.fixture(autouse=True)

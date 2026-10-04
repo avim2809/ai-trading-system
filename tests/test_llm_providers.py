@@ -50,6 +50,13 @@ class TestRegistry:
 
 
 class TestBuildLLMService:
+    @pytest.fixture(autouse=True)
+    def _isolated_cwd(self, tmp_path, monkeypatch):
+        # LLMService opens a response cache at the cwd-relative default
+        # "data/llm_cache.db"; without this the tests write into (and depend on
+        # the permissions of) whatever checkout they run from.
+        monkeypatch.chdir(tmp_path)
+
     def test_missing_key_raises(self, monkeypatch):
         monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         with pytest.raises(RuntimeError, match="ANTHROPIC_API_KEY"):
