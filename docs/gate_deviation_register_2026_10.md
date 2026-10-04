@@ -84,8 +84,8 @@ row). **Revert** = use the source plan's wording; the ambiguity named in the row
 Nothing below is valid until you fill it in yourself. An agent must not sign.
 
 ```
-Rows approved as drafted:  ____ of 19      Rows amended: ____      Rows reverted: ____
-Signed by: ________________    Date/time (UTC, from `date -u`): ________________
+Rows approved as drafted:  17 of 19      Rows amended: 2      Rows reverted: 0
+Signed by: Avi Milner    Date/time (UTC, from `date -u`): 2026-10-04T10:04:53Z
 sha256 of config/gates.yaml with the meta block removed (filled in at freeze): ________________
 ```
 
