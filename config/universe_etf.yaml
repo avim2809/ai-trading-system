@@ -1,0 +1,243 @@
+# ETF instrument universe (ticket P2-01). Written WITHOUT any performance input; see docs/universe_rationale_2026_10.md.
+# Metadata generated mechanically by plan/drafts/P2-01/gen_universe_meta.py (manifest + date/volume only).
+version: 1
+status: frozen_candidate   # becomes frozen when the owner signs the P2-01 review; do not change after the first ledger trial using it
+frozen_note: "chosen without performance input; no post-seal data examined (asof <= 2026-09-30)"
+asof: 2026-09-30
+screen:
+  early_window_years: 3
+  screen_floor_adv_usd: 1000000   # median dollar ADV over first 3y after inception; see rationale (deviation note)
+  min_history_years: 5
+  min_instruments: 15
+  max_instruments: 25
+  max_per_cell: 3
+  warmup: {min_return_days_to_enter: 256, full_vol_window_days: 2520, rule: "expanding mean of the vol quantity until 2520 days; enter after 256 return days"}
+asset_classes:
+  equity_us: [SPY, IWM, QQQ]
+  equity_dm_ex_us: [EFA, VGK]
+  equity_em: [EEM]
+  treasury: [SHY, IEF, TLT]
+  tips: [TIP]
+  credit_ig: [LQD]
+  credit_hy: [HYG]
+  gold: [GLD]
+  commodities: [DBC]
+  reit: [IYR]
+instruments:
+  - symbol: SPY
+    asset_class: equity_us
+    currency: USD
+    kind: etf
+    inception_date: 1993-01-29
+    first_trade_date: 1994-02-02
+    full_vol_window_date: 2003-01-30
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 12093823
+    prior_exposure: [allocation_forward_test_preregistered, alt_premia_preregistered_bars, eodhd_s3_bond_commodity_trend_preregistered_bars, s2_forward_preregistered]
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "earliest US large-cap broad-market vehicle"
+  - symbol: IWM
+    asset_class: equity_us
+    currency: USD
+    kind: etf
+    inception_date: 2000-05-26
+    first_trade_date: 2001-06-04
+    full_vol_window_date: 2010-06-07
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 97191794
+    prior_exposure: []
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "US small-cap (size cell member; earliest small-cap vehicle in candidate list)"
+  - symbol: QQQ
+    asset_class: equity_us
+    currency: USD
+    kind: etf
+    inception_date: 1999-03-10
+    first_trade_date: 2000-03-14
+    full_vol_window_date: 2009-03-17
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 2612792000
+    prior_exposure: []
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "US growth/large-tech index vehicle (candidate list fixed in advance)"
+  - symbol: EFA
+    asset_class: equity_dm_ex_us
+    currency: USD
+    kind: etf
+    inception_date: 2001-08-17
+    first_trade_date: 2002-08-29
+    full_vol_window_date: 2011-08-25
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 108580065
+    prior_exposure: [alt_premia_preregistered_bars]
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "earliest developed ex-US broad vehicle passing screen"
+  - symbol: VGK
+    asset_class: equity_dm_ex_us
+    currency: USD
+    kind: etf
+    inception_date: 2005-03-10
+    first_trade_date: 2006-03-16
+    full_vol_window_date: 2015-03-16
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 7786074
+    prior_exposure: []
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "developed Europe regional vehicle passing screen"
+  - symbol: EEM
+    asset_class: equity_em
+    currency: USD
+    kind: etf
+    inception_date: 2003-04-11
+    first_trade_date: 2004-04-19
+    full_vol_window_date: 2013-04-17
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 357682242
+    prior_exposure: [alt_premia_preregistered_bars]
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "earliest broad emerging-markets vehicle"
+  - symbol: SHY
+    asset_class: treasury
+    currency: USD
+    kind: etf
+    inception_date: 2002-07-26
+    first_trade_date: 2003-08-01
+    full_vol_window_date: 2012-07-27
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 12109723
+    prior_exposure: [eodhd_s3_bond_commodity_trend_preregistered_bars]
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "1-3y Treasury, earliest tie in cell"
+  - symbol: IEF
+    asset_class: treasury
+    currency: USD
+    kind: etf
+    inception_date: 2002-07-26
+    first_trade_date: 2003-08-01
+    full_vol_window_date: 2012-07-27
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 11353086
+    prior_exposure: [allocation_forward_test_preregistered, alt_premia_preregistered_bars, eodhd_s2_breadth_overlay_preregistered_bars, eodhd_s3_bond_commodity_trend_preregistered_bars, eodhd_s4_52wk_high_preregistered_bars, s2_forward_preregistered]
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "7-10y Treasury, earliest tie in cell"
+  - symbol: TLT
+    asset_class: treasury
+    currency: USD
+    kind: etf
+    inception_date: 2002-07-26
+    first_trade_date: 2003-08-01
+    full_vol_window_date: 2012-07-27
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 55233000
+    prior_exposure: [alt_premia_preregistered_bars, eodhd_s3_bond_commodity_trend_preregistered_bars]
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "20y+ Treasury, earliest tie in cell"
+  - symbol: TIP
+    asset_class: tips
+    currency: USD
+    kind: etf
+    inception_date: 2003-12-05
+    first_trade_date: 2004-12-13
+    full_vol_window_date: 2013-12-10
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 13682484
+    prior_exposure: []
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "earliest US inflation-linked vehicle"
+  - symbol: LQD
+    asset_class: credit_ig
+    currency: USD
+    kind: etf
+    inception_date: 2002-07-26
+    first_trade_date: 2003-08-01
+    full_vol_window_date: 2012-07-27
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 8917350
+    prior_exposure: []
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "earliest investment-grade corporate vehicle"
+  - symbol: HYG
+    asset_class: credit_hy
+    currency: USD
+    kind: etf
+    inception_date: 2007-04-11
+    first_trade_date: 2008-04-16
+    full_vol_window_date: 2017-04-12
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 16737347
+    prior_exposure: []
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "earliest high-yield vehicle in candidate list (JNK duplicates exposure)"
+  - symbol: GLD
+    asset_class: gold
+    currency: USD
+    kind: etf
+    inception_date: 2004-11-18
+    first_trade_date: 2005-11-23
+    full_vol_window_date: 2014-11-21
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 219493500
+    prior_exposure: [alt_premia_preregistered_bars, eodhd_s3_bond_commodity_trend_preregistered_bars]
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "earliest physical-gold vehicle"
+  - symbol: DBC
+    asset_class: commodities
+    currency: USD
+    kind: etf
+    inception_date: 2006-02-03
+    first_trade_date: 2007-02-12
+    full_vol_window_date: 2016-02-09
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 11293339
+    prior_exposure: [alt_premia_preregistered_bars]
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "earliest broad-commodity vehicle in candidate list (GSG, DJP duplicate exposure)"
+  - symbol: IYR
+    asset_class: reit
+    currency: USD
+    kind: etf
+    inception_date: 2000-06-19
+    first_trade_date: 2001-07-02
+    full_vol_window_date: 2010-07-06
+    min_return_days_to_enter: 256
+    early_window_median_adv_usd: 2819880
+    prior_exposure: [eodhd_s1_industry_momentum_preregistered_bars]
+    ucits_variant: null   # OD-12 open; never guessed
+    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
+    inclusion_reason: "earliest US REIT vehicle (VNQ is later, so excluded by the earliest-inception rule)"
+excluded_candidates:
+  - {symbol: EWJ, reason: "fails 5y/ADV screen: early-window median ADV below screen floor"}
+  - {symbol: VWO, reason: "near-duplicate of EEM (same cell, same exposure)"}
+  - {symbol: AGG, reason: "aggregate blend overlaps treasury and credit cells; no cell"}
+  - {symbol: JNK, reason: "duplicate of HYG"}
+  - {symbol: SCHP, reason: "later duplicate of TIP"}
+  - {symbol: IEI, reason: "cell cap and later inception than SHY/IEF/TLT"}
+  - {symbol: VNQ, reason: "later inception than IYR"}
+  - {symbol: GSG, reason: "duplicate commodity-index exposure to DBC; later"}
+  - {symbol: SLV, reason: "no cell for silver"}
+  - {symbol: USO, reason: "single-commodity; no cell"}
+  - {symbol: UNG, reason: "single-commodity; no cell"}
+  - {symbol: UUP, reason: "no FX cell"}
+  - {symbol: FXE, reason: "no FX cell"}
+  - {symbol: FXY, reason: "no FX cell"}
+  - {symbol: BIL, reason: "cash proxy; no cell"}
+  - {symbol: EMB, reason: "no EM-debt cell"}
+  - {symbol: PDBC, reason: "later than DBC (2014)"}
+mutual_fund_proxies:   # pre-inception history only; NEVER tradable members
+  - {symbol: VUSTX, kind: mutual_fund_proxy, tradable: false}
+  - {symbol: VFITX, kind: mutual_fund_proxy, tradable: false}
+  - {symbol: VFISX, kind: mutual_fund_proxy, tradable: false}
