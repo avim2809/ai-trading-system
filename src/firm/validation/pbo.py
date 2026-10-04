@@ -120,7 +120,7 @@ def pbo(
         chunks = [M[k * rows : (k + 1) * rows] for k in range(S)]
         is_list, oos_list = [], []
         for comb in combs:
-            cs = set(int(c) for c in comb)
+            cs = {int(c) for c in comb}
             oos_blocks = []
             for k in range(S):
                 if k in cs:
@@ -129,12 +129,16 @@ def pbo(
                 if embargo_rows:
                     start = embargo_rows if (k - 1) in cs else 0
                     end = embargo_rows if (k + 1) in cs else 0
-                    block = block[start : len(block) - end] if start + end < len(block) else block[0:0]
+                    block = (
+                        block[start : len(block) - end] if start + end < len(block) else block[0:0]
+                    )
                 if len(block):
                     oos_blocks.append(block)
             if not oos_blocks:
                 continue  # embargo purged the whole OOS set; skip as legacy does
-            is_list.append(np.asarray(metric(np.vstack([chunks[int(k)] for k in comb])), dtype=float))
+            is_list.append(
+                np.asarray(metric(np.vstack([chunks[int(k)] for k in comb])), dtype=float)
+            )
             oos_list.append(np.asarray(metric(np.vstack(oos_blocks)), dtype=float))
         if not is_list:
             raise ValueError("embargo_pct purged every out-of-sample set")
