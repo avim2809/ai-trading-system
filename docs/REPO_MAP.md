@@ -91,6 +91,13 @@ applied in `backtest/firm_strategy.py`) and a 0.3%/yr short-borrow fee (`short_b
 multiplier, no per-share/tiered commission, no roll cost. This is the "legacy convention" that G-RESEARCH 4
 reports for comparison.
 
+**Which engine when (P3-09).** Use `src/firm/backtest/vector_engine.py` (`run_vector_backtest`) for all research studies of the credibility plan
+(P3-07/08/11, P4-02..04, P5-04): signed positions, contract multipliers, fx, rf credit on cash, borrow, a P2-04 cost model with a stress
+multiplier and roll costs, one fill-lag convention (the engine shifts targets itself), and a mandatory ledger record (`ledger_ctx`, or
+`exploratory=True`). It is research-only, takes frames (no file access) and is not imported by `firm/backtest/__init__.py` (the package
+`__init__` still loads backtrader; the module itself does not import it). Use the backtrader `BacktestEngine` only for the legacy
+whole-share pipeline/API job path and legacy comparisons. Frozen `scripts/run_*_evaluation.py` loops stay as they are.
+
 | Launch path | Location | Notes |
 |---|---|---|
 | `execute_backtest(config)` | `src/firm/backtest/run.py:37` | Main programmatic entry; callers include `experiments/runner.py`, `api/jobs.py`, `scripts/run_standalone_strategy_evaluation.py`, `scripts/run_combination_evaluation.py`, `scripts/calibrate_*.py` |
