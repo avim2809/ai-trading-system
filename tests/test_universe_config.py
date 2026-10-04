@@ -52,7 +52,7 @@ def test_no_mutual_fund_proxy_is_a_member():
 
 
 def _scan(symbol: str) -> set[str]:
-    pat = re.compile(r"""["']%s["']""" % re.escape(symbol))
+    pat = re.compile(rf"""["']{re.escape(symbol)}["']""")
     return {p.stem for p in (ROOT / "scripts").glob("*_preregistered*.py") if pat.search(p.read_text())}
 
 
