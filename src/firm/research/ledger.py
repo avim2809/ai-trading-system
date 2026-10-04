@@ -73,7 +73,7 @@ class DirtyTreeError(RuntimeError):
 
 
 class UnapprovedPreregError(RuntimeError):
-    """Wired up in P1-09: the preregistration hash is not approved."""
+    """A ``registered`` trial whose preregistration is not approved or does not cover the config (P1-09)."""
 
 
 class LedgerNotProvisionedError(RuntimeError):
@@ -386,12 +386,25 @@ class TrialHandle:
 
 @contextmanager
 def run_trial(
-    family: str, config: dict, *, mode: Mode = "exploratory", prereg: str | None = None
+    family: str, config: dict, *, mode: Mode = "exploratory", prereg: str | None = None,
+    prereg_config: dict | None = None,
 ) -> Iterator[TrialHandle]:
     """Record a trial in ``finally``; on exception write ``status='failed'`` and re-raise.
 
     Failed trials count toward N (copies the pattern at ``experiments/runner.py:62-82``).
+
+    ``mode="registered"`` first requires ``firm.research.prereg.is_approved(prereg, prereg_config or config)``;
+    otherwise :class:`UnapprovedPreregError` is raised BEFORE the body runs and nothing is recorded (nothing ran).
+    ``prereg_config`` is the parameter dict checked against the pre-registered grid (default: ``config``).
     """
+    if mode == "registered":
+        from firm.research import prereg as _prereg  # lazy: keeps ledger import light
+
+        if not prereg or not _prereg.is_approved(prereg, prereg_config if prereg_config is not None else config):
+            raise UnapprovedPreregError(
+                f"preregistration {prereg!r} is not approved or does not cover this config; "
+                "use mode='exploratory' (counted, never promotable)"
+            )
     h = TrialHandle()
     status: Literal["completed", "failed"] = "completed"
     error: str | None = None
@@ -428,12 +441,17 @@ def run_trial(
                 raise
 
 
-def backtest_logged(family: str, *, mode: Mode = "exploratory", prereg: str | None = None):
+def backtest_logged(
+    family: str, *, mode: Mode = "exploratory", prereg: str | None = None, fixed_args: tuple[str, ...] = ()
+):
     """Decorator: log every call of the wrapped backtest function as one trial.
 
     ``config`` = the bound call arguments (strict canonical JSON; if an argument is not
     serialisable the trial is still recorded with ``args_repr`` and ``config_is_lossy=True`` rather
     than dropped). A ``pd.Series`` result is stored as the trial's returns.
+
+    With ``mode="registered"`` the bound arguments, minus the names in ``fixed_args`` (data inputs that are
+    not strategy parameters), must lie inside the approved pre-registration's grid (P1-09).
     """
 
     def deco(fn):
@@ -451,7 +469,8 @@ def backtest_logged(family: str, *, mode: Mode = "exploratory", prereg: str | No
                     "function": cfg["function"], "config_is_lossy": True,
                     "args_repr": {k: repr(v)[:500] for k, v in bound.arguments.items()},
                 }
-            with run_trial(family, cfg, mode=mode, prereg=prereg) as h:
+            params = {k: v for k, v in bound.arguments.items() if k not in fixed_args}
+            with run_trial(family, cfg, mode=mode, prereg=prereg, prereg_config=params) as h:
                 result = fn(*args, **kwargs)
                 if isinstance(result, pd.Series):
                     h.returns = result
