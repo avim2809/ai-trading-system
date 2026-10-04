@@ -76,7 +76,8 @@ Status vocabulary used in the reconciliation table:
 | `llm/`, `rag/` | Provider layer, cache, compression; RAG store/retriever/ingestors | Yes |
 | `api/` | `app.py` (`run`, FastAPI), `jobs.py`, `schemas.py`, `serializers.py`, `routers/{agents,decisions,live,llm,logs,meta,patterns,runs,system}.py` | Yes |
 | `scripts/` + `scripts_entry.py` | Console entry points `fetch-data`, `run-backtest` | No |
-| Not present | `validation/`, `research/`, `costs/`, `signals/`, `risk/`, `monitoring/`, `lifecycle/`, `reporting/` | n/a |
+| `signals/` | `vol.py` (P3-01: `ewma_vol` blended EWMA vol, `TRADING_DAYS_PER_YEAR=256`); research-only, not imported by live modules | No |
+| Not present | `validation/`, `research/`, `costs/`, `risk/`, `monitoring/`, `lifecycle/`, `reporting/` | n/a |
 
 Console scripts (`pyproject.toml`): `fetch-data` = `firm.scripts.fetch_data:main`,
 `run-backtest` = `firm.scripts.run_backtest:main`, `firm-api` = `firm.api.app:run`.
