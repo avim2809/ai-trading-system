@@ -12,6 +12,7 @@ Ported from the external trading-suite ``backtesting-frameworks`` /
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -32,6 +33,12 @@ class MonteCarloAnalyzer:
         Confidence level for interval / worst-case percentiles (e.g. 0.95).
     seed:
         RNG seed for reproducibility.
+    method:
+        ``"iid"`` (default, unchanged) or ``"stationary"`` (Politis-Romano
+        stationary bootstrap for autocorrelated returns).
+    block_len:
+        Mean block length for ``"stationary"``; ``None`` selects it
+        automatically (Politis-White).
     """
 
     def __init__(
@@ -39,9 +46,13 @@ class MonteCarloAnalyzer:
         n_simulations: int = 1000,
         confidence: float = 0.95,
         seed: int = 42,
+        method: Literal["iid", "stationary"] = "iid",
+        block_len: float | None = None,
     ) -> None:
         self.n_simulations = n_simulations
         self.confidence = confidence
+        self.method = method
+        self.block_len = block_len
         self._rng = np.random.default_rng(seed)
 
     # ------------------------------------------------------------------
@@ -52,17 +63,32 @@ class MonteCarloAnalyzer:
         self,
         returns: pd.Series | np.ndarray,
         n_periods: int | None = None,
+        *,
+        method: Literal["iid", "stationary"] | None = None,
+        block_len: float | None = None,
     ) -> np.ndarray:
         """Resample returns with replacement.
 
-        Returns an array of shape ``(n_simulations, n_periods)``.
+        Returns an array of shape ``(n_simulations, n_periods)``. ``method`` /
+        ``block_len`` override the constructor values for this call.
         """
+        method = method or self.method
+        if method not in ("iid", "stationary"):
+            raise ValueError(f"unknown bootstrap method {method!r}")
         arr = np.asarray(returns, dtype=float)
         arr = arr[np.isfinite(arr)]
         if arr.size == 0:
             return np.zeros((self.n_simulations, n_periods or 0))
         if n_periods is None:
             n_periods = arr.size
+        if method == "stationary":
+            # Lazy import: keeps firm.validation out of the live import graph.
+            from firm.validation.bootstrap import block_bootstrap_returns
+
+            seed = int(self._rng.integers(0, 2**32 - 1))
+            return block_bootstrap_returns(
+                arr, block_len or self.block_len, self.n_simulations, seed, n_periods
+            )
         idx = self._rng.integers(0, arr.size, size=(self.n_simulations, n_periods))
         return arr[idx]
 

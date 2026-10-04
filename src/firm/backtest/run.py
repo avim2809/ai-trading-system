@@ -35,6 +35,16 @@ _BT_FIELDS = frozenset({
 
 
 def execute_backtest(config: dict) -> BacktestReport:
+    """Run a single backtest (captured as one trial, P1-12); see :func:`_execute_backtest_impl`."""
+    from firm.backtest._capture_state import capture_run  # local import: no new top-level symbol
+
+    with capture_run("execute_backtest", config, config.get("seed")) as cap:
+        report = _execute_backtest_impl(config)
+        cap.finish(report)
+        return report
+
+
+def _execute_backtest_impl(config: dict) -> BacktestReport:
     """Run a single backtest from a flat *config* and return its report.
 
     ``config`` keys: ``data_source`` (``"synthetic"`` or a real provider),

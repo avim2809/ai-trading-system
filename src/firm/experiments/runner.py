@@ -48,6 +48,17 @@ class ExperimentRunner:
     def run(
         self, config: dict, seed: int = 42, notes: str = ""
     ) -> ExperimentRun:
+        """Execute a single experiment run (captured as one trial, P1-12)."""
+        from firm.backtest._capture_state import capture_run  # local import: no new top-level symbol
+
+        with capture_run("ExperimentRunner.run", config, seed) as cap:
+            result = self._run_impl(config, seed, notes)
+            cap.finish(result)
+            return result
+
+    def _run_impl(
+        self, config: dict, seed: int = 42, notes: str = ""
+    ) -> ExperimentRun:
         """Execute a single experiment run.
 
         Steps:

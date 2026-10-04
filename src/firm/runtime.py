@@ -442,6 +442,20 @@ def run_backtest_from_config(
     prices_df: pd.DataFrame,
     universe: list[str],
 ) -> tuple[BacktestEngine, "BacktestReport"]:  # noqa: F821
+    """Setup + run + report in one call (captured as one trial, P1-12)."""
+    from firm.backtest._capture_state import capture_run  # local import: no new top-level symbol
+
+    with capture_run("run_backtest_from_config", config, config.get("seed")) as cap:
+        engine, report = _run_backtest_from_config_impl(config, prices_df, universe)
+        cap.finish(report)
+        return engine, report
+
+
+def _run_backtest_from_config_impl(
+    config: dict,
+    prices_df: pd.DataFrame,
+    universe: list[str],
+) -> tuple[BacktestEngine, "BacktestReport"]:  # noqa: F821
     """Setup + run + report in one call.  Used by both CLI and API."""
     # Fundamentals/sentiment: same ParquetCache keys as ``fetch-data`` so
     # multi_factor / event_driven / sentiment backtests match live when
