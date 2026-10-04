@@ -25,6 +25,7 @@ output.
 | `REPO_MAP.md` | Verified map of the repo (packages, entry points, engines, data, frozen paths) and the credibility-plan path reconciliation table |
 | `../PLAN.md` | Credibility plan (repo root): realistic expectations, gates, phases, ticket index; tickets in `../plan/tickets/`, owner decisions in `../plan/OWNER_DECISIONS.md` |
 | `gate_deviation_register_2026_10.md` | OD-16: the 19 gate deviations from the source plan, for owner signature (DRAFT, unsigned); `config/gates.yaml` waits on it |
+| `DEPRECATIONS.md` | Strategy lifecycle statuses (LEGACY_LIVE for the 11 IBKR strategies, hard statuses for the rest), target statuses, evidence and reopen conditions (OD-03: advisory only). Code: `src/firm/strategies/registry.py` |
 | `HOLDOUT_POLICY.md` | Forward-data seal (seal_date 2026-10-01, history burned through 2026-09-30): enforcement layers, every on-host post-seal location, unseal rules, residual risks. Config: `../config/research_freeze.yaml` |
 | `research_ledger.md` | Host-level append-only trial ledger (P1-01): location, row format, modes, backfill, mirror sync, provisioning |
 | `GUARDRAIL_REDTEAM.md` | Agent guardrails: what is enforced by what, owner install steps for the root-owned settings and hooks, and the human-run red-team record (all rows NOT RUN until the owner fills them in) |
