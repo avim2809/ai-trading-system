@@ -261,7 +261,7 @@ shortlist_S1..S5}`). The licensed-data bundle lives outside the repo
 | `src/data/qa.py` | `src/firm/data/qa.py` (new) | extend | Extends cleaning rules and `tests/test_eodhd_clean.py` (P2-03) |
 | `src/data/PointInTimeDataStore.get(symbol,start,end,asof)` | `src/firm/data/pit_store.py` (`get_prices`, etc.) | extend | The 4-arg `get` does not exist; seal hook is a default-None `_ACCESS_GUARD` |
 | `src/costs/model.py` | `src/firm/costs/model.py` (new) | new | Reuses `src/firm/agents/_liquidity.py` without editing. P2-04 |
-| `src/signals/{vol,ewmac,breakout,carry}.py` | `src/firm/signals/*.py` (new) | new | Not under `strategies/` (different ABC). P3-01..P3-04 |
+| `src/signals/{vol,ewmac,breakout,carry}.py` | `src/firm/signals/*.py` (new) | new | Not under `strategies/` (different ABC). P3-01..P3-04. `signals/carry.py`: built, unused in core_v1 |
 | `src/portfolio/forecast_combine.py`, `sizing.py`, `weights.py` | `src/firm/portfolio/*.py` (new) | new | Live-imported package, so new modules are listed in the isolation test. Distinct from `agents/research/_combine.py` and signal-level HRP |
 | `src/portfolio/` (existing per author) | `src/firm/portfolio/{optimizer,state,attribution}.py` | exists | Pipeline-only; not the home for handcrafting |
 | `src/risk/limits.py`, `kill_switch.py`, `kelly.py` | `src/firm/risk/*.py` (new) | new | Existing risk is `agents/risk.py` (pipeline) and `live/execution_safety.py` (order level) |
