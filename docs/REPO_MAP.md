@@ -258,7 +258,7 @@ shortlist_S1..S5}`). The licensed-data bundle lives outside the repo
 | `src/validation/multiple_testing.py` | `src/firm/validation/multiple_testing.py` (new) | new | RC/SPA/Romano-Wolf absent everywhere. P1-06 |
 | `src/validation/effective_trials.py` | `src/firm/validation/effective_trials.py` (new) | new | P1-03 |
 | `src/validation/synthetic.py` | `src/firm/validation/synthetic.py` (new) | new | GARCH-t in numpy (`arch` not installed). P1-08. Not related to `src/firm/data/synthetic.py` |
-| `src/validation/stress_suite.py` | `src/firm/validation/stress_suite.py` (new) | new | P3-07 |
+| `src/validation/stress_suite.py` | `src/firm/validation/stress_suite.py` (new, done; `config/stress_periods.yaml`) | new | P3-07. All ten periods are pre-seal and in-sample |
 | `src/validation/diversification.py` | `src/firm/validation/diversification.py` (new) | new | P1-03 / P4-02 |
 | `src/research/ledger.py` | `src/firm/research/ledger.py` (new) | new | Canonical store is host-level `/local/store/research-ledger/trials.jsonl`. P1-01 |
 | `src/research/prereg.py` | `src/firm/research/prereg.py` (new) | new | Indexes the frozen `scripts/*_preregistered*.py`. P1-09 |
