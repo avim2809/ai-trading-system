@@ -14,15 +14,18 @@ import math
 from typing import Literal
 
 import numpy as np
+import pandas as pd
 
 from firm.eval.overfitting import _norm_cdf
 from firm.validation.nulls import benjamini_hochberg
 
 __all__ = [
     "bh_adjust",
+    "calm_stress_corr_test",
     "diversification_ratio",
     "effective_number_of_bets",
     "effective_rank",
+    "fisher_z_compare",
     "fisher_z_corr_diff",
     "marchenko_pastur_edge",
     "n_signal_eigenvalues",
@@ -98,3 +101,74 @@ def fisher_z_corr_diff(r1: float, n1: int, r2: float, n2: int) -> tuple[float, f
 def bh_adjust(p: np.ndarray, q: float = 0.10) -> np.ndarray:
     """Benjamini-Hochberg at level ``q``: boolean accept mask (delegates to P1-07 ``benjamini_hochberg``)."""
     return benjamini_hochberg(np.asarray(p, dtype=float), q)
+
+
+def fisher_z_compare(
+    r_calm: float, n_calm: int, r_stress: float, n_stress: int
+) -> tuple[float, float]:
+    """P4-02 name for ``fisher_z_corr_diff`` (independent samples): ``(z, two_sided_p)``; ``|r| < 1`` required."""
+    if not (abs(r_calm) < 1.0 and abs(r_stress) < 1.0):
+        raise ValueError("correlations must satisfy |r| < 1 for the Fisher transform")
+    return fisher_z_corr_diff(r_calm, n_calm, r_stress, n_stress)
+
+
+def _bh_adjusted_p(p: np.ndarray) -> np.ndarray:
+    """Benjamini-Hochberg adjusted p-values (monotone step-up), same order as ``p``."""
+    m = len(p)
+    order = np.argsort(p)
+    adj = np.minimum.accumulate((p[order] * m / np.arange(1, m + 1))[::-1])[::-1]
+    out = np.empty(m)
+    out[order] = np.minimum(adj, 1.0)
+    return out
+
+
+def calm_stress_corr_test(
+    returns: pd.DataFrame, stress_mask: pd.Series, *, min_overlap: int = 250, fdr_q: float = 0.05
+) -> pd.DataFrame:
+    """Pairwise calm-vs-stress correlation comparison (Fisher z, independent periods) with BH correction.
+
+    Columns: ``pair, r_calm, r_stress, z, p, p_adj, reject``. ``stress_mask`` (True = stress day) is an input and is never
+    defined here. Per pair the complete-case overlap must be at least ``min_overlap`` days (calm + stress) and each regime
+    must hold more than 3 days; otherwise ``ValueError``. Caveat: the z-test assumes i.i.d. observations; volatility
+    clustering makes it anti-conservative, and pairs sharing a stream are dependent (BH is valid under positive dependence).
+    """
+    cols = list(returns.columns)
+    if len(cols) < 2:
+        raise ValueError("need at least two streams")
+    mask = stress_mask.reindex(returns.index)
+    if mask.isna().any():
+        raise ValueError("stress_mask does not cover every date of returns")
+    mask = mask.astype(bool)
+    rows: list[dict] = []
+    for i in range(len(cols)):
+        for j in range(i + 1, len(cols)):
+            pair = returns[[cols[i], cols[j]]].dropna()
+            m = mask.loc[pair.index].to_numpy()
+            n_stress, n_calm = int(m.sum()), int((~m).sum())
+            if len(pair) < min_overlap:
+                raise ValueError(f"pair {cols[i]}/{cols[j]}: overlap {len(pair)} < {min_overlap}")
+            if n_stress <= 3 or n_calm <= 3:
+                raise ValueError(
+                    f"pair {cols[i]}/{cols[j]}: need more than 3 days in each regime ({n_calm} calm, {n_stress} stress)"
+                )
+            r_c = float(pair[~m].corr().iloc[0, 1])
+            r_s = float(pair[m].corr().iloc[0, 1])
+            if not (math.isfinite(r_c) and math.isfinite(r_s)):
+                raise ValueError(
+                    f"pair {cols[i]}/{cols[j]}: undefined correlation (constant stream in a regime)"
+                )
+            eps = 1e-12
+            z, p = fisher_z_compare(
+                float(np.clip(r_c, -1 + eps, 1 - eps)),
+                n_calm,
+                float(np.clip(r_s, -1 + eps, 1 - eps)),
+                n_stress,
+            )
+            rows.append(
+                {"pair": (cols[i], cols[j]), "r_calm": r_c, "r_stress": r_s, "z": z, "p": p}
+            )
+    out = pd.DataFrame(rows)
+    pv = out["p"].to_numpy(dtype=float)
+    out["p_adj"] = _bh_adjusted_p(pv)
+    out["reject"] = bh_adjust(pv, fdr_q)
+    return out
