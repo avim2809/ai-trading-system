@@ -1,0 +1,28 @@
+# Cost schedules for firm.costs (ticket P2-04). EVERY value is `verified: false` until the owner confirms it against the broker's
+# published schedule. The research agent cannot fetch anything; values below are the author's recollection of public IBKR/Alpaca/exchange
+# schedules and are PLACEHOLDERS for review. Source to confirm: IBKR "Commissions" pages (stocks/ETFs tiered; futures), SEC Section 31 fee
+# rate advisories, FINRA TAF schedule, Alpaca "Fee schedule". access date: none (no network). Do NOT tune any value on backtest results.
+version: 1
+verified: false
+default_spread_fraction: 0.0004        # quoted spread as FRACTION of price when no data given. UNVERIFIED placeholder, not calibrated
+impact_k_default: 1.0                  # source formula impact = k * sigma * sqrt(qty/ADV); UNCALIBRATED conservative default, flagged
+schedules:
+  ibkr_etf:                            # IBKR Pro tiered, US stocks/ETFs, first monthly-volume tier only (<= 300k shares)
+    commission: {per_share: 0.0035, min_per_order: 0.35, max_pct_of_value: 0.01}
+    exchange_fees: {per_share: 0.0003}      # exchange + clearing pass-through placeholder (NSCC clearing 0.00020 + exchange)
+    regulatory_on_sells: {sec_rate_of_value: 0.0000278, taf_per_share: 0.000166, taf_max_per_order: 8.30}
+    verified: false
+  alpaca_etf:                          # Alpaca: zero commission; regulatory pass-through on sells only
+    commission: {per_share: 0.0, min_per_order: 0.0, max_pct_of_value: 1.0}
+    exchange_fees: {per_share: 0.0}
+    regulatory_on_sells: {sec_rate_of_value: 0.0000278, taf_per_share: 0.000166, taf_max_per_order: 8.30}
+    verified: false
+  ibkr_future:                         # IBKR Pro futures, per contract per side (CME micro/equity-index style)
+    commission: {per_contract: 0.85}
+    exchange_fees: {per_contract: 1.38}     # exchange + clearing + NFA placeholder; varies by product
+    regulatory_on_sells: {}
+    verified: false
+specs:                                  # InstrumentCostSpec fields by name
+  etf_ibkr:    {kind: etf, broker: ibkr, multiplier: 1.0, half_spread_bps: null, impact_k: 1.0, roll_spreads_per_roll: 2}
+  etf_alpaca:  {kind: etf, broker: alpaca, multiplier: 1.0, half_spread_bps: null, impact_k: 1.0, roll_spreads_per_roll: 2}
+  mes_ibkr:    {kind: future, broker: ibkr, multiplier: 5.0, half_spread_bps: null, impact_k: 1.0, roll_spreads_per_roll: 2}

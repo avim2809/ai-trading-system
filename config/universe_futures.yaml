@@ -1,0 +1,276 @@
+# DRAFT futures candidate list (ticket P2-01, OD-13). NO futures data exists or is purchased (OD-02 undecided); OD-01 (capital < $25k) means the
+# futures path is not built. Seeded from the frozen DRAFT scripts/futures_trend_preregistered_bars.py UNIVERSE (L64), chosen without performance input.
+# Every contract spec below is from the author's general knowledge and is UNVERIFIED: owner must confirm against exchange/IBKR specs before any use.
+# The owner draws any sealed instrument subset with a recorded seed before data arrives (OD-02).
+version: 1
+status: draft
+frozen_note: "candidate list only; chosen without performance input; no post-seal data examined"
+asof: 2026-09-30
+margin_note: "margins not stored: docs/futures_trend_integration_sketch.md section 3 figures are UNVERIFIED"
+instruments:
+  - symbol: ES
+    asset_class: equity_index
+    multiplier: 50
+    currency: USD
+    exchange: CME
+    ibkr_symbol: ES
+    micro_symbol: MES
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: NQ
+    asset_class: equity_index
+    multiplier: 20
+    currency: USD
+    exchange: CME
+    ibkr_symbol: NQ
+    micro_symbol: MNQ
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: RTY
+    asset_class: equity_index
+    multiplier: 50
+    currency: USD
+    exchange: CME
+    ibkr_symbol: RTY
+    micro_symbol: M2K
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: FDAX
+    asset_class: equity_index
+    multiplier: 25
+    currency: EUR
+    exchange: EUREX
+    ibkr_symbol: DAX
+    micro_symbol: null
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: ZF
+    asset_class: rates
+    multiplier: 1000
+    currency: USD
+    exchange: CBOT
+    ibkr_symbol: ZF
+    micro_symbol: null
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: ZN
+    asset_class: rates
+    multiplier: 1000
+    currency: USD
+    exchange: CBOT
+    ibkr_symbol: ZN
+    micro_symbol: null
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: ZB
+    asset_class: rates
+    multiplier: 1000
+    currency: USD
+    exchange: CBOT
+    ibkr_symbol: ZB
+    micro_symbol: null
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: FGBL
+    asset_class: rates
+    multiplier: 1000
+    currency: EUR
+    exchange: EUREX
+    ibkr_symbol: GBL
+    micro_symbol: null
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: FGBS
+    asset_class: rates
+    multiplier: 1000
+    currency: EUR
+    exchange: EUREX
+    ibkr_symbol: GBS
+    micro_symbol: null
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: 6E
+    asset_class: fx
+    multiplier: 125000
+    currency: USD
+    exchange: CME
+    ibkr_symbol: EUR
+    micro_symbol: M6E
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: 6J
+    asset_class: fx
+    multiplier: 12500000
+    currency: USD
+    exchange: CME
+    ibkr_symbol: JPY
+    micro_symbol: null
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: 6B
+    asset_class: fx
+    multiplier: 62500
+    currency: USD
+    exchange: CME
+    ibkr_symbol: GBP
+    micro_symbol: M6B
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: 6A
+    asset_class: fx
+    multiplier: 100000
+    currency: USD
+    exchange: CME
+    ibkr_symbol: AUD
+    micro_symbol: M6A
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: 6C
+    asset_class: fx
+    multiplier: 100000
+    currency: USD
+    exchange: CME
+    ibkr_symbol: CAD
+    micro_symbol: null
+    roll_schedule_months: "HMUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: CL
+    asset_class: commodities
+    multiplier: 1000
+    currency: USD
+    exchange: NYMEX
+    ibkr_symbol: CL
+    micro_symbol: MCL
+    roll_schedule_months: "FGHJKMNQUVXZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: GC
+    asset_class: commodities
+    multiplier: 100
+    currency: USD
+    exchange: COMEX
+    ibkr_symbol: GC
+    micro_symbol: MGC
+    roll_schedule_months: "GJMQVZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: HG
+    asset_class: commodities
+    multiplier: 25000
+    currency: USD
+    exchange: COMEX
+    ibkr_symbol: HG
+    micro_symbol: MHG
+    roll_schedule_months: "HKNUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: ZC
+    asset_class: commodities
+    multiplier: 5000
+    currency: USD
+    exchange: CBOT
+    ibkr_symbol: ZC
+    micro_symbol: null
+    roll_schedule_months: "HKNUZ"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
+  - symbol: ZS
+    asset_class: commodities
+    multiplier: 5000
+    currency: USD
+    exchange: CBOT
+    ibkr_symbol: ZS
+    micro_symbol: null
+    roll_schedule_months: "FHKNQUX"
+    margin_unverified: true
+    margin_usd: null
+    liquidity_floor_adv_contracts: null   # owner/vendor data needed
+    spec_verified: false
+    dropped_reason: null
+    prior_exposure: [futures_trend_preregistered_bars]   # DRAFT, 0 trials
