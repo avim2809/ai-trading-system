@@ -68,7 +68,7 @@ Status vocabulary used in the reconciliation table:
 | `brokers/` | `base.py` (`OrderRequest`, `BrokerPosition`), `ibkr.py` (stock-only contracts), `alpaca.py` | Yes |
 | `live/` | `engine.py` (`LiveTradingEngine`, about 4250 lines), `scheduler.py`, `provider_utils.py` (`resolve_live_startup`), `execution_safety.py`, `capital_gate.py`, `approval.py`, `notifications.py`, `portfolio_sync.py`, `order_reconciliation.py`, `sleeve_reconciliation.py`, `planning_cycle.py`, `news_guard.py`, `pipeline_warmup.py`, `state_store.py`, `trade_history.py`, `data_feed.py`, `pattern_*`, `best_stocks_*`, `capital_reallocation*.py`, others | Yes (the services themselves) |
 | `allocation/` | `allocator.py` (`Allocator.plan`, `AllocationPlan`, `build_allocator`), `sleeves.py` (`Sleeve` ABC, `StaticSleeve`, `SLEEVE_REGISTRY`, `_resolve_sleeve_class`, `build_sleeves`), `btc_trend.py` (`BtcTrendSleeve`), `calendar.py` (NYSE calendar) | Yes |
-| `portfolio/` | `optimizer.py`, `state.py`, `attribution.py` only | Yes |
+| `portfolio/` | `optimizer.py`, `state.py`, `attribution.py` (live); `forecast_combine.py`, `sizing.py` (P3-06: N, B, buffering, rounding, IDM, `gross_cap_scale`; research-only, tau is a parameter) and (P3-05: fixed-weight forecast combination + FDM; research-only, NOT imported by `__init__`; distinct from `agents/research/_combine.py` and the HRP signal combiner, which combine pipeline strategy scores) | Yes |
 | `eval/` | `overfitting.py`, `robustness.py`, `metrics.py`, `tca.py`, `reports.py`, `tearsheet.py`, `plots.py`, `classification.py`, `rag_eval.py` | Yes (`robustness`, `reports`) |
 | `experiments/` | `registry.py` (`RunRegistry` writing `runs/`), `runner.py` (`ExperimentRunner.run`, `run_walk_forward`, `aggregate_walk_forward`) | API-lazy |
 | `patterns/` | Chart-pattern detectors, `significance.py` (iid null, BH), `scanner.py`, `ml/` (`purged_cv.py`, `sample_weights.py`, `xgb_*`, `cnn_validator.py`, `ppo_sizer.py`, others) | Yes (IBKR `pattern_recognition` strategy) |
@@ -76,7 +76,7 @@ Status vocabulary used in the reconciliation table:
 | `llm/`, `rag/` | Provider layer, cache, compression; RAG store/retriever/ingestors | Yes |
 | `api/` | `app.py` (`run`, FastAPI), `jobs.py`, `schemas.py`, `serializers.py`, `routers/{agents,decisions,live,llm,logs,meta,patterns,runs,system}.py` | Yes |
 | `scripts/` + `scripts_entry.py` | Console entry points `fetch-data`, `run-backtest` | No |
-| `signals/` | `vol.py` (P3-01: `ewma_vol` blended EWMA vol, `TRADING_DAYS_PER_YEAR=256`); `breakout.py` (P3-03: `breakout_raw`, `breakout_forecast`; NOT related to `strategies/volatility_breakout.py`, the single-stock ATR breakout); research-only, not imported by live modules | No |
+| `signals/` | `vol.py` (P3-01: `ewma_vol` blended EWMA vol, `TRADING_DAYS_PER_YEAR=256`); `ewmac.py` (P3-02: `ewmac_raw`, `ewmac_forecast`, `estimate_pooled_scalar`, `select_speeds`; ETF path keeps per-rule forecasts signed, scalars and speed filter on real data only in P3-11); `breakout.py` (P3-03: `breakout_raw`, `breakout_forecast`; NOT related to `strategies/volatility_breakout.py`, the single-stock ATR breakout); research-only, not imported by live modules | No |
 | Not present | `validation/`, `research/`, `costs/`, `risk/`, `monitoring/`, `lifecycle/`, `reporting/` | n/a |
 
 Console scripts (`pyproject.toml`): `fetch-data` = `firm.scripts.fetch_data:main`,
