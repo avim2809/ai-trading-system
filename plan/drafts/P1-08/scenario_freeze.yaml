@@ -1,0 +1,5 @@
+# P1-08 deferred scenario values, committed BEFORE the first harness run.
+# The owner folds these into a new signed gates.yaml version (p1_08_acceptance.scenarios).
+# Chosen conservatively: the generator's documented default correlation and a fixed, non-tuned seed.
+cross_correlation: 0.3      # equicorrelation of the K series (make_universe default in the ticket)
+master_seed: 20261004       # date of choice (YYYYMMDD); per-scenario base_seed = master_seed + 1000*scenario_index; per-sim seed = base_seed + sim_index
