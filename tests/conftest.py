@@ -112,3 +112,29 @@ def _isolated_execution_audit(tmp_path):
     """
     with patch.dict(os.environ, {"FIRM_EXECUTION_AUDIT": str(tmp_path / "execution_audit.jsonl")}):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _isolated_research_ledger(tmp_path):
+    """Keep tests out of the canonical host research ledger (P1-12).
+
+    Wrapped backtest entry points append one capture line per outermost call, and the armed path
+    writes ``unregistered`` rows into the append-only hash-chained ledger (no delete API), which
+    would irreversibly inflate N on every full-suite run. Redirects ``FIRM_RESEARCH_LEDGER_ROOT``
+    to ``tmp_path`` (``inbox/`` and ``returns/`` pre-created) and resets the capture module state
+    afterwards. Same ``patch.dict`` style as ``_isolated_execution_audit`` (deliberately no
+    ``monkeypatch``). Tests that set the env var themselves still win.
+    """
+    import sys
+
+    root = tmp_path / "research-ledger"
+    (root / "inbox").mkdir(parents=True)
+    (root / "returns").mkdir()
+    try:
+        with patch.dict(os.environ, {"FIRM_RESEARCH_LEDGER_ROOT": str(root)}):
+            yield
+    finally:
+        cs = sys.modules.get("firm.backtest._capture_state")
+        if cs is not None:
+            cs.IN_API_PROCESS = False
+            cs.LEDGER_SINK = None

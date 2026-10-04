@@ -42,12 +42,24 @@ class SPAStaticFiles(StaticFiles):
             raise
 
 
+def _tag_api_process() -> None:
+    """Tag this process as firm-api for trial capture (P1-12). Tag only; fail-open."""
+    try:
+        from firm.backtest._capture_state import mark_api_process
+
+        mark_api_process()
+    except Exception:
+        log.warning("trial-capture api tag unavailable (backtests still run)", exc_info=True)
+
+
 def create_app() -> FastAPI:
     """Build and return the configured FastAPI application."""
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         import asyncio
+
+        _tag_api_process()
 
         async def _auto_start_live() -> None:
             # IBKR connect uses ib_async on a worker thread — must not run on
@@ -168,6 +180,7 @@ def run() -> None:
     interfaces.
     """
     import uvicorn
+    _tag_api_process()
     host = os.environ.get("FIRM_API_HOST", "127.0.0.1")
     port = int(os.environ.get("FIRM_API_PORT", "8000"))
     uvicorn.run(app, host=host, port=port)

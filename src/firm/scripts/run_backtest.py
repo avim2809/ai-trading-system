@@ -153,13 +153,17 @@ def main() -> None:
 
     from firm.backtest.engine import BacktestEngine
 
-    engine = BacktestEngine(bt_config)
-    engine.setup(prices_df, pit_store, orchestrator, universe)
+    from firm.backtest._capture_state import capture_run
 
-    log.info("Running backtest: %s → %s", settings.backtest.start_date, settings.backtest.end_date)
-    engine.run()
+    with capture_run("run_backtest.main", merged_config, merged_config.get("seed")) as cap:
+        engine = BacktestEngine(bt_config)
+        engine.setup(prices_df, pit_store, orchestrator, universe)
 
-    report = engine.generate_report()
+        log.info("Running backtest: %s → %s", settings.backtest.start_date, settings.backtest.end_date)
+        engine.run()
+
+        report = engine.generate_report()
+        cap.finish(report)
     print(report.to_text())
 
     output_dir = args.output_dir
