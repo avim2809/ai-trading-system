@@ -59,7 +59,7 @@ def _as_date(value: Any, field: str) -> dt.date:
     raise _refuse(f"{_CONFIG_PATH.name}: {field} is not a date: {value!r}")
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _load_config() -> dict[str, Any]:
     """Parse and validate the freeze config. Cached; call ``_load_config.cache_clear()`` after changing it."""
     path = _CONFIG_PATH
