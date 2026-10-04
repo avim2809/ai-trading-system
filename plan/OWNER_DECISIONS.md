@@ -344,7 +344,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P5-06, P6-03, P5-04
 
-**Decision:** 
+**Decision:** Yes, after a dry run (owner, 2026-10-04): the read-only allocation-forward-test monitor timer may be installed by the OWNER (not an agent) once `validate` and a dry `run` have passed. Candidate-instance and reconcile timers stay per-ticket at P6. The S2 timer remains a separate pending decision.
 
 ---
 
@@ -365,7 +365,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P0-08, P1-08, P3-08, P6-02
 
-**Decision:** 
+**Decision:**  Post-signature confirmation (owner, 2026-10-04): the gate 7 margin is the minimum detectable Sharpe gap from the mandatory power analysis (a rule, no fixed number), as frozen in gates.yaml.
 
 ---
 
@@ -386,7 +386,7 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 
 **Blocks.** P5-02, P3-11, P3-08
 
-**Decision:** 
+**Decision:** 8-10% target volatility, set ex ante without performance input (owner, 2026-10-04). Working value tau = 9% (midpoint), to be confirmed in the ETF charter (P5-02) before P3-11; fraction of days at the gross cap must stay <= 20% (gate 6). gates.yaml keeps tau as a deferred value frozen by the charter.
 
 ---
 
