@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily allocation forward-test monitor (frozen bars: scripts/allocation_forward_test_preregistered.py)
+
+[Timer]
+# 22:30 UTC: after the 16:00 ET snapshot in every DST regime and after the US close prints settle.
+# OnCalendar pinned to UTC (server zone is Asia/Jerusalem). INSTALL ONLY UNDER OD-15, by the owner.
+OnCalendar=*-*-* 22:30:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

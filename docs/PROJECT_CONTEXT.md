@@ -979,6 +979,8 @@ design/history: `docs/capital_sleeves_plan.md`.
 
 ### Allocation mode (`strategy_mode: allocation`, `src/firm/allocation/`, LIVE on Alpaca since 2026-09-30)
 
+> Forward-test fidelity monitor (P5-06, not live code): `scripts/allocation_forward_monitor.py` + `src/firm/monitoring/allocation_forward.py` compute the frozen I1-I5/BAR_SLEEVE_DRIFT bars (live NAV from loopback GET-only API vs `scripts/allocation_replay.py`); alert-only; units in `deploy/allocation-forward-monitor.*` are not installed until OD-15.
+
 Opt-in alternative to the whole strategy→analyst→PM→risk pipeline, built after the
 edge-search verdict (`docs/edge_search_verdict_2026_09.md`). Absent key / `pipeline` =
 unchanged. **Live on the Alpaca instance since 2026-09-30** (`config/live_alpaca.yaml`; first allocation
