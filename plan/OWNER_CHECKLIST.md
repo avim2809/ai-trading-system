@@ -8,6 +8,7 @@ order of what unblocks the most. Commands run as root on the host.
 
 | # | What | How |
 |---|---|---|
+| A0 | **Review the draft ETF universe and costs** (before A1, about 15 minutes) | `config/universe_etf.yaml`: 15 ETFs in 10 cells, each with a written inclusion rationale, chosen without performance input; check each is something you would hold. `config/costs.yaml`: 5 fee entries are all `verified: false`; compare each with your broker's current schedule and set `verified: true` (or correct the number). Every cost-stress result and the after-tax benchmark use these fees. |
 | A1 | **Write and commit the charter** (about 15 minutes) | Copy `plan/drafts/P5-02/charter_core_v1_DRAFT.md` to `research/charters/core_v1.md`. The mechanism, falsification and the three "agent draft" paragraphs are drafted; rewrite them in your own words and delete the "AGENT DRAFT" labels. Fill the blanks (expected worst year, longest flat period, correlation, turnover and cost). Confirm tau (working value 9%). Fill the approval block, commit. |
 | A2 | **Approve the pre-registration** | Job `w12a` drafts `plan/drafts/P3-11/core_v1_prereg_DRAFT.yaml` (at most 12 configs, gates hash pinned). Review it, copy it to `research/preregistration/<date>_core_v1.yaml`, set `approved_by` and the date, commit. |
 | A3 | **Tell me both are committed** | I then run P3-11 (constants) and P3-08 (the real pre-seal research run) and report the Tier A/C/D verdict. |
