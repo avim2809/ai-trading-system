@@ -6,19 +6,21 @@ version: 1
 verified: false
 # Owner decision 2026-10-05: the research cost basis for the ETF path is the Alpaca zero-commission schedule (etf_alpaca); IBKR Pro tiered
 # (etf_ibkr) is kept as a reported sensitivity. CAT fee ($0.000001 per executed share, 2026) is negligible and not modelled.
+# Broker check 2026-10-05: IBKR Lite is NOT available to Israeli residents, so IBKR means Pro (tiered here as the sensitivity); Alpaca's own page still lists
+# old regulatory rates (SEC $22.90/M, TAF $0.000119) but states they are passed through at the regulator's rates, so the current regulator rates below apply.
 # Regulatory items (SEC sell fee, FINRA TAF) were verified on 2026-10-05 against the sources noted on each schedule; commissions,
 # exchange/clearing fees, spread and impact remain unverified placeholders.
 default_spread_fraction: 0.0004        # quoted spread as FRACTION of price when no data given. UNVERIFIED placeholder, not calibrated
 impact_k_default: 1.0                  # source formula impact = k * sigma * sqrt(qty/ADV); UNCALIBRATED conservative default, flagged
 schedules:
   ibkr_etf:                            # IBKR Pro tiered, US stocks/ETFs, first monthly-volume tier only (<= 300k shares)
-    commission: {per_share: 0.0035, min_per_order: 0.35, max_pct_of_value: 0.01}
-    exchange_fees: {per_share: 0.0003}      # exchange + clearing pass-through placeholder (NSCC clearing 0.00020 + exchange)
+    commission: {per_share: 0.0035, min_per_order: 0.35, max_pct_of_value: 0.01}   # first tier; tiers fall to 0.0005 with monthly volume. Matches IBKR pricing page excerpts 2026-10-05; owner to confirm in the account's own fee schedule
+    exchange_fees: {per_share: 0.0003}      # = NSCC/DTC clearing 0.00020 (matches IBKR page excerpts) + about 0.0001 exchange placeholder (varies by venue, can be a rebate)
     regulatory_on_sells: {sec_rate_of_value: 0.0000206, taf_per_share: 0.000195, taf_max_per_order: 9.79, verified: true,
                           source: "SEC fee rate advisory FY2026 #2 ($20.60 per million, effective 2026-04-04; was $0.00 from 2025-05-14); FINRA TAF $0.000195/share max $9.79 per trade from 2026-01-01; checked 2026-10-05"}
     verified: false
-  alpaca_etf:                          # Alpaca: zero commission; regulatory pass-through on sells only
-    commission: {per_share: 0.0, min_per_order: 0.0, max_pct_of_value: 1.0}
+  alpaca_etf:                          # Alpaca: zero commission; regulatory pass-through on sells (SEC, FINRA TAF) plus a negligible CAT fee
+    commission: {per_share: 0.0, min_per_order: 0.0, max_pct_of_value: 1.0, verified: true, source: "Alpaca pricing-and-fees page (forum.alpaca.markets/t/pricing-and-fees/2309): no commissions, clearing paid by Alpaca Securities LLC; checked 2026-10-05"}
     exchange_fees: {per_share: 0.0}
     regulatory_on_sells: {sec_rate_of_value: 0.0000206, taf_per_share: 0.000195, taf_max_per_order: 9.79, verified: true,
                           source: "SEC fee rate advisory FY2026 #2 ($20.60 per million, effective 2026-04-04; was $0.00 from 2025-05-14); FINRA TAF $0.000195/share max $9.79 per trade from 2026-01-01; checked 2026-10-05"}
