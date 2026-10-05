@@ -9,7 +9,7 @@
 #   fixed in the charter, working value 9%).
 # Frozen inputs that this schema has no field for (to be recorded in scripts/core_v1_preregistered.py, which P3-11 freezes
 # BEFORE any run, and re-verified by P3-08 step 1). sha256 at drafting time (2026-10-05); the owner must re-check at approval:
-#   config/universe_etf.yaml    3c2b671db8ea62a2c291ccc772811ac4e1044c526988bb7922d3567f787f800f
+#   config/universe_etf.yaml    379cb0d4611f46561b1125c72276803ea590ab3de136bcfb3d0ce6a9696d3514   (frozen 14-ETF universe, 2026-10-05)
 #   config/stress_periods.yaml  9b165c652cc7616fc4f441f00350a12a42e9145db9a261f9ab6e2004e9496f20
 #   config/tax_il.yaml          1badbc38c33a8321929d03d4bafe339b22600e5c312a026bfaa6153683585856
 #   plus: charter hash(es), instrument-weight vector hash, seed, embargo_pct (gates cpcv.embargo_pct = 0.01),
@@ -21,11 +21,11 @@
 # trials; they are enumerated with expected counts in scripts/core_v1_preregistered.py and all count toward N (OD-09, raw count).
 family: core_v1
 hypothesis: >-
-  A long/flat, volatility-scaled, diversified time-series trend portfolio (EWMAC plus breakout rules on the 15-ETF universe,
+  A long/flat, volatility-scaled, diversified time-series trend portfolio (EWMAC plus breakout rules on the 14-ETF universe,
   gross <= 1.0x, no leverage, no carry) earns, after realistic costs and Israeli tax, a net Sharpe ratio above that of the 60/40
   SPY/IEF benchmark with annual rebalancing (BM2) over the pre-seal window, and passes every G-RESEARCH test in the frozen gates.
 mechanism_ref: research/charters/core_v1.md
-universe: [SPY, IWM, QQQ, EFA, VGK, EEM, SHY, IEF, TLT, TIP, LQD, HYG, GLD, DBC, IYR]   # = config/universe_etf.yaml, in file order
+universe: [SPY, IWM, QQQ, EFA, EEM, SHY, IEF, TLT, TIP, LQD, HYG, GLD, DBC, IYR]   # = config/universe_etf.yaml, in file order
 date_range: ["1994-02-02", "2026-09-30"]   # earliest first_trade_date in the universe .. burned_through; an instrument enters after its 256-day gate
 param_grid:                                # 2 x 3 x 2 = 12 configs
   forecast_cap: [15.0, 20.0]
