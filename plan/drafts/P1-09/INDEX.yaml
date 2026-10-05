@@ -148,3 +148,14 @@ entries:
   fingerprint_source: trial_history
   status: RUN
   notes: ''
+- family: core_v1
+  kind: frozen_module
+  module_path: scripts/core_v1_preregistered.py
+  yaml_path: null
+  fingerprint: 495e6d70b6ea20994328582888ba8e466ac31ca27908a0712c9fc42f0c24550e
+  freeze_commit: 90ed37ecaa0d24750f2027469d01993e0b1f2341
+  freeze_time_utc: '2026-10-05T19:44:08Z'
+  ledger_path: null
+  fingerprint_source: freeze_commit
+  status: DRAFT
+  notes: 'P3-11 frozen module (w14a). Charter hash is verified at run time, not recorded. The YAML spec core_v1 is a separate owner-committed entry.'
