@@ -1,0 +1,35 @@
+# research/lifecycle/registry.yaml: SEED lifecycle registry (ticket P5-01). Owner-committed; agents do not mutate it.
+#
+# Seed rules (owner to review):
+#  * alpaca_allocation_92_8 is the live Alpaca forward test (kind forward_test): NOT a candidate, no promotion path.
+#  * s2_shadow_ledger is a shadow ledger (kind shadow_ledger): no promotion path.
+#  * Legacy IBKR pipeline strategies (grandfathered until OD-03) are kind legacy_pipeline: the 11 LEGACY_LIVE names are seeded
+#    PAPER (the IBKR account is a paper account), gann DECOMMISSIONED and the rest ARCHIVED, per src/firm/strategies/registry.py.
+#    They have no promotion path; their entered_at_utc is the seed date, not a real transition time.
+#  * code_commit / config_hash are SEED_UNRECORDED: no frozen hashes exist for pre-lifecycle strategies.
+# Owner approval files are read from approvals_dir (relative to the repo root).
+schema: 1
+approvals_dir: research/approvals
+history: []
+families:
+  - {family: alpaca_allocation_92_8, state: PAPER, prior_state: null, entered_at_utc: '2026-09-30T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: forward_test}
+  - {family: s2_shadow_ledger, state: RESEARCH, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: shadow_ledger}
+  - {family: momentum, state: PAPER, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: trend, state: PAPER, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: mean_reversion, state: PAPER, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: stat_arb, state: PAPER, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: multi_factor, state: PAPER, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: sentiment, state: PAPER, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: event_driven, state: PAPER, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: volatility_breakout, state: PAPER, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: seasonality, state: PAPER, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: regime_hmm, state: PAPER, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: pattern_recognition, state: PAPER, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: gann, state: DECOMMISSIONED, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: ml_prediction, state: ARCHIVED, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: danelfin_ai_score, state: ARCHIVED, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: danelfin_best_stocks_signal, state: ARCHIVED, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: danelfin_live_signals, state: ARCHIVED, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: danelfin_market_percentile, state: ARCHIVED, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: insider_cluster, state: ARCHIVED, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
+  - {family: investing_analyst_ratings, state: ARCHIVED, prior_state: null, entered_at_utc: '2026-10-05T00:00:00+00:00', code_commit: SEED_UNRECORDED, config_hash: SEED_UNRECORDED, kind: legacy_pipeline}
