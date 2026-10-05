@@ -1,6 +1,7 @@
 # ETF instrument universe (ticket P2-01). Written WITHOUT any performance input; see docs/universe_rationale_2026_10.md.
 # Metadata generated mechanically by plan/drafts/P2-01/gen_universe_meta.py (manifest + date/volume only).
 version: 1
+owner_review: "2026-10-05: VGK dropped (structural overlap with EFA, no performance input); min_instruments 15 -> 14; QQQ kept"
 status: frozen_candidate   # becomes frozen when the owner signs the P2-01 review; do not change after the first ledger trial using it
 frozen_note: "chosen without performance input; no post-seal data examined (asof <= 2026-09-30)"
 asof: 2026-09-30
@@ -8,13 +9,13 @@ screen:
   early_window_years: 3
   screen_floor_adv_usd: 1000000   # median dollar ADV over first 3y after inception; see rationale (deviation note)
   min_history_years: 5
-  min_instruments: 15
+  min_instruments: 14   # amended 15 -> 14 by owner 2026-10-05 (VGK dropped, see owner_review); universe not yet used by any ledger trial
   max_instruments: 25
   max_per_cell: 3
   warmup: {min_return_days_to_enter: 256, full_vol_window_days: 2520, rule: "expanding mean of the vol quantity until 2520 days; enter after 256 return days"}
 asset_classes:
   equity_us: [SPY, IWM, QQQ]
-  equity_dm_ex_us: [EFA, VGK]
+  equity_dm_ex_us: [EFA]
   equity_em: [EEM]
   treasury: [SHY, IEF, TLT]
   tips: [TIP]
@@ -76,19 +77,6 @@ instruments:
     ucits_variant: null   # OD-12 open; never guessed
     liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
     inclusion_reason: "earliest developed ex-US broad vehicle passing screen"
-  - symbol: VGK
-    asset_class: equity_dm_ex_us
-    currency: USD
-    kind: etf
-    inception_date: 2005-03-10
-    first_trade_date: 2006-03-16
-    full_vol_window_date: 2015-03-16
-    min_return_days_to_enter: 256
-    early_window_median_adv_usd: 7786074
-    prior_exposure: []
-    ucits_variant: null   # OD-12 open; never guessed
-    liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
-    inclusion_reason: "developed Europe regional vehicle passing screen"
   - symbol: EEM
     asset_class: equity_em
     currency: USD
@@ -220,6 +208,7 @@ instruments:
     liquidity_floor_adv_usd: 20000000   # trade-time floor on current ADV (P2-04/P5), not the selection screen
     inclusion_reason: "earliest US REIT vehicle (VNQ is later, so excluded by the earliest-inception rule)"
 excluded_candidates:
+  - {symbol: VGK, reason: "owner review 2026-10-05: regional subset of EFA (Europe is over 60% of EFA); under equal-within-class weights it would make Europe about 80% of the developed ex-US bucket"}
   - {symbol: EWJ, reason: "fails 5y/ADV screen: early-window median ADV below screen floor"}
   - {symbol: VWO, reason: "near-duplicate of EEM (same cell, same exposure)"}
   - {symbol: AGG, reason: "aggregate blend overlaps treasury and credit cells; no cell"}

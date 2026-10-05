@@ -30,11 +30,14 @@ The vol estimator (P3-01) uses a 2520-day long window. Until an instrument has 2
 instrument enters the portfolio only after 256 return days. `first_trade_date` = the date of the 257th data row (256 returns) = portfolio entry,
 read by P3-07 for active-instrument counts. `full_vol_window_date` = the 2521st row, reporting only.
 
-## Result (15 instruments)
+## Result (14 instruments; amended 2026-10-05)
+
+Owner review on 2026-10-05 dropped VGK: it is a regional subset of EFA (Europe is over 60% of EFA), so under equal-within-class weights it would make Europe about 80% of the developed ex-US bucket without adding an independent bet. The structural rule (no ETF that is a regional or sector subset of another in the same cell) uses no performance data. `min_instruments` was lowered from 15 to 14 accordingly, before any ledger trial. QQQ stays: it overlaps SPY by about 54% of weight but is not a subset, and its tech tilt is roughly offset by IWM inside the class.
+
 | Cell | Members | Reason |
 |---|---|---|
 | equity_us | SPY, IWM, QQQ | large cap, small cap, growth/tech index vehicles; all pass screen |
-| equity_dm_ex_us | EFA, VGK | EWJ fails the screen; EFA earliest broad vehicle |
+| equity_dm_ex_us | EFA | EWJ fails the screen; EFA earliest broad vehicle; VGK dropped at owner review (subset of EFA) |
 | equity_em | EEM | earliest broad EM; VWO duplicate |
 | treasury | SHY, IEF, TLT | exact earliest tie (2002-07-26), three durations |
 | tips | TIP | earliest linker; SCHP later |
@@ -50,7 +53,7 @@ Excluded candidates and reasons are listed there too. The Vanguard mutual funds 
 ## Prior exposure
 Generated mechanically: any frozen `scripts/*_preregistered*.py` containing the quoted ticker. Most members have been seen by earlier
 preregistered evaluations (flags mean the data is not fresh, and tell P3 which legacy trials enter the trend-family var_sr and N). IWM's
-flag comes from the insider-cluster prereg, QQQ, VGK, TIP, LQD, HYG have none.
+flag comes from the insider-cluster prereg, QQQ, TIP, LQD, HYG have none.
 
 ## Futures
 `config/universe_futures.yaml` is a DRAFT candidate list seeded from the 19 markets of the frozen DRAFT `futures_trend_preregistered_bars.py`.

@@ -4,18 +4,24 @@
 # rate advisories, FINRA TAF schedule, Alpaca "Fee schedule". access date: none (no network). Do NOT tune any value on backtest results.
 version: 1
 verified: false
+# Owner decision 2026-10-05: the research cost basis for the ETF path is the Alpaca zero-commission schedule (etf_alpaca); IBKR Pro tiered
+# (etf_ibkr) is kept as a reported sensitivity. CAT fee ($0.000001 per executed share, 2026) is negligible and not modelled.
+# Regulatory items (SEC sell fee, FINRA TAF) were verified on 2026-10-05 against the sources noted on each schedule; commissions,
+# exchange/clearing fees, spread and impact remain unverified placeholders.
 default_spread_fraction: 0.0004        # quoted spread as FRACTION of price when no data given. UNVERIFIED placeholder, not calibrated
 impact_k_default: 1.0                  # source formula impact = k * sigma * sqrt(qty/ADV); UNCALIBRATED conservative default, flagged
 schedules:
   ibkr_etf:                            # IBKR Pro tiered, US stocks/ETFs, first monthly-volume tier only (<= 300k shares)
     commission: {per_share: 0.0035, min_per_order: 0.35, max_pct_of_value: 0.01}
     exchange_fees: {per_share: 0.0003}      # exchange + clearing pass-through placeholder (NSCC clearing 0.00020 + exchange)
-    regulatory_on_sells: {sec_rate_of_value: 0.0000278, taf_per_share: 0.000166, taf_max_per_order: 8.30}
+    regulatory_on_sells: {sec_rate_of_value: 0.0000206, taf_per_share: 0.000195, taf_max_per_order: 9.79, verified: true,
+                          source: "SEC fee rate advisory FY2026 #2 ($20.60 per million, effective 2026-04-04; was $0.00 from 2025-05-14); FINRA TAF $0.000195/share max $9.79 per trade from 2026-01-01; checked 2026-10-05"}
     verified: false
   alpaca_etf:                          # Alpaca: zero commission; regulatory pass-through on sells only
     commission: {per_share: 0.0, min_per_order: 0.0, max_pct_of_value: 1.0}
     exchange_fees: {per_share: 0.0}
-    regulatory_on_sells: {sec_rate_of_value: 0.0000278, taf_per_share: 0.000166, taf_max_per_order: 8.30}
+    regulatory_on_sells: {sec_rate_of_value: 0.0000206, taf_per_share: 0.000195, taf_max_per_order: 9.79, verified: true,
+                          source: "SEC fee rate advisory FY2026 #2 ($20.60 per million, effective 2026-04-04; was $0.00 from 2025-05-14); FINRA TAF $0.000195/share max $9.79 per trade from 2026-01-01; checked 2026-10-05"}
     verified: false
   ibkr_future:                         # IBKR Pro futures, per contract per side (CME micro/equity-index style)
     commission: {per_contract: 0.85}

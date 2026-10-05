@@ -21,7 +21,7 @@ def _d(v):
 
 def test_etf_count_and_unique_symbols():
     syms = [i["symbol"] for i in ETF["instruments"]]
-    assert 15 <= len(syms) <= 25
+    assert 14 <= len(syms) <= 25   # min_instruments amended 15 -> 14 at owner review 2026-10-05
     assert len(set(syms)) == len(syms)
 
 

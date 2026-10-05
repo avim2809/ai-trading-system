@@ -8,7 +8,7 @@ order of what unblocks the most. Commands run as root on the host.
 
 | # | What | How |
 |---|---|---|
-| A0 | **Review the draft ETF universe and costs** (before A1, about 15 minutes) | `config/universe_etf.yaml`: 15 ETFs in 10 cells, each with a written inclusion rationale, chosen without performance input; check each is something you would hold. `config/costs.yaml`: 5 fee entries are all `verified: false`; compare each with your broker's current schedule and set `verified: true` (or correct the number). Every cost-stress result and the after-tax benchmark use these fees. |
+| A0 | **Freeze the ETF universe and confirm the remaining cost rows** (5 minutes) | Reviewed 2026-10-05: VGK dropped, 14 instruments, SEC and TAF fees verified (see Section E). To finish: in `config/universe_etf.yaml` change `status: frozen_candidate` to `status: frozen` and commit (do it before the first ledger trial; the real-data job waits for this). In `config/costs.yaml` the Alpaca schedule is the research basis (zero commission); confirm it against Alpaca's disclosures page and set `verified: true` on `alpaca_etf` when satisfied. The IBKR rows stay unverified placeholders (sensitivity only). |
 | A1 | **Write and commit the charter** (about 15 minutes) | Copy `plan/drafts/P5-02/charter_core_v1_DRAFT.md` to `research/charters/core_v1.md`. The mechanism, falsification and the three "agent draft" paragraphs are drafted; rewrite them in your own words and delete the "AGENT DRAFT" labels. Fill the blanks (expected worst year, longest flat period, correlation, turnover and cost). Confirm tau (working value 9%). Fill the approval block, commit. |
 | A2 | **Approve the pre-registration** | Job `w12a` drafts `plan/drafts/P3-11/core_v1_prereg_DRAFT.yaml` (at most 12 configs, gates hash pinned). Review it, copy it to `research/preregistration/<date>_core_v1.yaml`, set `approved_by` and the date, commit. |
 | A3 | **Tell me both are committed** | I then run P3-11 (constants) and P3-08 (the real pre-seal research run) and report the Tier A/C/D verdict. |
@@ -52,3 +52,4 @@ looks wrong: `git -C /local/store/git/ai-trading-system reset --hard 330a0e2` (t
 - The P1-08 harness result is accepted: PASS, with test size 0.070 against the 0.07 bar marginal.
 - Real-data steps of P2-02, P2-03, P2-05 may be run by a research job (pre-seal, through the fail-closed loader only).
 - Live services are restarted by you tonight after the US close (section B).
+- ETF universe: VGK dropped (14 instruments, `min_instruments` 14); research cost basis is Alpaca zero-commission with IBKR tiered as a sensitivity; SEC/TAF fees corrected and verified; cash earns the 3-month T-bill when flat.
