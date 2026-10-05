@@ -4,6 +4,20 @@ Updated 2026-10-05. All 20 owner decisions are recorded in `plan/OWNER_DECISIONS
 (`config/gates.yaml`, hash recorded). Stage 7 guardrails and the research venv are installed. Everything below is action, in
 order of what unblocks the most. Commands run as root on the host.
 
+## Run this first: `/root/owner_run.sh`
+
+One interactive script covers most of the items below. Each stage asks before it changes anything, validates its work with the project's own
+tools, never prints a secret and never restarts a trading service:
+
+```bash
+/root/owner_run.sh status            # what is done and what is open
+/root/owner_run.sh all               # costs, charter, integrity-tests, monitor, s2, prereg, status
+# or one stage at a time: costs | charter | integrity-tests | monitor | s2 | prereg
+```
+
+The `prereg` stage stops until two agent deliverables exist (the frozen `scripts/core_v1_preregistered.py` and a refreshed prereg draft); the
+script tells you exactly what is missing. Bank of Israel FX and the tax adviser stay manual (protected files / outside the repo).
+
 ## A. Needed for the research verdict (the long pole)
 
 | # | What | How |
