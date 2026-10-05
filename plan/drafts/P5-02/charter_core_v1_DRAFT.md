@@ -49,20 +49,20 @@ what the post-publication decay evidence implies.
 
 ETF path, long/flat, no leverage (gross at most 1.0x). Instruments and the written inclusion rationale for each:
 `config/universe_etf.yaml` (15 ETFs across 10 cells). Chosen without any performance input (P2-01). Carry is futures-only and is not
-part of the ETF core. Rebalance frequency: weekly review with a no-trade buffer. Expected turnover and annual cost: **YOUR NUMBERS**
-(fill from the cost model `config/costs.yaml` once A4 is done): ______ % turnover, ______ bps a year.
+part of the ETF core. Rebalance frequency: weekly review with a no-trade buffer. Expected turnover and annual cost: **AGENT ESTIMATE, edit freely**: about 200-400% one-way turnover a year and about 10-20 bps a year
+of cost on the Alpaca zero-commission basis (spread and regulatory fees only). A rough figure, not derived from any backtest; the real number comes from the cost model after the run.
 
 ## 3. Expected Sharpe, worst year, flat period  **YOUR CALL**
 
 The plan's own range is 0.3 to 0.6 net, a haircut of at least 50% from published figures. Pre-filled from the plan; change if you disagree:
 - Expected net Sharpe: **0.3 to 0.6** (estimate, not a forecast).
-- Expected worst calendar year: ______ (guide: the SG Trend Index's worst rolling 12 months was -18.6%).
-- Expected longest flat period: ______ years (guide: multi-year flat periods are normal for this style).
+- Expected worst calendar year: **about -10% to -15%** (AGENT ESTIMATE: the plan's 20-35% max drawdown at 12-15% vol, scaled to tau 9%; guide: the SG Trend Index's worst rolling 12 months was -18.6%).
+- Expected longest flat period: **3 to 5 years** (AGENT ESTIMATE; multi-year flat periods are normal for this style).
 
 ## 4. Target volatility tau (OD-17, decided)
 
 **Working value 9%**, from your 8-10% decision: set ex ante from long-run asset volatilities with no performance input. The fraction of
-days at the 1.0x gross cap must stay at or below 20% (gate 6). Confirm or change: tau = ______ %
+days at the 1.0x gross cap must stay at or below 20% (gate 6). Confirm or change: tau = **9 %** (working value from your 8-10% decision; AGENT-filled, confirm)
 
 ## 5. Drawdown procedure and references (pre-filled from `config/gates.yaml`)
 
@@ -78,8 +78,9 @@ strategy on PROBATION and opens a review. Two triggers set the target weight to 
 
 ## 7. Correlation expectation and diversification rationale  **YOUR CALL**
 
-Expected correlation with the 60/40 benchmark (BM2): ______ . If you expect it at or below 0.3, write the diversification rationale
-here (it is what gate 7's correlation branch needs): ______________________________________________
+Expected correlation with the 60/40 benchmark (BM2): **0.5 to 0.7** (AGENT ESTIMATE: a long/flat ETF trend book holds the same assets as 60/40, so
+the correlation stays high). At that level gate 7's correlation branch (at most 0.3) is unlikely to apply, and the test rests on beating BM2 after
+tax; no diversification rationale is claimed.
 
 ## 7b. What would falsify the mechanism  **YOUR WORDS**
 

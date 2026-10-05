@@ -2,7 +2,9 @@
 # Metadata generated mechanically by plan/drafts/P2-01/gen_universe_meta.py (manifest + date/volume only).
 version: 1
 owner_review: "2026-10-05: VGK dropped (structural overlap with EFA, no performance input); min_instruments 15 -> 14; QQQ kept"
-status: frozen_candidate   # becomes frozen when the owner signs the P2-01 review; do not change after the first ledger trial using it
+status: frozen   # frozen by the owner on 2026-10-05 (P2-01 review signed); do not change; any later change is a new universe and a new pre-registration
+frozen_by: owner
+frozen_date: 2026-10-05
 frozen_note: "chosen without performance input; no post-seal data examined (asof <= 2026-09-30)"
 asof: 2026-09-30
 screen:
