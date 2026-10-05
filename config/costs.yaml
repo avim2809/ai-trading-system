@@ -24,7 +24,7 @@ schedules:
     exchange_fees: {per_share: 0.0}
     regulatory_on_sells: {sec_rate_of_value: 0.0000206, taf_per_share: 0.000195, taf_max_per_order: 9.79, verified: true,
                           source: "SEC fee rate advisory FY2026 #2 ($20.60 per million, effective 2026-04-04; was $0.00 from 2025-05-14); FINRA TAF $0.000195/share max $9.79 per trade from 2026-01-01; checked 2026-10-05"}
-    verified: false
+    verified: true   # confirmed by the owner against Alpaca's disclosures page
   ibkr_future:                         # IBKR Pro futures, per contract per side (CME micro/equity-index style)
     commission: {per_contract: 0.85}
     exchange_fees: {per_contract: 1.38}     # exchange + clearing + NFA placeholder; varies by product

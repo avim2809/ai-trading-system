@@ -1,0 +1,18 @@
+# DRAFT for research/preregistration/TEMPLATE.yaml (owner-committed). Copy to <YYYYMMDD>_<family>.yaml,
+# fill EVERY field, commit the charter FIRST, then have the owner commit this file and its INDEX.yaml entry
+# (kind: yaml, fingerprint = firm.research.prereg.spec_hash). Approval time = `date -u` / the git commit, never a log line.
+family: ""                        # e.g. core_v1
+hypothesis: ""                    # one falsifiable sentence
+mechanism_ref: ""                 # path to the approved charter (P5-02), e.g. research/charters/core_v1.md
+universe: []                      # instruments, chosen without performance input
+date_range: ["2010-01-01", "2026-06-30"]   # [start, end]; pre-seal only (end <= 2026-09-30)
+param_grid: {}                    # {param: [allowed values]}; the product must not exceed max_grid_size
+max_grid_size: 12                 # <= 12 for core_v1
+n_planned_trials: 1               # 1..max_grid_size
+metrics: []                       # e.g. [net_sharpe, deflated_sharpe, max_drawdown]
+gates_hash: ""                    # sha256 of config/gates.yaml at approval (python scripts/gates_hash.py)
+charter_ref: ""                   # same charter path; its git commit time must precede approved_at_utc
+falsification: ""                 # the result that would reject the hypothesis
+post_seal_data_declaration: "No data after 2026-09-30 was examined."
+approver: ""                      # owner identity
+approved_at_utc: ""               # ISO-8601 with timezone, from `date -u`, e.g. 2026-11-10T09:00:00Z
