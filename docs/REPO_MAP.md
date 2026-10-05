@@ -263,6 +263,7 @@ shortlist_S1..S5}`). The licensed-data bundle lives outside the repo
 | `src/research/ledger.py` | `src/firm/research/ledger.py` (new) | new | Canonical store is host-level `/local/store/research-ledger/trials.jsonl`. P1-01 |
 | `src/research/prereg.py` | `src/firm/research/prereg.py` (new) | new | Indexes the frozen `scripts/*_preregistered*.py`. P1-09 |
 | `src/research/` (seal, data access) | `src/firm/research/{seal,data_access,capture}.py` (new) | new | P0-02, P1-12 |
+| (charter tooling) | `src/firm/research/charter.py` (new) | new | Front-matter parser/validator and charter-before-ledger ordering check. P5-02 |
 | `src/data/futures_loader.py` | `src/firm/data/futures_loader.py` (new) | new | Deferred (P2-07). Package is `src/firm/data/` |
 | `src/data/etf_loader.py` | `src/firm/data/etf_loader.py` (new) | new | P2-02 |
 | `src/data/qa.py` | `src/firm/data/qa.py` (new) | extend | Extends cleaning rules and `tests/test_eodhd_clean.py` (P2-03) |
