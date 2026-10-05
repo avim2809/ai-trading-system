@@ -1,0 +1,15 @@
+# config/kill_switch.yaml: DRAFT, CANDIDATE-ONLY settings for src/firm/risk/kill_switch.py (ticket P4-04).
+# Not loaded by any live process. config/live*.yaml and the IBKR 8% / Alpaca 25% kill-switch regimes are untouched.
+#
+# Both numbers below are DELIBERATELY null:
+#  * tau comes from the approved ETF charter (P5-02, OD-17); not copied here.
+#  * charter_dd_bootstrap_p95 is a ledger-derived artefact (P5-02 max_dd_procedure, trial_id-referenced; fixed 10-year
+#    stationary-bootstrap path); charters carry no numeric max-DD literal, and neither does this file until the owner
+#    signs the value.
+# load_kill_switch_config() raises while either is null. survival_ref = max(p95, 2.5 * tau) is computed in code.
+charter_dd_bootstrap_p95: null
+tau: null
+soft_mult: 1.0          # alert only (no soft de-risking: needs an OD-16 row and a P5-02 charter key first)
+hard_mult: 1.5          # block new orders (does not flatten)
+stale_data_days: 2      # trading days
+flatten_on_hard: false  # FLATTEN needs an owner-signed OD-16 rule; keep false
