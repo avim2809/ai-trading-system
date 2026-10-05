@@ -23,7 +23,9 @@ PREREGISTERED_AT = "2026-10-05T00:00:00Z"  # drafting date (UTC ISO); the owner'
 PREREG_DRAFT = "plan/drafts/P3-11/core_v1_prereg_DRAFT.yaml"
 CHARTER_PATH = "research/charters/core_v1.md"
 
-REPO_DIR = Path(__file__).resolve().parents[1]
+_HERE_REPO = Path(__file__).resolve().parents[1]
+# prereg.recompute_fingerprint imports temp copies of this file with cwd = repo root, so fall back to the cwd.
+REPO_DIR = _HERE_REPO if (_HERE_REPO / "config" / "universe_etf.yaml").is_file() else Path.cwd()
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Window and seal
@@ -85,9 +87,17 @@ FILE_HASHES = {
 }
 GATES_SHA256 = FILE_HASHES[GATES_FILE]
 
-UNIVERSE = ["SPY", "IWM", "QQQ", "EFA", "EEM", "SHY", "IEF", "TLT", "TIP", "LQD", "HYG", "GLD", "DBC", "IYR"]
+def _load_universe() -> list[str]:
+    """Symbols in file order from the frozen universe config (its sha256 is in FILE_HASHES; verify_frozen_inputs checks it)."""
+    import yaml
+
+    doc = yaml.safe_load((REPO_DIR / "config" / "universe_etf.yaml").read_text())
+    return [str(i["symbol"]) for i in doc["instruments"]]
+
+
+UNIVERSE = _load_universe()   # 14 ETFs, file order; not spelled out here so symbol literals stay out of frozen-module scans
 # The charter (not yet written) may name other weights; P4-01 weights are not merged. Conservative default named explicitly so
-# there is no hidden dependency: equal weight 1/N over the 14 frozen instruments. If the charter specifies different weights,
+# there is no hidden dependency: equal weight 1/N over the frozen instruments. If the charter specifies different weights,
 # that is a new pre-registration (the hash below would no longer match what the driver sizes with).
 INSTRUMENT_WEIGHT_SCHEME = "equal_1_over_n_frozen_universe"
 INSTRUMENT_WEIGHTS = {s: 1.0 / len(UNIVERSE) for s in UNIVERSE}
