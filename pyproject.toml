@@ -77,6 +77,10 @@ llm = [
     # first (pip install torch --index-url https://download.pytorch.org/whl/cpu)
     # or this pulls the much larger CUDA build.
     "llmlingua",
+    # Security floor for a transitive dependency (kubernetes -> requests-oauthlib
+    # -> oauthlib, pulled in by chromadb): GHSA-xpv3-w29h-x7cv / CVE-2026-49265
+    # (PKCE timing attack) is fixed only in oauthlib 4.0.0 (major bump).
+    "oauthlib>=4.0.0",
 ]
 # Optional: run RAG embeddings/reranking locally (pulls torch — large, ~2GB RAM).
 # Not needed when using the default hosted Voyage provider.
