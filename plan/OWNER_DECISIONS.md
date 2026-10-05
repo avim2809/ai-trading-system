@@ -450,3 +450,16 @@ Ticket headers list every OD a ticket consumes. Only the Blocks column gates a t
 **Blocks.** P7-02
 
 **Decision:** Not applicable for now (owner, 2026-10-04): capital is under $25k, where the plan stays passive. Nothing is bought, provisioned or installed. Revisit if capital exceeds $25k or before any live step. No real-money broker, account or host is chosen; P7 stays unplanned.
+
+---
+
+## Addendum 2026-10-05 (owner answers during the build; not new OD numbers)
+
+- **Kelly bound (register row 19, `charter.kelly_tau_bound`):** evaluated once in the P3-08 research report using the deflated Sharpe with the 50% haircut. A breach is Tier D (reason: Kelly bound). It is not a charter-time check and is not added to live limits.
+- **OD-17 follow-up:** tau stays at the working value 9%; gate 6's 20% cap-days ceiling decides whether it is too high for the long-only ETF path.
+- **P4-01 handcrafting tree:** one group per asset class (equal weight across classes, equal within each class), frozen in the charter.
+- **P1-08 acceptance:** the full-size run (verdict PASS; test size 0.070 against the 0.07 bar, marginal) is accepted as is; no rerun.
+- **Real-data steps (P2-02, P2-03, P2-05):** a research job may run them, pre-seal only, through `firm.research.data_access`.
+- **Live-path restart:** the owner restarts both services after the US close on 2026-10-05; the assistant verifies afterwards.
+- **ILS FX:** the owner asked for the Bank of Israel series to be wired in automatically. The required edits are to protected files (`config/research_freeze.yaml`, `/etc/claude-code/research_freeze.deny.json`), which neither agents nor the assistant may edit; they are listed as owner steps in `plan/OWNER_CHECKLIST.md` section D. Until done, after-tax FX uses EODHD USD/ILS.
+

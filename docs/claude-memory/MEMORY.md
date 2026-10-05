@@ -44,5 +44,5 @@
 - [Host clock is local time](feedback_host_clock_is_local_time.md) — VPS/log timestamps are Asia/Jerusalem (UTC+3); take audit UTC times from date -u or git, never log lines
 - [External review package](feedback_external_review_package.md) — owner wants data+scripts+results preserved for 3rd-party review; use scripts/build_review_package.py, merge branches, bundle licensed data privately
 - [S2 shadow forward test 10/1](project_s2_forward_test_oct01.md) — paper ledger only, first check cut state (47.8%); timer install awaits owner; needs EODHD for monthly pulls
-- [Credibility plan 10/2](project_credibility_plan_oct02.md) — external trend+carry/DSR-gates plan reconciled into PLAN.md + 56 tickets + 20 owner decisions (branch plan/credibility-2026-10, unmerged); DSR at N≈460 makes Tier A ~unreachable
-- [Research sessions scope](feedback_research_sessions_scope.md) — credibility-plan research sessions run as the `research` user in a separate clone: no service restarts, no live-config edits, sealed paths unreadable, branches only; "run on your own" and autonomous-restart grants apply to OPS sessions only
+- [Credibility plan 10/2](project_credibility_plan_oct02.md) — plan reconciled + built; 10/5: waves 5-10 merged to main (c9a2c38), suite 4195 green, live-path code merged but services restart pending (owner, after US close); research run waits on owner charter + prereg approval
+- [Research sessions scope](feedback_research_sessions_scope.md) — research sessions never restart services or edit live config; they run as the research user in a separate clone
