@@ -21,10 +21,10 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
-import recompute as rc  # noqa: E402
+import insider_cluster_preregistered_bars as prereg
+import recompute as rc
 
-from firm.eval.overfitting import cscv_pbo, deflated_sharpe  # noqa: E402
-import insider_cluster_preregistered_bars as prereg  # noqa: E402
+from firm.eval.overfitting import cscv_pbo, deflated_sharpe
 
 OUT = rc.OUT
 BAD_TICKERS = ["ACRX", "CERN", "SMLP", "QPAC", "XBKS"]
@@ -63,7 +63,7 @@ def main() -> None:
     for hname, hold in rc.HOLDS.items():
         print(f"{hname}: computing event returns ...")
         df = rc.compute_event_returns(events_windowed, cache, benches, hold, data_end)
-        strict = df[df["name_ok"] == True]  # noqa: E712
+        strict = df[df["name_ok"] == True]
         clean_df = df[~df["ticker"].isin(BAD_TICKERS)]
         clean_strict = strict[~strict["ticker"].isin(BAD_TICKERS)]
         n_excluded = int(len(strict) - len(clean_strict))
@@ -74,7 +74,7 @@ def main() -> None:
         boot = rc.month_cluster_bootstrap_mean(v, months, rc.N_BOOT, rc.SEED + hold + 777)
 
         hold_res = {
-            "n_before_exclusion": int(len(strict)), "n_after_exclusion": int(len(clean_strict)),
+            "n_before_exclusion": len(strict), "n_after_exclusion": len(clean_strict),
             "n_excluded_events": n_excluded,
             "mean": float(v.mean()), "median": float(np.median(v)),
             "lb": float(np.quantile(boot, rc.ALPHA)), "ub": float(np.quantile(boot, 1 - rc.ALPHA)),

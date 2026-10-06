@@ -29,7 +29,7 @@ from pathlib import Path
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fetch_eodhd_prices import MAX_RPS, OUT, START, Client, _key  # noqa: E402
+from fetch_eodhd_prices import MAX_RPS, OUT, START, Client, _key
 
 log = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ def fetch_eod(client: Client, code: str, path: Path, start: str = START) -> dict
     df = pd.DataFrame(data)
     df["date"] = pd.to_datetime(df["date"])
     _save(df, path)
-    return {"status": "ok", "rows": int(len(df)), "first": str(df["date"].min().date()),
+    return {"status": "ok", "rows": len(df), "first": str(df["date"].min().date()),
             "last": str(df["date"].max().date())}
 
 
@@ -88,7 +88,7 @@ def fetch_action(client: Client, kind: str, ticker: str, path: Path) -> dict:
         return {"status": "error", "http": status}
     df = pd.DataFrame(data if isinstance(data, list) else [])
     _save(df, path)  # an empty frame is a valid answer: no splits / no dividends
-    return {"status": "ok", "rows": int(len(df))}
+    return {"status": "ok", "rows": len(df)}
 
 
 def _merge_manifest(path: Path, updates: dict) -> dict:

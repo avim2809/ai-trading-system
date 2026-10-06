@@ -22,7 +22,7 @@ import logging
 import math
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -33,8 +33,8 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import combination_preregistered_bars as comb_prereg  # noqa: E402
-import standalone_strategy_preregistered_bars as prereg  # noqa: E402
+import combination_preregistered_bars as comb_prereg
+import standalone_strategy_preregistered_bars as prereg
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +49,7 @@ ANN = math.sqrt(252)
 
 def cmd_run(args: argparse.Namespace) -> int:
     import run_combination_evaluation as comb_run
+
     from firm.backtest.run import execute_backtest
     from firm.portfolio.attribution import PerformanceAttribution as PA
 
@@ -106,10 +107,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         "candidate": CANDIDATE,
         "bars_fingerprint": comb_prereg.bars_fingerprint(),        # for run_combination_evaluation evaluate
         "standalone_fingerprint": prereg.bars_fingerprint(),
-        "seconds": round(secs), "n_days": int(len(rets)),
-        "n_book_rows": int(len(books)), "strategies_captured": sorted(books["strategy"].unique().tolist()),
+        "seconds": round(secs), "n_days": len(rets),
+        "n_book_rows": len(books), "strategies_captured": sorted(books["strategy"].unique().tolist()),
         "portfolio": d.get("portfolio", {}), "turnover": d.get("turnover", {}),
-        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": datetime.now(UTC).isoformat(),
     }
     (out / f"{CANDIDATE}.meta.json").write_text(json.dumps(meta, indent=2, default=str))
     log.info("run done in %.0fs (%d days, %d book rows, strategies %s)", secs, len(rets), len(books),
@@ -149,8 +150,8 @@ def boot_sharpe_lb(x: np.ndarray, seed: int) -> float:
 
 
 def load_prices(dates: pd.DatetimeIndex, symbols: list[str]) -> pd.DataFrame:
-    from firm.data.cache import ParquetCache
     from firm.config import get_settings
+    from firm.data.cache import ParquetCache
     p = ParquetCache(get_settings().data.cache_dir).get("combined/prices")
     p = p[p.symbol.isin(symbols)]
     px = p.pivot_table(index="date", columns="symbol", values="adj_close")
@@ -255,7 +256,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
             fidelity[s] = {"max_abs_diff": float(np.abs(a.to_numpy()[ok] - gross0[ok]).max()) if ok.any() else None,
                            "corr": float(np.corrcoef(a.to_numpy()[ok], gross0[ok])[0, 1]) if ok.sum() > 2 else None}
         results[s] = {
-            "oos_days": int(len(x)), "sharpe_oos_hedged_net": _sharpe(x),
+            "oos_days": len(x), "sharpe_oos_hedged_net": _sharpe(x),
             "lb_one_sided": boot_sharpe_lb(x, prereg.BOOTSTRAP["seed"] + hash(s) % 1000),
             "fold_sharpes": folds, "betas": betas,
             "sharpe_oos_hedged_gross": _sharpe(hedge(gross, spy, m_tr, m_te)[0][oos]),
@@ -299,7 +300,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     for s in missing:
         results[s] = {"survives": False, "note": "no signal book captured"}
 
-    report = {"generated_at": datetime.now(timezone.utc).isoformat(), "fingerprint": fp,
+    report = {"generated_at": datetime.now(UTC).isoformat(), "fingerprint": fp,
               "folds": [list(x) for x in splits], "cost_bps_per_side": cost,
               "alpha_one_sided": prereg.BOOTSTRAP["alpha_one_sided"], "strategies": results,
               "survivors": [s for s, r in results.items() if r.get("survives")]}
@@ -308,7 +309,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         Path(args.report).write_text(json.dumps(report, indent=2, default=float))
     if args.append_ledger:
         ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"family": "standalone_strategy", "entries": []}
-        ledger["entries"].append({"date": datetime.now(timezone.utc).date().isoformat(), "fingerprint": fp,
+        ledger["entries"].append({"date": datetime.now(UTC).date().isoformat(), "fingerprint": fp,
                                   "n_trials": len(prereg.STRATEGIES), "trials": prereg.STRATEGIES,
                                   "trial_daily_sharpes": [float(v) for v in trial_daily],
                                   "survivors": report["survivors"]})

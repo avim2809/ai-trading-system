@@ -29,7 +29,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -182,7 +182,7 @@ def timeline(scratch: Path) -> None:
                 except ValueError:
                     continue
         if stamps:
-            to_utc = lambda t: (t - HOST_TZ_OFFSET).strftime("%Y-%m-%dT%H:%M:%SZ")  # noqa: E731
+            to_utc = lambda t: (t - HOST_TZ_OFFSET).strftime("%Y-%m-%dT%H:%M:%SZ")
             lines.append(f"| {p.relative_to(scratch)} | {to_utc(stamps[0])} | {to_utc(stamps[-1])} |")
     (REVIEW / "TIMELINE.md").write_text("\n".join(lines) + "\n")
 
@@ -210,7 +210,7 @@ def main() -> int:
     ap.add_argument("--no-bundle", action="store_true")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     (REVIEW / "data").mkdir(parents=True, exist_ok=True)
     man = build_manifest(args.scratch)
     with gzip.open(REVIEW / "data" / "MANIFEST.csv.gz", "wt") as f:

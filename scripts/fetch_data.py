@@ -20,7 +20,7 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.scripts_entry import fetch_data_main  # noqa: E402
+from firm.scripts_entry import fetch_data_main
 
 if __name__ == "__main__":
     raise SystemExit(fetch_data_main())

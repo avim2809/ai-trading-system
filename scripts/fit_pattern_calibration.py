@@ -90,8 +90,8 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.live.pattern_scan_history import PatternScanHistoryStore  # noqa: E402
-from firm.patterns.ml.calibration import fit_sigmoid_calibration, save_calibration  # noqa: E402
+from firm.live.pattern_scan_history import PatternScanHistoryStore
+from firm.patterns.ml.calibration import fit_sigmoid_calibration, save_calibration
 
 log = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ def build_calibration(
         "model": model,
         "a": a,
         "b": b,
-        "n_samples": int(len(raw_scores)),
+        "n_samples": len(raw_scores),
         "source": "fit_pattern_calibration.py",
     }
 

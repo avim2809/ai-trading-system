@@ -29,10 +29,10 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.config import get_settings  # noqa: E402
-from firm.data.cache import ParquetCache  # noqa: E402
-from firm.data.providers.tiingo import TiingoProvider  # noqa: E402
-from firm.data.schemas import PRICE_COLS  # noqa: E402
+from firm.config import get_settings
+from firm.data.cache import ParquetCache
+from firm.data.providers.tiingo import TiingoProvider
+from firm.data.schemas import PRICE_COLS
 
 log = logging.getLogger(__name__)
 

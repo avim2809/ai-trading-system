@@ -18,10 +18,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from firm.config import get_settings
+from firm.data.providers.alphavantage import AlphaVantageProvider
 from firm.data.providers.fmp import FMPProvider
 from firm.data.providers.massive import MassiveProvider
 from firm.data.providers.tiingo import TiingoProvider
-from firm.data.providers.alphavantage import AlphaVantageProvider
 
 SYMBOL = "AAPL"
 START = "2026-06-01"

@@ -32,10 +32,10 @@ import json
 import logging
 import math
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -45,10 +45,13 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import eodhd_clean as ec  # noqa: E402
-import eodhd_s2_breadth_overlay_preregistered_bars as prereg  # noqa: E402
-from firm.eval.overfitting import cscv_pbo, deflated_sharpe  # noqa: E402
-from run_alt_premia_evaluation import stationary_indices  # noqa: E402  (reused verbatim, per protocol Sec.4)
+import eodhd_clean as ec
+import eodhd_s2_breadth_overlay_preregistered_bars as prereg
+from run_alt_premia_evaluation import (
+    stationary_indices,
+)
+
+from firm.eval.overfitting import cscv_pbo, deflated_sharpe
 
 log = logging.getLogger(__name__)
 
@@ -524,7 +527,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     for name in frame.columns:
         s = frame.loc[wmask, name]
         flagged = s[s.abs() > 0.15]
-        big_moves[name] = {"n": int(len(flagged)), "dates": [str(d.date()) for d in flagged.index],
+        big_moves[name] = {"n": len(flagged), "dates": [str(d.date()) for d in flagged.index],
                             "values": [float(v) for v in flagged.to_numpy()]}
     nan_days = {name: int(frame.loc[wmask, name].isna().sum()) for name in frame.columns}
     sanity = {
@@ -582,7 +585,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     for vid in VARIANT_IDS:
         c = frame.loc[wmask, vid]
         c_full = c.dropna()
-        res = {"n_days": int(len(c_full)),
+        res = {"n_days": len(c_full),
                "sharpe": sharpe(c_full.to_numpy()), "cagr": cagr(c_full.to_numpy()),
                "vol": float(c_full.std(ddof=1) * ANN), "max_dd": max_drawdown(c_full.to_numpy()),
                "calmar": calmar(c_full.to_numpy()), "vs": {}}
@@ -619,7 +622,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
             js = pd.concat([cs, bs], axis=1, keys=["c", "b"]).dropna()
             gap_stress = sharpe(js.c.to_numpy()) - sharpe(js.b.to_numpy())
             res["vs"][bm] = {
-                "n_days": int(len(j)), "sharpe_c": sharpe(ce), "sharpe_b": sharpe(be), "gap": gap,
+                "n_days": len(j), "sharpe_c": sharpe(ce), "sharpe_b": sharpe(be), "gap": gap,
                 "lb": lb, "ub": ub, "gap_half_1": gap_lo, "gap_half_2": gap_hi, "gap_stress": gap_stress,
                 "max_dd_c": max_drawdown(ce), "max_dd_b": max_drawdown(be),
                 "calmar_c": calmar(ce), "calmar_b": calmar(be),
@@ -683,7 +686,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     ]
 
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(), "fingerprint": fp,
+        "generated_at": datetime.now(UTC).isoformat(), "fingerprint": fp,
         "prereg_at": prereg.PREREGISTERED_AT, "cleaning_fingerprint_used_for_breadth": "f62cb2e4... (label-only "
         "predecessor of the frozen fc0690f0...; cleaning BEHAVIOUR identical -- see module docstring)",
         "window": prereg.WINDOW, "alpha_one_sided": alpha, "pbo": pbo_value,
@@ -705,7 +708,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     if args.append_ledger:
         ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"family": "S2", "entries": []}
         ledger["entries"].append({
-            "date": datetime.now(timezone.utc).date().isoformat(), "fingerprint": fp,
+            "date": datetime.now(UTC).date().isoformat(), "fingerprint": fp,
             "n_trials": len(trial_daily_sr_cash_excess), "trials": VARIANT_IDS,
             "trial_daily_sharpes_cash_excess_governing": [float(x) for x in trial_daily_sr_cash_excess],
             "trial_daily_sharpes_bm2_excess_alt": [float(x) for x in trial_daily_sr_bm2_excess],

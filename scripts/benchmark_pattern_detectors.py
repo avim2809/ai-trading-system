@@ -45,21 +45,7 @@ _TESTS = Path(__file__).resolve().parents[1] / "tests"
 if _TESTS.exists() and str(_TESTS) not in sys.path:
     sys.path.insert(0, str(_TESTS))
 
-from firm.eval.classification import (  # noqa: E402
-    binary_classification_report,
-    brier_score,
-    pr_auc,
-    reliability_diagram_bins,
-)
-from firm.patterns.ml.feature_engineering import PATTERN_FAMILY_MAP  # noqa: E402
-from firm.patterns.scanner import scan_symbol  # noqa: E402
-from firm.patterns.significance import (  # noqa: E402
-    benjamini_hochberg_accept,
-    cached_null_score_distribution,
-    pattern_p_value,
-)
-
-from pattern_fixtures import (  # noqa: E402
+from pattern_fixtures import (
     AMBIGUOUS_FIXTURES,
     BOUNDARY_FIXTURES,
     CUP_HANDLE_AMBIGUOUS_EXPECTED,
@@ -69,6 +55,20 @@ from pattern_fixtures import (  # noqa: E402
     _cup_handle_frame,
     build_frame,
     synthetic_negative_frames,
+)
+
+from firm.eval.classification import (
+    binary_classification_report,
+    brier_score,
+    pr_auc,
+    reliability_diagram_bins,
+)
+from firm.patterns.ml.feature_engineering import PATTERN_FAMILY_MAP
+from firm.patterns.scanner import scan_symbol
+from firm.patterns.significance import (
+    benjamini_hochberg_accept,
+    cached_null_score_distribution,
+    pattern_p_value,
 )
 
 log = logging.getLogger(__name__)

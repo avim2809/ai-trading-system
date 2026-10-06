@@ -17,7 +17,7 @@ import pandas as pd
 
 ROOT = Path("/local/store/git/ai-trading-system")
 sys.path.insert(0, str(ROOT / "scripts"))
-from fetch_eodhd_prices import price_path  # noqa: E402
+from fetch_eodhd_prices import price_path
 
 OUT = Path(
     "/tmp/claude-0/-local-store-git-ai-trading-system/"

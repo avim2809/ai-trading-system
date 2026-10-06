@@ -21,6 +21,7 @@ from pathlib import Path
 # Make ``firm`` importable when run from a source checkout.
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+import firm.strategies  # noqa: F401 — ensure @register decorators fire
 from firm.brokers.ibkr import IBKRBroker
 from firm.live.approval import ApprovalQueue
 from firm.live.data_feed import LiveDataFeed
@@ -31,7 +32,6 @@ from firm.live.provider_utils import (
 )
 from firm.llm.config import load_llm_config, provider_config
 from firm.logging_setup import setup_logging
-import firm.strategies  # noqa: F401 — ensure @register decorators fire
 
 setup_logging(log_file="data/logs/live_trading.log")
 log = logging.getLogger("firm.live.runner")
@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     config["llm_config"] = provider_config()
 
     data_feed = LiveDataFeed(providers=_build_providers(host, port), universe=universe)
-    providers = data_feed._providers  # noqa: SLF001 — filter strategies before engine build
+    providers = data_feed._providers
     if strategies_enabled:
         strategies_enabled = filter_strategies_for_providers(
             strategies_enabled, providers, logger=log

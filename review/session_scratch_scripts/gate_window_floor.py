@@ -29,7 +29,7 @@ _SUFFIX_RE = re.compile(r"^([A-Za-z-]+?)([0-9]{3,})$")
 
 
 def base_symbol(code: str) -> str:
-    stem = code[:-4] if code.endswith("-USD") else code
+    stem = code.removesuffix("-USD")
     stem = stem.upper()
     m = _SUFFIX_RE.match(stem)
     return m.group(1) if m else stem

@@ -17,14 +17,14 @@ import logging
 import math
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.live.state_store import LiveStateStore  # noqa: E402
+from firm.live.state_store import LiveStateStore
 
 log = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ def main() -> int:
     max_dd = _max_drawdown(navs)
 
     llm_config = os.environ.get("FIRM_LLM_CONFIG", "(default llm.yaml)")
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     snapshot = {
         "timestamp": now,

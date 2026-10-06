@@ -37,10 +37,10 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.config import get_settings  # noqa: E402
-from firm.data.cache import ParquetCache  # noqa: E402
-from firm.data.danelfin_market_percentile import fetch_market_percentile_pool  # noqa: E402
-from firm.data.providers.danelfin import DanelfinProvider  # noqa: E402
+from firm.config import get_settings
+from firm.data.cache import ParquetCache
+from firm.data.danelfin_market_percentile import fetch_market_percentile_pool
+from firm.data.providers.danelfin import DanelfinProvider
 
 log = logging.getLogger(__name__)
 

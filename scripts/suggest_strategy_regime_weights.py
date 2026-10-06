@@ -28,11 +28,11 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.backtest.run import execute_backtest  # noqa: E402
-from firm.config import get_settings  # noqa: E402
-from firm.regime.features import compute_regime_features  # noqa: E402
-from firm.regime.model import BEAR, BULL, CHOP, GaussianRegimeModel  # noqa: E402
-from firm.runtime import load_prices  # noqa: E402
+from firm.backtest.run import execute_backtest
+from firm.config import get_settings
+from firm.regime.features import compute_regime_features
+from firm.regime.model import BEAR, BULL, CHOP, GaussianRegimeModel
+from firm.runtime import load_prices
 
 log = logging.getLogger(__name__)
 
