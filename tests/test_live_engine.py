@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
@@ -35,7 +35,6 @@ from firm.time_utils import utcnow
 
 # Re-use MockBroker from test_brokers
 from tests.test_brokers import MockBroker
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -559,8 +558,8 @@ class TestLiveDataFeed:
         assert sent.empty
 
     def test_refresh_merges_cached_fundamentals(self, tmp_path, monkeypatch):
-        from firm.data.cache import ParquetCache
         from firm.config import Settings
+        from firm.data.cache import ParquetCache
 
         monkeypatch.setenv("FIRM_LIVE_FETCH_FUNDAMENTALS", "1")
         monkeypatch.setenv("FIRM_FUNDAMENTALS_REFRESH_MAX_AGE_HOURS", "0")
@@ -2164,16 +2163,16 @@ class TestEngineConfigUpdates:
 
 class TestTradingDayTimezone:
     def test_trading_day_key_uses_session_timezone_not_utc(self):
-        from datetime import datetime, timezone as dt_tz
+        from datetime import datetime
 
         from firm.live.scheduler import trading_day_key
 
         # 2026-07-26 03:00 UTC = 2026-07-25 23:00 US/Eastern (EDT)
-        ts = datetime(2026, 7, 26, 3, 0, tzinfo=dt_tz.utc)
+        ts = datetime(2026, 7, 26, 3, 0, tzinfo=UTC)
         assert trading_day_key(ts, "US/Eastern") == "2026-07-25"
         assert trading_day_key(ts.replace(tzinfo=None), "US/Eastern") == "2026-07-25"
         # Same instant, UTC calendar date would be 2026-07-26
-        assert ts.astimezone(dt_tz.utc).strftime("%Y-%m-%d") == "2026-07-26"
+        assert ts.astimezone(UTC).strftime("%Y-%m-%d") == "2026-07-26"
 
     @patch("firm.live.engine.build_orchestrator")
     def test_daily_limits_reset_on_trading_day_boundary(self, mock_build, engine_components):
@@ -4393,7 +4392,7 @@ class TestFlattenStrategy:
 
     def test_blended_no_attributed_positions_is_a_no_op(self, tmp_path):
         engine = self._engine(tmp_path=tmp_path)
-        engine._attribution.dominant_strategy_by_symbol = lambda: {}
+        engine._attribution.dominant_strategy_by_symbol = dict
 
         result = engine.flatten_strategy("momentum")
         assert result == {"strategy": "momentum", "flattened": False, "reason": "no attributed positions held"}

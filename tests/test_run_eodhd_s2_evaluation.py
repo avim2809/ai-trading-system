@@ -18,8 +18,8 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import run_eodhd_s2_evaluation as ev  # noqa: E402
-import eodhd_s2_breadth_overlay_preregistered_bars as prereg  # noqa: E402
+import eodhd_s2_breadth_overlay_preregistered_bars as prereg
+import run_eodhd_s2_evaluation as ev
 
 
 def _bdate_range(start: str, periods: int) -> pd.DatetimeIndex:
@@ -247,7 +247,7 @@ class TestOverlayWeights:
         first_of_month = np.array([True, False, False, False, False])
         inp = ev.Inputs(dates, spy_ret, bond_ret, cash_ret, pct_above, net_ad, first_of_month)
         on = ev._variant_decision_states(inp, "V1_primary")
-        assert on[0] == False  # noqa: E712 -- NaN signal must not be read as "on"
+        assert on[0] == False
 
 
 # ---------------------------------------------------------------------------

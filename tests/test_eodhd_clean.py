@@ -13,7 +13,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import eodhd_clean as ec  # noqa: E402
+import eodhd_clean as ec
 
 FROZEN_FP = "fc0690f087edaac8c11ddf77b381e58b59c57a893d460f12c7fa782229693054"  # v2; a shortlist prereg cites this value
 

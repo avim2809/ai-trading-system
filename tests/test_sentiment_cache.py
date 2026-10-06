@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 
+from firm.config import Settings
 from firm.data.cache import ParquetCache
 from firm.data.sentiment_cache import (
     merge_with_cached_sentiment,
     partition_sentiment_fetch,
     save_sentiment_cache,
 )
-from firm.config import Settings
 
 
 def _row(sym: str, day: str, score: float = 0.5) -> dict:
@@ -31,7 +31,7 @@ def test_partition_cold_vs_warm_symbols():
         _row("AAPL", "2026-07-23"),
         _row("MSFT", "2026-07-20"),  # stale vs asof 2026-07-24
     ])
-    asof = datetime(2026, 7, 24, 15, 0, tzinfo=timezone.utc)
+    asof = datetime(2026, 7, 24, 15, 0, tzinfo=UTC)
     plan = partition_sentiment_fetch(
         ["AAPL", "MSFT", "NVDA"],
         cached,
@@ -61,7 +61,7 @@ def test_save_sentiment_cache_writes_parquet(tmp_path, monkeypatch):
     saved = save_sentiment_cache(
         df,
         lookback_days=30,
-        asof=datetime(2026, 7, 24, tzinfo=timezone.utc),
+        asof=datetime(2026, 7, 24, tzinfo=UTC),
     )
     assert len(saved) == 1
     cache = ParquetCache(tmp_path)

@@ -24,14 +24,15 @@ import pytest
 
 pytest.importorskip("alpaca")
 
-from firm.brokers.alpaca import AlpacaBroker
-from firm.brokers.base import BrokerError, OrderRequest
 from alpaca.common.exceptions import APIError
 from alpaca.trading.requests import (
     StopLimitOrderRequest,
     StopOrderRequest,
     TrailingStopOrderRequest,
 )
+
+from firm.brokers.alpaca import AlpacaBroker
+from firm.brokers.base import BrokerError, OrderRequest
 
 
 class _FakeTradingClient:

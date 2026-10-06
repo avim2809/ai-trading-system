@@ -9,7 +9,7 @@ not that the fixture matches investing.com's actual current markup.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pytest
@@ -18,10 +18,10 @@ import pytest
 # without it, same convention as the alpaca/ib_async test modules.
 pytest.importorskip("bs4")
 
-from firm.data.investing.calendar import fetch_calendar  # noqa: E402
-from firm.data.investing.session import PageResponse  # noqa: E402
-from firm.data.providers.base import ProviderError  # noqa: E402
-from firm.live.news_guard import Event  # noqa: E402
+from firm.data.investing.calendar import fetch_calendar
+from firm.data.investing.session import PageResponse
+from firm.data.providers.base import ProviderError
+from firm.live.news_guard import Event
 
 _SAMPLE_HTML = """
 <table>
@@ -84,7 +84,7 @@ class TestFetchCalendar:
         assert nfp.title == "Non-Farm Payrolls"
         assert nfp.currency == "USD"
         assert nfp.impact == "high"
-        assert nfp.when == datetime.fromtimestamp(1706108400, tz=timezone.utc)
+        assert nfp.when == datetime.fromtimestamp(1706108400, tz=UTC)
 
         ecb = events[1]
         assert ecb.currency == "EUR"

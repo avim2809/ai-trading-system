@@ -23,8 +23,8 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import run_eodhd_s3_evaluation as ev  # noqa: E402
-import eodhd_s3_bond_commodity_trend_preregistered_bars as prereg  # noqa: E402
+import eodhd_s3_bond_commodity_trend_preregistered_bars as prereg
+import run_eodhd_s3_evaluation as ev
 
 
 def make_dates(n: int, start: str = "2007-01-02") -> pd.DatetimeIndex:

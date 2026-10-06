@@ -34,8 +34,8 @@ def _load_harness():
     for p in (str(_ROOT / "src"), str(_ROOT / "scripts")):
         if p not in sys.path:
             sys.path.insert(0, p)
-    import alt_premia_preregistered_bars as prereg  # noqa: PLC0415
-    import run_alt_premia_evaluation as harness  # noqa: PLC0415
+    import alt_premia_preregistered_bars as prereg
+    import run_alt_premia_evaluation as harness
 
     return prereg, harness
 

@@ -17,7 +17,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from validate_pattern_cnn_walkforward import (  # noqa: E402
+from validate_pattern_cnn_walkforward import (
     DEFAULT_PARAM_GRID,
     _fold_flag_selection_pattern,
     derive_recommendation,

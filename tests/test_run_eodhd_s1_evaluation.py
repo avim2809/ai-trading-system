@@ -18,9 +18,8 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import run_eodhd_s1_evaluation as ev  # noqa: E402
-import eodhd_s1_industry_momentum_preregistered_bars as prereg  # noqa: E402
-
+import eodhd_s1_industry_momentum_preregistered_bars as prereg
+import run_eodhd_s1_evaluation as ev
 
 # ---------------------------------------------------------------------------
 # Return math
@@ -179,7 +178,7 @@ class TestSimulateOpenExec:
         targets = {1: np.array([0.0, 1.0])}
         cost_bps = {1: np.array([0.0, 0.0])}
         out, held, turnover = ev.simulate_open_exec(full_ret, overnight, intraday, rf,
-                                                     {**{0: np.array([1.0, 0.0])}, **targets}, {
+                                                     {0: np.array([1.0, 0.0]), **targets}, {
                                                          0: np.array([0.0, 0.0]), **cost_bps})
         # Day 1: overnight leg earns asset-0's 2% (old weights), intraday leg earns
         # asset-1's 3% (new weights) -- zero cost.

@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pandas as pd
 
-from firm.data.cache import ParquetCache
 from firm.config import Settings
+from firm.data.cache import ParquetCache
 
 
 def test_refresh_cache_only_skips_network(tmp_path, monkeypatch):

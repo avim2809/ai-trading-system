@@ -8,7 +8,6 @@ from firm.rag.chunker import DocumentChunker
 from firm.rag.models import RetrievedDoc
 from firm.rag.retriever import RAGRetriever
 
-
 # ── Phase 3a: contextual embeddings ─────────────────────────────────
 
 class TestContextualChunker:

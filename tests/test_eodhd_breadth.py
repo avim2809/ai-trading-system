@@ -20,7 +20,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import eodhd_breadth as eb  # noqa: E402
+import eodhd_breadth as eb
 
 SMA_WINDOW = eb.UNIVERSE_SCREEN["sma_window"]          # 200
 PRICE_MIN = eb.UNIVERSE_SCREEN["price_min_usd"]        # 5.0

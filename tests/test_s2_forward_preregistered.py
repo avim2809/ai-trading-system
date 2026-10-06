@@ -11,7 +11,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import s2_forward_preregistered as pre  # noqa: E402
+import s2_forward_preregistered as pre
 
 
 def test_frozen_and_fingerprint_deterministic():

@@ -13,14 +13,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-
 from firm.backtest.commissions import PercentageCommission
 from firm.backtest.datafeeds import AdjustedPandasData, dataframe_to_feed, load_feeds
-from firm.backtest.firm_strategy import PitViewAdapter
 from firm.backtest.engine import BacktestEngine
+from firm.backtest.firm_strategy import PitViewAdapter
 from firm.data.pit_store import PointInTimeDataStore
 from firm.strategies.base import PitView
-
 
 # ======================================================================
 # Helpers

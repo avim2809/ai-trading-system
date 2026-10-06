@@ -14,7 +14,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import eodhd_s4_52wk_high_preregistered_bars as prereg  # noqa: E402
+import eodhd_s4_52wk_high_preregistered_bars as prereg
 
 
 class TestDraftStatus:
