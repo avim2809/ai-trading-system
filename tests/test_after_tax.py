@@ -182,13 +182,51 @@ def test_cost_deducted_in_both(rebalance):
     assert set(out.columns) >= {"gross", "after_cost", "after_tax"}
 
 
-def test_gate_benchmark_is_higher_after_tax_variant():
+def _gates(**bench):
+    return {"g_research": {"benchmark": {"benchmark": "BM2_60_40_SPY_IEF", "rebalance": "annual", "sensitivity": "monthly", **bench}}}
+
+
+def _gate_run(gates):
     _i, prices, fx, cpi, div = _bm2_inputs()
-    name, df, both = at.gate_benchmark_bm2(prices, fx, cpi, div, cfg(inflation_adjust=True), COSTS)
+    return at.gate_benchmark_bm2(prices, fx, cpi, div, cfg(inflation_adjust=True), COSTS, gates=gates)
+
+
+@pytest.mark.parametrize("variant", ["annual", "monthly"])
+def test_gate_benchmark_is_pinned_variant(variant):
+    name, df, both = _gate_run(_gates(uses_higher_after_tax_sharpe_of_the_two=False, gate_variant=variant))
+    assert name == variant and set(both) == {"annual", "monthly"}
+    pd.testing.assert_frame_equal(df, both[variant])
+
+
+def test_gate_benchmark_reads_the_real_gates_file_pinned_annual():
+    name, _df, _both = at.gate_benchmark_bm2(*_bm2_inputs()[1:], cfg(inflation_adjust=True), COSTS)
+    assert name == "annual"
+    assert at.gate_variant_rule() == (False, "annual")
+
+
+def test_gate_benchmark_legacy_higher_after_tax_variant_when_flag_true():
+    name, df, both = _gate_run(_gates(uses_higher_after_tax_sharpe_of_the_two=True, gate_variant="annual"))
     sr = {k: at.summarise(v["after_tax"]).sharpe for k, v in both.items()}
-    assert set(sr) == {"annual", "monthly"}
     assert name == max(sr, key=sr.get)
     pd.testing.assert_frame_equal(df, both[name])
+
+
+@pytest.mark.parametrize("bench", [
+    {"gate_variant": "annual"},                                                              # flag missing
+    {"uses_higher_after_tax_sharpe_of_the_two": False},                                      # variant missing
+    {"uses_higher_after_tax_sharpe_of_the_two": False, "gate_variant": "weekly"},            # unknown variant
+    {"uses_higher_after_tax_sharpe_of_the_two": "no", "gate_variant": "annual"},             # not a bool
+])
+def test_gate_benchmark_fails_closed(bench):
+    with pytest.raises(ValueError):
+        at.gate_variant_rule(_gates(**bench))
+    with pytest.raises(ValueError):
+        _gate_run(_gates(**bench))
+
+
+def test_gate_variant_rule_needs_a_benchmark_block():
+    with pytest.raises(ValueError):
+        at.gate_variant_rule({"x": {"y": 1}})
 
 
 def test_tax_conventions_identical_for_system_and_bm2():

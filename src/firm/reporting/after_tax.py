@@ -308,12 +308,44 @@ def benchmark_bm2(prices_usd: pd.DataFrame, fx: pd.Series, cpi: pd.Series, divid
     return out
 
 
-def gate_benchmark_bm2(prices_usd, fx, cpi, dividends, cfg, cost_cfg, **kw) -> tuple[str, pd.DataFrame, dict[str, pd.DataFrame]]:
-    """Gate-7 benchmark: the rebalancing variant (annual / monthly) with the higher AFTER-TAX Sharpe, plus both variants."""
-    both = {m: benchmark_bm2(prices_usd, fx, cpi, dividends, cfg, cost_cfg, rebalance=m, **kw) for m in ("annual", "monthly")}
+_GATES_PATH = Path(__file__).resolve().parents[3] / "config" / "gates.yaml"
+_VARIANTS = ("annual", "monthly")
+
+
+def gate_variant_rule(gates: dict | None = None) -> tuple[bool, str | None]:
+    """(uses_higher_of_the_two, pinned variant) from the gates file (register Amendment 1); fail closed on a missing key or unknown variant."""
+    if gates is None:
+        from firm.reporting.diversification_report import load_gates
+
+        gates = load_gates(_GATES_PATH)
+    blocks = [v["benchmark"] for v in gates.values() if isinstance(v, dict) and isinstance(v.get("benchmark"), dict)]
+    if len(blocks) != 1:
+        raise ValueError(f"gates file must hold exactly one benchmark block, found {len(blocks)}")
+    b = blocks[0]
+    if "uses_higher_after_tax_sharpe_of_the_two" not in b:
+        raise ValueError("gates benchmark block lacks uses_higher_after_tax_sharpe_of_the_two")
+    higher = b["uses_higher_after_tax_sharpe_of_the_two"]
+    if not isinstance(higher, bool):
+        raise ValueError(f"uses_higher_after_tax_sharpe_of_the_two must be a bool, got {higher!r}")
+    if higher:
+        return True, None
+    if "gate_variant" not in b:
+        raise ValueError("gates benchmark block lacks gate_variant while the higher-of-two rule is off")
+    if b["gate_variant"] not in _VARIANTS:
+        raise ValueError(f"unknown gate_variant {b['gate_variant']!r}; expected one of {_VARIANTS}")
+    return False, str(b["gate_variant"])
+
+
+def gate_benchmark_bm2(prices_usd, fx, cpi, dividends, cfg, cost_cfg, *, gates: dict | None = None,
+                       **kw) -> tuple[str, pd.DataFrame, dict[str, pd.DataFrame]]:
+    """Gate-7 benchmark variant, chosen by the gates file: the pinned ``gate_variant`` (the other is a reported sensitivity only),
+    or, only if ``uses_higher_after_tax_sharpe_of_the_two`` is true (legacy), the variant with the higher AFTER-TAX Sharpe.
+    Returns (gate variant name, its frame, both variants)."""
+    higher, pinned = gate_variant_rule(gates)
+    both = {m: benchmark_bm2(prices_usd, fx, cpi, dividends, cfg, cost_cfg, rebalance=m, **kw) for m in _VARIANTS}
     sharpe = {m: summarise(df["after_tax"]).sharpe for m, df in both.items()}
-    name = max(sharpe, key=sharpe.get)
-    log.info("gate benchmark %s (after-tax Sharpe %s)", name, sharpe)
+    name = max(sharpe, key=sharpe.get) if higher else pinned
+    log.info("gate benchmark %s (%s; after-tax Sharpe %s)", name, "higher-of-two" if higher else "pinned ex ante", sharpe)
     return name, both[name], both
 
 
