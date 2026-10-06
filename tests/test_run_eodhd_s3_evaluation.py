@@ -150,7 +150,6 @@ class TestMonthlyCompounding:
 class TestBondState:
     def test_on_when_excess_positive_off_when_negative(self):
         dates = make_dates(130)
-        month_of = dates.to_period("M")
         close_ret = pd.DataFrame({"SHY": 0.0, "IEF": 0.0, "TLT": 0.0}, index=dates)
         # One bucket clearly beats cash every month, one clearly loses to cash.
         close_ret["SHY"] = 0.002

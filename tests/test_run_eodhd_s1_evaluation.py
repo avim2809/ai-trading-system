@@ -201,7 +201,7 @@ class TestSimulateOpenExec:
 
 class TestSimulateCloseExec:
     def test_rebalances_only_when_decide_returns_target(self):
-        T, N = 4, 1
+        T = 4
         rets = np.array([[0.0], [0.05], [0.0], [0.0]])
         rf = np.zeros(T)
 

@@ -73,7 +73,6 @@ class TestProcessTickerMechanics:
         # Monotonically increasing so ratio_52wk == 1.0 once the window is full.
         closes = 10.0 + 0.01 * np.arange(400)
         df = _synthetic_bars(cal, closes)
-        path = Path("/tmp") / "UNUSED"  # process_ticker reads from disk; test via clean_bars path instead
         cleaned, _ = __import__("eodhd_clean").clean_bars(df, "equity", cal)
         cleaned = bp._segment_rolling(cleaned)
         row_251 = cleaned.iloc[250]   # 251st bar, n_bars_in_segment == 251
