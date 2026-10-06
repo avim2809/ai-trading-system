@@ -50,7 +50,9 @@ dependencies = [
 dev = [
     "pytest",
     "pytest-cov",
-    "ruff",
+    # Pinned: ruff 0.16 changed its implicit default rule set, so an unpinned
+    # install makes CI lint results drift from the host. Keep == review/requirements-lock.txt.
+    "ruff==0.16.8",
     "httpx",
     "hypothesis",
 ]
