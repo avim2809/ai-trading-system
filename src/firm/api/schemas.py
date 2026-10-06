@@ -69,7 +69,7 @@ class RunRequest(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _end_after_start(self) -> "RunRequest":
+    def _end_after_start(self) -> RunRequest:
         if date.fromisoformat(self.end_date) < date.fromisoformat(self.start_date):
             raise ValueError("end_date must be on or after start_date")
         return self

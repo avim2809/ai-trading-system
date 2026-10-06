@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
@@ -66,7 +66,7 @@ def refresh_fundamentals_cache(
 
     with _refresh_lock:
         cfg = settings or get_settings()
-        end = datetime.now(timezone.utc).date()
+        end = datetime.now(UTC).date()
         start = end - timedelta(days=lookback_days)
         start_s, end_s = start.isoformat(), end.isoformat()
 

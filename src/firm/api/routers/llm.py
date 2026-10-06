@@ -246,9 +246,9 @@ def delete_rag_collection(collection: str):
 @router.get("/embedding-models")
 def list_embedding_models():
     """Return all supported embedding models with metadata."""
-    from firm.rag.embeddings import list_models
-
     from dataclasses import asdict
+
+    from firm.rag.embeddings import list_models
     return [asdict(m) for m in list_models()]
 
 

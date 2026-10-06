@@ -23,10 +23,10 @@ from __future__ import annotations
 import csv
 import logging
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Iterable, Optional
 
 log = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ class Event:
             "title": self.title,
             "currency": self.currency,
             "impact": self.impact,
-            "time": self.when.astimezone(timezone.utc).isoformat(),
+            "time": self.when.astimezone(UTC).isoformat(),
         }
 
 
@@ -89,7 +89,7 @@ def parse_time(value: str) -> datetime:
         s = s[:-1] + "+00:00"
     dt = datetime.fromisoformat(s)
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -119,7 +119,7 @@ def is_crypto(instrument: str) -> bool:
 # --------------------------------------------------------------------------
 
 
-def _coerce_event(title, country, impact, when_raw) -> Optional[Event]:
+def _coerce_event(title, country, impact, when_raw) -> Event | None:
     try:
         when = parse_time(str(when_raw))
     except (ValueError, TypeError):
@@ -165,7 +165,7 @@ def load_from_csv(path: Path = BUNDLED_CSV) -> list[Event]:
     return out
 
 
-def bundled_csv_age_hours(path: Path = BUNDLED_CSV) -> Optional[float]:
+def bundled_csv_age_hours(path: Path = BUNDLED_CSV) -> float | None:
     """Age of the bundled offline calendar file in hours, or ``None`` if it
     can't be stat'd (missing/permissions) — used to size how stale a
     live-calendar-fetch-failure fallback is for the engine's alert."""
@@ -313,7 +313,7 @@ def decide(
             "reason": reason,
             "instrument": instrument.upper(),
             "currencies": sorted(ccys),
-            "at": at.astimezone(timezone.utc).isoformat(),
+            "at": at.astimezone(UTC).isoformat(),
             "blocking_event": blocking.to_public(),
             "next_event": next_event,
             "minutes_until": minutes_until,
@@ -336,7 +336,7 @@ def decide(
         "reason": reason,
         "instrument": instrument.upper(),
         "currencies": sorted(ccys),
-        "at": at.astimezone(timezone.utc).isoformat(),
+        "at": at.astimezone(UTC).isoformat(),
         "blocking_event": None,
         "next_event": next_event,
         "minutes_until": minutes_until,
@@ -356,7 +356,7 @@ def evaluate(
     decide. Passing *events* keeps the call fully offline and deterministic."""
     at_dt = at if isinstance(at, datetime) else parse_time(at)
     if at_dt.tzinfo is None:
-        at_dt = at_dt.replace(tzinfo=timezone.utc)
+        at_dt = at_dt.replace(tzinfo=UTC)
     if events is not None:
         return decide(instrument, at_dt, events, before_min, after_min, "provided")
     loaded, source = load_events(offline=offline)

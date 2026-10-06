@@ -18,9 +18,9 @@ router = APIRouter()
 @router.post("/agents/step")
 def agent_step(req: StepRequest):
     """Run one orchestrator step and return the serialized blackboard."""
-    from firm.data.synthetic import make_synthetic_prices
-    from firm.data.pit_store import PointInTimeDataStore
     from firm.backtest.firm_strategy import PitViewAdapter
+    from firm.data.pit_store import PointInTimeDataStore
+    from firm.data.synthetic import make_synthetic_prices
     from firm.portfolio.state import PortfolioState
     from firm.runtime import build_orchestrator
 
@@ -31,8 +31,8 @@ def agent_step(req: StepRequest):
             seed=req.seed,
         )
     else:
-        from firm.runtime import load_prices
         from firm.config import get_settings
+        from firm.runtime import load_prices
         prices_df = load_prices(get_settings())
 
     pit_store = PointInTimeDataStore()
@@ -54,7 +54,7 @@ def agent_step(req: StepRequest):
         "strategy_params": req.strategy_params,
     }
     try:
-        from firm.llm.config import load_llm_config, llm_service_config
+        from firm.llm.config import llm_service_config, load_llm_config
         llm_yaml = load_llm_config()
         config["agent_modes"] = llm_yaml.get("agent_modes", {})
         config["llm_config"] = llm_service_config(llm_yaml)

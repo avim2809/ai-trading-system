@@ -16,10 +16,11 @@ import math
 import threading
 import weakref
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 from concurrent.futures import thread as _cf_thread
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -434,14 +435,13 @@ class LiveTradingEngine:
         submitted orders — the scheduler's catch-up job would then fire a
         spurious duplicate cycle for that day.
         """
-        from datetime import timezone as dt_timezone
         from zoneinfo import ZoneInfo
 
         tz = ZoneInfo(timezone)
         today = datetime.now(tz).date()
 
         def _is_today(ts: datetime) -> bool:
-            aware = ts if ts.tzinfo is not None else ts.replace(tzinfo=dt_timezone.utc)
+            aware = ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
             return aware.astimezone(tz).date() == today
 
         by_cycle_id: dict[int, dict[str, Any]] = {}
@@ -1210,7 +1210,7 @@ class LiveTradingEngine:
 
         from firm.live import news_guard as ng
 
-        at = now if now.tzinfo is not None else now.replace(tzinfo=timezone.utc)
+        at = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         try:
             events, source = ng.load_events(
                 offline=self._news_guard_offline, source=self._news_guard_source,
@@ -1297,8 +1297,7 @@ class LiveTradingEngine:
             # suffix match and leave a dangling double clause.
             reason = bucket["reason"]
             suffix = f" for {bucket['first_symbol']}."
-            if reason.endswith(suffix):
-                reason = reason[: -len(suffix)]
+            reason = reason.removesuffix(suffix)
             reason += f" for {len(symbols)} symbol(s): {', '.join(symbols)}."
             alert = self._emit_alert(
                 "news_guard_blackout", "warning", reason,
@@ -3921,7 +3920,7 @@ class LiveTradingEngine:
     @staticmethod
     def _group_by_strategy(
         orders: list[dict[str, Any]]
-    ) -> "OrderedDict[str, list[dict[str, Any]]]":
+    ) -> OrderedDict[str, list[dict[str, Any]]]:
         """Group orders by their originating strategy (preserving order).
 
         Each group becomes a separate approval entry so an operator can
@@ -3991,7 +3990,12 @@ class LiveTradingEngine:
         effect on execution timing despite being enabled — see
         ``IBKRBroker._submit_order_once_unlocked``.
         """
-        from firm.live.execution_safety import Order, RiskProfile, guard_live_submission, guard_order
+        from firm.live.execution_safety import (
+            Order,
+            RiskProfile,
+            guard_live_submission,
+            guard_order,
+        )
 
         # Final, independently-auditable hard cap right before the broker
         # call — a backstop against a bug anywhere upstream (RiskAgent,

@@ -12,7 +12,8 @@ locally non-terminal order and correcting the persisted record in place.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from firm.brokers.base import Broker, BrokerError
 from firm.live.trade_history import TradeHistoryStore
