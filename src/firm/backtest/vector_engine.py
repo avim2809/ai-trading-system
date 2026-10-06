@@ -23,6 +23,7 @@ Sharpe convention: ``excess_returns = returns - rf`` (== ``returns`` when ``rf i
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import logging
@@ -279,18 +280,72 @@ def run_vector_backtest(
     return res
 
 
+# ------------------------------------------------------------------ optional P4-03 helpers (research-only, additive)
+
+def ewma_covariance(returns: pd.DataFrame, span: int, periods_per_year: float = 256.0) -> np.ndarray:
+    """Annualised zero-mean EWMA covariance per date, shape (T, N, N): ``sum_k (1-a)^k r r' / sum_k (1-a)^k``, ``a = 2 / (span + 1)``.
+
+    The bias-corrected form of the same ``adjust=True`` EWMA that ``firm.risk.limits.ewma_realised_vol`` uses. Each matrix is a convex
+    combination of outer products, hence symmetric positive semi-definite. A NaN return (instrument not yet listed) counts as no information
+    (0). Row t uses returns up to and including t (known at the close on which the target is decided).
+    """
+    if span < 2:
+        raise ValueError("span must be >= 2")
+    x = returns.fillna(0.0).to_numpy(float)
+    T, N = x.shape
+    a = 2.0 / (span + 1.0)
+    out = np.empty((T, N, N))
+    num, den = np.zeros((N, N)), 0.0
+    for t in range(T):
+        num = (1.0 - a) * num + np.outer(x[t], x[t])
+        den = (1.0 - a) * den + 1.0
+        out[t] = num / den * periods_per_year
+    return out
+
+
+def portfolio_vol_scale(raw_weights: pd.DataFrame, returns: pd.DataFrame, *, tau: float, span: int, max_scale: float,
+                        periods_per_year: float = 256.0) -> pd.Series:
+    """P4-03 vol-target scalar ``clip(tau / sigma_ewma, upper=max_scale)`` per decision date.
+
+    ``sigma_ewma`` is the slow EWMA (``span``) realised vol of the FORECAST-SIZED portfolio: the return of day t is
+    ``sum_i raw_weights[t-1, i] * returns[t, i]`` (the weight known one close earlier, so no look-ahead), where ``raw_weights`` are the
+    unscaled, unbuffered, uncapped forecast-sized weights (NaN = no forecast yet). The series starts at the first date with a lagged weight
+    and sigma needs ``span`` observations; before that the result is NaN (the sizing wrapper treats NaN as scale 1). ``sigma <= 0`` gives 0,
+    as ``firm.risk.limits.vol_scale``.
+    """
+    w_lag = raw_weights.reindex(index=returns.index, columns=returns.columns).shift(1)
+    rp = (w_lag.fillna(0.0) * returns.fillna(0.0)).sum(axis=1).where(w_lag.notna().any(axis=1))
+    ms = (rp**2).ewm(span=span, adjust=True, min_periods=span).mean()
+    sigma = np.sqrt(periods_per_year * ms)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        scale = np.where(sigma > 0, np.minimum(tau / sigma, max_scale), 0.0)
+    return pd.Series(np.where(sigma.isna(), np.nan, scale), index=returns.index, name="vol_scale")
+
+
 # ------------------------------------------------------------------ optional P3-06 sizing wrapper
 
 def targets_from_forecasts(
     forecasts: pd.DataFrame, prices: pd.DataFrame, vol_pct: pd.DataFrame, *, weights: dict[str, float], idm: float, tau: float,
     capital: float | pd.Series, multipliers: dict[str, float], fx: pd.DataFrame | None = None, buffer_fraction: float = 0.10,
     long_only: bool = True, gross_cap: float | None = 1.0, rounding: str = "toward_zero", fractional: dict[str, bool] | None = None,
+    vol_scale: pd.Series | None = None, risk_limits: Any = None, cov_annual: np.ndarray | None = None,
+    diagnostics: dict | None = None,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """Unit targets (indexed by decision date, NOT shifted) from combined forecasts via ``firm.portfolio.sizing`` (P3-06).
 
     Per day and instrument: source N, buffer around N (``buffered_trade``), pro-rata gross cap (``gross_cap_scale``), then rounding
     (after buffering, as P3-06). A NaN forecast/price/vol means no information: the instrument is flat that day. ``capital`` is a fixed
     number or a per-date series (the engine does not feed back its own equity). Returns (targets, gross_cap_bound flags).
+
+    Optional P4-03 layer (all default ``None``: the result is then exactly the P3-06 path above, covered by tests):
+
+    * ``vol_scale``: per decision date, the vol-target scalar ``s`` (``portfolio_vol_scale``). ``w1 = s * raw`` is implemented by sizing N and
+      the buffer width on ``capital * s`` (NaN = 1, no estimate yet).
+    * ``risk_limits`` (``firm.risk.limits.RiskLimits``) with ``cov_annual`` (T, N, N; ``ewma_covariance``): after the buffer step the held weights
+      go through ``apply_caps`` (long-only, instrument risk-contribution cap, class cap if below 1, gross cap). The gross cap is ``gross_cap`` of
+      this function, so a perturbed value above the limits' own ETF ceiling still works: risk shares are scale-invariant, so capping
+      ``w * max_gross / gross_cap`` and scaling back is identical to capping at ``gross_cap``. ``diagnostics`` (a dict) receives the number of days
+      on which an instrument cap or a class cap bound and the number of days with an infeasible-cap skip.
     """
     from firm.portfolio import sizing as S
 
@@ -298,11 +353,19 @@ def targets_from_forecasts(
     fcs = forecasts.reindex(index=prices.index, columns=syms)
     vol = vol_pct.reindex(index=prices.index, columns=syms)
     fxf = None if fx is None else fx.reindex(index=prices.index, columns=syms).ffill().fillna(1.0)
+    scale = None if vol_scale is None else vol_scale.reindex(prices.index).fillna(1.0)
+    if risk_limits is not None:
+        if cov_annual is None or np.shape(cov_annual) != (len(prices), len(syms), len(syms)):
+            raise ValueError("risk_limits needs cov_annual of shape (len(prices), n_instruments, n_instruments)")
+        if gross_cap is None or not gross_cap > 0:
+            raise ValueError("risk_limits needs a positive gross_cap")
     cur = dict.fromkeys(syms, 0.0)
     out = np.zeros(prices.shape)
     bound = np.zeros(len(prices), dtype=bool)
+    n_inst_bound = n_class_bound = n_infeasible = 0
     for i, d in enumerate(prices.index):
         cap = float(capital.loc[d]) if isinstance(capital, pd.Series) else float(capital)
+        size_cap = cap if scale is None else cap * float(scale.iat[i])
         new = {}
         for j, s in enumerate(syms):
             f, p, v = fcs.iat[i, j], prices.iat[i, j], vol.iat[i, j]
@@ -310,11 +373,28 @@ def targets_from_forecasts(
                 new[s] = 0.0
                 continue
             x = 1.0 if fxf is None else float(fxf.iat[i, j])
-            args = (cap, idm, weights.get(s, 0.0), tau, multipliers[s], float(p), x, float(v))
+            args = (size_cap, idm, weights.get(s, 0.0), tau, multipliers[s], float(p), x, float(v))
             n = S.target_position(float(f), *args)
             b = S.buffer_width(*args, fraction=buffer_fraction)
             new[s] = S.buffered_trade(cur[s], n, b, long_only=long_only)
-        if gross_cap is not None and cap > 0:
+        if risk_limits is not None and cap > 0:
+            unit_w = {s: multipliers[s] * float(prices.iat[i, j]) * (1.0 if fxf is None else float(fxf.iat[i, j])) / cap
+                      for j, s in enumerate(syms)}
+            held = [j for j, s in enumerate(syms) if new[s] != 0.0]
+            if held:
+                names = [syms[j] for j in held]
+                k = gross_cap / risk_limits.max_gross
+                wts = pd.Series({s: new[s] * unit_w[s] for s in names})
+                cov = pd.DataFrame(np.asarray(cov_annual[i])[np.ix_(held, held)], index=names, columns=names)
+                with _quiet("firm.risk.limits"):
+                    res = _apply_caps(wts / k, cov, risk_limits)
+                bound[i] = bool(res.gross_cap_bound)
+                n_inst_bound += any(res.instrument_cap_bound.values())
+                n_class_bound += any(res.class_cap_bound.values())
+                n_infeasible += any(c.startswith("infeasible:") for c in res.breaches_clipped)
+                for s in names:
+                    new[s] = float(res.weights[s]) * k / unit_w[s]
+        elif gross_cap is not None and cap > 0:
             wts = {s: new[s] * multipliers[s] * float(prices.iat[i, j]) * (1.0 if fxf is None else float(fxf.iat[i, j])) / cap
                    for j, s in enumerate(syms)}
             _, bound[i] = S.gross_cap_scale(wts, cap=gross_cap)
@@ -325,4 +405,25 @@ def targets_from_forecasts(
             frac = (multipliers[s] == 1.0) if fractional is None or s not in fractional else fractional[s]
             cur[s] = S.round_position(new[s], frac, multipliers[s], mode=rounding)
             out[i, j] = cur[s]
+    if diagnostics is not None:
+        diagnostics.update(instrument_cap_bound_days=int(n_inst_bound), class_cap_bound_days=int(n_class_bound),
+                           infeasible_cap_days=int(n_infeasible), n_days=len(prices))
     return pd.DataFrame(out, index=prices.index, columns=syms), pd.Series(bound, index=prices.index, name="gross_cap_bound")
+
+
+def _apply_caps(weights: pd.Series, cov: pd.DataFrame, limits: Any):
+    from firm.risk.limits import apply_caps  # lazy: only the P4-03 path needs it
+
+    return apply_caps(weights, cov, limits)
+
+
+@contextlib.contextmanager
+def _quiet(logger_name: str):
+    """Raise a logger to ERROR for the block (apply_caps logs a line per binding cap per day; the counts go to ``diagnostics``)."""
+    lg = logging.getLogger(logger_name)
+    old = lg.level
+    lg.setLevel(logging.ERROR)
+    try:
+        yield
+    finally:
+        lg.setLevel(old)

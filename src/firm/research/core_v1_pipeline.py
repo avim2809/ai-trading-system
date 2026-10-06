@@ -38,6 +38,7 @@ from firm.costs import model as CM
 from firm.portfolio import forecast_combine as FC
 from firm.portfolio import sizing as SZ
 from firm.research import ledger as L
+from firm.risk.limits import RiskLimits
 from firm.signals import breakout as BO
 from firm.signals import ewmac as EW
 from firm.signals import vol as VOL
@@ -53,7 +54,13 @@ COST_SPEC = "etf_alpaca"
 SCALAR_TARGET_ABS = 10.0
 FLAT_BPS_PER_SIDE = 5.0        # alt_premia legacy convention (scripts/alt_premia_preregistered_bars.py COSTS["etf_bps_per_side"]); comparison only
 CORE_ONLY_BAND_ABS = 0.02      # docs/allocation_forward_test_plan.md: off-schedule trade when the split drifts more than 2 points
-NOT_IN_PIPELINE = frozenset({"max_vol_scale", "instrument_risk_cap_multiple"})   # P4-03 limits layer is not wired into this sizing path
+# P4-03 limits layer (batch 20): wired into ``build_targets`` only when the three parameters below are frozen (``params_from_gates(frozen=...)``).
+# Without them (the pre-batch-20 callers, the IDM sub-system runs) ``NOT_IN_PIPELINE`` stays unassessed and the layer is off.
+LIMITS_PARAMS = ("vol_ewma_span", "max_vol_scale", "instrument_risk_cap_multiple")
+NOT_IN_PIPELINE = frozenset({"max_vol_scale", "instrument_risk_cap_multiple"})
+# The class risk cap (risk.yaml max_class_risk_share 0.40) is NOT applied: it is not one of the gate-6 parameters, and an applied but never
+# perturbed number would be an exemption ("every numeric core parameter, no exemptions"). 1.0 disables it (a share cannot exceed 1).
+CLASS_RISK_CAP_APPLIED = 1.0
 _TRADING_DAYS = 256
 
 
@@ -77,6 +84,10 @@ class CoreParams:
     tau: float
     gross_cap: float
     speed_cost_max_fraction: float
+    # P4-03 limits layer; None = layer off (pre-batch-20 behaviour). All three are set together by ``params_from_gates(frozen=...)``.
+    vol_ewma_span: int | None = None
+    max_vol_scale: float | None = None
+    instrument_risk_cap_multiple: float | None = None
 
 
 _GATES_NAMES = {
@@ -85,18 +96,34 @@ _GATES_NAMES = {
     "ewmac_slow_to_fast_ratio": "ewmac_slow_to_fast_ratio", "forecast_cap": "forecast_cap", "breakout_lookbacks": "breakout_lookbacks_N",
     "breakout_smoothing_fraction": "breakout_smoothing_fraction_of_N", "fdm_cap": "fdm_cap", "idm_cap": "idm_cap",
     "buffer_fraction": "buffer_fraction", "gross_cap": "gross_cap", "speed_cost_max_fraction": "speed_cost_max_fraction",
+    "vol_ewma_span": "vol_ewma_span", "max_vol_scale": "max_vol_scale", "instrument_risk_cap_multiple": "instrument_risk_cap_multiple",
 }
 
 
-def params_from_gates(gates: Mapping, tau: float) -> CoreParams:
-    """Default parameters straight from ``gates['robustness_parameters']``; ``tau`` comes from the charter (never chosen here)."""
+def params_from_gates(gates: Mapping, tau: float, *, frozen: Mapping | None = None) -> CoreParams:
+    """Default parameters straight from ``gates['robustness_parameters']``; ``tau`` comes from the charter (never chosen here).
+
+    ``frozen`` switches the P4-03 limits layer on: it must carry ``vol_ewma_span`` (null in the gates file; frozen in the core_v1 prereg
+    module); ``max_vol_scale`` and ``instrument_risk_cap_multiple`` are read from the gates like every other parameter. Without ``frozen`` the
+    three fields stay None and the layer is off.
+    """
     rp = gates["robustness_parameters"]
     kw: dict[str, Any] = {}
     for field_name, gname in _GATES_NAMES.items():
+        if field_name in LIMITS_PARAMS:
+            continue
         v = rp[gname]["value"]
         if v is None:
             raise ValueError(f"gates robustness_parameters.{gname} has no value")
         kw[field_name] = tuple(v) if isinstance(v, list) else v
+    if frozen is not None:
+        if frozen.get("vol_ewma_span") is None:
+            raise ValueError("frozen limits need vol_ewma_span")
+        kw["vol_ewma_span"] = int(frozen["vol_ewma_span"])
+        for name in ("max_vol_scale", "instrument_risk_cap_multiple"):
+            if rp[name]["value"] is None:
+                raise ValueError(f"gates robustness_parameters.{name} has no value")
+            kw[name] = float(rp[name]["value"])
     return CoreParams(tau=float(tau), **kw)
 
 
@@ -122,18 +149,26 @@ def perturb(params: CoreParams, name: str, factor: float) -> CoreParams:
     if field_name not in {f.name for f in dataclasses.fields(params)} or field_name in ("ewmac_fast_spans", "breakout_lookbacks"):
         raise KeyError(name)
     cur = getattr(params, field_name)
+    if cur is None:
+        raise ValueError(f"{name} is not frozen in these params (limits layer off)")
     new = max(2, _half_up(cur * factor)) if isinstance(cur, int) and not isinstance(cur, bool) else float(cur) * factor
     return dataclasses.replace(params, **{field_name: new})
 
 
-def perturbable_names(gates: Mapping) -> dict[str, list[str]]:
+def perturbable_names(gates: Mapping, frozen: Mapping | None = None) -> dict[str, list[str]]:
     """Parameter names to perturb, from ``gates['robustness_parameters']``: ``assessed`` and ``unassessed`` (with the reason implied by
-    membership: a null value in gates, or a P4-03 limits-layer parameter that this sizing path does not use)."""
+    membership: a null value in gates, or a P4-03 limits-layer parameter that this sizing path does not use). With ``frozen`` (the limits
+    layer is wired in, ``params_from_gates(frozen=...)``) the three limits parameters are assessed, so nothing is unassessed."""
     rp = gates["robustness_parameters"]
     assessed: list[str] = []
     unassessed: list[str] = []
     for name, spec in rp.items():
-        if name in NOT_IN_PIPELINE or (spec["value"] is None and name != "tau"):
+        if frozen is not None and name in LIMITS_PARAMS:
+            if name == "vol_ewma_span" and frozen.get("vol_ewma_span") is None:
+                unassessed.append(name)
+            else:
+                assessed.append(name)
+        elif name in NOT_IN_PIPELINE or (spec["value"] is None and name != "tau"):
             unassessed.append(name)
         elif isinstance(spec["value"], list):
             assessed.extend(f"{name}[{i}]" for i in range(len(spec["value"])))
@@ -397,6 +432,7 @@ class ConstantsBundle:
     group_weights: dict[str, float]
     window: tuple[str, str]
     fdm_override: dict[str, float] | None = None     # per-instrument FDM when held from constants.json
+    asset_class: dict[str, str] | None = None        # instrument -> asset class; only read by the P4-03 limits layer
 
 
 def fdm_for(constants: ConstantsBundle, symbol: str, active_ids: Sequence[str] | None, params: CoreParams,
@@ -429,6 +465,7 @@ class RunResult:
     weights: dict[str, dict[str, float]]
     params: CoreParams
     trial_id: str | None = None
+    limits: dict | None = None                       # P4-03 layer diagnostics (None when the layer is off)
 
 
 def make_cost_fn(panel: Panel, vol_daily: pd.DataFrame, *, flat_bps: float | None = None):
@@ -449,11 +486,46 @@ def make_cost_fn(panel: Panel, vol_daily: pd.DataFrame, *, flat_bps: float | Non
     return fn
 
 
+def raw_portfolio_weights(combined: pd.DataFrame, vol: pd.DataFrame, constants: ConstantsBundle, tau: float) -> pd.DataFrame:
+    """Forecast-sized portfolio weights (fraction of capital, unscaled, unbuffered, uncapped): ``f / 10 * idm * w_i * tau / vol_i``.
+
+    The same ``target_position`` formula as ``firm.portfolio.sizing`` with multiplier 1 and no FX (``units * price / capital``); NaN where
+    the forecast or the vol is missing. Input of the P4-03 vol-target scalar (``vol_ewma_span``).
+    """
+    w = pd.Series({s: float(constants.instrument_weights.get(s, 0.0)) for s in combined.columns})
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out = combined / 10.0 * constants.idm * w * tau / vol.where(vol > 0)
+    return out
+
+
+def _limits_inputs(panel: Panel, constants: ConstantsBundle, params: CoreParams, combined: pd.DataFrame, vol: pd.DataFrame):
+    """(RiskLimits, vol-scale series, EWMA covariance) of the P4-03 layer, or None when the layer is off."""
+    if params.vol_ewma_span is None:
+        return None
+    if params.max_vol_scale is None or params.instrument_risk_cap_multiple is None:
+        raise ValueError("vol_ewma_span, max_vol_scale and instrument_risk_cap_multiple must be set together")
+    if not constants.asset_class:
+        raise ValueError("the P4-03 limits layer needs constants.asset_class (instrument -> asset class)")
+    lim = RiskLimits(tau=params.tau, vol_ewma_span=int(params.vol_ewma_span), instrument_type="etf", max_gross=1.0, long_only=True,
+                     asset_class=dict(constants.asset_class), handcraft_share=dict(constants.instrument_weights),
+                     max_vol_scale=float(params.max_vol_scale), max_class_risk_share=CLASS_RISK_CAP_APPLIED,
+                     max_instrument_risk_mult=float(params.instrument_risk_cap_multiple))
+    ret = panel.ret.reindex(index=panel.close.index, columns=panel.symbols)
+    scale = VE.portfolio_vol_scale(raw_portfolio_weights(combined, vol, constants, params.tau), ret, tau=params.tau,
+                                   span=lim.vol_ewma_span, max_scale=lim.max_vol_scale, periods_per_year=_TRADING_DAYS)
+    return lim, scale, VE.ewma_covariance(ret, lim.vol_ewma_span, periods_per_year=_TRADING_DAYS)
+
+
 def build_targets(panel: Panel, constants: ConstantsBundle, params: CoreParams, subset: Sequence[str] | None, *,
                   raw: Mapping[str, pd.DataFrame] | None = None, vol: pd.DataFrame | None = None,
                   scalars: Mapping[str, float] | None = None, fdm_fixed: Mapping[str, float] | None = None,
-                  base: CoreParams | None = None) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, dict, dict, pd.DataFrame]:
-    """Unit targets and gross-cap flags for one configuration. Returns (targets, flags, combined forecasts, fdm, weights, vol)."""
+                  base: CoreParams | None = None, diag: dict | None = None
+                  ) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, dict, dict, pd.DataFrame]:
+    """Unit targets and gross-cap flags for one configuration. Returns (targets, flags, combined forecasts, fdm, weights, vol).
+
+    When the P4-03 parameters are frozen in ``params`` the sizing applies the vol-target scalar, the instrument risk-contribution cap and the
+    gross cap (``VE.targets_from_forecasts`` with ``risk_limits``); ``diag`` (a dict) then receives the layer's counts.
+    """
     base = base or params
     v = vol_annual(panel, params) if vol is None else vol
     defs = rule_defs(base, params)
@@ -471,10 +543,19 @@ def build_targets(panel: Panel, constants: ConstantsBundle, params: CoreParams, 
             combined[s] = np.nan
             continue
         combined[s] = FC.combine_forecasts(fcs[s][list(w)], w, fdm, cap=params.forecast_cap, floor=0.0)
+    lim_in = _limits_inputs(panel, constants, params, combined, v)
+    extra: dict[str, Any] = {}
+    if lim_in is not None:
+        extra = {"vol_scale": lim_in[1], "risk_limits": lim_in[0], "cov_annual": lim_in[2], "diagnostics": diag if diag is not None else {}}
     targets, flags = VE.targets_from_forecasts(
         combined, panel.close, v, weights=constants.instrument_weights, idm=constants.idm, tau=params.tau, capital=INITIAL_CAPITAL,
         multipliers=dict.fromkeys(panel.symbols, 1.0), buffer_fraction=params.buffer_fraction, long_only=True,
-        gross_cap=params.gross_cap, rounding="toward_zero")
+        gross_cap=params.gross_cap, rounding="toward_zero", **extra)
+    if lim_in is not None and diag is not None:
+        sc = lim_in[1].dropna()
+        diag.update(vol_scale_min=float(sc.min()) if len(sc) else None, vol_scale_max=float(sc.max()) if len(sc) else None,
+                    vol_scale_mean=float(sc.mean()) if len(sc) else None, vol_scale_days_at_cap=int((sc >= lim_in[0].max_vol_scale - 1e-12).sum()),
+                    vol_scale_n_obs=len(sc))
     return targets, flags, combined, fdms, wts, v
 
 
@@ -485,14 +566,17 @@ def run_config(panel: Panel, constants: ConstantsBundle, params: CoreParams, *, 
                seed: int | None = None) -> RunResult:
     """One engine run of one configuration at ``stress`` x cost. The engine row is written under ``family`` (a separate family from the
     registered core_v1 trial rows: every engine run is a ledger row, ``run_vector_backtest`` refuses to run unlogged)."""
-    targets, flags, combined, fdms, wts, v = build_targets(panel, constants, params, subset_ids, scalars=scalars, fdm_fixed=fdm_fixed, base=base)
+    diag: dict = {}
+    targets, flags, combined, fdms, wts, v = build_targets(panel, constants, params, subset_ids, scalars=scalars, fdm_fixed=fdm_fixed, base=base,
+                                                           diag=diag)
     cfg = VE.EngineConfig(initial_capital=INITIAL_CAPITAL, stress_multiplier=float(stress), allow_short=False, fill_lag_bars=1)
     ctx = VE.LedgerContext(family=family, mode="exploratory", data_snapshot_id=snapshot_id or panel.snapshot_id, seed=seed,
                            config={"label": label, "stress": stress, "flat_bps": flat_bps, "outer_mode": ledger_mode, "prereg": prereg})
     res = VE.run_vector_backtest(
         panel.close, targets, dict.fromkeys(panel.symbols, 1.0), make_cost_fn(panel, v / math.sqrt(_TRADING_DAYS), flat_bps=flat_bps), cfg,
         adv=panel.adv, vol_pct=v / math.sqrt(_TRADING_DAYS), gross_cap_bound=flags, ledger_ctx=ctx)
-    return RunResult(res, float(flags.mean()), flags, targets, combined, fdms, wts, params, res.meta.get("trial_id"))
+    return RunResult(res, float(flags.mean()), flags, targets, combined, fdms, wts, params, res.meta.get("trial_id"),
+                     limits=diag if params.vol_ewma_span is not None else None)
 
 
 def core_only_100_targets(prices: pd.DataFrame, capital: float, band_abs: float = CORE_ONLY_BAND_ABS) -> pd.DataFrame:

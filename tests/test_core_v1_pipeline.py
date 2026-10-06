@@ -68,12 +68,37 @@ def test_perturb_integer_rounding_half_up_min_two(base):
 
 
 def test_perturbable_list_matches_gates(base):
-    names = P.perturbable_names(GATES)
+    names = P.perturbable_names(GATES)                                              # no frozen limits layer: the pre-batch-20 behaviour
     assert names["assessed"] and "vol_ewma_span" in names["unassessed"]          # null value in gates: cannot be perturbed
     assert {"max_vol_scale", "instrument_risk_cap_multiple"} <= set(names["unassessed"])  # P4-03 layer is not in the sizing path
     assert sum(n.startswith("ewmac_fast_spans[") for n in names["assessed"]) == 6
     assert sum(n.startswith("breakout_lookbacks_N[") for n in names["assessed"]) == 5
     assert "tau" in names["assessed"] and "vol_ewma_span" not in names["assessed"]
+
+
+FROZEN = {"vol_ewma_span": pre.VOL_EWMA_SPAN}
+
+
+def test_all_27_gate6_parameters_are_perturbable_once_the_limits_layer_is_frozen():
+    names = P.perturbable_names(GATES, frozen=FROZEN)
+    assert names["unassessed"] == [] and len(names["assessed"]) == 27 == pre.N_ROBUSTNESS_PARAMS
+    assert {"vol_ewma_span", "max_vol_scale", "instrument_risk_cap_multiple"} <= set(names["assessed"])
+    assert 2 * len(names["assessed"]) == pre.EXPECTED_LEDGER_ROWS["robustness"] == 54
+
+
+def test_params_with_frozen_limits_and_perturbations():
+    off = P.params_from_gates(GATES, tau=0.09)
+    assert off.vol_ewma_span is None and off.max_vol_scale is None and off.instrument_risk_cap_multiple is None
+    p = P.params_from_gates(GATES, tau=0.09, frozen=FROZEN)
+    assert p.vol_ewma_span == pre.VOL_EWMA_SPAN and p.max_vol_scale == 1.5 and p.instrument_risk_cap_multiple == 2.0
+    assert P.perturb(p, "vol_ewma_span", 0.75).vol_ewma_span == P._half_up(pre.VOL_EWMA_SPAN * 0.75)
+    assert P.perturb(p, "max_vol_scale", 0.75).max_vol_scale == pytest.approx(1.125)
+    assert P.perturb(p, "max_vol_scale", 1.25).max_vol_scale == pytest.approx(1.875)
+    assert P.perturb(p, "instrument_risk_cap_multiple", 0.75).instrument_risk_cap_multiple == pytest.approx(1.5)
+    with pytest.raises(ValueError, match="not frozen"):
+        P.perturb(off, "vol_ewma_span", 0.75)
+    with pytest.raises(ValueError, match="vol_ewma_span"):
+        P.params_from_gates(GATES, tau=0.09, frozen={})
 
 
 def test_speed_subset_selects_base_rule_ids(base):
@@ -278,3 +303,91 @@ def test_pipeline_never_reads_files_directly():
     tree = ast.parse(src)
     bad = [n.lineno for n in ast.walk(tree) if isinstance(n, ast.Attribute) and n.attr in {"read_parquet", "read_csv", "read_feather"}]
     assert not bad, f"direct file reads at lines {bad}; use firm.research.data_access via firm.data.etf_loader"
+
+
+# ---- P4-03 limits layer in the sizing path (batch 20) -----------------------------------------------------------------------------------------
+@pytest.fixture(scope="module")
+def limited(base):
+    return P.params_from_gates(GATES, tau=0.09, frozen={"vol_ewma_span": 60})          # a short span so the 1500-day panel has history
+
+
+def _with_classes(constants):
+    import dataclasses
+
+    cls = {"AAA": "x", "BBB": "x", "CCC": "y", "DDD": "z"}
+    w = {"AAA": 0.1, "BBB": 0.2, "CCC": 0.3, "DDD": 0.4}
+    return dataclasses.replace(constants, asset_class=cls, instrument_weights=w)
+
+
+def test_limits_off_path_is_unchanged_even_when_asset_classes_are_given(panel, base, constants):
+    t0, f0, *_ = P.build_targets(panel, constants, base, None)
+    import dataclasses
+
+    t2, f2, *_ = P.build_targets(panel, dataclasses.replace(_with_classes(constants), instrument_weights=constants.instrument_weights),
+                                 base, None)
+    assert t2.equals(t0) and f2.equals(f0)        # classes ignored while the layer is not frozen
+
+
+def test_raw_weights_match_the_sizing_formula(panel, base, constants):
+    from firm.portfolio import sizing as S
+
+    vol = P.vol_annual(panel, base)
+    defs = P.rule_defs(base, base)
+    raw = P.raw_forecasts(panel, base, defs, vol)
+    _, _, combined, *_ = P.build_targets(panel, constants, base, None, raw=raw, vol=vol)
+    rw = P.raw_portfolio_weights(combined, vol, constants, base.tau)
+    i = 900
+    for s in panel.symbols:
+        f, v = combined[s].iat[i], vol[s].iat[i]
+        want = S.target_position(float(f), 100.0, constants.idm, constants.instrument_weights[s], base.tau, 1.0, 1.0, 1.0, float(v)) / 100.0
+        assert rw[s].iat[i] == pytest.approx(want, rel=1e-12)
+    assert rw.where(vol.isna()).isna().all().all() and rw.notna().any().any()
+
+
+def test_limits_layer_applies_vol_scale_instrument_caps_and_gross_cap(panel, limited, constants):
+    import dataclasses
+
+    c = _with_classes(constants)
+    diag: dict = {}
+    t, _flags, *_ = P.build_targets(panel, c, limited, None, diag=diag)
+    gross = (t * panel.close).sum(axis=1) / P.INITIAL_CAPITAL
+    assert gross.max() <= limited.gross_cap + 1e-9 and (t >= 0).all().all()
+    assert diag["n_days"] == len(panel.close) and diag["vol_scale_min"] <= diag["vol_scale_max"] <= limited.max_vol_scale + 1e-12
+    off, *_ = P.build_targets(panel, c, dataclasses.replace(limited, vol_ewma_span=None), None)
+    assert not t.equals(off)
+    # a vanishing scale cap de-levers; a huge instrument cap multiple never binds
+    lo, *_ = P.build_targets(panel, c, dataclasses.replace(limited, max_vol_scale=0.01), None)
+    assert (lo * panel.close).sum(axis=1).mean() < (t * panel.close).sum(axis=1).mean()
+    d_free: dict = {}
+    P.build_targets(panel, c, dataclasses.replace(limited, instrument_risk_cap_multiple=1e6), None, diag=d_free)
+    assert d_free["instrument_cap_bound_days"] == 0
+    d_tight: dict = {}
+    P.build_targets(panel, c, dataclasses.replace(limited, instrument_risk_cap_multiple=0.8), None, diag=d_tight)
+    assert d_tight["instrument_cap_bound_days"] + d_tight["infeasible_cap_days"] > 0
+
+
+def test_limits_layer_needs_asset_classes(panel, limited, constants):
+    with pytest.raises(ValueError, match="asset_class"):
+        P.build_targets(panel, constants, limited, None)
+
+
+def test_limits_path_has_no_lookahead(panel, limited, constants):
+    c = _with_classes(constants)
+    k = 1300
+    t0, *_ = P.build_targets(panel, c, limited, None)
+    close = panel.close.copy()
+    rng = np.random.default_rng(9)
+    close.iloc[k:] = close.iloc[k:].mul(np.cumprod(1 + rng.normal(0, 0.05, (len(close) - k, close.shape[1])), axis=0))
+    ret = panel.ret.copy()
+    ret.iloc[k:] = close.pct_change().iloc[k:]
+    p2 = P.Panel(symbols=panel.symbols, close=close, raw_close=panel.raw_close, ret=ret, adv=panel.adv, snapshot_id=panel.snapshot_id)
+    t1, *_ = P.build_targets(p2, c, limited, None)
+    assert t0.iloc[:k].equals(t1.iloc[:k])
+    assert not t0.iloc[k:].equals(t1.iloc[k:])
+
+
+def test_run_config_with_limits_end_to_end(panel, limited, constants):
+    res = P.run_config(panel, _with_classes(constants), limited, subset_ids=None, ledger_mode="exploratory", label="limits")
+    assert res.engine.returns.notna().all() and res.limits is not None and res.limits["n_days"] == len(panel.close)
+    # the cap binds at the decision date (asserted on the targets above); marked-to-market exposure drifts with prices until the next trade
+    assert res.engine.gross_exposure.max() <= limited.gross_cap * 1.10

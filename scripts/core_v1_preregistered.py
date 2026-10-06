@@ -1,5 +1,11 @@
 """FROZEN pre-registration module for the core_v1 research family (tickets P3-11 constants, P3-08 G-RESEARCH run).
 
+RE-FREEZE (batch 20, 2026-10-06, before any real run). The previous freeze (fingerprint 7826fb03..., 0 real trials, never run) left three
+gaps that made a Tier A unreachable by construction: ``min_active_fraction`` (gate 5) and ``vol_ewma_span`` / ``max_vol_scale`` /
+``instrument_risk_cap_multiple`` (gate 6) were unfrozen, so gate 5 was ``insufficient`` and 3 of 27 gate-6 parameters were unassessed.
+They are frozen below, each WITHOUT any performance input (the source of every value is written next to it). Nothing else changed: weights
+scheme, seed, family-N semantics, universe, tau (charter), gates hash, grid and the annual gate-7 variant are exactly as before.
+
 Written WITHOUT any backtest, any data read or any performance input. Mirrors the YAML draft
 ``plan/drafts/P3-11/core_v1_prereg_DRAFT.yaml`` (the owner commits the YAML under research/preregistration/; this module
 records the frozen inputs that the YAML schema has no field for). Do not edit once frozen: a changed fingerprint is a new
@@ -19,7 +25,7 @@ from pathlib import Path
 
 STATUS = "FROZEN_PENDING_OWNER_APPROVAL"   # becomes effective when the owner commits the YAML + INDEX entry
 FAMILY = "core_v1"
-PREREGISTERED_AT = "2026-10-05T00:00:00Z"  # drafting date (UTC ISO); the owner's approved_at_utc in the YAML is authoritative
+PREREGISTERED_AT = "2026-10-06T20:58:05Z"  # drafting time of the re-freeze, `date -u` (UTC ISO); the owner's approved_at_utc in the YAML is authoritative
 PREREG_DRAFT = "plan/drafts/P3-11/core_v1_prereg_DRAFT.yaml"
 CHARTER_PATH = "research/charters/core_v1.md"
 
@@ -140,6 +146,52 @@ def instrument_weights_hash(weights: dict[str, float] | None = None) -> str:
 INSTRUMENT_WEIGHTS_SHA256 = instrument_weights_hash()
 
 # ---------------------------------------------------------------------------------------------------------------------
+# Gate-5 coverage floor and the P4-03 limits layer (frozen by the batch-20 re-freeze; no performance input; owner-confirm items)
+# ---------------------------------------------------------------------------------------------------------------------
+# MIN_ACTIVE_FRACTION (gate 5, the gates file g_research.stress.min_active_fraction, "frozen in the core_v1 prereg"). The stress suite
+# scores an episode "low_coverage" (gate 5 insufficient) when active instruments / universe size at the episode start is below it
+# (firm.validation.stress_suite.run_stress_suite). Value 0.5 = a simple majority of the frozen 14-ETF universe (7 of 14 must have passed the
+# 256-day entry gate), so that an episode speaks for a diversified book and not for one or two markets. Structural cross-check (tests, from
+# universe config metadata only): the two largest asset classes hold 3 + 3 = 6 < 7 instruments, so any 7 active ETFs span at least 3 of the
+# 10 classes, the minimum for a 0.40 class risk cap to be feasible (ceil(1 / 0.40) = 3, config/risk.yaml). No other basis exists in the gates
+# file, the charter or the plan: the value is a convention, OWNER-CONFIRM. A larger value is stricter (more episodes insufficient).
+MIN_ACTIVE_FRACTION = 0.5
+
+# VOL_EWMA_SPAN (gate 6; null in the gates file and in config/risk.yaml, "frozen before P3-11"; P4-03: "slow EWMA span of the realised returns
+# of the forecast-sized portfolio"). 252 trading days = one year, the slow counterpart of the 35-day instrument-vol span (Carver's fast span,
+# gates vol_span 35) and of the annualisation horizon; a fast value would duplicate vol_span and make the scalar chase noise. Conventional
+# round number, no result input, OWNER-CONFIRM (config/risk.yaml cannot carry it: tests/test_risk_limits.py pins it to null until tau is set).
+VOL_EWMA_SPAN = 252
+# MAX_VOL_SCALE and INSTRUMENT_RISK_CAP_MULTIPLE: the gates robustness_parameters values (1.5 and 2.0 = the source plan's limits, also
+# config/risk.yaml max_vol_scale / max_instrument_risk_mult). Read from the frozen gates file, never typed.
+# CLASS_RISK_CAP_APPLIED: the 0.40 class risk cap of config/risk.yaml is NOT applied in the evaluation sizing path. It is not one of the 27
+# gate-6 parameters, so applying it would add a numeric core parameter that is never perturbed (gate 6: "no exemptions"). 1.0 disables it.
+CLASS_RISK_CAP_APPLIED = 1.0
+LIMITS_LAYER_RULES = {
+    "vol_scale": "clip(tau / sigma_ewma, upper=max_vol_scale) multiplies the capital used for N and the buffer width (w1 = s * raw); NaN "
+                 "(fewer than vol_ewma_span observations) = 1.0; sigma <= 0 gives 0",
+    "sigma_ewma": "sqrt(256 * EWMA_span(rp^2)), adjust=True, rp_t = sum_i raw_w[t-1,i] * r[t,i] with raw_w the unscaled unbuffered uncapped "
+                  "forecast-sized weights (f/10*idm*w_i*tau/vol_i); series starts at the first lagged weight; 256 = the sizing's annualisation",
+    "covariance": "zero-mean bias-corrected EWMA covariance, span = vol_ewma_span, x256, NaN return = 0, row t uses returns up to t",
+    "caps": "firm.risk.limits.apply_caps after the buffer step: long-only, instrument risk contribution <= instrument_risk_cap_multiple x "
+            "handcrafted weight, class cap disabled, gross cap = gross_cap (scaled by gross_cap / 1.0 so a +25% perturbation above 1.0 works); "
+            "infeasible caps are skipped as P4-03 documents",
+    "scope": "evaluation sizing path only (scripts/run_core_v1_evaluation.py); the P3-11 constants driver and the IDM sub-systems stay unlimited",
+}
+
+
+def _load_limit_values() -> tuple[float, float]:
+    """max_vol_scale and instrument_risk_cap_multiple from the frozen gates file (robustness_parameters)."""
+    import yaml
+
+    rp = yaml.safe_load((REPO_DIR / GATES_FILE).read_text())["robustness_parameters"]
+    return float(rp["max_vol_scale"]["value"]), float(rp["instrument_risk_cap_multiple"]["value"])
+
+
+MAX_VOL_SCALE, INSTRUMENT_RISK_CAP_MULTIPLE = _load_limit_values()
+FROZEN_LIMITS = {"vol_ewma_span": VOL_EWMA_SPAN}   # what firm.research.core_v1_pipeline.params_from_gates(frozen=...) needs
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Trial counts. Two different counts, never mixed (the frozen gates file's `n_rule` and `n_counts` are authoritative):
 #  * FAMILY N (N_gate, what the DSR deflates for in a family-N verdict): legacy trend/carry trials (standalone trend 1,
 #    alt_premia 10, S3 bond/commodity trend 5, S5 crypto momentum 3, futures_trend draft 0 = 19) PLUS the core_v1 GRID of up to
@@ -155,6 +207,7 @@ FAMILY_N_ROW_KINDS = ("grid",)                                       # the only 
 # Expected DIAGNOSTIC ledger rows per kind (config['kind']); RAW count only (OD-09), not family N. Grid rows (12) are separate.
 N_RULES = 6 + 5                              # six EWMAC speeds + five breakout lookbacks
 # robustness: one parameter at a time, both directions; each list element is its own parameter (assumption, see report).
+# After the batch-20 re-freeze ALL 27 are perturbable (vol_ewma_span, max_vol_scale, instrument_risk_cap_multiple are wired into the sizing path).
 N_ROBUSTNESS_PARAMS = 16 + 6 + 5             # 16 scalar entries + 6 EWMAC spans + 5 breakout lookbacks of robustness_parameters
 EXPECTED_LEDGER_ROWS = {
     "constant_estimation": N_RULES + len(UNIVERSE) + len(UNIVERSE) + 1,   # 11 scalars + 14 speed filters + 14 FDM sets + 1 IDM = 40
@@ -183,7 +236,10 @@ def bars_fingerprint() -> str:
          "INSTRUMENT_WEIGHT_SCHEME": INSTRUMENT_WEIGHT_SCHEME, "INSTRUMENT_WEIGHTS_SHA256": INSTRUMENT_WEIGHTS_SHA256,
          "EXPECTED_LEDGER_ROWS": EXPECTED_LEDGER_ROWS, "FAMILY_N": FAMILY_N,
          "FAMILY_N_ROW_KINDS": FAMILY_N_ROW_KINDS, "ASSET_CLASSES": ASSET_CLASSES, "CHARTER_PATH": CHARTER_PATH,
-         "BENCHMARK_GATE_VARIANT": BENCHMARK_GATE_VARIANT, "BENCHMARK_SENSITIVITY_VARIANT": BENCHMARK_SENSITIVITY_VARIANT},
+         "BENCHMARK_GATE_VARIANT": BENCHMARK_GATE_VARIANT, "BENCHMARK_SENSITIVITY_VARIANT": BENCHMARK_SENSITIVITY_VARIANT,
+         "MIN_ACTIVE_FRACTION": MIN_ACTIVE_FRACTION, "VOL_EWMA_SPAN": VOL_EWMA_SPAN, "MAX_VOL_SCALE": MAX_VOL_SCALE,
+         "INSTRUMENT_RISK_CAP_MULTIPLE": INSTRUMENT_RISK_CAP_MULTIPLE, "CLASS_RISK_CAP_APPLIED": CLASS_RISK_CAP_APPLIED,
+         "LIMITS_LAYER_RULES": LIMITS_LAYER_RULES, "N_ROBUSTNESS_PARAMS": N_ROBUSTNESS_PARAMS},
         sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 
@@ -207,6 +263,24 @@ def verify_frozen_inputs(repo_dir: Path | None = None) -> None:
         bad.append("instrument weight vector hash mismatch")
     if bad:
         raise PreregError("frozen inputs changed: " + "; ".join(bad))
+
+
+def _risk_yaml_mismatches(repo_dir: Path | None = None) -> list[str]:
+    """config/risk.yaml is not hashed (the owner may later fill tau / vol_ewma_span there); its limit values must still agree with this module."""
+    import yaml
+
+    try:
+        cfg = yaml.safe_load((Path(repo_dir or REPO_DIR) / "config" / "risk.yaml").read_text()) or {}
+    except OSError as exc:
+        return [f"config/risk.yaml: unreadable ({exc})"]
+    bad = []
+    if cfg.get("max_vol_scale") != MAX_VOL_SCALE:
+        bad.append(f"risk.yaml max_vol_scale {cfg.get('max_vol_scale')!r} != frozen {MAX_VOL_SCALE}")
+    if cfg.get("max_instrument_risk_mult") != INSTRUMENT_RISK_CAP_MULTIPLE:
+        bad.append(f"risk.yaml max_instrument_risk_mult {cfg.get('max_instrument_risk_mult')!r} != frozen {INSTRUMENT_RISK_CAP_MULTIPLE}")
+    if cfg.get("vol_ewma_span") not in (None, VOL_EWMA_SPAN):
+        bad.append(f"risk.yaml vol_ewma_span {cfg.get('vol_ewma_span')!r} != frozen {VOL_EWMA_SPAN}")
+    return bad
 
 
 def verify_charter(repo_dir: Path | None = None, *, ledger=None) -> dict:
@@ -243,6 +317,9 @@ def verify_charter(repo_dir: Path | None = None, *, ledger=None) -> dict:
 def verify_before_run(repo_dir: Path | None = None, *, ledger=None) -> dict:
     """Single entry point for the drivers: frozen inputs then charter. Raises PreregError; no data is touched."""
     verify_frozen_inputs(repo_dir)
+    bad = _risk_yaml_mismatches(repo_dir)
+    if bad:
+        raise PreregError("frozen limits changed: " + "; ".join(bad))
     return verify_charter(repo_dir, ledger=ledger)
 
 

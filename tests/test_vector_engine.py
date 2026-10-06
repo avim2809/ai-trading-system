@@ -370,3 +370,121 @@ def test_targets_from_forecasts_wrapper():
     )
     assert flags2.all()
     assert (tg2 * prices).abs().sum(axis=1).iloc[0] == pytest.approx(250.0)
+
+
+# ---- P4-03 limits wired into the sizing wrapper (batch 20; additive, default behaviour unchanged) --------------------------------------------
+def _limits(names, **kw):
+    from firm.risk.limits import RiskLimits
+
+    base = {"tau": 0.10, "vol_ewma_span": 20, "instrument_type": "etf", "max_gross": 1.0, "long_only": True,
+                "asset_class": dict.fromkeys(names, "eq"), "handcraft_share": dict.fromkeys(names, 1.0 / len(names)),
+                "max_vol_scale": 1.5, "max_class_risk_share": 1.0, "max_instrument_risk_mult": 2.0}
+    base.update(kw)
+    return RiskLimits(**base)
+
+
+def test_ewma_covariance_is_psd_zero_mean_and_matches_a_reference():
+    rng = np.random.default_rng(1)
+    r = pd.DataFrame(rng.normal(0, 0.01, (80, 3)), columns=list("abc"))
+    r.iloc[:10, 2] = np.nan                                   # pre-inception: treated as no information (0)
+    cov = VE.ewma_covariance(r, span=20, periods_per_year=256)
+    assert cov.shape == (80, 3, 3) and np.isfinite(cov).all()
+    a = 2.0 / 21.0
+    x = r.fillna(0.0).to_numpy()
+    k = np.arange(79, -1, -1)
+    wts = (1 - a) ** k
+    ref = (x[:, :, None] * x[:, None, :] * wts[:, None, None]).sum(axis=0) / wts.sum() * 256
+    assert cov[-1] == pytest.approx(ref, rel=1e-12)
+    for t in (5, 40, 79):
+        assert np.linalg.eigvalsh(cov[t]).min() > -1e-12 and np.allclose(cov[t], cov[t].T)
+
+
+def test_portfolio_vol_scale_clips_and_has_no_lookahead():
+    rng = np.random.default_rng(2)
+    idx = pd.bdate_range("2020-01-01", periods=120)
+    r = pd.DataFrame(rng.normal(0, 0.01, (120, 2)), index=idx, columns=["a", "b"])
+    w = pd.DataFrame(0.5, index=idx, columns=["a", "b"])
+    w.iloc[:30] = np.nan                                      # no forecast yet
+    s = VE.portfolio_vol_scale(w, r, tau=0.10, span=20, max_scale=1.5, periods_per_year=256)
+    assert s.iloc[:30].isna().all()
+    live = s.dropna()
+    assert (live <= 1.5 + 1e-12).all() and (live > 0).all()
+    # tau / sigma well above the cap -> clipped; a huge tau-free check: tiny vol gives exactly the cap
+    s2 = VE.portfolio_vol_scale(w, r * 1e-4, tau=0.10, span=20, max_scale=1.5, periods_per_year=256)
+    assert s2.dropna().iloc[-1] == 1.5
+    s3 = VE.portfolio_vol_scale(w, r * 10, tau=0.10, span=20, max_scale=1.5, periods_per_year=256)
+    assert s3.dropna().iloc[-1] < 1.0
+    # changing a FUTURE return must not change the scale at an earlier date (the weight at t-1 earns r_t; sigma_t uses r up to t)
+    r_mod = r.copy()
+    r_mod.iloc[100:] *= 5
+    sm = VE.portfolio_vol_scale(w, r_mod, tau=0.10, span=20, max_scale=1.5, periods_per_year=256)
+    assert sm.iloc[:100].equals(s.iloc[:100])
+    # the return on day t is earned by the weight of day t-1: shifting weights by one day changes the series
+    w2 = w.copy()
+    w2.iloc[60:] = 2.0
+    s4 = VE.portfolio_vol_scale(w2, r, tau=0.10, span=20, max_scale=1.5, periods_per_year=256)
+    assert s4.iloc[:60].equals(s.iloc[:60]) and s4.iloc[60] == s.iloc[60]      # w_{60} only earns r_{61}
+
+
+def test_targets_default_path_is_bit_identical_with_none_limits():
+    n = 40
+    rng = np.random.default_rng(3)
+    prices = frame(100 * np.cumprod(1 + rng.normal(0, 0.01, (n, 3)), axis=0))
+    fc = frame(rng.uniform(0, 20, (n, 3)))
+    vol = frame(np.full((n, 3), 0.2))
+    kw = {"weights": {"S0": 0.4, "S1": 0.3, "S2": 0.3}, "idm": 1.3, "tau": 0.1, "capital": 1000.0, "multipliers": dict.fromkeys(["S0", "S1", "S2"], 1.0),
+              "buffer_fraction": 0.1, "long_only": True, "gross_cap": 0.5}
+    a = VE.targets_from_forecasts(fc, prices, vol, **kw)
+    b = VE.targets_from_forecasts(fc, prices, vol, **kw, vol_scale=None, risk_limits=None, cov_annual=None)
+    assert a[0].equals(b[0]) and a[1].equals(b[1])
+
+
+def test_vol_scale_multiplies_the_full_position_and_the_buffer():
+    n = 6
+    prices = frame(np.full((n, 2), 100.0))
+    fc = frame(np.full((n, 2), 10.0))
+    vol = frame(np.full((n, 2), 0.2))
+    kw = {"weights": {"S0": 0.5, "S1": 0.5}, "idm": 1.0, "tau": 0.1, "capital": 1000.0, "multipliers": {"S0": 1.0, "S1": 1.0},
+              "buffer_fraction": 0.0, "long_only": True, "gross_cap": 1.0}
+    tg, _ = VE.targets_from_forecasts(fc, prices, vol, **kw, vol_scale=pd.Series(1.5, index=prices.index))
+    assert tg.iloc[0].tolist() == pytest.approx([3.75, 3.75])                    # 2.5 * 1.5
+    nan_scale = pd.Series(np.nan, index=prices.index)                            # no estimate yet -> neutral 1.0
+    tg1, _ = VE.targets_from_forecasts(fc, prices, vol, **kw, vol_scale=nan_scale)
+    assert tg1.iloc[0].tolist() == pytest.approx([2.5, 2.5])
+
+
+def test_instrument_risk_cap_is_enforced_through_the_wrapper_and_gross_cap_factor():
+    names = ["S0", "S1", "S2"]
+    n = 5
+    prices = frame(np.full((n, 3), 100.0))
+    fc = frame(np.full((n, 3), 10.0))
+    vol = frame(np.full((n, 3), 0.2))
+    cov = np.broadcast_to(np.diag([0.04, 0.04, 0.04]), (n, 3, 3)).copy()
+    # S0 is sized 3x the others, so its risk share is 9/11; cap at 2 x (1/3) = 0.667 pulls it down
+    kw = {"weights": {"S0": 0.6, "S1": 0.2, "S2": 0.2}, "idm": 1.0, "tau": 0.1, "capital": 1000.0, "multipliers": dict.fromkeys(names, 1.0),
+              "buffer_fraction": 0.0, "long_only": True, "gross_cap": 1.0, "rounding": "none"}
+    lim = _limits(names)
+    diag: dict = {}
+    tg, _flags = VE.targets_from_forecasts(fc, prices, vol, **kw, risk_limits=lim, cov_annual=cov, diagnostics=diag)
+    w = tg.iloc[0].to_numpy()
+    rc = w * (cov[0] @ w) / (w @ cov[0] @ w)
+    assert rc[0] == pytest.approx(2.0 / 3.0, abs=1e-9) and (rc[1:] < 2.0 / 3.0).all()
+    assert diag["instrument_cap_bound_days"] == n
+    tg0, _ = VE.targets_from_forecasts(fc, prices, vol, **kw)
+    assert (tg.iloc[0] <= tg0.iloc[0] + 1e-12).all() and tg.iloc[0, 0] < tg0.iloc[0, 0]
+    # gross cap above 1.0 (a +25% robustness perturbation) is honoured: same shares, scaled
+    big = dict(kw, gross_cap=1.25, weights={"S0": 1.5, "S1": 0.5, "S2": 0.5}, tau=0.2)
+    tg2, f2 = VE.targets_from_forecasts(fc, prices, vol, **big, risk_limits=lim, cov_annual=cov)
+    gross = float((tg2.iloc[0] * 100.0).sum() / 1000.0)
+    assert gross == pytest.approx(1.25, abs=1e-9) and f2.all()
+
+
+def test_risk_limits_require_cov_and_a_gross_cap():
+    names = ["S0", "S1"]
+    prices = frame(np.full((3, 2), 100.0))
+    fc, vol = frame(np.full((3, 2), 10.0)), frame(np.full((3, 2), 0.2))
+    kw = {"weights": {"S0": 0.5, "S1": 0.5}, "idm": 1.0, "tau": 0.1, "capital": 1000.0, "multipliers": dict.fromkeys(names, 1.0)}
+    with pytest.raises(ValueError, match="cov_annual"):
+        VE.targets_from_forecasts(fc, prices, vol, **kw, risk_limits=_limits(names))
+    with pytest.raises(ValueError, match="gross_cap"):
+        VE.targets_from_forecasts(fc, prices, vol, **kw, gross_cap=None, risk_limits=_limits(names), cov_annual=np.ones((3, 2, 2)))
