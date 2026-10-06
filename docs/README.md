@@ -20,6 +20,7 @@ output.
 | `allocation_deploy_runbook.md` | How the Alpaca allocation portfolio was deployed, the exact config, and rollback |
 | `allocation_forward_test_plan.md` | How the live allocation portfolio is judged (plain language) |
 | (code) `scripts/allocation_forward_monitor.py`, `src/firm/monitoring/allocation_forward.py` | P5-06 I1-I5 monitor of the allocation forward test (alert-only; timer not installed until OD-15; owner-run real-data steps) |
+| (code) `scripts/run_core_v1_constants.py`, `scripts/run_core_v1_evaluation.py`, `src/firm/reporting/gate_report.py`, `src/firm/research/{core_v1_pipeline,run_guards}.py` | P3-11 constants driver and P3-08 G-RESEARCH driver for core_v1 (code DONE, synthetic tests only; the real run is pending the owner's addendum copy and the run window). Outputs go to `../research/reports/core_v1/`; driver commands, guards and owner actions are in the w19a report |
 | `s2_forward_test_plan.md` | Shadow forward test of the S2 breadth overlay (running; paper ledger only) |
 | `capital_sleeves_plan.md` | Per-strategy capital sleeves (pipeline mode; used by the IBKR/pipeline code path) |
 | `REPO_MAP.md` | Verified map of the repo (packages, entry points, engines, data, frozen paths) and the credibility-plan path reconciliation table |
