@@ -39,3 +39,15 @@ Order matters (`is_approved` and gate 8 need the charter commit to be older than
 - Owner action: the real (protected) prereg INDEX has no `core_v1` frozen_module entry, so
   `tests/test_prereg.py::test_every_frozen_prereg_module_is_indexed` fails until the owner copies the draft INDEX entry across
   (freeze_commit is valid only if this branch is merged without squashing; otherwise recompute it).
+
+## Notes on the gates-v2 refresh (w16a, 2026-10-06)
+
+- Owner Amendment 1 (2026-10-06) changed the gates file (sha256 now `bcecaec9...1540`, see the draft `gates_hash`): the gate-7 benchmark is the
+  pinned ANNUAL BM2 variant; monthly stays a reported sensitivity. `scripts/core_v1_preregistered.py` records the new hash and derives
+  `BENCHMARK_GATE_VARIANT` / `BENCHMARK_SENSITIVITY_VARIANT` from the gates file (refuses if the pin is missing). Both enter the fingerprint.
+- Re-frozen at commit f5f9b01 (2026-10-06T08:05:53Z); new fingerprint `7826fb03...b46a` (the w15a value `9fe358a8...` is superseded; it never ran
+  anything). Weights scheme, seed 20261005 and family-N semantics are unchanged. Universe, stress and tax hashes were re-verified unchanged.
+- Step 3 above applies to the new hash. Stale elsewhere: `plan/drafts/P5-02/charter_core_v1_DRAFT.md` front matter still carries the old
+  `gates_yaml_sha256` (a2ad5245...); the charter must record `bcecaec9...` or `verify_charter` will refuse it. Owner action.
+- Owner action (unchanged): index the module in the protected prereg INDEX (draft entry in `plan/drafts/P1-09/INDEX.yaml`, freeze_commit valid only
+  without squashing), else `test_every_frozen_prereg_module_is_indexed` and `test_every_frozen_module_indexed` keep failing.
