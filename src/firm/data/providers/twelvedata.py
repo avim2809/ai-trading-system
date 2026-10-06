@@ -6,8 +6,9 @@ Docs: https://twelvedata.com/docs
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Sequence
+from typing import Any
 
 import pandas as pd
 

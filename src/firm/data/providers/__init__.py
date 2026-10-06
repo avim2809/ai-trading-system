@@ -16,19 +16,19 @@ from firm.data.providers.tiingo import TiingoProvider
 from firm.data.providers.twelvedata import TwelveDataProvider
 
 __all__ = [
-    "DataProvider",
-    "ProviderError",
-    "FallbackProvider",
-    "TiingoProvider",
+    "AlpacaProvider",
     "AlphaVantageProvider",
-    "FMPProvider",
-    "FinnhubProvider",
+    "DanelfinProvider",
+    "DataProvider",
     "EdgarProvider",
-    "TwelveDataProvider",
+    "FMPProvider",
+    "FallbackProvider",
+    "FinnhubProvider",
     "IBKRProvider",
     "MassiveProvider",
-    "DanelfinProvider",
-    "AlpacaProvider",
+    "ProviderError",
+    "TiingoProvider",
+    "TwelveDataProvider",
     "get_provider",
 ]
 

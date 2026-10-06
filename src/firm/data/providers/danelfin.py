@@ -59,7 +59,7 @@ before the plan/key had fully propagated, not a real 10/min Free-tier cap.
 from __future__ import annotations
 
 import time
-from typing import Sequence
+from collections.abc import Sequence
 
 import pandas as pd
 

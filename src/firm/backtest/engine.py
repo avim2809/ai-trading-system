@@ -9,9 +9,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-import pandas as pd
-
 import backtrader as bt
+import pandas as pd
 
 from firm.backtest.analyzers import (
     BenchmarkAnalyzer,

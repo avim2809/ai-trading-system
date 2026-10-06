@@ -8,8 +8,8 @@ Docs: https://www.alphavantage.co/documentation/. Endpoints used:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Sequence
 
 import pandas as pd
 

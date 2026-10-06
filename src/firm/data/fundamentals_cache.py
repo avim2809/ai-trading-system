@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +41,7 @@ def save_refresh_meta(
     path = refresh_meta_path(cache_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "refreshed_at": datetime.now(timezone.utc).isoformat(),
+        "refreshed_at": datetime.now(UTC).isoformat(),
         "symbols": symbols,
         "row_count": row_count,
         "symbol_count": symbol_count,
@@ -61,8 +61,8 @@ def hours_since_refresh(cache_dir: str | Path) -> float | None:
     try:
         ts = datetime.fromisoformat(str(meta["refreshed_at"]))
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        delta = datetime.now(timezone.utc) - ts.astimezone(timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
+        delta = datetime.now(UTC) - ts.astimezone(UTC)
         return delta.total_seconds() / 3600.0
     except ValueError:
         return None

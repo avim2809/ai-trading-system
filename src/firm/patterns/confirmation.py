@@ -20,7 +20,8 @@ its callers in any way.
 from __future__ import annotations
 
 import logging
-from typing import Callable, Literal
+from collections.abc import Callable
+from typing import Literal
 
 import numpy as np
 

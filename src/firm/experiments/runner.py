@@ -610,8 +610,7 @@ class ExperimentRunner:
         for i in range(n_splits):
             window_start = start + timedelta(days=i * window_days)
             window_end = window_start + timedelta(days=window_days)
-            if window_end > end:
-                window_end = end
+            window_end = min(window_end, end)
 
             train_days = int(window_days * train_pct)
             train_start = window_start

@@ -26,7 +26,6 @@ from firm.runtime import (
     load_sentiment,
 )
 
-
 log = logging.getLogger(__name__)
 
 

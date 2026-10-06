@@ -17,8 +17,9 @@ from __future__ import annotations
 import logging
 import os
 import time
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Any, Sequence
+from typing import Any
 
 import pandas as pd
 import requests

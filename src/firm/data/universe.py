@@ -13,8 +13,8 @@ Membership frame schema: :data:`firm.data.schemas.UNIVERSE_COLUMNS`
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Sequence
 
 import pandas as pd
 
@@ -45,7 +45,7 @@ class UniverseResolver:
         self._df = df
 
     @classmethod
-    def from_static(cls, symbols: Sequence[str], index: str = "static") -> "UniverseResolver":
+    def from_static(cls, symbols: Sequence[str], index: str = "static") -> UniverseResolver:
         """Build a resolver from a fixed symbol list (always-active membership)."""
         df = pd.DataFrame(
             {
@@ -124,7 +124,7 @@ class UniverseResolver:
 def build_resolver(
     membership: pd.DataFrame | None,
     fallback_symbols: Sequence[str],
-) -> "UniverseResolver":
+) -> UniverseResolver:
     """Build a resolver from real membership data, degrading to a static list.
 
     When *membership* is a non-empty frame conforming to

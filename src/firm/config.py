@@ -13,7 +13,6 @@ import yaml
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 
-
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_SETTINGS_PATH = _PROJECT_ROOT / "config" / "settings.yaml"
 
@@ -246,7 +245,7 @@ class Settings(BaseSettings):
         return value
 
     @classmethod
-    def from_yaml(cls, path: Path | str | None = None, **overrides: Any) -> "Settings":
+    def from_yaml(cls, path: Path | str | None = None, **overrides: Any) -> Settings:
         """Build settings by layering YAML values under .env API keys."""
         path = Path(path) if path else _DEFAULT_SETTINGS_PATH
         yaml_data: dict[str, Any] = {}

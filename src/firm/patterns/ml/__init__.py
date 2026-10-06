@@ -26,8 +26,8 @@ from firm.patterns.ml.feature_engineering import build_feature_frame, build_feat
 from firm.patterns.ml.labeling import label_matches, label_triple_barrier
 
 __all__ = [
-    "build_features",
     "build_feature_frame",
-    "label_triple_barrier",
+    "build_features",
     "label_matches",
+    "label_triple_barrier",
 ]

@@ -1,8 +1,5 @@
 """Alpha strategies – signal generation against point-in-time data."""
 
-from firm.strategies.base import BaseStrategy, PitView
-from firm.strategies.registry import get, list_strategies, register
-
 # Import every strategy module so that @register decorators execute.
 from firm.strategies import (  # noqa: F401
     danelfin_ai_score,
@@ -24,5 +21,7 @@ from firm.strategies import (  # noqa: F401
     trend,
     volatility_breakout,
 )
+from firm.strategies.base import BaseStrategy, PitView
+from firm.strategies.registry import get, list_strategies, register
 
-__all__ = ["BaseStrategy", "PitView", "register", "get", "list_strategies"]
+__all__ = ["BaseStrategy", "PitView", "get", "list_strategies", "register"]

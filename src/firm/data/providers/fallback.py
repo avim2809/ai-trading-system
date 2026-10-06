@@ -15,8 +15,8 @@ Priority order (first non-empty result wins):
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Sequence
 
 import pandas as pd
 
