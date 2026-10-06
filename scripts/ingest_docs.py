@@ -90,8 +90,8 @@ def main():
     topics = args.topics.split(",") if args.topics else None
 
     # Initialize store and chunker
-    from firm.rag.store import VectorStore
     from firm.rag.chunker import DocumentChunker
+    from firm.rag.store import VectorStore
 
     store = VectorStore(persist_dir=persist_dir)
     chunker = DocumentChunker(chunk_size=chunk_size, overlap=chunk_overlap)

@@ -1,8 +1,11 @@
-import sys, json
+import json
+import sys
+
 sys.path.insert(0, sys.argv[1] + "/scripts"); sys.path.insert(0, sys.argv[1] + "/src")
-import pandas as pd
 from pathlib import Path
-from eodhd_clean import clean_bars, equity_calendar, cleaning_fingerprint
+
+import pandas as pd
+from eodhd_clean import clean_bars, cleaning_fingerprint, equity_calendar
 
 EODHD = Path(sys.argv[1]) / "data" / "research" / "eodhd" / "etfs_full"
 BOND = ["SHY","IEF","TLT"]
@@ -26,7 +29,7 @@ def snap(t, asset="equity"):
         "present": True,
         "first_clean_date": str(d["date"].min().date()),
         "last_clean_date": str(d["date"].max().date()),
-        "n_clean_bars": int(len(d)),
+        "n_clean_bars": len(d),
         "n_segments": int(d["segment"].nunique()),
         "clean_report": rep,
     }

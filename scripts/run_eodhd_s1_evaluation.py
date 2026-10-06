@@ -32,7 +32,7 @@ import logging
 import math
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -43,10 +43,11 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import eodhd_s1_industry_momentum_preregistered_bars as prereg  # noqa: E402
-from eodhd_clean import clean_bars, equity_calendar  # noqa: E402
-from run_alt_premia_evaluation import stationary_indices  # noqa: E402  (reused per instruction)
-from firm.eval.overfitting import cscv_pbo, deflated_sharpe, _norm_ppf  # noqa: E402
+import eodhd_s1_industry_momentum_preregistered_bars as prereg
+from eodhd_clean import clean_bars, equity_calendar
+from run_alt_premia_evaluation import stationary_indices
+
+from firm.eval.overfitting import cscv_pbo, deflated_sharpe
 
 log = logging.getLogger(__name__)
 
@@ -578,7 +579,7 @@ def _gap_bars(c: pd.Series, b: pd.Series, rf: pd.Series, start: str, end: str,
     gap = sc - sb
     boot = paired_sharpe_gap_boot(ce, be, seed)
     lb, ub = float(np.quantile(boot, alpha)), float(np.quantile(boot, 1 - alpha))
-    return {"sharpe_c": sc, "sharpe_b": sb, "gap": gap, "lb": lb, "ub": ub, "n_days": int(len(j))}
+    return {"sharpe_c": sc, "sharpe_b": sb, "gap": gap, "lb": lb, "ub": ub, "n_days": len(j)}
 
 
 def _gap_point(c: pd.Series, b: pd.Series, rf: pd.Series, start: str, end: str) -> float:
@@ -682,7 +683,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     # ---- A4 (both halves, vs primary benchmark + BM1-3) ----
     h1_start, h1_end, h2_start, h2_end = half_windows(w_start, w_end, prereg.WINDOW["midpoint_date"])
     a4_rows = {}
-    for bname, bser in {**{"EW_universe_bh": primary_bm}, **base_bms}.items():
+    for bname, bser in {"EW_universe_bh": primary_bm, **base_bms}.items():
         g1 = _gap_point(primary, bser, rf_s, h1_start, h1_end)
         g2 = _gap_point(primary, bser, rf_s, h2_start, h2_end)
         a4_rows[bname] = {"gap_half1": g1, "gap_half2": g2, "pass": bool(g1 > 0 and g2 > 0)}
@@ -690,7 +691,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
 
     # ---- A5 (2x costs, vs primary benchmark + BM1-3) ----
     a5_rows = {}
-    for bname, bser in {**{"EW_universe_bh": primary_bm_stress}, **stress_bms}.items():
+    for bname, bser in {"EW_universe_bh": primary_bm_stress, **stress_bms}.items():
         g = _gap_point(primary_stress, bser, rf_s, w_start, w_end)
         a5_rows[bname] = {"gap_stress": g, "pass": bool(g > 0)}
     A5 = all(v["pass"] for v in a5_rows.values())
@@ -774,7 +775,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         raw = j.c.to_numpy()
         ex = (j.c - j.rf).to_numpy()
         return {"sharpe_excess_of_cash": sharpe(ex), "cagr": cagr(raw), "vol": float(np.std(raw, ddof=1) * ANN),
-               "max_dd": max_drawdown(raw), "n_days": int(len(j))}
+               "max_dd": max_drawdown(raw), "n_days": len(j)}
 
     table = {
         "primary_variant": row(primary, rf_s), "EW_universe_bh": row(primary_bm, rf_s),
@@ -783,7 +784,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     }
 
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(), "fingerprint": fp,
+        "generated_at": datetime.now(UTC).isoformat(), "fingerprint": fp,
         "prereg_at": prereg.PREREGISTERED_AT, "data_end": prereg.DATA_END, "window": prereg.WINDOW,
         "primary_variant": prereg.PRIMARY_VARIANT, "alpha_one_sided": alpha,
         "table": table,
@@ -829,7 +830,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     if args.append_ledger:
         ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"family": "S1", "entries": []}
         ledger["entries"].append({
-            "date": datetime.now(timezone.utc).date().isoformat(), "fingerprint": fp,
+            "date": datetime.now(UTC).date().isoformat(), "fingerprint": fp,
             "n_trials": prereg.N_VARIANTS, "trials": list(prereg.VARIANTS),
             "trial_daily_sharpes": trial_sharpes, "tier": tier,
         })

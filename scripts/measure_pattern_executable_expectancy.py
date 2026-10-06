@@ -141,7 +141,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -150,9 +150,9 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.eval.metrics import compute_trade_metrics  # noqa: E402
-from firm.patterns.match import PatternMatch  # noqa: E402
-from firm.patterns.ml.feature_engineering import build_features  # noqa: E402
+from firm.eval.metrics import compute_trade_metrics
+from firm.patterns.match import PatternMatch
+from firm.patterns.ml.feature_engineering import build_features
 
 # `first_barrier_hit` (public) returns only the label; every executable
 # pricing here also needs the bar the barrier was touched on, to mark the
@@ -160,13 +160,13 @@ from firm.patterns.ml.feature_engineering import build_features  # noqa: E402
 # with the offset retained -- imported directly, rather than re-implemented,
 # so there stays exactly ONE copy of the same-bar-collision ("stop wins") and
 # timeout semantics in the codebase.
-from firm.patterns.ml.labeling import (  # noqa: E402
+from firm.patterns.ml.labeling import (
     _first_barrier_hit_with_offset,
     label_triple_barrier_with_exit,
 )
-from firm.patterns.ml.xgb_inference import score_pattern_meta_confirmation  # noqa: E402
-from firm.patterns.scanner import scan_symbol  # noqa: E402
-from firm.strategies.pattern_recognition import _adjusted_ohlc  # noqa: E402
+from firm.patterns.ml.xgb_inference import score_pattern_meta_confirmation
+from firm.patterns.scanner import scan_symbol
+from firm.strategies.pattern_recognition import _adjusted_ohlc
 
 log = logging.getLogger("measure_pattern_executable_expectancy")
 
@@ -297,7 +297,7 @@ def adjusted_open(sym_df: pd.DataFrame) -> np.ndarray:
 class SymbolSeries:
     """Full (untruncated) per-symbol arrays, used for every barrier walk."""
 
-    __slots__ = ("symbol", "ohlcv", "open", "high", "low", "close", "dates", "n")
+    __slots__ = ("close", "dates", "high", "low", "n", "ohlcv", "open", "symbol")
 
     def __init__(self, symbol: str, sym_df: pd.DataFrame):
         self.symbol = symbol
@@ -684,7 +684,7 @@ def symbol_block_bootstrap(
     """
     mask = np.isfinite(values)
     values, symbols = values[mask], symbols[mask]
-    out: dict[str, float] = {"n": int(len(values))}
+    out: dict[str, float] = {"n": len(values)}
     if len(values) == 0:
         return {**out, "mean": float("nan"), "ci_low": float("nan"), "ci_high": float("nan"),
                 "t_cluster": float("nan"), "t_iid": float("nan"), "n_symbols": 0}
@@ -732,7 +732,7 @@ def describe(values: np.ndarray) -> dict[str, float]:
     if not len(v):
         return {"n": 0}
     return {
-        "n": int(len(v)), "mean": float(v.mean()), "p10": pct(v, 10), "median": pct(v, 50),
+        "n": len(v), "mean": float(v.mean()), "p10": pct(v, 10), "median": pct(v, 50),
         "p90": pct(v, 90),
     }
 

@@ -9,14 +9,13 @@ import json
 import sys
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 WT = Path("/tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt_S1")
 sys.path.insert(0, str(WT / "src"))
 sys.path.insert(0, str(WT / "scripts"))
 
-from eodhd_clean import clean_bars, equity_calendar, cleaning_fingerprint  # noqa: E402
+from eodhd_clean import clean_bars, cleaning_fingerprint, equity_calendar
 
 EODHD = WT / "data" / "research" / "eodhd" / "etfs_full"
 
@@ -55,10 +54,10 @@ def main() -> None:
             "status": "ok",
             "first_date_any_segment": str(d["date"].iloc[0].date()),
             "last_date": str(d["date"].iloc[-1].date()),
-            "n_rows_clean": int(len(d)),
+            "n_rows_clean": len(d),
             "n_segments": n_segments,
             "last_segment_first_date": str(last_seg_df["date"].iloc[0].date()),
-            "last_segment_n_rows": int(len(last_seg_df)),
+            "last_segment_n_rows": len(last_seg_df),
             "adv20_usd_at_end": None if pd.isna(adv20.iloc[-1]) else round(float(adv20.iloc[-1]), 0),
             "adv20_usd_median_last_seg": None if last_seg_df.empty else round(
                 float((last_seg_df["adjusted_close"].astype(float) * last_seg_df["volume"].astype(float))

@@ -126,7 +126,7 @@ def _parse_historical(year: int, html: str) -> list[dict]:
 
 def _parse_current(html: str) -> list[dict]:
     out = []
-    for panel in re.finditer(r"(\d{4}) FOMC Meetings(.*?)(?=\d{4} FOMC Meetings|$)", html, re.S):
+    for panel in re.finditer(r"(\d{4}) FOMC Meetings(.*?)(?=\d{4} FOMC Meetings|$)", html, re.DOTALL):
         yr, body = int(panel.group(1)), panel.group(2)
         months = re.findall(r'fomc-meeting__month[^>]*>\s*(?:<strong>)?([A-Za-z/]+)', body)
         dates = re.findall(r'fomc-meeting__date[^>]*>\s*([^<]+)', body)

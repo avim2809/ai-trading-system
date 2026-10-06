@@ -1,8 +1,11 @@
-import sys, json
+import json
+import sys
+
 sys.path.insert(0, sys.argv[1] + "/scripts"); sys.path.insert(0, sys.argv[1] + "/src")
-import pandas as pd
 from pathlib import Path
-from eodhd_clean import clean_bars, equity_calendar, cleaning_fingerprint
+
+import pandas as pd
+from eodhd_clean import clean_bars, cleaning_fingerprint, equity_calendar
 
 EODHD = Path(sys.argv[1]) / "data" / "research" / "eodhd" / "etfs_full"
 FRED = Path(sys.argv[1]) / "data" / "research" / "fred"
@@ -27,7 +30,7 @@ def snap(t, asset="equity"):
         "present": True,
         "first_clean_date": str(d["date"].min().date()),
         "last_clean_date": str(d["date"].max().date()),
-        "n_clean_bars": int(len(d)),
+        "n_clean_bars": len(d),
         "n_segments": int(d["segment"].nunique()),
         "clean_report": rep,
     }
@@ -54,7 +57,7 @@ fred = pd.read_parquet(FRED / "DTB3.parquet")
 out["fred_dtb3"] = {
     "first_date": str(pd.to_datetime(fred["date"]).min().date()),
     "last_date": str(pd.to_datetime(fred["date"]).max().date()),
-    "n_rows": int(len(fred)),
+    "n_rows": len(fred),
     "used_for": "cash accrual before BIL's 2007-05-30 first bar only",
 }
 print(json.dumps(out, indent=2, default=str))

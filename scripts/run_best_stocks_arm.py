@@ -57,23 +57,23 @@ import argparse
 import logging
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.config import get_settings  # noqa: E402
-from firm.data.providers.danelfin import DanelfinProvider  # noqa: E402
-from firm.data.providers.fallback import FallbackProvider  # noqa: E402
-from firm.live.best_stocks_arm import (  # noqa: E402
+from firm.config import get_settings
+from firm.data.providers.danelfin import DanelfinProvider
+from firm.data.providers.fallback import FallbackProvider
+from firm.live.best_stocks_arm import (
     select_best_stocks,
     select_from_real_beststocks,
     selection_symbols,
 )
-from firm.live.best_stocks_ledger import BestStocksLedger  # noqa: E402
-from firm.live.best_stocks_execution import main_engine_excluded_symbols  # noqa: E402
+from firm.live.best_stocks_execution import main_engine_excluded_symbols
+from firm.live.best_stocks_ledger import BestStocksLedger
 
 log = logging.getLogger(__name__)
 
@@ -247,7 +247,7 @@ def _run_live_trading(args: argparse.Namespace, asof: datetime) -> int:
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     args = _parse_args(argv)
-    asof = datetime.now(timezone.utc)
+    asof = datetime.now(UTC)
 
     if args.live_trading:
         return _run_live_trading(args, asof)

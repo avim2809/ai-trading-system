@@ -24,7 +24,7 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from firm.monitoring import allocation_forward as m  # noqa: E402
+from firm.monitoring import allocation_forward as m
 
 log = logging.getLogger("allocation_forward_monitor")
 DEFAULT_STATE = _ROOT / "data" / "forward_monitors" / "allocation"

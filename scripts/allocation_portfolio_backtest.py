@@ -36,7 +36,7 @@ import argparse
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -47,8 +47,8 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import alt_premia_preregistered_bars as prereg  # noqa: E402
-import run_alt_premia_evaluation as ape  # noqa: E402
+import alt_premia_preregistered_bars as prereg
+import run_alt_premia_evaluation as ape
 
 log = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ LEGACY_RETURNS_PARQUET = Path(
 # Core sleeve: 60/40 SPY/IEF, monthly + 2%-absolute daily drift band
 # ---------------------------------------------------------------------------
 
-def core_6040_drift_band(inp: "ape.Inputs", stress: bool = False) -> pd.Series:
+def core_6040_drift_band(inp: ape.Inputs, stress: bool = False) -> pd.Series:
     """60/40 SPY/IEF, target-weight rebalance at the close of the first US
     trading day of each month, plus a same-day check any other day: if either
     sleeve-internal weight has drifted more than ``CORE_DRIFT_BAND_ABS`` from
@@ -97,7 +97,7 @@ def core_6040_drift_band(inp: "ape.Inputs", stress: bool = False) -> pd.Series:
     return s
 
 
-def core_rebalance_events(inp: "ape.Inputs") -> dict:
+def core_rebalance_events(inp: ape.Inputs) -> dict:
     """Count how often the drift band, not the monthly clock, forces a trade."""
     r = inp.px[["SPY", "IEF"]].pct_change().to_numpy()
     target = np.array([CORE_TARGETS["SPY"], CORE_TARGETS["IEF"]])
@@ -211,7 +211,7 @@ def metrics(r: pd.Series, rf: pd.Series) -> dict:
     dd = _drawdown_series(j.r)
     worst_month_date, worst_month_ret = _worst_month(j.r)
     return {
-        "n_days": int(len(j)), "start": str(j.index[0].date()), "end": str(j.index[-1].date()),
+        "n_days": len(j), "start": str(j.index[0].date()), "end": str(j.index[-1].date()),
         "total_return": float(np.prod(1 + j.r.to_numpy()) - 1),
         "cagr": cagr, "annualized_vol": vol, "sharpe_above_tbills": sh,
         "max_drawdown": float(dd.max()),
@@ -267,7 +267,7 @@ def main() -> int:
     }
 
     report: dict = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "note": "sanity backtest, not a new edge claim; reuses the frozen C1 rule from "
                 "alt_premia_preregistered_bars.py and its cost model",
         "reused_prereg_fingerprint": prereg.bars_fingerprint(),

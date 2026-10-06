@@ -12,7 +12,6 @@ labelled POST-HOC DIAGNOSTIC, not a change to the frozen verdict.
 from __future__ import annotations
 
 import json
-import math
 import sys
 from pathlib import Path
 
@@ -24,9 +23,8 @@ for p in (ROOT / "src", ROOT / "scripts"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-from fetch_eodhd_prices import price_path  # noqa: E402
-from firm.eval.overfitting import cscv_pbo, deflated_sharpe  # noqa: E402
-import insider_cluster_preregistered_bars as prereg  # noqa: E402
+import insider_cluster_preregistered_bars as prereg
+from fetch_eodhd_prices import price_path
 
 OUT = Path(
     "/tmp/claude-0/-local-store-git-ai-trading-system/"
@@ -163,7 +161,7 @@ def main() -> None:
     posthoc = {}
     ev_clean_all = ev_primary[~ev_primary["ticker"].isin(bad_tickers)].copy()
     for hname in ("3_month", "6_month"):
-        strict = ev_primary[(ev_primary["hold_name"] == hname) & (ev_primary["name_ok"] == True)]  # noqa: E712
+        strict = ev_primary[(ev_primary["hold_name"] == hname) & (ev_primary["name_ok"] == True)]
         clean = strict[~strict["ticker"].isin(bad_tickers)]
         v = clean["xs_net"].to_numpy(dtype=float)
         v = v[np.isfinite(v)]
@@ -172,7 +170,7 @@ def main() -> None:
         winsor_lo, winsor_hi = np.percentile(v, [1, 99])
         v_wins = np.clip(v, winsor_lo, winsor_hi)
         posthoc[hname] = {
-            "n_excluding_flagged": int(len(v)),
+            "n_excluding_flagged": len(v),
             "n_excluded_events": int(len(strict) - len(clean)),
             "mean": float(v.mean()), "median": float(np.median(v)),
             "lb": float(np.quantile(boot, ALPHA)), "ub": float(np.quantile(boot, 1 - ALPHA)),

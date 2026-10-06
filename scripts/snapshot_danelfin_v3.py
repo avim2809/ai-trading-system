@@ -22,15 +22,15 @@ import json
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.config import get_settings  # noqa: E402
-from firm.data.providers.danelfin import DanelfinProvider  # noqa: E402
+from firm.config import get_settings
+from firm.data.providers.danelfin import DanelfinProvider
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
 
     provider = DanelfinProvider(settings=get_settings())
     snapshot: dict = {
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "captured_at": datetime.now(UTC).isoformat(),
         "best_stocks": [],
         "per_symbol": {},
     }

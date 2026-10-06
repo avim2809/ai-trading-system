@@ -165,7 +165,7 @@ def fetch_ticker(client: Client, ticker: str) -> dict:
     tmp = path.with_suffix(".parquet.tmp")
     df.to_parquet(tmp)
     tmp.replace(path)  # atomic: an interrupted run never leaves a partial file
-    return {"status": "ok", "rows": int(len(df)), "first": str(df["date"].min().date()),
+    return {"status": "ok", "rows": len(df), "first": str(df["date"].min().date()),
             "last": str(df["date"].max().date())}
 
 
@@ -244,9 +244,9 @@ def _resolve_one(client: Client, t: str, ev: pd.DataFrame, by_key: dict, manifes
             df.to_parquet(tmp)
             tmp.replace(dest)
             manifest[t] = {"status": "ok", "resolved_code": code, "resolved_by": "exact_name",
-                           "rows": int(len(df)), "first": str(df["date"].min().date()),
+                           "rows": len(df), "first": str(df["date"].min().date()),
                            "last": str(df["date"].max().date()), "events_covered": covered,
-                           "events_total": int(len(dates))}
+                           "events_total": len(dates)}
             return 1
         return 0
 

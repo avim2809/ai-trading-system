@@ -68,10 +68,10 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.config import get_settings  # noqa: E402
-from firm.data.providers.danelfin import DanelfinProvider  # noqa: E402
-from firm.data.providers.fallback import FallbackProvider  # noqa: E402
-from firm.live.best_stocks_arm import select_best_stocks_historical  # noqa: E402
+from firm.config import get_settings
+from firm.data.providers.danelfin import DanelfinProvider
+from firm.data.providers.fallback import FallbackProvider
+from firm.live.best_stocks_arm import select_best_stocks_historical
 
 log = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ def _annual_rebalance_dates(start: str, end: str) -> list[str]:
     return dates
 
 
-def _nearest_trading_day(price_cache: "PriceCache", date: str, max_shift_days: int = 10) -> str | None:
+def _nearest_trading_day(price_cache: PriceCache, date: str, max_shift_days: int = 10) -> str | None:
     """Nearest real trading day on/after *date*, using the benchmark's own
     price series as the trading-day calendar (it's guaranteed accurate,
     unlike probing Danelfin: a 404 there means "zero rows match this exact

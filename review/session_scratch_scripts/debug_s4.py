@@ -1,10 +1,14 @@
-import sys, logging
+import logging
+import sys
+
 sys.path.insert(0, "/tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt_S4/scripts")
 sys.path.insert(0, "/tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/wt_S4/src")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
-import run_eodhd_s4_evaluation as r
-import numpy as np, pandas as pd
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import run_eodhd_s4_evaluation as r
 
 panel = Path("/tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/runs/S4/panel.parquet")
 built = r.build_all(panel, limit_placebo=1)

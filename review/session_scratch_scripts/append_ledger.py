@@ -1,9 +1,11 @@
-import sys, json
+import json
+import sys
+from datetime import UTC, datetime
 from pathlib import Path
-from datetime import datetime, timezone
+
 sys.path.insert(0, sys.argv[1] + "/scripts"); sys.path.insert(0, sys.argv[1] + "/src")
-import pandas as pd
 import eodhd_s3_bond_commodity_trend_preregistered_bars as prereg
+import pandas as pd
 import run_eodhd_s3_evaluation as ev
 
 out_dir = Path(sys.argv[2])
@@ -22,8 +24,8 @@ assert fp == report["fingerprint"], (fp, report["fingerprint"])
 LEDGER = Path(sys.argv[1]) / "docs" / "S3_trial_history.json"
 ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"family": "S3", "entries": []}
 ledger["entries"].append({
-    "date": datetime.now(timezone.utc).date().isoformat(), "fingerprint": fp,
-    "n_trials": int(len(trial_daily_sr)), "trials": pbo_cols[:5],
+    "date": datetime.now(UTC).date().isoformat(), "fingerprint": fp,
+    "n_trials": len(trial_daily_sr), "trials": pbo_cols[:5],
     "trial_daily_sharpes": [float(x) for x in trial_daily_sr],
     "tiers": {k: v["tier"] for k, v in report["results"].items()},
 })

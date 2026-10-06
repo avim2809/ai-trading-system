@@ -98,7 +98,7 @@ import logging
 import math
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -109,11 +109,12 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import eodhd_clean as ec  # noqa: E402
-import eodhd_s4_52wk_high_preregistered_bars as prereg  # noqa: E402
-from eodhd_s4_build_panel import entry_dates_after, month_end_dates  # noqa: E402
-from firm.eval.overfitting import cscv_pbo, deflated_sharpe  # noqa: E402
-from run_alt_premia_evaluation import stationary_indices  # noqa: E402
+import eodhd_clean as ec
+import eodhd_s4_52wk_high_preregistered_bars as prereg
+from eodhd_s4_build_panel import entry_dates_after, month_end_dates
+from run_alt_premia_evaluation import stationary_indices
+
+from firm.eval.overfitting import cscv_pbo, deflated_sharpe
 
 log = logging.getLogger(__name__)
 
@@ -383,7 +384,7 @@ def month_universe_and_decile(panel_window: pd.DataFrame) -> tuple[list[pd.Times
 # ---------------------------------------------------------------------------
 
 class Slot:
-    __slots__ = ("col", "weight", "entry_pos", "exit_pos", "early_exit")
+    __slots__ = ("col", "early_exit", "entry_pos", "exit_pos", "weight")
 
     def __init__(self, col, weight, entry_pos, exit_pos, early_exit):
         self.col, self.weight = col, weight
@@ -898,7 +899,7 @@ def per_year_table(r: np.ndarray, dates: pd.DatetimeIndex) -> dict:
     out = {}
     for y, g in s.groupby(s.index.year):
         g = g[np.isfinite(g)]
-        out[int(y)] = {"sharpe": sharpe(g.to_numpy()), "n_days": int(len(g))}
+        out[int(y)] = {"sharpe": sharpe(g.to_numpy()), "n_days": len(g)}
     return out
 
 
@@ -934,7 +935,7 @@ def current_git_commit() -> str:
 
 
 def cmd_evaluate(args: argparse.Namespace) -> int:
-    run_started_utc = datetime.now(timezone.utc).isoformat()
+    run_started_utc = datetime.now(UTC).isoformat()
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -1021,9 +1022,9 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     ]
 
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(), "fingerprint": built["fingerprint"],
+        "generated_at": datetime.now(UTC).isoformat(), "fingerprint": built["fingerprint"],
         "prereg_at": prereg.PREREGISTERED_AT, "window": prereg.WINDOW,
-        "alpha_one_sided": ALPHA, "pbo": pbo, "dsr_trials": int(len(trial_sr)),
+        "alpha_one_sided": ALPHA, "pbo": pbo, "dsr_trials": len(trial_sr),
         "candidates": results, "sanity_checks": sanity, "prereg_issues": prereg_issues,
         "cleaning_fingerprint_v2_at_freeze": prereg.OBSERVED["cleaning_fingerprint_v2"],
         "cleaning_fingerprint_v2_now": ec.cleaning_fingerprint(),
@@ -1062,8 +1063,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     if args.append_ledger:
         ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"family": "S4", "entries": []}
         ledger["entries"].append({
-            "date": datetime.now(timezone.utc).date().isoformat(), "fingerprint": built["fingerprint"],
-            "n_trials": int(len(trial_sr)), "trials": list(prereg.CANDIDATES),
+            "date": datetime.now(UTC).date().isoformat(), "fingerprint": built["fingerprint"],
+            "n_trials": len(trial_sr), "trials": list(prereg.CANDIDATES),
             "trial_daily_sharpes": [float(x) for x in trial_sr],
             "tiers": {k: v["tier"] for k, v in results.items()},
         })

@@ -22,10 +22,10 @@ import json
 import logging
 import math
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -35,8 +35,9 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import alt_premia_preregistered_bars as prereg  # noqa: E402
-from firm.eval.overfitting import cscv_pbo, deflated_sharpe  # noqa: E402
+import alt_premia_preregistered_bars as prereg
+
+from firm.eval.overfitting import cscv_pbo, deflated_sharpe
 
 log = logging.getLogger(__name__)
 
@@ -674,7 +675,7 @@ def cmd_power(args: argparse.Namespace) -> int:
     log.info("power sim check T2 vs BM1 at MDE=%.2f: empirical power %.2f (n_sim=%d)", g, sim_power, n_sim)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    rep = {"generated_at": datetime.now(timezone.utc).isoformat(), "fingerprint": prereg.bars_fingerprint(),
+    rep = {"generated_at": datetime.now(UTC).isoformat(), "fingerprint": prereg.bars_fingerprint(),
            "method": "analytic Jobson-Korkie/Memmel SE of the Sharpe gap, one-sided alpha_one_sided, 80% power; "
                      "priors from POWER_PRIORS; uses benchmark returns only",
            "rows": rows, "sim_check": {"pair": "T2_cross_asset_trend vs BM1_SPY", "mde": g,
@@ -737,7 +738,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     for cand in SERIES:
         spec = prereg.CANDIDATES[cand]
         c_ex_full = window(base[cand] - rf, spec["eval_start"])
-        res = {"eval_start": spec["eval_start"], "n_days": int(len(c_ex_full)),
+        res = {"eval_start": spec["eval_start"], "n_days": len(c_ex_full),
                "sharpe": sharpe(c_ex_full.to_numpy()),
                "cagr": float(np.prod(1 + window(base[cand], spec["eval_start"]).to_numpy()) ** (
                    prereg.TRADING_DAYS / len(c_ex_full)) - 1),
@@ -782,7 +783,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
             ep_b = [d for _, _, d in eps]
             gated = bm in spec["benchmarks"]
             res["vs"][bm] = {
-                "gated": gated, "window_start": start, "n_days": int(len(j)),
+                "gated": gated, "window_start": start, "n_days": len(j),
                 "sharpe_c": sharpe(ce), "sharpe_b": sharpe(be), "gap": gap, "lb": lb, "ub": ub,
                 "gap_post_publication": gap_post, "gap_stress_costs": gap_stress,
                 "max_dd_c": dd_c, "max_dd_vol_matched_b": dd_vm, "max_dd_b_raw": max_drawdown(j.b.to_numpy()),
@@ -823,9 +824,9 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
                 "sharpe": sharpe((s - window(rf, start)).to_numpy()), "max_dd": max_drawdown(s.to_numpy())}
 
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(), "fingerprint": fp,
+        "generated_at": datetime.now(UTC).isoformat(), "fingerprint": fp,
         "prereg_at": prereg.PREREGISTERED_AT, "data_end": prereg.DATA_END,
-        "alpha_one_sided": alpha, "pbo": pbo, "dsr_trials": int(len(trial_daily_sr)),
+        "alpha_one_sided": alpha, "pbo": pbo, "dsr_trials": len(trial_daily_sr),
         "c1_avg_weight": base["_c1_avg_weight"], "candidates": results, "benchmarks": bm_summary,
         "fallback_benchmark": prereg.FALLBACK_BENCHMARK,
     }
@@ -835,8 +836,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     if args.append_ledger:
         ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"family": "alt_premia", "entries": []}
         ledger["entries"].append({
-            "date": datetime.now(timezone.utc).date().isoformat(), "fingerprint": fp,
-            "n_trials": int(len(trial_daily_sr)),
+            "date": datetime.now(UTC).date().isoformat(), "fingerprint": fp,
+            "n_trials": len(trial_daily_sr),
             "trials": pbo_cols, "trial_daily_sharpes": [float(x) for x in trial_daily_sr],
             "tiers": {k: v["tier"] for k, v in results.items()},
         })

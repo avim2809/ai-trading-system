@@ -1,7 +1,9 @@
-import sys, json
+import sys
+
 sys.path.insert(0, sys.argv[1] + "/scripts")
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 from eodhd_clean import clean_bars, equity_calendar
 
 EODHD = Path(sys.argv[1]) / "data" / "research" / "eodhd" / "etfs_full"
