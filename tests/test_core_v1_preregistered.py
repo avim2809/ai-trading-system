@@ -16,7 +16,7 @@ _SCRIPTS = ROOT / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import core_v1_preregistered as pre  # noqa: E402
+import core_v1_preregistered as pre
 
 DRAFT = ROOT / "plan" / "drafts" / "P3-11" / "core_v1_prereg_DRAFT.yaml"
 # Pinned at freeze: any edit to the frozen constants changes this and must be a new pre-registration.
