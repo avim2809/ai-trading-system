@@ -83,7 +83,7 @@ FILE_HASHES = {
     "config/universe_etf.yaml": "379cb0d4611f46561b1125c72276803ea590ab3de136bcfb3d0ce6a9696d3514",
     "config/stress_periods.yaml": "9b165c652cc7616fc4f441f00350a12a42e9145db9a261f9ab6e2004e9496f20",
     "config/tax_il.yaml": "1badbc38c33a8321929d03d4bafe339b22600e5c312a026bfaa6153683585856",
-    GATES_FILE: "a2ad524590376bb43fa0fd13ecc030181015a98575aeef8c7677fdaf623ed5be",
+    GATES_FILE: "bcecaec9ef44163596e27459779a124747d382c8068bf0607d4793df79f71540",
 }
 GATES_SHA256 = FILE_HASHES[GATES_FILE]
 
@@ -95,6 +95,21 @@ def _load_universe_doc() -> dict:
 
 
 _UNIVERSE_DOC = _load_universe_doc()
+
+
+def _load_benchmark_variants() -> tuple[str, str]:
+    """Gate-7 benchmark variant and reported sensitivity, read from the frozen gates file (Amendment 1, 2026-10-06)."""
+    import yaml
+
+    doc = yaml.safe_load((REPO_DIR / GATES_FILE).read_text())
+    b = next(v["benchmark"] for v in doc.values() if isinstance(v, dict) and isinstance(v.get("benchmark"), dict))
+    if b.get("uses_higher_after_tax_sharpe_of_the_two") is not False:
+        raise RuntimeError("gates file does not pin the gate-7 benchmark variant ex ante")
+    return str(b["gate_variant"]), str(b["sensitivity"])
+
+
+# gate 7 compares against the pinned variant only; the other variant is a reported sensitivity (never gates)
+BENCHMARK_GATE_VARIANT, BENCHMARK_SENSITIVITY_VARIANT = _load_benchmark_variants()
 UNIVERSE = [str(i["symbol"]) for i in _UNIVERSE_DOC["instruments"]]   # 14 ETFs, file order; no symbol literals in this module
 ASSET_CLASSES = {str(c): [str(s) for s in m] for c, m in _UNIVERSE_DOC["asset_classes"].items()}   # 10 classes
 
@@ -146,7 +161,7 @@ EXPECTED_LEDGER_ROWS = {
     "robustness": 2 * N_ROBUSTNESS_PARAMS,                                # 54
     "cost_stress": 2,                                                     # 2x and 3x of the selected config (1x is the grid run)
     "stress_suite": 10,                                                   # one per episode in the stress-periods file
-    "benchmark": 3,                                                       # BM2 annual, BM2 monthly, core_only_100
+    "benchmark": 3,                                                       # BM2 annual (gate), BM2 monthly (sensitivity), core_only_100
     "comparison": 1,                                                      # flat-bps comparison row (never gates)
 }
 EXPECTED_GRID_ROWS = len(GRID)
@@ -167,7 +182,8 @@ def bars_fingerprint() -> str:
          "CPCV_SELECTION_RULE": CPCV_SELECTION_RULE, "FILE_HASHES": FILE_HASHES, "UNIVERSE": UNIVERSE,
          "INSTRUMENT_WEIGHT_SCHEME": INSTRUMENT_WEIGHT_SCHEME, "INSTRUMENT_WEIGHTS_SHA256": INSTRUMENT_WEIGHTS_SHA256,
          "EXPECTED_LEDGER_ROWS": EXPECTED_LEDGER_ROWS, "FAMILY_N": FAMILY_N,
-         "FAMILY_N_ROW_KINDS": FAMILY_N_ROW_KINDS, "ASSET_CLASSES": ASSET_CLASSES, "CHARTER_PATH": CHARTER_PATH},
+         "FAMILY_N_ROW_KINDS": FAMILY_N_ROW_KINDS, "ASSET_CLASSES": ASSET_CLASSES, "CHARTER_PATH": CHARTER_PATH,
+         "BENCHMARK_GATE_VARIANT": BENCHMARK_GATE_VARIANT, "BENCHMARK_SENSITIVITY_VARIANT": BENCHMARK_SENSITIVITY_VARIANT},
         sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 
