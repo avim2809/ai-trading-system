@@ -12,7 +12,7 @@ expected_worst_year: "about -10% to -15%"
 expected_longest_flat_months: "36 to 60"
 correlation_expectations: "0.5 to 0.7 versus the 60/40 benchmark; the gate-7 correlation branch is not claimed"
 falsification: "No net-of-cost, net-of-tax advantage over 60/40 across non-overlapping decades, returns explained by static beta, drawdown beyond the survival reference, or a premium visible in only one market or sub-period (section 7b)"
-gates_yaml_sha256: "a2ad524590376bb43fa0fd13ecc030181015a98575aeef8c7677fdaf623ed5be"
+gates_yaml_sha256: "bcecaec9ef44163596e27459779a124747d382c8068bf0607d4793df79f71540"
 mechanism_committed_at_utc: "2026-10-05T19:00:58Z"
 tau: 0.09
 tau_derivation: "plan/OWNER_DECISIONS.md (OD-17: 8-10% set ex ante from long-run asset volatilities, working value 9%; addendum 2026-10-05)"

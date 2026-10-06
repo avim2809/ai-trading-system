@@ -11,7 +11,9 @@
 # in its own pre-registration, and are listed under `deferred_values`.
 
 meta:
-  version: 1
+  version: 2
+  amended_utc: "2026-10-06T08:02:08Z"
+  amended_by: "Avi Milner"
   register: docs/gate_deviation_register_2026_10.md
   register_signed_commit: b3dd32c
   signed_by: Avi Milner
@@ -135,7 +137,8 @@ g_research:
     benchmark: BM2_60_40_SPY_IEF
     rebalance: annual
     sensitivity: monthly
-    uses_higher_after_tax_sharpe_of_the_two: true
+    uses_higher_after_tax_sharpe_of_the_two: false   # amended 2026-10-06 (register Amendment 1): pinned ex ante
+    gate_variant: annual                              # the gate-7 benchmark variant; monthly stays a reported sensitivity
     after_cost_and_after_tax: true
     tax_model: config/tax_il.yaml        # hash recorded in the core_v1 prereg
     data: pre_seal_only
