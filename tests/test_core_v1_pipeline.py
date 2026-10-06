@@ -11,7 +11,6 @@ import pandas as pd
 import pytest
 import yaml
 
-from firm.backtest.vector_engine import EngineConfig
 from firm.research import core_v1_pipeline as P
 from firm.research import ledger as L
 
@@ -19,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 _SCRIPTS = ROOT / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
-import core_v1_preregistered as pre  # noqa: E402
+import core_v1_preregistered as pre
 
 GATES = yaml.safe_load((ROOT / "config" / "gates.yaml").read_text())
 

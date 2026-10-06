@@ -48,16 +48,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import core_v1_preregistered as pre
 import numpy as np
 import pandas as pd
 import yaml
 
-import core_v1_preregistered as pre
 import firm.research  # noqa: F401  (ledger / seal entry-point check: scripts/run_*.py must go through firm.research)
 from firm.research import core_v1_pipeline as P
 from firm.research import run_guards as G
 from firm.research import seal
-from firm.research.core_v1_pipeline import (  # noqa: F401  (the ticket's entry points live in the pipeline module and are re-exported)
+from firm.research.core_v1_pipeline import (
     apply_cost_speed_filter,
     estimate_fdm_rho,
     estimate_idm_H,
@@ -166,8 +166,6 @@ def run_estimation(panel: P.Panel, *, gates: dict, tau: float, instrument_weight
             fdm_u[s] = P.fdm_from_rho(np.array([w[i] for i in ids]), rho_full.loc[ids, ids].to_numpy(), cap=float("inf"))
 
     # step 6: IDM from the sub-system returns through the engine at 1x cost (one trial; the engine adds its own exploratory rows)
-    bundle = P.ConstantsBundle(scalars=scalars, survivors=survivors, rho=rho_full, idm=1.0, instrument_weights=instrument_weights,
-                               group_weights=group_weights, window=win)
     sub_rets = {}
     with P.logged_trial(ctx, "constant_estimation", "idm", "all", detail={"n_subsystems": len(syms)}):
         unit = dataclasses.replace(base, gross_cap=None)

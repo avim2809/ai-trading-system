@@ -395,6 +395,7 @@ Legend: E = exists today, N = new.
 | P3-06 | `src/firm/portfolio/sizing.py`, `tests/test_sizing.py` | N | new | Follows `Allocator.fractional_symbols` |
 | P3-09 | `src/firm/backtest/vector_engine.py`, `tests/test_vector_engine.py` | N | new | |
 | P3-11 | `research/preregistration/`, `scripts/core_v1_preregistered.py`, `research/reports/core_v1/constants.md` | N | new | New-family harness follows `scripts/<family>_preregistered.py` convention |
+| P3-11 | `scripts/run_core_v1_constants.py` (driver, code DONE; real run pending), `src/firm/research/{core_v1_pipeline,run_guards}.py` (shared pipeline and unconditional run guards: seal preflight, run window from `date -u`, memory cap), `tests/test_core_v1_{pipeline,run_guards,constants_driver}.py` | N | new | Pipeline and guards are research-only (the `firm.research` prefix is forbidden in the live import graph); `research/reports/core_v1/drafts/*.py.draft` hold the agent drafts of the two integrity tests |
 | P3-07 | `src/firm/validation/stress_suite.py`, `config/stress_periods.yaml`, `tests/test_stress_suite.py` | N | new | |
 | P4-01 | `src/firm/portfolio/weights.py`, `tests/test_weights.py` | N | new | `agents/analysts/__init__.py` (E) only cross-checked |
 | P4-02 | `src/firm/reporting/diversification_report.py`, `src/firm/validation/diversification.py`, `tests/test_diversification_report.py` | N | new | |
@@ -402,7 +403,7 @@ Legend: E = exists today, N = new.
 | P4-04 | `src/firm/risk/kill_switch.py`, `config/kill_switch.yaml`, `tests/test_kill_switch_tiers.py` | N | new | Pure module; engine `_check_drawdown` (E) unchanged until P6-01 |
 | P4-05 | `src/firm/risk/kelly.py`, `tests/test_kelly.py` | N | new | Unrelated to the pipeline's `kelly` allocation method |
 | P3-08 | `scripts/core_v1_preregistered.py`, `scripts/run_core_v1_evaluation.py`, `docs/core_v1_trial_history.json` | N | new | Follows repo convention |
-| P3-08 | `src/firm/reporting/gate_report.py`, `research/reports/core_v1/REPORT.md` | N | new | |
+| P3-08 | `src/firm/reporting/gate_report.py` (tier read from the frozen gates file, no hard-coded threshold), `scripts/run_core_v1_evaluation.py` (code DONE; real run pending), `research/reports/core_v1/REPORT.md` | N | new | `docs/core_v1_trial_history.json` is drafted under `research/reports/core_v1/drafts/` first (owner commits it; the trial-history BASELINE and a legacy-adapter entry need an owner change, see the w19a report) |
 | P3-10 | `scripts/unseal_forward_holdout.py`, `research/reports/core_v1/FORWARD_HOLDOUT.md`, `research/approvals/` | N | new | Deferred, earliest 2027-10-01 |
 | P5-05 | `docs/LLM_POLICY.md`, `src/firm/strategies/registry.py` | N / E | new / extend | Policy and status only |
 | P5-06 | `src/firm/monitoring/{__init__,allocation_forward}.py`, `scripts/allocation_forward_monitor.py` | N | new | Calls `scripts/allocation_replay.py::replay` (E) |

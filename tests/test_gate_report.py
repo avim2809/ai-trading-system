@@ -12,7 +12,6 @@ import pytest
 import yaml
 
 from firm.reporting import gate_report as GR
-from firm.validation.sharpe_stats import length_adjusted_var_sr
 
 ROOT = Path(__file__).resolve().parents[1]
 

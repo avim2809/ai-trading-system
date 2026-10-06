@@ -364,9 +364,9 @@ def _fmt(v: Any) -> str:
 def render_report(outcomes: Sequence[TestOutcome], tier: str, meta: dict, comparators: dict) -> str:
     """REPORT.md text: tier, every gate row with its values, N and var_sr with sources, comparators and the seal sentences."""
     label = f" ({meta['tier_label']})" if meta.get("tier_label") else ""
-    verdict = {"A": "Tier A: all eight gates pass. Paper-eligible only on the stated N basis.",
-               "C": "Tier C: no point failure, but a confidence or power threshold was missed. Outcome: passive (BM2, or the owner's 92/8 book).",
-               "D": "Tier D: a point failure or an H4 ENB miss. Outcome: passive (BM2, or the owner's 92/8 book); the candidate stops."}[tier]
+    verdict = {"A": "All eight gates pass. Paper-eligible only on the stated N basis.",
+               "C": "No point failure, but a confidence or power threshold was missed. Outcome: passive (BM2, or the owner's 92/8 book).",
+               "D": "A point failure or an H4 ENB miss. Outcome: passive (BM2, or the owner's 92/8 book); the candidate stops."}[tier]
     L = ["# core_v1 research run: G-RESEARCH report", "", f"**Tier {tier}{label}.** {verdict}", ""]
     if meta.get("tier_reason"):
         L += [f"Reason: {meta['tier_reason']}", ""]

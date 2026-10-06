@@ -52,7 +52,7 @@ def test_window_uses_winter_time_after_dst_ends():
 
 def test_window_rejects_naive_datetime():
     with pytest.raises(ValueError):
-        G.window_ok(dt.datetime(2026, 10, 6, 1, 0))
+        G.window_ok(dt.datetime(2026, 10, 6, 1, 0))  # noqa: DTZ001 - naive on purpose
 
 
 def test_assert_in_window_raises_with_injected_clock():

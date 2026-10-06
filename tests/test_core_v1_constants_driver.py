@@ -19,12 +19,12 @@ for p in (ROOT / "scripts", ROOT / "src"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-import core_v1_preregistered as pre  # noqa: E402
-import run_core_v1_constants as D  # noqa: E402
+import core_v1_preregistered as pre
+import run_core_v1_constants as D
 
-from firm.research import core_v1_pipeline as P  # noqa: E402
-from firm.research import ledger as L  # noqa: E402
-from firm.research import run_guards as G  # noqa: E402
+from firm.research import core_v1_pipeline as P
+from firm.research import ledger as L
+from firm.research import run_guards as G
 
 HOST_LEDGER = Path("/local/store/research-ledger/trials.jsonl")
 GATES = yaml.safe_load((ROOT / "config" / "gates.yaml").read_text())
@@ -74,7 +74,7 @@ def test_constants_json_has_every_required_key(run):
 
 
 def test_writes_only_the_three_report_files_and_nothing_under_preregistration(run):
-    res, out, *_ = run
+    out = run[1]
     assert sorted(p.name for p in out.iterdir()) == ["constants.json", "constants.md", "constants_addendum.draft.yaml"]
     assert not list((ROOT / "research" / "preregistration").glob("*addendum*"))
     with pytest.raises(ValueError, match="preregistration"):
@@ -94,7 +94,7 @@ def test_file_hash_matches_write_constants_and_the_draft_addendum(run, tmp_path)
 
 def test_pooled_scalar_mean_abs_is_ten_and_post_cap_mean_reported_separately(run):
     c = run[0]["constants"]
-    for r, d in c["scalar_diagnostics"].items():
+    for d in c["scalar_diagnostics"].values():
         assert d["mean_abs_uncapped"] == pytest.approx(10.0, abs=1e-9)
         assert d["mean_abs_capped"] <= 10.0 + 1e-9
     assert any(d["mean_abs_capped"] < 10.0 for d in c["scalar_diagnostics"].values())
@@ -107,7 +107,7 @@ def test_fdm_and_idm_obey_caps(run):
 
 
 def test_every_step_is_a_ledger_trial_with_kind_constant_estimation(run, synth):
-    res, out, ctx, ledger_root = run
+    ctx, ledger_root = run[2], run[3]
     tr = L.trials(family="core_v1")
     assert len(tr) == 11 + 3 + 3 + 1                                   # scalars + speed filters + FDM sets + IDM
     assert all(row["kind"] == "constant_estimation" for row in tr["config"])

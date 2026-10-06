@@ -107,7 +107,7 @@ def with_config(params: CoreParams, config: Mapping, speed_subsets: Mapping) -> 
 
 
 def _half_up(x: float) -> int:
-    return int(math.floor(x + 0.5))
+    return math.floor(x + 0.5)
 
 
 def perturb(params: CoreParams, name: str, factor: float) -> CoreParams:
@@ -311,7 +311,7 @@ def scalar_diagnostics(raw: Mapping[str, pd.DataFrame], scalars: Mapping[str, fl
     out = {}
     for r, df in raw.items():
         v = df.loc[window[0]:window[1]].stack().dropna().abs().to_numpy() * scalars[r]
-        out[r] = {"mean_abs_uncapped": float(v.mean()), "mean_abs_capped": float(np.minimum(v, cap).mean()), "n_obs": int(len(v))}
+        out[r] = {"mean_abs_uncapped": float(v.mean()), "mean_abs_capped": float(np.minimum(v, cap).mean()), "n_obs": len(v)}
     return out
 
 
