@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from datetime import datetime, timedelta, timezone as dt_tz
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -44,7 +44,6 @@ from firm.live.scheduler import (
     within_extended_hours_window,
 )
 
-
 # ---------------------------------------------------------------------------
 # trading_day_key
 # ---------------------------------------------------------------------------
@@ -55,15 +54,15 @@ class TestTradingDayKey:
         assert trading_day_key(naive, "US/Eastern") == "2026-07-25"
 
     def test_aware_datetime_converted_to_target_timezone(self):
-        aware = datetime(2026, 7, 26, 3, 0, tzinfo=dt_tz.utc)
+        aware = datetime(2026, 7, 26, 3, 0, tzinfo=UTC)
         assert trading_day_key(aware, "US/Eastern") == "2026-07-25"
 
     def test_default_timezone_is_us_eastern(self):
-        aware = datetime(2026, 7, 26, 3, 0, tzinfo=dt_tz.utc)
+        aware = datetime(2026, 7, 26, 3, 0, tzinfo=UTC)
         assert trading_day_key(aware) == trading_day_key(aware, DEFAULT_MARKET_TIMEZONE)
 
     def test_different_timezone_produces_different_key(self):
-        aware = datetime(2026, 7, 26, 3, 0, tzinfo=dt_tz.utc)
+        aware = datetime(2026, 7, 26, 3, 0, tzinfo=UTC)
         assert trading_day_key(aware, "UTC") == "2026-07-26"
 
 
@@ -1446,7 +1445,7 @@ class TestWithinExtendedHoursWindow:
         assert within_extended_hours_window(outside, "premarket", cfg) is False
 
     def test_aware_datetime_also_supported(self):
-        aware = datetime(2026, 7, 27, 12, 0, tzinfo=dt_tz.utc)
+        aware = datetime(2026, 7, 27, 12, 0, tzinfo=UTC)
         assert within_extended_hours_window(
             aware, "premarket", self._ENABLED_PREMARKET
         ) is True

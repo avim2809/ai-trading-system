@@ -16,7 +16,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from pattern_recognition_rollout_gate import (  # noqa: E402
+from pattern_recognition_rollout_gate import (
     DEFAULT_DRAWDOWN_MULTIPLE_THRESHOLD,
     DEFAULT_MIN_LIVE_DAYS,
     DEFAULT_MIN_LIVE_SIGNALS,

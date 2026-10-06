@@ -13,7 +13,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import run_insider_cluster_evaluation as ev  # noqa: E402
+import run_insider_cluster_evaluation as ev
 
 
 def _series(n=300, start="2010-01-04", px=10.0, drift=0.0, vol=200_000.0, adj_ratio=1.0):

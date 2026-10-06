@@ -19,7 +19,6 @@ import pandas as pd
 import pytest
 
 from firm.contracts.models import Signal
-from firm.data.pit_store import PointInTimeDataStore
 from firm.patterns.extrema import zigzag_pivots
 from firm.patterns.rules.continuation import detect_flag_pennant
 from firm.patterns.rules.cup_handle import detect_cup_handle

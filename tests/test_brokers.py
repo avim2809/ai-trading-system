@@ -19,7 +19,6 @@ from firm.brokers.base import (
 )
 from firm.time_utils import utcnow
 
-
 # ---------------------------------------------------------------------------
 # MockBroker – full Broker ABC implementation for testing
 # ---------------------------------------------------------------------------

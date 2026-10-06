@@ -20,7 +20,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import eodhd_s5_crypto_momentum_preregistered_bars as s5  # noqa: E402
+import eodhd_s5_crypto_momentum_preregistered_bars as s5
 
 
 class TestDraftStatus:

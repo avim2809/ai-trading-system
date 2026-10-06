@@ -12,9 +12,7 @@ _TESTS = Path(__file__).resolve().parent
 if str(_TESTS) not in sys.path:
     sys.path.insert(0, str(_TESTS))
 
-from firm.patterns.ml.feature_engineering import PATTERN_NAMES
-
-from pattern_fixtures import (  # noqa: E402
+from pattern_fixtures import (
     AMBIGUOUS_FIXTURES,
     BOUNDARY_FIXTURES,
     NEGATIVE_FIXTURES,
@@ -23,6 +21,8 @@ from pattern_fixtures import (  # noqa: E402
     build_frame,
     synthetic_negative_frames,
 )
+
+from firm.patterns.ml.feature_engineering import PATTERN_NAMES
 
 
 def test_every_pattern_name_is_covered_by_the_corpus():

@@ -14,7 +14,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import s2_forward_shadow as fs  # noqa: E402
+import s2_forward_shadow as fs
 
 
 def _px(start="2026-10-01", n=70, spy_step=0.001, ief_step=0.0002, gap=0.0):

@@ -20,8 +20,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import run_eodhd_s4_evaluation as r  # noqa: E402
-
+import run_eodhd_s4_evaluation as r
 
 # ---------------------------------------------------------------------------
 # adv_bucket_bps

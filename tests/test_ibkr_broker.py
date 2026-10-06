@@ -489,7 +489,7 @@ class TestGetPositionsUsesRealMarketValue:
         calls = {"positions": 0}
         broker._ib = SimpleNamespace(
             isConnected=lambda: True,
-            portfolio=lambda: [],
+            portfolio=list,
             positions=lambda: calls.__setitem__("positions", calls["positions"] + 1),
         )
 
@@ -1131,7 +1131,7 @@ class TestBoundedIBLockAndRequestTimeout:
         broker = IBKRBroker(host="127.0.0.1", port=4002, client_id=22)
         broker._ib = SimpleNamespace(
             isConnected=lambda: True,
-            accountSummary=lambda: [],
+            accountSummary=list,
         )
 
         holder_ready = threading.Event()
@@ -1148,9 +1148,8 @@ class TestBoundedIBLockAndRequestTimeout:
 
         with patch(
             "firm.brokers.ibkr._IB_LOCK_ACQUIRE_TIMEOUT_SECONDS", 0.2,
-        ):
-            with pytest.raises(BrokerError, match="Timed out.*waiting for the IBKR connection lock"):
-                broker.get_account()
+        ), pytest.raises(BrokerError, match="Timed out.*waiting for the IBKR connection lock"):
+            broker.get_account()
 
         release_holder.set()
         holder.join(timeout=5)

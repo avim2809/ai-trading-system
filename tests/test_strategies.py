@@ -18,11 +18,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from firm.contracts.models import Signal
-from firm.strategies.base import BaseStrategy
-
 # Force all strategy modules to register themselves
 import firm.strategies  # noqa: F401
+from firm.contracts.models import Signal
+from firm.strategies.base import BaseStrategy
 from firm.strategies.registry import get, list_strategies
 
 

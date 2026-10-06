@@ -23,14 +23,13 @@ _TESTS = Path(__file__).resolve().parent
 if str(_TESTS) not in sys.path:
     sys.path.insert(0, str(_TESTS))
 
-from benchmark_pattern_detectors import (  # noqa: E402
+from benchmark_pattern_detectors import (
     apply_significance_and_fdr,
     build_report,
     run_benchmark,
     run_fixture,
 )
-
-from pattern_fixtures import (  # noqa: E402
+from pattern_fixtures import (
     BOUNDARY_FIXTURES,
     NEGATIVE_FIXTURES,
     POSITIVE_FIXTURES,

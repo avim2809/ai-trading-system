@@ -17,8 +17,8 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import run_eodhd_s5_evaluation as ev  # noqa: E402
-import eodhd_s5_crypto_momentum_preregistered_bars as prereg  # noqa: E402
+import eodhd_s5_crypto_momentum_preregistered_bars as prereg
+import run_eodhd_s5_evaluation as ev
 
 
 def _dates(start: str, n: int) -> np.ndarray:

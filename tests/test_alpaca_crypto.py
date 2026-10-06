@@ -30,10 +30,11 @@ import pytest
 
 pytest.importorskip("alpaca")
 
-from firm.brokers.alpaca import AlpacaBroker
-from firm.brokers.base import BrokerError, OrderRequest
 from alpaca.trading.enums import AssetClass
 from alpaca.trading.requests import MarketOrderRequest
+
+from firm.brokers.alpaca import AlpacaBroker
+from firm.brokers.base import BrokerError, OrderRequest
 
 
 class _FakeTradingClient:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import firm.live.pipeline_warmup as pipeline_warmup
+from firm.live import pipeline_warmup
 from firm.live.pipeline_warmup import PipelineWarmupGate
 
 
