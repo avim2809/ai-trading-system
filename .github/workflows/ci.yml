@@ -57,7 +57,9 @@ jobs:
           echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
 
       - name: Lint (ruff)
-        run: ruff check src tests
+        run: |
+          ruff --version   # pinned via pyproject dev extra (ruff==0.16.8)
+          ruff check src tests
 
       # Coverage floor is set a few points below the measured baseline
       # (~78-79% as of 2026-07) so routine PRs have headroom, while still
