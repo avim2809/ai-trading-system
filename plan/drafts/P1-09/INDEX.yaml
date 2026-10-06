@@ -155,9 +155,9 @@ entries:
   kind: frozen_module
   module_path: scripts/core_v1_preregistered.py
   yaml_path: null
-  fingerprint: 1ecafe019825106d01c98090b6e50ace2b0166730ba4203f70e00c48d5dfd0dc
-  freeze_commit: 6df5c98abac3c279d4788134a52eba4c337cd1a0
-  freeze_time_utc: '2026-10-06T21:21:11Z'
+  fingerprint: 6274c43219d3c7fe1fe9d9686bd6a8cfe3c643fc32aaf68d86116279746c2bba
+  freeze_commit: d711ec34d5878ab49a2f74c28eaba3029661c779
+  freeze_time_utc: '2026-10-06T21:55:31Z'
   ledger_path: null
   fingerprint_source: freeze_commit
   status: APPROVED
