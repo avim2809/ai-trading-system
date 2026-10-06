@@ -14,9 +14,10 @@ Documented substitutions (all flagged in the report):
 * Israeli CPI is not available (``il_macro`` is not in the allow-list): the basis inflation uplift is switched OFF (the config's
   documented sensitivity ``inflation_adjust: false``) and CPI is a flat 1.0. This OVERSTATES the modelled tax.
 * USD/ILS comes from the EODHD forex file (the Bank of Israel series is not available).
-* ``corporate_actions/dividends`` exists on disk for SPY but not for IEF, so cash dividends are IMPLIED for both from the ratio
-  ``adjusted_close/close`` on ex-dates (``D = P_{t-1} (1 - f_{t-1}/f_t)``, ``f = adjusted_close/close``). Noise (< 1e-5) and
-  dividends (> 1e-3) are separated by a clean gap; the derivation is validated against the 87 real SPY dividends in the report.
+* Cash dividends are the REAL ``corporate_actions/dividends`` files (all 14 ETFs are on disk since the 2026-10-06 download;
+  snapshot ``ab5d0a98...``). The earlier implied-dividend derivation (``D = P_{t-1} (1 - f_{t-1}/f_t)``, ``f = adjusted_close/close``) is kept
+  ONLY as a cross-check of the real files for SPY and IEF (the first dry run, batch 13a, had to imply them).
+* The gate-7 benchmark variant is read from the gates file (``at.gate_variant_rule``; Amendment 1 pins ANNUAL); monthly is a sensitivity.
 """
 
 from __future__ import annotations
@@ -73,9 +74,9 @@ def load_inputs(asof: dt.date) -> dict:
     bars = {k: s[k].bars for k in ("SPY", "IEF")}
     prices = pd.concat({k: bars[k]["close"] for k in bars}, axis=1).dropna()
     adj = pd.concat({k: bars[k]["adjusted_close"] for k in bars}, axis=1).reindex(prices.index)
-    divs = pd.concat([implied_dividends(bars[k], k) for k in bars], ignore_index=True)
-    real = load_dividends(["SPY"], asof=asof)
-    return {"prices": prices, "adjusted": adj, "dividends": divs, "fx": usd_ils(asof, source="eodhd"), "real_spy_dividends": real,
+    implied = pd.concat([implied_dividends(bars[k], k) for k in bars], ignore_index=True)
+    real = load_dividends(["SPY", "IEF"], asof=asof)
+    return {"prices": prices, "adjusted": adj, "dividends": real, "implied_dividends": implied, "fx": usd_ils(asof, source="eodhd"), "real_dividends": real,
             "bars": bars, "source": "eodhd etfs_full via firm.data.etf_loader; fx eodhd forex/USDILS"}
 
 
@@ -87,7 +88,7 @@ def synthetic_inputs(seed: int = 0) -> dict:
     q = idx[idx.month.isin([3, 6, 9, 12]) & (idx.day == 15)]
     divs = pd.DataFrame({"date": q, "symbol": "SPY", "amount": 0.5})
     fx = pd.Series(3.5 * np.cumprod(1 + rng.normal(0, 0.003, len(idx))), index=idx)
-    return {"prices": px, "adjusted": px, "dividends": divs, "fx": fx, "real_spy_dividends": divs, "bars": {}, "source": "SYNTHETIC"}
+    return {"prices": px, "adjusted": px, "dividends": divs, "implied_dividends": divs, "fx": fx, "real_dividends": divs, "bars": {}, "source": "SYNTHETIC"}
 
 
 def _summ(nav: pd.Series) -> dict:
@@ -106,11 +107,13 @@ def no_cpi_config(cfg_base: at.TaxConfig) -> at.TaxConfig:
 
 def analyse(inp: dict, cfg_base: at.TaxConfig, cost_cfg: dict, replay: dict | None) -> dict:
     cfg = no_cpi_config(cfg_base)
-    out: dict = {"disclaimer": at.DISCLAIMER, "no_post_seal_data_was_read": True, "seed": SEED, "n_boot": N_BOOT,
+    gate_variant = at.gate_variant_rule()  # (uses_higher_of_two, pinned variant) straight from the gates file
+    out: dict = {"gate_variant_rule": {"uses_higher_after_tax_sharpe_of_the_two": gate_variant[0], "gate_variant": gate_variant[1]},
+                 "disclaimer": at.DISCLAIMER, "no_post_seal_data_was_read": True, "seed": SEED, "n_boot": N_BOOT,
                  "data_source": inp["source"], "tax_assumptions_active": at.describe_assumptions(cfg).splitlines(),
                  "substitutions": ["Israeli CPI unavailable: inflation_adjust forced False, CPI flat 1.0 (overstates modelled tax)",
                                    "USD/ILS from EODHD forex (Bank of Israel series not available)",
-                                   "dividends implied from adjusted_close/close ratio for SPY and IEF (no IEF dividend file on disk)",
+                                   "dividends: real EODHD files for SPY and IEF (all 14 ETF files on disk); implied series used only as a cross-check",
                                    "withholding US/IE unset (adviser Q10): modelled 0.0 placeholder"], "windows": {}}
     prices, divs, fx = inp["prices"], inp["dividends"], inp["fx"]
     cpi = pd.Series(1.0, index=prices.index)
@@ -128,8 +131,9 @@ def analyse(inp: dict, cfg_base: at.TaxConfig, cost_cfg: dict, replay: dict | No
                 cost_spec="etf_alpaca"),
         }
         w["ils_nav_summaries"] = {k: {s: _summ(df[s]) for s in at.STATES} for k, df in runs.items()}
-        w["gate_benchmark_variant_by_after_tax_sharpe"] = max(
-            ("annual_alpaca", "monthly_alpaca"), key=lambda k: w["ils_nav_summaries"][k]["after_tax"]["sharpe"])
+        w["variant_with_higher_after_tax_sharpe_informational"] = max(
+            ("annual", "monthly"), key=lambda m: w["ils_nav_summaries"][f"{m}_alpaca"]["after_tax"]["sharpe"])
+        w["gate_benchmark_variant"] = w["variant_with_higher_after_tax_sharpe_informational"] if gate_variant[0] else gate_variant[1]
         w["annual_tax_annual_alpaca"] = json.loads(runs["annual_alpaca"].attrs["annual_tax"].round(2).to_json(orient="index"))
         w["n_trades_annual_alpaca"] = len(runs["annual_alpaca"].attrs["trades"])
         w["paired_bootstrap_monthly_minus_annual"] = json.loads(json.dumps(
@@ -151,16 +155,16 @@ def analyse(inp: dict, cfg_base: at.TaxConfig, cost_cfg: dict, replay: dict | No
             "bm2_usd_pre_tax_core_window": c["usd_pre_tax_summaries"],
             "daily_rebalanced_cagr": daily, "abs_cagr_gap_to_published_pp": abs(daily - ref["cagr"]) * 100,
             "real_data_sanity_test_equivalent_passes_within_1pp": bool(abs(daily - ref["cagr"]) < 0.01)}
-    dv = inp["real_spy_dividends"]
-    imp = divs[divs["symbol"] == "SPY"]
-    real = dv.assign(date=pd.to_datetime(dv["date"])).set_index("date")["amount"]
-    impl = imp.assign(date=pd.to_datetime(imp["date"])).set_index("date")["amount"]
-    both = pd.concat({"real": real, "implied": impl}, axis=1, sort=True).dropna()
-    rel = ((both["implied"] / both["real"]) - 1).abs() if len(both) else pd.Series(dtype=float)
-    out["implied_dividend_validation_spy"] = {"n_real": len(real), "n_implied_total": len(impl), "n_matched_dates": len(both),
-                                              "median_rel_err": float(rel.median()) if len(rel) else None,
-                                              "max_rel_err": float(rel.max()) if len(rel) else None,
-                                              "implied_n_ief": int((divs["symbol"] == "IEF").sum())}
+    out["real_vs_implied_dividend_validation"] = {}
+    for sym in ("SPY", "IEF"):
+        rl, im = (inp[k][inp[k]["symbol"] == sym] for k in ("real_dividends", "implied_dividends"))
+        real = rl.assign(date=pd.to_datetime(rl["date"])).set_index("date")["amount"]
+        impl = im.assign(date=pd.to_datetime(im["date"])).set_index("date")["amount"]
+        both = pd.concat({"real": real, "implied": impl}, axis=1, sort=True).dropna()
+        rel = ((both["implied"] / both["real"]) - 1).abs() if len(both) else pd.Series(dtype=float)
+        out["real_vs_implied_dividend_validation"][sym] = {
+            "n_real": len(real), "n_implied_total": len(impl), "n_matched_dates": len(both),
+            "median_rel_err": float(rel.median()) if len(rel) else None, "max_rel_err": float(rel.max()) if len(rel) else None}
     return out
 
 
@@ -176,7 +180,8 @@ def to_markdown(r: dict) -> str:
          "Tax assumptions printed by the model:", "", "```", *r["tax_assumptions_active"], "```", ""]
     for name, w in r["windows"].items():
         L += [f"## Window {name}: {w['start']}..{w['end']} ({w['n_days']} days); ILS NAV", "",
-              f"Gate variant by higher after-tax Sharpe: **{w['gate_benchmark_variant_by_after_tax_sharpe']}**", "",
+              (f"Gate benchmark variant (pinned in the gates file, Amendment 1): **{w['gate_benchmark_variant']}**; variant with the higher "
+               f"after-tax Sharpe (information only, never gates): {w['variant_with_higher_after_tax_sharpe_informational']}"), "",
               "| variant | state | CAGR | vol | Sharpe (vs 0) | maxDD |", "|---|---|---|---|---|---|"]
         for k, st in w["ils_nav_summaries"].items():
             for s, m in st.items():
@@ -188,7 +193,7 @@ def to_markdown(r: dict) -> str:
         d = w["usd_daily_rebalanced_adjusted_close_reference"]
         L += ["", (f"Daily-rebalanced adjusted_close total-return reference (USD): CAGR {d['cagr']:.2%}, vol {d['vol']:.2%}, "
                f"Sharpe {d['sharpe']:.3f}, maxDD {d['max_dd']:.2%}."), "",
-              (f"Paired bootstrap, monthly (as 'system') minus annual (gate bench), ILS NAV, block length "
+              (f"Paired bootstrap, monthly (sensitivity, as 'system') minus annual (BM2 annual variant), ILS NAV, block length "
                f"{w['paired_bootstrap_monthly_minus_annual']['block_length']:.1f}:"), "",
               "| state | dSharpe [95% CI] | dCAGR [95% CI] | dMaxDD [95% CI] |", "|---|---|---|---|"]
         for s, dd in w["paired_bootstrap_monthly_minus_annual"]["diff"].items():
@@ -207,10 +212,13 @@ def to_markdown(r: dict) -> str:
               (f"Daily-rebalanced SPY/IEF adjusted-close reference CAGR {c['daily_rebalanced_cagr']:.2%}; gap to published "
                f"{c['abs_cagr_gap_to_published_pp']:.2f} pp; within the 1 pp bound of the opt-in `real_data` sanity test: "
                f"**{c['real_data_sanity_test_equivalent_passes_within_1pp']}** (computed here, equivalent to that test)."), ""]
-    v = r["implied_dividend_validation_spy"]
-    L += ["## Implied-dividend validation (SPY real dividend file vs implied)", "",
-          (f"real {v['n_real']}, implied (SPY, all history) {v['n_implied_total']}, matched on date {v['n_matched_dates']}; "
-           f"median relative error {v['median_rel_err']:.2e}, max {v['max_rel_err']:.2e}; implied IEF events {v['implied_n_ief']}."), ""]
+    L += ["## Real vs implied dividends (cross-check; the run uses the REAL files)", "",
+          "| symbol | real | implied | matched on date | median rel. err | max rel. err |", "|---|---|---|---|---|---|"]
+    for sym, v in r["real_vs_implied_dividend_validation"].items():
+        med = f"{v['median_rel_err']:.2e}" if v["median_rel_err"] is not None else "n/a"
+        mx = f"{v['max_rel_err']:.2e}" if v["max_rel_err"] is not None else "n/a"
+        L.append(f"| {sym} | {v['n_real']} | {v['n_implied_total']} | {v['n_matched_dates']} | {med} | {mx} |")
+    L.append("")
     return "\n".join(L)
 
 
@@ -237,6 +245,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--asof", type=dt.date.fromisoformat, default=None)
     ap.add_argument("--out", type=Path, default=ROOT / "research" / "reports")
+    ap.add_argument("--tag", default="", help="suffix for the report file stem (keeps earlier reports)")
     ap.add_argument("--synthetic", action="store_true", help="random fixture + temp ledger (plumbing check only)")
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO)
@@ -247,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
         os.makedirs(os.path.join(os.environ["FIRM_RESEARCH_LEDGER_ROOT"], "returns"), exist_ok=True)
     p2_05_bm2_dry_run(asof.isoformat(), WINDOWS, "etf_alpaca", SEED, N_BOOT, bool(a.synthetic))
     a.out.mkdir(parents=True, exist_ok=True)
-    stem = "p2_05_bm2_dry_run" + ("_SYNTHETIC" if a.synthetic else "")
+    stem = "p2_05_bm2_dry_run" + (f"_{a.tag}" if a.tag else "") + ("_SYNTHETIC" if a.synthetic else "")
     (a.out / f"{stem}.json").write_text(json.dumps(_RESULT, indent=1, sort_keys=True, default=str) + "\n", encoding="utf-8")
     (a.out / f"{stem}.md").write_text(to_markdown(_RESULT), encoding="utf-8")
     log.info("report written to %s", a.out / f"{stem}.md")
