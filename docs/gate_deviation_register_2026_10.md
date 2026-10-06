@@ -86,8 +86,21 @@ Nothing below is valid until you fill it in yourself. An agent must not sign.
 ```
 Rows approved as drafted:  17 of 19      Rows amended: 2      Rows reverted: 0
 Signed by: Avi Milner    Date/time (UTC, from `date -u`): 2026-10-04T10:04:53Z
-sha256 of config/gates.yaml with the meta block removed (filled in at freeze): f212120e7613372643aad3124977a4404a34dae26d0bb67bf2a8b820e5ce4869
+sha256 of config/gates.yaml with the meta block removed (filled in at freeze): ef3caa3ca8f6b6b70dc3f40fb2c386d667ab5dabd0717e21ca8c9cc28d994dc7
 ```
 
 After you sign: ticket P0-08 writes `config/gates.yaml` from the signed rows, the integrity test pins its hash to the line above,
 and every later pre-registration stores the same hash.
+
+## Amendment 1 (2026-10-06T08:02:08Z)
+
+Row 8 (G-RESEARCH 7, benchmark) amended by the owner: the after-tax benchmark variant used by the gate is **pinned ex ante to ANNUAL
+rebalancing** (`config/gates.yaml` `g_research.benchmark.gate_variant: annual`, `uses_higher_after_tax_sharpe_of_the_two: false`). Monthly
+rebalancing remains a reported sensitivity. Reason: in the core window the two variants' after-tax Sharpe differ by 0.002 (paired bootstrap
+95% CI -0.021 to +0.025), so choosing the higher one is outcome-dependent noise. No research result existed when this was signed.
+
+```
+Amended by: Avi Milner    Date/time (UTC, from `date -u`): 2026-10-06T08:02:08Z
+gates.yaml sha256 before: f212120e7613372643aad3124977a4404a34dae26d0bb67bf2a8b820e5ce4869
+gates.yaml sha256 after (recorded above): ef3caa3ca8f6b6b70dc3f40fb2c386d667ab5dabd0717e21ca8c9cc28d994dc7
+```
