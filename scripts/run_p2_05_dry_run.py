@@ -95,8 +95,7 @@ def _summ(nav: pd.Series) -> dict:
 
 
 def _states(df: pd.DataFrame) -> dict[str, pd.Series]:
-    # benchmark_bm2 frames carry DataFrame-valued ``attrs`` that pandas cannot compare inside ``pd.concat``: strip them on the columns
-    return {s: pd.Series(df[s].to_numpy(), index=df.index, name=s) for s in at.STATES}
+    return {s: df[s] for s in at.STATES}
 
 
 def no_cpi_config(cfg_base: at.TaxConfig) -> at.TaxConfig:
@@ -231,7 +230,7 @@ def p2_05_bm2_dry_run(asof: str, start_end_windows: dict, cost_basis: str, seed:
     dv = dv[(pd.to_datetime(dv["date"]) >= px.index[0]) & (pd.to_datetime(dv["date"]) <= px.index[-1])]
     nav = at.benchmark_bm2(px, inp["fx"], pd.Series(1.0, index=px.index), dv, cfg2, cost_cfg, rebalance="annual", cost_spec="etf_alpaca")
     ret = nav["after_tax"].pct_change().dropna()
-    return pd.Series(ret.to_numpy(), index=ret.index, name="bm2_annual_after_tax_ils")  # plain Series: frame attrs break parquet
+    return ret.rename("bm2_annual_after_tax_ils")
 
 
 def main(argv: list[str] | None = None) -> int:
