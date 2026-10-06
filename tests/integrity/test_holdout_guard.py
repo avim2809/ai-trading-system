@@ -302,10 +302,12 @@ def test_runtime_loaders_set_is_complete():
 def test_runtime_loader_refuses_denied_cache_dir(guards):
     from firm import runtime
 
+    combined = REPO_ROOT / "data" / "cache" / "combined"
+    existed_before = combined.exists()  # the live checkout legitimately has this folder; the guard must only never CREATE it
     settings = types.SimpleNamespace(data=types.SimpleNamespace(cache_dir="data/cache"))
     with pytest.raises(guards.HoldoutAccessError):
         runtime.load_prices(settings)
-    assert not (REPO_ROOT / "data" / "cache" / "combined").exists()
+    assert combined.exists() == existed_before
 
 
 # --------------------------------------------------------------------------- data_access
