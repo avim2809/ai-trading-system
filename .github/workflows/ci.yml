@@ -28,6 +28,7 @@ jobs:
       # just risk subtle behaviour differences, it makes `pip install -e .`
       # fail outright.
       - name: Set up Python
+        id: setup-python
         uses: actions/setup-python@v6
         with:
           python-version: "3.14"
@@ -42,7 +43,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: .venv
-          key: venv-${{ runner.os }}-py3.14-${{ hashFiles('pyproject.toml') }}
+          key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('pyproject.toml') }}
 
       # Embedding models pulled by the RAG/LLM tests live here; caching avoids
       # re-downloading them on every run.
@@ -56,6 +57,8 @@ jobs:
 
       - name: Install
         run: |
+          # A restored venv whose interpreter symlink is dead (the runner's Python patch version moved) must be rebuilt.
+          if [ -e .venv ] && ! .venv/bin/python -c 'pass' 2>/dev/null; then rm -rf .venv; fi
           python -m venv .venv
           . .venv/bin/activate
           python -m pip install --upgrade pip
