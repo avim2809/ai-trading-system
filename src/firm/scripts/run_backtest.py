@@ -26,7 +26,6 @@ from firm.runtime import (
     load_sentiment,
 )
 
-
 log = logging.getLogger(__name__)
 
 
@@ -151,9 +150,8 @@ def main() -> None:
         merged_config["real_rebalance_band_pct"] = settings.real_rebalance_band_pct
     orchestrator = build_orchestrator(merged_config)
 
-    from firm.backtest.engine import BacktestEngine
-
     from firm.backtest._capture_state import capture_run
+    from firm.backtest.engine import BacktestEngine
 
     with capture_run("run_backtest.main", merged_config, merged_config.get("seed")) as cap:
         engine = BacktestEngine(bt_config)

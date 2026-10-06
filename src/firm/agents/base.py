@@ -43,8 +43,8 @@ class AgentContext:
     """
 
     now: datetime
-    pit_view: "PitView | None" = None
-    portfolio: "PortfolioState | None" = None
+    pit_view: PitView | None = None
+    portfolio: PortfolioState | None = None
     config: dict[str, Any] = field(default_factory=dict)
     strategy_returns: dict[str, Any] | None = None
     strategy_signal_returns: dict[str, Any] | None = None

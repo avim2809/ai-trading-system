@@ -61,8 +61,7 @@ class MomentumStrategy(BaseStrategy):
             prices_df.pivot_table(index="date", columns="symbol", values="adj_close")
             .sort_index()
         )
-        if len(pivot) < lookback_days:
-            lookback_days = len(pivot)
+        lookback_days = min(lookback_days, len(pivot))
         if lookback_days <= skip_days + 21:
             return []
 

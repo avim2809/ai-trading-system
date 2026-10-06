@@ -99,7 +99,7 @@ class GaussianRegimeModel:
     def fitted(self) -> bool:
         return self._model is not None
 
-    def fit(self, X: np.ndarray) -> "GaussianRegimeModel":
+    def fit(self, X: np.ndarray) -> GaussianRegimeModel:
         """Standardise *X*, fit the HMM, smooth the transition matrix, label states.
 
         Args:

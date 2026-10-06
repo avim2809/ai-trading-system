@@ -50,7 +50,7 @@ class IBKRProvider(DataProvider):
 
     def __init__(
         self,
-        ib: "IB | None" = None,
+        ib: IB | None = None,
         host: str = "127.0.0.1",
         port: int = 4002,
         client_id: int = 2,
@@ -84,7 +84,7 @@ class IBKRProvider(DataProvider):
         # relying on a fully root-caused explanation of the interaction.
         self._shared_broker = shared_broker
 
-    def _ensure_ib(self) -> "IB":
+    def _ensure_ib(self) -> IB:
         if self._ib is not None and self._ib.isConnected():
             return self._ib
         self._ib = IB()
@@ -96,7 +96,7 @@ class IBKRProvider(DataProvider):
         return self._ib
 
     @contextmanager
-    def _connection(self) -> "IB":
+    def _connection(self) -> IB:
         """Yield a connected ``IB`` instance for the duration of one call.
 
         When ``shared_broker`` is set, reuses its connection under its own
@@ -113,7 +113,7 @@ class IBKRProvider(DataProvider):
         with self._connection() as ib:
             return self._get_prices(ib, symbols, start, end)
 
-    def _get_prices(self, ib: "IB", symbols: list[str], start: str, end: str) -> pd.DataFrame:
+    def _get_prices(self, ib: IB, symbols: list[str], start: str, end: str) -> pd.DataFrame:
         ib.reqMarketDataType(self._market_data_type)
 
         # Fail fast if IBKR has already told us (via IBKRBroker's errorEvent
@@ -197,7 +197,7 @@ class IBKRProvider(DataProvider):
             return self._get_news_sentiment(ib, symbols, start, end)
 
     def _get_news_sentiment(
-        self, ib: "IB", symbols: list[str], start: str, end: str
+        self, ib: IB, symbols: list[str], start: str, end: str
     ) -> pd.DataFrame:
         if self._news_codes is None:
             try:

@@ -19,7 +19,8 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Callable, Literal, NamedTuple
+from collections.abc import Callable
+from typing import Literal, NamedTuple
 
 import numpy as np
 

@@ -26,7 +26,7 @@ _INSTALL_HINT = (
 
 def _require_quantstats():
     try:
-        import quantstats as qs  # noqa: PLC0415
+        import quantstats as qs
     except ImportError as exc:  # pragma: no cover - exercised only when missing
         raise ImportError(_INSTALL_HINT) from exc
     return qs

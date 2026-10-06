@@ -21,7 +21,11 @@ log = logging.getLogger(__name__)
 
 try:
     from alpaca.common.exceptions import APIError
+    from alpaca.data.historical import StockHistoricalDataClient
+    from alpaca.data.historical.crypto import CryptoHistoricalDataClient
+    from alpaca.data.requests import CryptoLatestQuoteRequest, StockLatestQuoteRequest
     from alpaca.trading.client import TradingClient
+    from alpaca.trading.enums import AssetClass, OrderSide, QueryOrderStatus, TimeInForce
     from alpaca.trading.requests import (
         GetOrdersRequest,
         LimitOrderRequest,
@@ -30,10 +34,6 @@ try:
         StopOrderRequest,
         TrailingStopOrderRequest,
     )
-    from alpaca.trading.enums import OrderSide, TimeInForce, QueryOrderStatus, AssetClass
-    from alpaca.data.historical import StockHistoricalDataClient
-    from alpaca.data.historical.crypto import CryptoHistoricalDataClient
-    from alpaca.data.requests import StockLatestQuoteRequest, CryptoLatestQuoteRequest
 
     _HAS_ALPACA = True
 except ImportError:
@@ -584,7 +584,7 @@ class AlpacaBroker(Broker):
         except Exception as exc:
             raise BrokerError(f"Order submission failed: {exc}") from exc
 
-    def _submit_with_wash_trade_retry(self, client: "TradingClient", req: Any) -> Any:
+    def _submit_with_wash_trade_retry(self, client: TradingClient, req: Any) -> Any:
         """Submit *req*; if Alpaca rejects it as a wash trade against a
         stale resting order for the same symbol, cancel that order and
         retry once.

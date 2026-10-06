@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -154,7 +154,7 @@ def save_sentiment_cache(
     if merged.empty:
         return merged
 
-    asof_ts = pd.Timestamp(asof or datetime.now(timezone.utc))
+    asof_ts = pd.Timestamp(asof or datetime.now(UTC))
     if asof_ts.tzinfo is not None:
         asof_ts = asof_ts.tz_convert("UTC").tz_localize(None)
     asof_ts = asof_ts.normalize()

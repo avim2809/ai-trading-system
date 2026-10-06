@@ -32,14 +32,14 @@ from firm.regime.model import (
 )
 
 __all__ = [
+    "BEAR",
+    "BULL",
+    "CHOP",
     "REGIME_FEATURES",
-    "apply_laplace_smoothing",
-    "compute_regime_features",
     "GaussianRegimeModel",
     "RegimeState",
     "RegimeUnavailable",
+    "apply_laplace_smoothing",
+    "compute_regime_features",
     "hmm_available",
-    "BULL",
-    "BEAR",
-    "CHOP",
 ]

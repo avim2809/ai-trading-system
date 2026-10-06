@@ -47,7 +47,7 @@ def _block_length_1d(x: np.ndarray, kind: str) -> float:
     insig = np.abs(rho[1:]) < crit  # insig[j-1] <-> lag j
     # m_hat: smallest m with |rho(m+j)| < crit for j = 1..K_n
     m_hat = None
-    for m in range(0, max_lag - k_n + 1):
+    for m in range(max_lag - k_n + 1):
         if insig[m : m + k_n].all():
             m_hat = m
             break

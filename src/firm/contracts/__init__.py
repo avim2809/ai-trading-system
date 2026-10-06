@@ -12,12 +12,12 @@ from firm.contracts.models import (
 )
 
 __all__ = [
+    "DebateResult",
+    "ExecutionReport",
+    "PortfolioSnapshot",
+    "RiskDecision",
     "Signal",
     "SignalSet",
     "Thesis",
-    "DebateResult",
     "TradeProposal",
-    "RiskDecision",
-    "ExecutionReport",
-    "PortfolioSnapshot",
 ]

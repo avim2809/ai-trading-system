@@ -7,7 +7,7 @@ import json
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -141,7 +141,7 @@ class ResponseCache:
                    (key, response, model, tokens_in, tokens_out, cost, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (key, response, model, tokens_in, tokens_out, cost,
-                 datetime.now(timezone.utc).isoformat()),
+                 datetime.now(UTC).isoformat()),
             )
             self._conn.commit()
 

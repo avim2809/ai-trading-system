@@ -30,10 +30,7 @@ from dataclasses import dataclass, field
 
 # Minimal stopword set for lexical overlap; intentionally small and dependency-free.
 _STOPWORDS = frozenset(
-    "the a an and or of to in for on at by is are was were be been being with "
-    "as it its this that these those from into over under than then so such no "
-    "not what which who whom how when where why did do does done has have had "
-    "you your i we they he she them his her our their me my".split()
+    ["the", "a", "an", "and", "or", "of", "to", "in", "for", "on", "at", "by", "is", "are", "was", "were", "be", "been", "being", "with", "as", "it", "its", "this", "that", "these", "those", "from", "into", "over", "under", "than", "then", "so", "such", "no", "not", "what", "which", "who", "whom", "how", "when", "where", "why", "did", "do", "does", "done", "has", "have", "had", "you", "your", "i", "we", "they", "he", "she", "them", "his", "her", "our", "their", "me", "my"]
 )
 
 # A judge scores one triad metric in [0, 1] given (question, contexts, answer).

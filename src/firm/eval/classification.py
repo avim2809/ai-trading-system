@@ -13,7 +13,8 @@ easy-to-get-subtly-wrong computations with no reason to reimplement.
 
 from __future__ import annotations
 
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 from sklearn.metrics import (
@@ -63,7 +64,7 @@ def binary_classification_report(
         "f1": float(f1_score(y_true, y_pred, pos_label=pos_label, zero_division=0)),
         "confusion_matrix": cm.tolist(),
         "confusion_matrix_labels": labels,
-        "n": int(len(y_true)),
+        "n": len(y_true),
         "n_positive": int(np.sum(y_true == pos_label)),
     }
 

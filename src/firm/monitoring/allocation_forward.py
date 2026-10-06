@@ -12,19 +12,18 @@ No ``.env`` access anywhere: secrets come from ``os.environ`` (injected by the u
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import importlib
 import json
 import logging
 import math
 import os
-import re
 import sys
 import threading
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping
+from typing import Any
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -332,9 +331,7 @@ def bar_i4(fills: pd.DataFrame | None, decisions: pd.DataFrame | None,
             continue  # unmapped orders are an I5 failure; I4 only judges triggers of mapped ones
         d = dec.loc[did]
         trig = d.get("trigger")
-        if not isinstance(trig, str) or not trig.strip():
-            untraceable += 1
-        elif trig == "drift_band" and not np.isfinite(d.get("breach_weight", np.nan)):
+        if not isinstance(trig, str) or not trig.strip() or trig == "drift_band" and not np.isfinite(d.get("breach_weight", np.nan)):
             untraceable += 1
     if untraceable:
         problems.append(f"{untraceable} trade(s) without traceable trigger/breach weight")
@@ -480,7 +477,7 @@ def make_notify(timeout: float = 5.0) -> Callable[..., None]:
     def _notify(*, severity: str, kind: str, message: str, **extra: Any) -> None:
         url = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
         alert = {"severity": severity, "kind": kind, "message": message,
-                 "timestamp": datetime.now(timezone.utc).isoformat(), **extra}
+                 "timestamp": datetime.now(UTC).isoformat(), **extra}
         if not url:
             log.warning("ALERT (no webhook configured) %s %s: %s", severity, kind, message)
             return
@@ -527,7 +524,7 @@ def run_daily(state_dir: Path, *, live_nav_fetcher: Callable[[], pd.Series],
     trial_history_path = Path(trial_history_path or _ROOT / "docs" / "allocation_forward_test_trial_history.json")
     config_path = Path(config_path or _ROOT / "config" / "live_alpaca.yaml")
     inputs_dir = sd / "inputs"
-    result: dict[str, Any] = {"status": "ok", "run_at": datetime.now(timezone.utc).isoformat()}
+    result: dict[str, Any] = {"status": "ok", "run_at": datetime.now(UTC).isoformat()}
 
     def finish(status: str) -> dict:
         result["status"] = status

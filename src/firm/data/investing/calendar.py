@@ -25,7 +25,7 @@ trading. Fix the selectors here once the real markup has been inspected
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from firm.data.investing.session import InvestingSession
 from firm.data.providers.base import ProviderError
@@ -104,7 +104,7 @@ def _parse_row(row) -> Event | None:
     ts_raw = row.get("event_timestamp")
     if not ts_raw:
         return None
-    when = datetime.fromtimestamp(int(ts_raw), tz=timezone.utc)
+    when = datetime.fromtimestamp(int(ts_raw), tz=UTC)
 
     currency_cell = row.select_one("td.flagCur")
     currency = currency_cell.get_text(strip=True)[-3:].upper() if currency_cell else ""

@@ -3,4 +3,4 @@
 Submodules: ``vol`` (blended EWMA volatility), ``ewmac``, ``breakout``. Kept free of heavy imports.
 """
 
-__all__ = ["vol", "ewmac", "breakout"]
+__all__ = ["breakout", "ewmac", "vol"]

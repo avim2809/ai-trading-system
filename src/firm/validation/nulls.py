@@ -22,15 +22,15 @@ from typing import Literal
 import numpy as np
 
 from firm.validation.bootstrap import (
-    block_bootstrap_returns,  # noqa: F401  (re-exported under the source-plan name)
+    block_bootstrap_returns,
     politis_white_block_length,
 )
 
 log = logging.getLogger(__name__)
 
 __all__ = [
-    "block_bootstrap_returns",
     "benjamini_hochberg",
+    "block_bootstrap_returns",
     "mean_return",
     "p_value",
     "phase_randomised_surrogate",
