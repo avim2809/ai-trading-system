@@ -152,10 +152,10 @@ entries:
   kind: frozen_module
   module_path: scripts/core_v1_preregistered.py
   yaml_path: null
-  fingerprint: 495e6d70b6ea20994328582888ba8e466ac31ca27908a0712c9fc42f0c24550e
-  freeze_commit: 90ed37ecaa0d24750f2027469d01993e0b1f2341
-  freeze_time_utc: '2026-10-05T19:44:08Z'
+  fingerprint: 9fe358a86960a4b29536ebc49d164253b61d7a2828afd58da09646a4b66a9e58
+  freeze_commit: a305ea604eda336e4286a4b25e1cc04ff3804a84
+  freeze_time_utc: '2026-10-06T06:51:26Z'
   ledger_path: null
   fingerprint_source: freeze_commit
   status: DRAFT
-  notes: 'P3-11 frozen module (w14a). Charter hash is verified at run time, not recorded. The YAML spec core_v1 is a separate owner-committed entry.'
+  notes: 'P3-11 frozen module (w14a; re-frozen by w15a with handcrafted one-group-per-asset-class weights and family-N vs raw-count constants). Charter hash is verified at run time, not recorded. The YAML spec core_v1 is a separate owner-committed entry.'

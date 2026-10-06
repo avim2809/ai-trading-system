@@ -87,20 +87,32 @@ FILE_HASHES = {
 }
 GATES_SHA256 = FILE_HASHES[GATES_FILE]
 
-def _load_universe() -> list[str]:
-    """Symbols in file order from the frozen universe config (its sha256 is in FILE_HASHES; verify_frozen_inputs checks it)."""
+def _load_universe_doc() -> dict:
+    """The frozen universe config (its sha256 is in FILE_HASHES; verify_frozen_inputs checks it)."""
     import yaml
 
-    doc = yaml.safe_load((REPO_DIR / "config" / "universe_etf.yaml").read_text())
-    return [str(i["symbol"]) for i in doc["instruments"]]
+    return yaml.safe_load((REPO_DIR / "config" / "universe_etf.yaml").read_text())
 
 
-UNIVERSE = _load_universe()   # 14 ETFs, file order; not spelled out here so symbol literals stay out of frozen-module scans
-# The charter (not yet written) may name other weights; P4-01 weights are not merged. Conservative default named explicitly so
-# there is no hidden dependency: equal weight 1/N over the frozen instruments. If the charter specifies different weights,
-# that is a new pre-registration (the hash below would no longer match what the driver sizes with).
-INSTRUMENT_WEIGHT_SCHEME = "equal_1_over_n_frozen_universe"
-INSTRUMENT_WEIGHTS = {s: 1.0 / len(UNIVERSE) for s in UNIVERSE}
+_UNIVERSE_DOC = _load_universe_doc()
+UNIVERSE = [str(i["symbol"]) for i in _UNIVERSE_DOC["instruments"]]   # 14 ETFs, file order; no symbol literals in this module
+ASSET_CLASSES = {str(c): [str(s) for s in m] for c, m in _UNIVERSE_DOC["asset_classes"].items()}   # 10 classes
+
+# Handcrafted weights, ONE GROUP PER ASSET CLASS (owner decision 2026-10-05, plan/OWNER_DECISIONS.md addendum "P4-01 handcrafting
+# tree"): equal weight across the asset classes of the universe config, equal within each class. Derived with
+# firm.portfolio.weights.handcraft_weights (P4-01, merged); no data input. A different vector is a new pre-registration.
+# (The first freeze used equal 1/14 because P4-01 was believed unmerged; that was a mistake and is replaced here.)
+INSTRUMENT_WEIGHT_SCHEME = "handcrafted_one_group_per_asset_class"
+
+
+def _handcrafted_weights() -> dict[str, float]:
+    from firm.portfolio.weights import handcraft_weights   # pure function; no live import, no data
+
+    w = handcraft_weights({c: {c: m} for c, m in ASSET_CLASSES.items()})
+    return {s: float(w[s]) for s in UNIVERSE}
+
+
+INSTRUMENT_WEIGHTS = _handcrafted_weights()
 
 
 def instrument_weights_hash(weights: dict[str, float] | None = None) -> str:
@@ -113,8 +125,19 @@ def instrument_weights_hash(weights: dict[str, float] | None = None) -> str:
 INSTRUMENT_WEIGHTS_SHA256 = instrument_weights_hash()
 
 # ---------------------------------------------------------------------------------------------------------------------
-# Expected ledger rows per kind (config['kind']); all count toward N (OD-09, raw count). Grid runs (12) are separate.
+# Trial counts. Two different counts, never mixed (the frozen gates file's `n_rule` and `n_counts` are authoritative):
+#  * FAMILY N (N_gate, what the DSR deflates for in a family-N verdict): legacy trend/carry trials (standalone trend 1,
+#    alt_premia 10, S3 bond/commodity trend 5, S5 crypto momentum 3, futures_trend draft 0 = 19) PLUS the core_v1 GRID of up to
+#    12 = 31 (= n_counts.family_provisional; the owner still has to confirm the membership list).
+#  * RAW count: every ledger row. The diagnostic rows below (constant_estimation, robustness, cost_stress, stress_suite,
+#    benchmark, comparison) are NOT family members: they count toward the RAW count only, never toward the family N.
 # ---------------------------------------------------------------------------------------------------------------------
+FAMILY_N_LEGACY = 1 + 10 + 5 + 3 + 0
+FAMILY_N_GRID_MAX = MAX_GRID_SIZE
+FAMILY_N = FAMILY_N_LEGACY + FAMILY_N_GRID_MAX                       # 31
+FAMILY_N_ROW_KINDS = ("grid",)                                       # the only core_v1 ledger rows that enter the family N
+
+# Expected DIAGNOSTIC ledger rows per kind (config['kind']); RAW count only (OD-09), not family N. Grid rows (12) are separate.
 N_RULES = 6 + 5                              # six EWMAC speeds + five breakout lookbacks
 # robustness: one parameter at a time, both directions; each list element is its own parameter (assumption, see report).
 N_ROBUSTNESS_PARAMS = 16 + 6 + 5             # 16 scalar entries + 6 EWMAC spans + 5 breakout lookbacks of robustness_parameters
@@ -127,6 +150,8 @@ EXPECTED_LEDGER_ROWS = {
     "comparison": 1,                                                      # flat-bps comparison row (never gates)
 }
 EXPECTED_GRID_ROWS = len(GRID)
+DIAGNOSTIC_ROWS_RAW_ONLY = sum(EXPECTED_LEDGER_ROWS.values())        # 110: added to the raw count, never to FAMILY_N
+NEW_RAW_ROWS = DIAGNOSTIC_ROWS_RAW_ONLY + EXPECTED_GRID_ROWS         # 122 raw rows from core_v1; 12 of them are family rows
 
 
 class PreregError(RuntimeError):
@@ -141,7 +166,8 @@ def bars_fingerprint() -> str:
          "MAX_GRID_SIZE": MAX_GRID_SIZE, "SEED": SEED, "EMBARGO_PCT": EMBARGO_PCT, "CPCV": CPCV,
          "CPCV_SELECTION_RULE": CPCV_SELECTION_RULE, "FILE_HASHES": FILE_HASHES, "UNIVERSE": UNIVERSE,
          "INSTRUMENT_WEIGHT_SCHEME": INSTRUMENT_WEIGHT_SCHEME, "INSTRUMENT_WEIGHTS_SHA256": INSTRUMENT_WEIGHTS_SHA256,
-         "EXPECTED_LEDGER_ROWS": EXPECTED_LEDGER_ROWS, "CHARTER_PATH": CHARTER_PATH},
+         "EXPECTED_LEDGER_ROWS": EXPECTED_LEDGER_ROWS, "FAMILY_N": FAMILY_N,
+         "FAMILY_N_ROW_KINDS": FAMILY_N_ROW_KINDS, "ASSET_CLASSES": ASSET_CLASSES, "CHARTER_PATH": CHARTER_PATH},
         sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()
 

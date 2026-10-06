@@ -20,7 +20,8 @@ import core_v1_preregistered as pre  # noqa: E402
 
 DRAFT = ROOT / "plan" / "drafts" / "P3-11" / "core_v1_prereg_DRAFT.yaml"
 # Pinned at freeze: any edit to the frozen constants changes this and must be a new pre-registration.
-PINNED_FINGERPRINT = "495e6d70b6ea20994328582888ba8e466ac31ca27908a0712c9fc42f0c24550e"
+PINNED_FINGERPRINT = "9fe358a86960a4b29536ebc49d164253b61d7a2828afd58da09646a4b66a9e58"
+PINNED_WEIGHTS_SHA256 = "6eb94e426e90a832b4a7c1778f36212bd2e1503d6cdb3e89141d45f8df3d0d83"
 
 
 def test_fingerprint_stable_and_pinned():
@@ -79,8 +80,53 @@ def test_universe_matches_config_and_weights_hash():
     u = yaml.safe_load((ROOT / "config/universe_etf.yaml").read_text())
     assert [i["symbol"] for i in u["instruments"]] == pre.UNIVERSE
     assert sum(pre.INSTRUMENT_WEIGHTS.values()) == pytest.approx(1.0)
-    assert pre.instrument_weights_hash() == pre.INSTRUMENT_WEIGHTS_SHA256
     assert pre.instrument_weights_hash({**pre.INSTRUMENT_WEIGHTS, "SPY": 0.5}) != pre.INSTRUMENT_WEIGHTS_SHA256
+
+
+def _class_groups():
+    u = yaml.safe_load((ROOT / "config/universe_etf.yaml").read_text())
+    return u["asset_classes"]
+
+
+def test_weights_are_one_group_per_asset_class():
+    classes = _class_groups()
+    assert pre.INSTRUMENT_WEIGHT_SCHEME == "handcrafted_one_group_per_asset_class"
+    w = pre.INSTRUMENT_WEIGHTS
+    assert list(w) == pre.UNIVERSE or set(w) == set(pre.UNIVERSE)
+    assert sum(w.values()) == pytest.approx(1.0, abs=1e-12)
+    assert sorted(s for m in classes.values() for s in m) == sorted(pre.UNIVERSE)
+    class_w = {c: sum(w[s] for s in m) for c, m in classes.items()}
+    assert len(classes) == 10
+    assert all(v == pytest.approx(1 / len(classes), abs=1e-12) for v in class_w.values())   # equal across classes
+    for c, members in classes.items():                                                      # equal within each class
+        assert all(w[s] == pytest.approx(class_w[c] / len(members), abs=1e-12) for s in members)
+    assert w["SPY"] == pytest.approx(1 / 30) and w["EFA"] == pytest.approx(0.1)
+    assert w["SPY"] != pytest.approx(1 / len(pre.UNIVERSE))                                 # not the old equal 1/14
+
+
+def test_weights_match_firm_portfolio_weights_and_hash():
+    from firm.portfolio.weights import handcraft_weights
+    classes = _class_groups()
+    ref = handcraft_weights({c: {c: list(m)} for c, m in classes.items()})
+    assert {s: float(ref[s]) for s in ref.index} == pre.INSTRUMENT_WEIGHTS
+    assert pre.instrument_weights_hash() == pre.INSTRUMENT_WEIGHTS_SHA256
+    assert re.fullmatch(r"[0-9a-f]{64}", pre.INSTRUMENT_WEIGHTS_SHA256)
+    assert pre.INSTRUMENT_WEIGHTS_SHA256 == PINNED_WEIGHTS_SHA256
+
+
+def test_family_n_and_raw_count_semantics_follow_gates():
+    gates = yaml.safe_load((ROOT / pre.GATES_FILE).read_text())
+    counts = gates["n_counts"]
+    assert pre.FAMILY_N == counts["family_provisional"] == pre.FAMILY_N_LEGACY + pre.FAMILY_N_GRID_MAX
+    assert pre.FAMILY_N_GRID_MAX == pre.MAX_GRID_SIZE == len(pre.GRID) == 12
+    assert pre.FAMILY_N_LEGACY == 1 + 10 + 5 + 3 + 0 == 19       # trend, alt_premia, S3, S5, futures_trend per n_rule
+    assert "the core_v1 grid (up to 12)" in gates["n_rule"]
+    # diagnostics are raw-count only; the module does not add them to the family N
+    diag = sum(pre.EXPECTED_LEDGER_ROWS.values())
+    assert diag == pre.DIAGNOSTIC_ROWS_RAW_ONLY == 110
+    assert pre.NEW_RAW_ROWS == diag + len(pre.GRID)
+    assert pre.FAMILY_N_ROW_KINDS == ("grid",) and not set(pre.FAMILY_N_ROW_KINDS) & set(pre.EXPECTED_LEDGER_ROWS)
+    assert counts["raw_with_estimates"] == 463      # verdicts also state this raw count (it predates core_v1 rows)
 
 
 def test_expected_ledger_rows_consistent_with_configs():
