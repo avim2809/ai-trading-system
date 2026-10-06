@@ -175,7 +175,9 @@ LIMITS_LAYER_RULES = {
     "covariance": "zero-mean bias-corrected EWMA covariance, span = vol_ewma_span, x256, NaN return = 0, row t uses returns up to t",
     "caps": "firm.risk.limits.apply_caps after the buffer step: long-only, instrument risk contribution <= instrument_risk_cap_multiple x "
             "handcrafted weight, class cap disabled, gross cap = gross_cap (scaled by gross_cap / 1.0 so a +25% perturbation above 1.0 works); "
-            "infeasible caps are skipped as P4-03 documents",
+            "infeasible caps are skipped as P4-03 documents; the per-day call uses apply_caps(solver='closed_form' (exact quadratic root of the "
+            "share equation), max_sweeps=100, tol=1e-6, on_nonconvergence='return' (last down-scaled iterate kept, counted in the diagnostics)), "
+            "because the default 50-sweep bisection raises on about a quarter of random 14-instrument cases and costs about 0.2 s per call",
     "scope": "evaluation sizing path only (scripts/run_core_v1_evaluation.py); the P3-11 constants driver and the IDM sub-systems stay unlimited",
 }
 

@@ -61,6 +61,9 @@ NOT_IN_PIPELINE = frozenset({"max_vol_scale", "instrument_risk_cap_multiple"})
 # The class risk cap (risk.yaml max_class_risk_share 0.40) is NOT applied: it is not one of the gate-6 parameters, and an applied but never
 # perturbed number would be an exemption ("every numeric core parameter, no exemptions"). 1.0 disables it (a share cannot exceed 1).
 CLASS_RISK_CAP_APPLIED = 1.0
+# apply_caps options of the per-day research call (frozen in the prereg's LIMITS_LAYER_RULES): the exact quadratic solver, at most 100 fixed-point
+# sweeps to a 1e-6 share tolerance, and the last (down-scaled) iterate on non-convergence (counted in the diagnostics) instead of aborting the run.
+CAP_OPTIONS = {"solver": "closed_form", "max_sweeps": 100, "tol": 1e-6, "on_nonconvergence": "return"}
 _TRADING_DAYS = 256
 
 
@@ -546,7 +549,8 @@ def build_targets(panel: Panel, constants: ConstantsBundle, params: CoreParams, 
     lim_in = _limits_inputs(panel, constants, params, combined, v)
     extra: dict[str, Any] = {}
     if lim_in is not None:
-        extra = {"vol_scale": lim_in[1], "risk_limits": lim_in[0], "cov_annual": lim_in[2], "diagnostics": diag if diag is not None else {}}
+        extra = {"vol_scale": lim_in[1], "risk_limits": lim_in[0], "cov_annual": lim_in[2], "diagnostics": diag if diag is not None else {},
+                 "risk_cap_kwargs": CAP_OPTIONS}
     targets, flags = VE.targets_from_forecasts(
         combined, panel.close, v, weights=constants.instrument_weights, idm=constants.idm, tau=params.tau, capital=INITIAL_CAPITAL,
         multipliers=dict.fromkeys(panel.symbols, 1.0), buffer_fraction=params.buffer_fraction, long_only=True,

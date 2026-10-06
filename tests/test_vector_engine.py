@@ -470,6 +470,10 @@ def test_instrument_risk_cap_is_enforced_through_the_wrapper_and_gross_cap_facto
     rc = w * (cov[0] @ w) / (w @ cov[0] @ w)
     assert rc[0] == pytest.approx(2.0 / 3.0, abs=1e-9) and (rc[1:] < 2.0 / 3.0).all()
     assert diag["instrument_cap_bound_days"] == n
+    assert diag["nonconverged_cap_days"] == 0
+    tgc, _ = VE.targets_from_forecasts(fc, prices, vol, **kw, risk_limits=lim, cov_annual=cov,
+                                       risk_cap_kwargs={"solver": "closed_form", "max_sweeps": 100, "tol": 1e-6, "on_nonconvergence": "return"})
+    assert tgc.to_numpy() == pytest.approx(tg.to_numpy(), rel=1e-6)
     tg0, _ = VE.targets_from_forecasts(fc, prices, vol, **kw)
     assert (tg.iloc[0] <= tg0.iloc[0] + 1e-12).all() and tg.iloc[0, 0] < tg0.iloc[0, 0]
     # gross cap above 1.0 (a +25% robustness perturbation) is honoured: same shares, scaled

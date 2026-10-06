@@ -20,7 +20,7 @@ import core_v1_preregistered as pre
 
 DRAFT = ROOT / "plan" / "drafts" / "P3-11" / "core_v1_prereg_DRAFT.yaml"
 # Pinned at freeze: any edit to the frozen constants changes this and must be a new pre-registration.
-PINNED_FINGERPRINT = "1ecafe019825106d01c98090b6e50ace2b0166730ba4203f70e00c48d5dfd0dc"   # batch-20 re-freeze (supersedes 7826fb03...)
+PINNED_FINGERPRINT = "6274c43219d3c7fe1fe9d9686bd6a8cfe3c643fc32aaf68d86116279746c2bba"   # batch-20 re-freeze (supersedes 7826fb03...)
 PINNED_DRAFT_SPEC_HASH = "b964385057cf7a7ef25b5f14f36ce2551f0511adff86dbca968ce1874a9bdbf0"
 PINNED_WEIGHTS_SHA256 = "6eb94e426e90a832b4a7c1778f36212bd2e1503d6cdb3e89141d45f8df3d0d83"
 

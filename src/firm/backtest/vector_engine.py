@@ -329,7 +329,7 @@ def targets_from_forecasts(
     capital: float | pd.Series, multipliers: dict[str, float], fx: pd.DataFrame | None = None, buffer_fraction: float = 0.10,
     long_only: bool = True, gross_cap: float | None = 1.0, rounding: str = "toward_zero", fractional: dict[str, bool] | None = None,
     vol_scale: pd.Series | None = None, risk_limits: Any = None, cov_annual: np.ndarray | None = None,
-    diagnostics: dict | None = None,
+    diagnostics: dict | None = None, risk_cap_kwargs: dict | None = None,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """Unit targets (indexed by decision date, NOT shifted) from combined forecasts via ``firm.portfolio.sizing`` (P3-06).
 
@@ -345,7 +345,8 @@ def targets_from_forecasts(
       go through ``apply_caps`` (long-only, instrument risk-contribution cap, class cap if below 1, gross cap). The gross cap is ``gross_cap`` of
       this function, so a perturbed value above the limits' own ETF ceiling still works: risk shares are scale-invariant, so capping
       ``w * max_gross / gross_cap`` and scaling back is identical to capping at ``gross_cap``. ``diagnostics`` (a dict) receives the number of days
-      on which an instrument cap or a class cap bound and the number of days with an infeasible-cap skip.
+      on which an instrument cap or a class cap bound, the days with an infeasible-cap skip and the days the cap fixed point did not converge
+      (only possible with ``risk_cap_kwargs={"on_nonconvergence": "return", ...}``, passed to ``apply_caps``; otherwise it raises, as P4-03).
     """
     from firm.portfolio import sizing as S
 
@@ -362,7 +363,7 @@ def targets_from_forecasts(
     cur = dict.fromkeys(syms, 0.0)
     out = np.zeros(prices.shape)
     bound = np.zeros(len(prices), dtype=bool)
-    n_inst_bound = n_class_bound = n_infeasible = 0
+    n_inst_bound = n_class_bound = n_infeasible = n_nonconv = 0
     for i, d in enumerate(prices.index):
         cap = float(capital.loc[d]) if isinstance(capital, pd.Series) else float(capital)
         size_cap = cap if scale is None else cap * float(scale.iat[i])
@@ -387,11 +388,12 @@ def targets_from_forecasts(
                 wts = pd.Series({s: new[s] * unit_w[s] for s in names})
                 cov = pd.DataFrame(np.asarray(cov_annual[i])[np.ix_(held, held)], index=names, columns=names)
                 with _quiet("firm.risk.limits"):
-                    res = _apply_caps(wts / k, cov, risk_limits)
+                    res = _apply_caps(wts / k, cov, risk_limits, **(risk_cap_kwargs or {}))
                 bound[i] = bool(res.gross_cap_bound)
                 n_inst_bound += any(res.instrument_cap_bound.values())
                 n_class_bound += any(res.class_cap_bound.values())
                 n_infeasible += any(c.startswith("infeasible:") for c in res.breaches_clipped)
+                n_nonconv += "nonconverged" in res.breaches_clipped
                 for s in names:
                     new[s] = float(res.weights[s]) * k / unit_w[s]
         elif gross_cap is not None and cap > 0:
@@ -407,14 +409,14 @@ def targets_from_forecasts(
             out[i, j] = cur[s]
     if diagnostics is not None:
         diagnostics.update(instrument_cap_bound_days=int(n_inst_bound), class_cap_bound_days=int(n_class_bound),
-                           infeasible_cap_days=int(n_infeasible), n_days=len(prices))
+                           infeasible_cap_days=int(n_infeasible), nonconverged_cap_days=int(n_nonconv), n_days=len(prices))
     return pd.DataFrame(out, index=prices.index, columns=syms), pd.Series(bound, index=prices.index, name="gross_cap_bound")
 
 
-def _apply_caps(weights: pd.Series, cov: pd.DataFrame, limits: Any):
+def _apply_caps(weights: pd.Series, cov: pd.DataFrame, limits: Any, **kw: Any):
     from firm.risk.limits import apply_caps  # lazy: only the P4-03 path needs it
 
-    return apply_caps(weights, cov, limits)
+    return apply_caps(weights, cov, limits, **kw)
 
 
 @contextlib.contextmanager
