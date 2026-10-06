@@ -284,7 +284,9 @@ def record_trial(rec: TrialRecord, returns: pd.Series | None = None) -> str:
         (root / "returns").mkdir(exist_ok=True)
         final = root / returns_path
         tmp = root / "returns" / f".{rec.trial_id}.{os.getpid()}.tmp"
-        returns.rename("returns").to_frame().to_parquet(tmp)
+        frame = returns.rename("returns").to_frame()
+        frame.attrs = {}  # inherited attrs (e.g. DataFrames from benchmark frames) are not JSON-serialisable; values are unaffected
+        frame.to_parquet(tmp)
         os.replace(tmp, final)
     elif returns_path is not None and not (root / returns_path).exists() and rec.mode != "legacy":
         raise ValueError(f"returns_path {returns_path!r} given without returns and file is missing")

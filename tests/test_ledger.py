@@ -396,3 +396,13 @@ def test_sync_mirror_extends_and_refuses_rewrite(root, tmp_path):
     (mirror / "trials.jsonl").write_bytes(b"x" + (mirror / "trials.jsonl").read_bytes())
     with pytest.raises(sync.MirrorError):
         sync.sync(mirror)
+
+
+def test_returns_series_with_dataframe_attrs_is_stored(root, clean_repo):
+    idx = pd.bdate_range("2020-01-01", periods=5)
+    s = pd.Series(np.linspace(0.0, 0.01, 5), index=idx, name="r")
+    s.attrs["trades"] = pd.DataFrame({"a": [1, 2]})  # e.g. inherited from a benchmark_bm2 frame
+    tid = L.record_trial(mk("exploratory"), returns=s)
+    back = pd.read_parquet(root / "returns" / f"{tid}.parquet")["returns"]
+    np.testing.assert_allclose(back.to_numpy(), s.to_numpy())
+    assert "trades" in s.attrs  # caller's object untouched

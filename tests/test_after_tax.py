@@ -344,3 +344,21 @@ def test_core_only_100_sanity():
     tr = pd.concat({k: total_return(s[k]) for k in ("SPY", "IEF")}, axis=1).loc["2015-02-02":asof.isoformat()].dropna()
     nav = (1 + (0.6 * tr["SPY"] + 0.4 * tr["IEF"])).cumprod()  # daily-rebalanced pre-tax reference
     assert abs(at.summarise(nav).cagr - 0.0866) < 0.01
+
+
+def _states_from_bm2(df):
+    return {s: df[s] for s in at.STATES}  # raw columns: they inherit the frame's DataFrame-valued attrs
+
+
+def test_compare_accepts_bm2_columns_carrying_dataframe_attrs():
+    a, m = _bm2("annual"), _bm2("monthly")
+    assert isinstance(a["after_tax"].attrs.get("trades"), pd.DataFrame)  # the precondition that used to break pd.concat
+    out = at.compare(_states_from_bm2(m), _states_from_bm2(a), n_boot=50, seed=1)
+    assert out["n_obs"] > 100
+
+
+def test_compare_does_not_mutate_input_attrs():
+    a, m = _bm2("annual"), _bm2("monthly")
+    before = set(a["after_tax"].attrs)
+    at.compare(_states_from_bm2(m), _states_from_bm2(a), n_boot=20, seed=1)
+    assert set(a["after_tax"].attrs) == before

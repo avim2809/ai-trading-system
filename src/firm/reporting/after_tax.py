@@ -356,7 +356,11 @@ def compare(system: dict[str, pd.Series], bench: dict[str, pd.Series], *, n_boot
     if not (isinstance(block, str) and block == "politis_white") and not (isinstance(block, (int, float)) and block > 1.0):
         raise ValueError("block must be 'politis_white' or a mean block length > 1 (iid resampling is not allowed)")
     names = [("system", s) for s in STATES] + [("bench", s) for s in STATES]
-    aligned = pd.concat({f"{w}/{s}": (system if w == "system" else bench)[s] for w, s in names}, axis=1, join="inner")
+    # attrs (e.g. DataFrame-valued ones inherited from benchmark_bm2 frames) cannot be merged by pd.concat: drop them on copies
+    cols = {f"{w}/{s}": pd.Series((system if w == "system" else bench)[s]).copy() for w, s in names}
+    for c in cols.values():
+        c.attrs = {}
+    aligned = pd.concat(cols, axis=1, join="inner")
     rets = aligned.pct_change().dropna()
     mat = rets.to_numpy(dtype=float)
     n = len(mat)
