@@ -1,0 +1,230 @@
+{
+ "asof": "2026-09-30",
+ "columns": [
+  "dataset",
+  "licence",
+  "path",
+  "bytes",
+  "sha256",
+  "rows",
+  "first_date",
+  "last_date"
+ ],
+ "data_root": "data/research/eodhd",
+ "instruments": [
+  "SPY",
+  "IWM",
+  "QQQ",
+  "EFA",
+  "EEM",
+  "SHY",
+  "IEF",
+  "TLT",
+  "TIP",
+  "LQD",
+  "HYG",
+  "GLD",
+  "DBC",
+  "IYR"
+ ],
+ "missing": [
+  "corporate_actions/dividends/DBC.parquet",
+  "corporate_actions/dividends/EEM.parquet",
+  "corporate_actions/dividends/EFA.parquet",
+  "corporate_actions/dividends/GLD.parquet",
+  "corporate_actions/dividends/HYG.parquet",
+  "corporate_actions/dividends/IEF.parquet",
+  "corporate_actions/dividends/IYR.parquet",
+  "corporate_actions/dividends/LQD.parquet",
+  "corporate_actions/dividends/QQQ.parquet",
+  "corporate_actions/dividends/SHY.parquet",
+  "corporate_actions/dividends/TIP.parquet",
+  "corporate_actions/dividends/TLT.parquet"
+ ],
+ "note": "no post-seal data was read; hashing is of file bytes; filename key = snapshot_id",
+ "rows": [
+  {
+   "bytes": 9002,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2005-03-24",
+   "last_date": "2026-09-15",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "corporate_actions/dividends/IWM.parquet",
+   "rows": 87,
+   "sha256": "90a379369f30bbb16a9f7ece77a99dd9fd22345d7c953e3c598d802dc45f048e"
+  },
+  {
+   "bytes": 8919,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2005-03-18",
+   "last_date": "2026-09-18",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "corporate_actions/dividends/SPY.parquet",
+   "rows": 87,
+   "sha256": "a5abecd1acc9c5e410115967de220334e2b7d0b602520169885f7da1ca3b97f1"
+  },
+  {
+   "bytes": 185943,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2006-02-03",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/DBC.parquet",
+   "rows": 5195,
+   "sha256": "c4e17b0e238b078e0ce002b3dd9d58e61a3fdb9066b0840699cc0dd0674bf252"
+  },
+  {
+   "bytes": 254552,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2003-04-11",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/EEM.parquet",
+   "rows": 5904,
+   "sha256": "25790692bd9f823db7e0650dce63526021198e679dee65758ec2c66054a1ab1d"
+  },
+  {
+   "bytes": 263302,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2001-08-17",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/EFA.parquet",
+   "rows": 6315,
+   "sha256": "1245cd9d7a23e758c764d4e83237a6f146a1ae228cadcb51ad088a31b11b76ff"
+  },
+  {
+   "bytes": 237997,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2004-11-18",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/GLD.parquet",
+   "rows": 5499,
+   "sha256": "450fecd087eb1fb65e7e61d563387bd743d894a4f0ed021f2d83e00c624b7d73"
+  },
+  {
+   "bytes": 187019,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2007-04-11",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/HYG.parquet",
+   "rows": 4899,
+   "sha256": "ec31bb79f4cd516a9c73da9eb40a3c296060337c2e3db2f13a5ff21f2eba0e72"
+  },
+  {
+   "bytes": 226159,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2002-07-26",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/IEF.parquet",
+   "rows": 6083,
+   "sha256": "76a85998a8bd5131838c35e3de52527d6aa6c16692d91a04726da788e3520f54"
+  },
+  {
+   "bytes": 296730,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2000-05-26",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/IWM.parquet",
+   "rows": 6624,
+   "sha256": "5325f45333ccb22c536c545beaf877c0e2a44a3ac940d4ef418509cc24232533"
+  },
+  {
+   "bytes": 266954,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2000-06-19",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/IYR.parquet",
+   "rows": 6604,
+   "sha256": "ac9f8a7fabcfec649032e55fe85d6c3f0c71cefc64e37918ddbef06620c79e4d"
+  },
+  {
+   "bytes": 229129,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2002-07-26",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/LQD.parquet",
+   "rows": 6083,
+   "sha256": "c0298c8b616a60821e4de8e22709a5109d0bfe5a6ad213ac99ac77dcb83dc0bc"
+  },
+  {
+   "bytes": 316461,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "1999-03-10",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/QQQ.parquet",
+   "rows": 6932,
+   "sha256": "61dba1d67050bb2ec462a9a1e9f775cbf7e3d89ca19209111abd892d8907fcee"
+  },
+  {
+   "bytes": 175518,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2002-07-26",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/SHY.parquet",
+   "rows": 6083,
+   "sha256": "bb5c18b3de3a0a9a6ec658b2c52601c1ea162bb8428fbc9b200bb6287dcbfc1d"
+  },
+  {
+   "bytes": 383815,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "1993-01-29",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/SPY.parquet",
+   "rows": 8474,
+   "sha256": "cdd7b74a7db1a60123901d443aa6f5dc4263663e4735b2a3808b10c522e19aef"
+  },
+  {
+   "bytes": 204179,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2003-12-05",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/TIP.parquet",
+   "rows": 5739,
+   "sha256": "6de02a861117b41a1a64800d057083e9461a784d08f952963eeb7c516ceb009d"
+  },
+  {
+   "bytes": 242952,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2002-07-26",
+   "last_date": "2026-09-29",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "etfs_full/TLT.parquet",
+   "rows": 6083,
+   "sha256": "4e34d04037e36a34e0da94594bcbc222548655ead27789e851ab86148c595a51"
+  },
+  {
+   "bytes": 205488,
+   "dataset": "eodhd_etf_universe",
+   "first_date": "2005-01-03",
+   "last_date": "2026-09-30",
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "forex/USDILS.parquet",
+   "rows": 5745,
+   "sha256": "385650c80fd9620358a6e7b3675825930bee05fcb2af6cb1c16e1213095a73af"
+  },
+  {
+   "bytes": 1576788,
+   "dataset": "eodhd_etf_universe",
+   "first_date": null,
+   "last_date": null,
+   "licence": "EODHD licensed; manifest only, data not committed",
+   "path": "symbols_delisted.parquet",
+   "rows": null,
+   "sha256": "445c3b83a5d721daf5283a1e813d7beee633fb40a17920811d37575097af0851"
+  }
+ ],
+ "snapshot_id": "2dfb174ba3218ef2920a6404069529493df0bd2a578c7695f8e7795c67c5f364",
+ "universe_yaml": "config/universe_etf.yaml",
+ "universe_yaml_sha256": "379cb0d4611f46561b1125c72276803ea590ab3de136bcfb3d0ce6a9696d3514"
+}
