@@ -326,7 +326,7 @@ def gate_variant_rule(gates: dict | None = None) -> tuple[bool, str | None]:
         raise ValueError("gates benchmark block lacks uses_higher_after_tax_sharpe_of_the_two")
     higher = b["uses_higher_after_tax_sharpe_of_the_two"]
     if not isinstance(higher, bool):
-        raise ValueError(f"uses_higher_after_tax_sharpe_of_the_two must be a bool, got {higher!r}")
+        raise TypeError(f"uses_higher_after_tax_sharpe_of_the_two must be a bool, got {higher!r}")
     if higher:
         return True, None
     if "gate_variant" not in b:

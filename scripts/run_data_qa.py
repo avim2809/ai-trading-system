@@ -32,8 +32,18 @@ from firm.research import data_access, seal
 log = logging.getLogger("run_data_qa")
 
 
+# Flags the owner verified against a second source (annotation only: nothing is cleaned, dropped or adjusted because of it).
+VERIFIED_REAL = {
+    ("spike", "SPY", "2008-10-13"): "owner-verified real: the SPY 2008-10-10 vendor close matches Yahoo, so the +14.5% return into 2008-10-13 is genuine",
+}
+
+
+def _verified(f) -> str | None:
+    return VERIFIED_REAL.get((f.check, f.symbol, f.date.isoformat() if f.date else None))
+
+
 def _findings_json(fs) -> list[dict]:
-    return [{**f.__dict__, "date": f.date.isoformat() if f.date else None} for f in fs]
+    return [{**f.__dict__, "date": f.date.isoformat() if f.date else None, **({"verified_real": v} if (v := _verified(f)) else {})} for f in fs]
 
 
 def _ret_note(series, f) -> str:
@@ -122,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
               "cleaning v3 is the one in `clean_reports`)."), "",
              "## Counts (cleaned bars)", "", "| check/severity | count |", "|---|---|", *[f"| {k} | {v} |" for k, v in report["counts"].items()], "",
              "## Flags for the owner (cleaned bars)", "", "| check | symbol | date | detail |", "|---|---|---|---|",
-             *[f"| {f.check} | {f.symbol} | {f.date} | {(f.detail + _ret_note(series, f)).replace(chr(124), chr(92) + chr(124))} |" for f in findings if f.severity != "info"], "",
+             *[f"| {f.check} | {f.symbol} | {f.date} | {(f.detail + _ret_note(series, f) + (f" **VERIFIED REAL: {_verified(f)}**" if _verified(f) else "")).replace(chr(124), chr(92) + chr(124))} |" for f in findings if f.severity != "info"], "",
              f"## Raw-bar cross-check: findings present on raw bars but not on cleaned bars: {len(raw_only)}", "",
              *[f"- {f.check} {f.symbol} {f.date} [{f.severity}] {f.detail}" for f in raw_only], "",
              "## SPY bar dates vs exchange calendar (1993-2026)", "",

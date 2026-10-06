@@ -218,9 +218,9 @@ def test_gate_benchmark_legacy_higher_after_tax_variant_when_flag_true():
     {"uses_higher_after_tax_sharpe_of_the_two": "no", "gate_variant": "annual"},             # not a bool
 ])
 def test_gate_benchmark_fails_closed(bench):
-    with pytest.raises(ValueError):
+    with pytest.raises((ValueError, TypeError)):
         at.gate_variant_rule(_gates(**bench))
-    with pytest.raises(ValueError):
+    with pytest.raises((ValueError, TypeError)):
         _gate_run(_gates(**bench))
 
 
