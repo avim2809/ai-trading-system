@@ -121,7 +121,7 @@ INSTRUMENT_WEIGHT_SCHEME = "handcrafted_one_group_per_asset_class"
 
 
 def _handcrafted_weights() -> dict[str, float]:
-    from firm.portfolio.weights import handcraft_weights  # pure function; no live import, no data
+    from firm.portfolio.weights import handcraft_weights   # pure function; no live import, no data
 
     w = handcraft_weights({c: {c: m} for c, m in ASSET_CLASSES.items()})
     return {s: float(w[s]) for s in UNIVERSE}
@@ -216,9 +216,7 @@ def verify_charter(repo_dir: Path | None = None, *, ledger=None) -> dict:
     (``ledger`` may be injected; default reads the host ledger). Also requires family == core_v1 and a gates hash equal to
     this module's. The charter's own hash and ``approved_commit`` are returned for recording, never hard-coded here.
     """
-    from firm.research import (
-        charter as C,  # lazy: firm.research must not be imported by live modules
-    )
+    from firm.research import charter as C   # lazy: firm.research must not be imported by live modules
 
     repo = Path(repo_dir or REPO_DIR)
     path = repo / CHARTER_PATH

@@ -351,6 +351,7 @@ filterwarnings = [
 "review/studies/insider_clusters/artifacts/run_outputs/insider_recompute/recompute.py" = ["EXE001"]
 "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2_recompute/s2_excess_check.py" = ["UP031"]
 "review/studies/shortlist_S2_breadth_overlay/artifacts/run_outputs/S2_recompute/s2_recompute.py" = ["F841"]
+"scripts/core_v1_preregistered.py" = ["I001"]  # frozen module (hash pinned in the approved prereg): never autofix
 "scripts/allocation_forward_test_preregistered.py" = ["ISC004"]
 "scripts/allocation_portfolio_backtest.py" = ["F841"]
 "scripts/analyze_pattern_scan_outcomes.py" = ["EXE001"]
