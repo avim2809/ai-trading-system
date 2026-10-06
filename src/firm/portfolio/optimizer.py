@@ -549,7 +549,7 @@ def _solve_qp(
     try:
         import cvxpy as cp
     except Exception:
-        log.error("cvxpy unavailable -- falling back to closed-form solve", exc_info=True)
+        log.exception("cvxpy unavailable -- falling back to closed-form solve")
         return None
 
     n = len(symbols)

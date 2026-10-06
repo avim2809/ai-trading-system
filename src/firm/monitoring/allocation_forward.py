@@ -550,7 +550,7 @@ def run_daily(state_dir: Path, *, live_nav_fetcher: Callable[[], pd.Series],
         return finish("blocked_missing_live_nav_rule")
 
     cfg = load_replay_config(config_path)
-    i5_params = verify_frozen_params(cfg, frozen.PORTFOLIO)
+    verify_frozen_params(cfg, frozen.PORTFOLIO)
     spy = pd.read_parquet(inputs_dir / "tiingo_SPY.parquet")["date"]
     as_of = str(pd.Timestamp(spy.max()).date())
     sim = simulated_nav(cfg, inputs_dir, dep.start_date, as_of, dep.initial_nav)

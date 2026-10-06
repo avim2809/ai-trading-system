@@ -37,8 +37,8 @@ def _block_length_1d(x: np.ndarray, kind: str) -> float:
         raise ValueError(f"series too short for block-length selection (n={n})")
     if not np.all(np.isfinite(x)):
         raise ValueError("series contains non-finite values")
-    k_n = max(5, int(math.ceil(math.sqrt(math.log10(n)))))
-    max_lag = min(int(math.ceil(math.sqrt(n))) + k_n, n - 1)
+    k_n = max(5, math.ceil(math.sqrt(math.log10(n))))
+    max_lag = min(math.ceil(math.sqrt(n)) + k_n, n - 1)
     r = _autocov(x, max_lag)
     if r[0] <= 0:
         return 1.0  # constant series
