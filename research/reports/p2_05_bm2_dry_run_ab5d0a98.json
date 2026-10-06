@@ -1,0 +1,824 @@
+{
+ "core_only_100_reference": {
+  "abs_cagr_gap_to_published_pp": 0.19042248343099644,
+  "bm2_usd_pre_tax_core_window": {
+   "annual": {
+    "after_cost": {
+     "cagr": 0.08768740392152874,
+     "max_dd": 0.21323404772125143,
+     "sharpe": 0.873218355996435,
+     "vol": 0.10226678459926769
+    },
+    "gross": {
+     "cagr": 0.0877012967394335,
+     "max_dd": 0.213203473497372,
+     "sharpe": 0.8733662849863285,
+     "vol": 0.10226373496021693
+    }
+   },
+   "monthly": {
+    "after_cost": {
+     "cagr": 0.0880633307938885,
+     "max_dd": 0.21188719317569382,
+     "sharpe": 0.8691656455916198,
+     "vol": 0.10325825709058077
+    },
+    "gross": {
+     "cagr": 0.0881120056582152,
+     "max_dd": 0.21184284161339573,
+     "sharpe": 0.869604989089082,
+     "vol": 0.10325744958080976
+    }
+   }
+  },
+  "daily_rebalanced_cagr": 0.08854680461828579,
+  "note": "published summary only (no daily series on disk): core_only_100 is a monthly drift-band rebalanced 60/40 SPY/IEF; its Sharpe is ex-T-bill, ours is vs zero, so Sharpe is not comparable; CAGR/vol/maxDD are",
+  "published": {
+   "cagr": 0.08664257978397583,
+   "end": "2026-09-28",
+   "max_drawdown": 0.21041369135531307,
+   "n_days": 2931,
+   "orders": 279,
+   "sharpe_ex_tbill": 0.6503759849372265,
+   "start": "2015-02-02",
+   "vol": 0.10376442406257316
+  },
+  "real_data_sanity_test_equivalent_passes_within_1pp": true
+ },
+ "data_source": "eodhd etfs_full via firm.data.etf_loader; fx eodhd forex/USDILS",
+ "disclaimer": "INFORMATION ONLY - not tax advice and not the owner's actual liability.",
+ "gate_variant_rule": {
+  "gate_variant": "annual",
+  "uses_higher_after_tax_sharpe_of_the_two": false
+ },
+ "n_boot": 10000,
+ "no_post_seal_data_was_read": true,
+ "real_vs_implied_dividend_validation": {
+  "IEF": {
+   "max_rel_err": 0.01356556865992986,
+   "median_rel_err": 0.00021213192826341487,
+   "n_implied_total": 290,
+   "n_matched_dates": 290,
+   "n_real": 290
+  },
+  "SPY": {
+   "max_rel_err": 0.005308120654590631,
+   "median_rel_err": 3.7431012405164665e-05,
+   "n_implied_total": 136,
+   "n_matched_dates": 87,
+   "n_real": 87
+  }
+ },
+ "seed": 13,
+ "substitutions": [
+  "Israeli CPI unavailable: inflation_adjust forced False, CPI flat 1.0 (overstates modelled tax)",
+  "USD/ILS from EODHD forex (Bank of Israel series not available)",
+  "dividends: real EODHD files for SPY and IEF (all 14 ETF files on disk); implied series used only as a cross-check",
+  "withholding US/IE unset (adviser Q10): modelled 0.0 placeholder"
+ ],
+ "tax_assumptions_active": [
+  "INFORMATION ONLY - not tax advice and not the owner's actual liability.",
+  "Active assumptions:",
+  "  convention: deferred_mtm [plan-fixed-ex-ante]",
+  "  dividend_rate: UNSET (reuses rate_real_gain) [unset]",
+  "  foreign_tax_credit: False [unset]",
+  "  fx_translation: trade_date [agent-knowledge]",
+  "  inflation_adjust: False (FORCED: Israeli CPI unavailable; documented sensitivity; overstates tax)",
+  "  loss_carryforward: False [agent-knowledge]",
+  "  lot_method: fifo [agent-knowledge]",
+  "  rate_real_gain: 0.25 [repo-brief+source-plan]",
+  "  surtax_rate_1: 0.03 [source-plan]",
+  "  surtax_rate_2: 0.02 [source-plan]",
+  "  surtax_threshold_ils: 721560 [source-plan(current-year value open)]",
+  "  withholding.IE: UNSET (adviser Q10): modelled as 0.0 placeholder, not a tax fact",
+  "  withholding.US: UNSET (adviser Q10): modelled as 0.0 placeholder, not a tax fact"
+ ],
+ "windows": {
+  "core_window": {
+   "annual_tax_annual_alpaca": {
+    "2015": {
+     "loss_used": 0.0,
+     "net_real_gain": 0.0,
+     "surtax": 0.0,
+     "tax_dividends": 1882.09,
+     "tax_gain": 0.0,
+     "total": 1882.09
+    },
+    "2016": {
+     "loss_used": 0.0,
+     "net_real_gain": -26.62,
+     "surtax": 0.0,
+     "tax_dividends": 2005.38,
+     "tax_gain": 0.0,
+     "total": 2005.38
+    },
+    "2017": {
+     "loss_used": 0.0,
+     "net_real_gain": 1144.09,
+     "surtax": 0.0,
+     "tax_dividends": 1964.4,
+     "tax_gain": 286.02,
+     "total": 2250.42
+    },
+    "2018": {
+     "loss_used": 0.0,
+     "net_real_gain": 2535.33,
+     "surtax": 0.0,
+     "tax_dividends": 2295.28,
+     "tax_gain": 633.83,
+     "total": 2929.11
+    },
+    "2019": {
+     "loss_used": 0.0,
+     "net_real_gain": -786.35,
+     "surtax": 0.0,
+     "tax_dividends": 2414.72,
+     "tax_gain": 0.0,
+     "total": 2414.72
+    },
+    "2020": {
+     "loss_used": 0.0,
+     "net_real_gain": 7009.0,
+     "surtax": 0.0,
+     "tax_dividends": 1947.67,
+     "tax_gain": 1752.25,
+     "total": 3699.92
+    },
+    "2021": {
+     "loss_used": 0.0,
+     "net_real_gain": 2323.84,
+     "surtax": 0.0,
+     "tax_dividends": 1701.49,
+     "tax_gain": 580.96,
+     "total": 2282.45
+    },
+    "2022": {
+     "loss_used": 0.0,
+     "net_real_gain": 20782.84,
+     "surtax": 0.0,
+     "tax_dividends": 2449.6,
+     "tax_gain": 5195.71,
+     "total": 7645.31
+    },
+    "2023": {
+     "loss_used": 0.0,
+     "net_real_gain": -2400.42,
+     "surtax": 0.0,
+     "tax_dividends": 3369.62,
+     "tax_gain": 0.0,
+     "total": 3369.62
+    },
+    "2024": {
+     "loss_used": 0.0,
+     "net_real_gain": 18229.11,
+     "surtax": 0.0,
+     "tax_dividends": 4097.53,
+     "tax_gain": 4557.28,
+     "total": 8654.8
+    },
+    "2025": {
+     "loss_used": 0.0,
+     "net_real_gain": 26783.33,
+     "surtax": 0.0,
+     "tax_dividends": 4418.04,
+     "tax_gain": 6695.83,
+     "total": 11113.87
+    },
+    "2026": {
+     "loss_used": 0.0,
+     "net_real_gain": 11040.31,
+     "surtax": 0.0,
+     "tax_dividends": 2926.3,
+     "tax_gain": 2760.08,
+     "total": 5686.38
+    }
+   },
+   "end": "2026-09-28",
+   "gate_benchmark_variant": "annual",
+   "ils_nav_summaries": {
+    "annual_alpaca": {
+     "after_cost": {
+      "cagr": 0.06482717772098945,
+      "max_dd": 0.1273972028661683,
+      "sharpe": 0.6527416739657528,
+      "vol": 0.10462134387284269
+     },
+     "after_tax": {
+      "cagr": 0.05209498819040492,
+      "max_dd": 0.10207490180755507,
+      "sharpe": 0.6206603031956659,
+      "vol": 0.08807575795811394
+     },
+     "gross": {
+      "cagr": 0.06484077854970716,
+      "max_dd": 0.12739372582121677,
+      "sharpe": 0.6528745654043799,
+      "vol": 0.10461928762114739
+     }
+    },
+    "annual_alpaca_terminal_liquidation": {
+     "after_cost": {
+      "cagr": 0.06482717772098945,
+      "max_dd": 0.1273972028661683,
+      "sharpe": 0.6527416739657528,
+      "vol": 0.10462134387284269
+     },
+     "after_tax": {
+      "cagr": 0.05209498819040492,
+      "max_dd": 0.1315033957202395,
+      "sharpe": 0.5169495547874086,
+      "vol": 0.10995404126132238
+     },
+     "gross": {
+      "cagr": 0.06484077854970716,
+      "max_dd": 0.12739372582121677,
+      "sharpe": 0.6528745654043799,
+      "vol": 0.10461928762114739
+     }
+    },
+    "annual_ibkr": {
+     "after_cost": {
+      "cagr": 0.06482268758969578,
+      "max_dd": 0.12739806123434316,
+      "sharpe": 0.6526994127747576,
+      "vol": 0.10462171538629712
+     },
+     "after_tax": {
+      "cagr": 0.05209133306783409,
+      "max_dd": 0.10207473498456177,
+      "sharpe": 0.6206111883091245,
+      "vol": 0.08807735540772145
+     },
+     "gross": {
+      "cagr": 0.06484077854970716,
+      "max_dd": 0.12739372582121677,
+      "sharpe": 0.6528745654043799,
+      "vol": 0.10461928762114739
+     }
+    },
+    "monthly_alpaca": {
+     "after_cost": {
+      "cagr": 0.06519520363457487,
+      "max_dd": 0.1354226387554609,
+      "sharpe": 0.6521020828907904,
+      "vol": 0.10537437250651914
+     },
+     "after_tax": {
+      "cagr": 0.05251082626342107,
+      "max_dd": 0.10853848916564479,
+      "sharpe": 0.6225226066320586,
+      "vol": 0.08850800688490212
+     },
+     "gross": {
+      "cagr": 0.06524285548585174,
+      "max_dd": 0.13541458772251602,
+      "sharpe": 0.6525268316071369,
+      "vol": 0.10537434741928263
+     }
+    }
+   },
+   "n_days": 2931,
+   "n_trades_annual_alpaca": 24,
+   "paired_bootstrap_monthly_minus_annual": {
+    "bench": {
+     "after_cost": {
+      "cagr": 0.06482717772098945,
+      "max_dd": 0.1273972028661683,
+      "sharpe": 0.6527416739657528,
+      "vol": 0.10462134387284269
+     },
+     "after_tax": {
+      "cagr": 0.05209498819040492,
+      "max_dd": 0.10207490180755507,
+      "sharpe": 0.6206603031956659,
+      "vol": 0.08807575795811394
+     },
+     "gross": {
+      "cagr": 0.06484077854970716,
+      "max_dd": 0.12739372582121677,
+      "sharpe": 0.6528745654043799,
+      "vol": 0.10461928762114739
+     }
+    },
+    "block_length": 28.220174746587396,
+    "diff": {
+     "after_cost": {
+      "cagr": {
+       "ci_high": 0.003524082701970753,
+       "ci_low": -0.0023628195531374407,
+       "estimate": 0.0003680259135854236
+      },
+      "max_dd": {
+       "ci_high": 0.011593402875662465,
+       "ci_low": -0.005368223227764406,
+       "estimate": 0.00802543588929261
+      },
+      "sharpe": {
+       "ci_high": 0.02340742679604443,
+       "ci_low": -0.023479563349936308,
+       "estimate": -0.0006395910749623646
+      }
+     },
+     "after_tax": {
+      "cagr": {
+       "ci_high": 0.0029671963644180782,
+       "ci_low": -0.0017966605890171238,
+       "estimate": 0.0004158380730161504
+      },
+      "max_dd": {
+       "ci_high": 0.009287209606373562,
+       "ci_low": -0.005056606334900635,
+       "estimate": 0.006463587358089717
+      },
+      "sharpe": {
+       "ci_high": 0.02525249489499588,
+       "ci_low": -0.020512099746751347,
+       "estimate": 0.0018623034363927093
+      }
+     },
+     "gross": {
+      "cagr": {
+       "ci_high": 0.003568027319089767,
+       "ci_low": -0.002332756600090974,
+       "estimate": 0.00040207693614457973
+      },
+      "max_dd": {
+       "ci_high": 0.011566164597861821,
+       "ci_low": -0.005406413674771779,
+       "estimate": 0.008020861901299248
+      },
+      "sharpe": {
+       "ci_high": 0.023717962867831302,
+       "ci_low": -0.023198169738264766,
+       "estimate": -0.0003477337972430661
+      }
+     }
+    },
+    "n_boot": 10000,
+    "n_obs": 2930,
+    "seed": 13,
+    "system": {
+     "after_cost": {
+      "cagr": 0.06519520363457487,
+      "max_dd": 0.1354226387554609,
+      "sharpe": 0.6521020828907904,
+      "vol": 0.10537437250651914
+     },
+     "after_tax": {
+      "cagr": 0.05251082626342107,
+      "max_dd": 0.10853848916564479,
+      "sharpe": 0.6225226066320586,
+      "vol": 0.08850800688490212
+     },
+     "gross": {
+      "cagr": 0.06524285548585174,
+      "max_dd": 0.13541458772251602,
+      "sharpe": 0.6525268316071369,
+      "vol": 0.10537434741928263
+     }
+    }
+   },
+   "start": "2015-02-02",
+   "usd_daily_rebalanced_adjusted_close_reference": {
+    "cagr": 0.08854680461828579,
+    "max_dd": 0.21017149450521821,
+    "sharpe": 0.8605663029753211,
+    "vol": 0.10501767354294973
+   },
+   "usd_pre_tax_summaries": {
+    "annual": {
+     "after_cost": {
+      "cagr": 0.08768740392152874,
+      "max_dd": 0.21323404772125143,
+      "sharpe": 0.873218355996435,
+      "vol": 0.10226678459926769
+     },
+     "gross": {
+      "cagr": 0.0877012967394335,
+      "max_dd": 0.213203473497372,
+      "sharpe": 0.8733662849863285,
+      "vol": 0.10226373496021693
+     }
+    },
+    "monthly": {
+     "after_cost": {
+      "cagr": 0.0880633307938885,
+      "max_dd": 0.21188719317569382,
+      "sharpe": 0.8691656455916198,
+      "vol": 0.10325825709058077
+     },
+     "gross": {
+      "cagr": 0.0881120056582152,
+      "max_dd": 0.21184284161339573,
+      "sharpe": 0.869604989089082,
+      "vol": 0.10325744958080976
+     }
+    }
+   },
+   "variant_with_higher_after_tax_sharpe_informational": "monthly"
+  },
+  "long_window": {
+   "annual_tax_annual_alpaca": {
+    "2005": {
+     "loss_used": 0.0,
+     "net_real_gain": 0.0,
+     "surtax": 0.0,
+     "tax_dividends": 2961.42,
+     "tax_gain": 0.0,
+     "total": 2961.42
+    },
+    "2006": {
+     "loss_used": 0.0,
+     "net_real_gain": 517.83,
+     "surtax": 0.0,
+     "tax_dividends": 3326.33,
+     "tax_gain": 129.46,
+     "total": 3455.79
+    },
+    "2007": {
+     "loss_used": 0.0,
+     "net_real_gain": 1281.2,
+     "surtax": 0.0,
+     "tax_dividends": 3518.26,
+     "tax_gain": 320.3,
+     "total": 3838.56
+    },
+    "2008": {
+     "loss_used": 0.0,
+     "net_real_gain": -719.7,
+     "surtax": 0.0,
+     "tax_dividends": 3106.95,
+     "tax_gain": 0.0,
+     "total": 3106.95
+    },
+    "2009": {
+     "loss_used": 0.0,
+     "net_real_gain": -310.78,
+     "surtax": 0.0,
+     "tax_dividends": 2964.31,
+     "tax_gain": 0.0,
+     "total": 2964.31
+    },
+    "2010": {
+     "loss_used": 0.0,
+     "net_real_gain": -6640.68,
+     "surtax": 0.0,
+     "tax_dividends": 2870.33,
+     "tax_gain": 0.0,
+     "total": 2870.33
+    },
+    "2011": {
+     "loss_used": 0.0,
+     "net_real_gain": -947.83,
+     "surtax": 0.0,
+     "tax_dividends": 2864.51,
+     "tax_gain": 0.0,
+     "total": 2864.51
+    },
+    "2012": {
+     "loss_used": 0.0,
+     "net_real_gain": 1138.49,
+     "surtax": 0.0,
+     "tax_dividends": 3027.44,
+     "tax_gain": 284.62,
+     "total": 3312.06
+    },
+    "2013": {
+     "loss_used": 0.0,
+     "net_real_gain": 567.01,
+     "surtax": 0.0,
+     "tax_dividends": 2944.43,
+     "tax_gain": 141.75,
+     "total": 3086.18
+    },
+    "2014": {
+     "loss_used": 0.0,
+     "net_real_gain": 7842.91,
+     "surtax": 0.0,
+     "tax_dividends": 3573.5,
+     "tax_gain": 1960.73,
+     "total": 5534.22
+    },
+    "2015": {
+     "loss_used": 0.0,
+     "net_real_gain": 3225.08,
+     "surtax": 0.0,
+     "tax_dividends": 4024.97,
+     "tax_gain": 806.27,
+     "total": 4831.24
+    },
+    "2016": {
+     "loss_used": 0.0,
+     "net_real_gain": 314.39,
+     "surtax": 0.0,
+     "tax_dividends": 4152.15,
+     "tax_gain": 78.6,
+     "total": 4230.74
+    },
+    "2017": {
+     "loss_used": 0.0,
+     "net_real_gain": 10620.67,
+     "surtax": 0.0,
+     "tax_dividends": 4067.29,
+     "tax_gain": 2655.17,
+     "total": 6722.46
+    },
+    "2018": {
+     "loss_used": 0.0,
+     "net_real_gain": 15725.99,
+     "surtax": 0.0,
+     "tax_dividends": 4752.38,
+     "tax_gain": 3931.5,
+     "total": 8683.88
+    },
+    "2019": {
+     "loss_used": 0.0,
+     "net_real_gain": 798.92,
+     "surtax": 0.0,
+     "tax_dividends": 4999.68,
+     "tax_gain": 199.73,
+     "total": 5199.41
+    },
+    "2020": {
+     "loss_used": 0.0,
+     "net_real_gain": 26440.54,
+     "surtax": 0.0,
+     "tax_dividends": 4032.65,
+     "tax_gain": 6610.14,
+     "total": 10642.78
+    },
+    "2021": {
+     "loss_used": 0.0,
+     "net_real_gain": 8117.78,
+     "surtax": 0.0,
+     "tax_dividends": 3522.94,
+     "tax_gain": 2029.44,
+     "total": 5552.38
+    },
+    "2022": {
+     "loss_used": 0.0,
+     "net_real_gain": 59706.82,
+     "surtax": 0.0,
+     "tax_dividends": 5071.9,
+     "tax_gain": 14926.71,
+     "total": 19998.6
+    },
+    "2023": {
+     "loss_used": 0.0,
+     "net_real_gain": -1665.85,
+     "surtax": 0.0,
+     "tax_dividends": 6976.8,
+     "tax_gain": 0.0,
+     "total": 6976.8
+    },
+    "2024": {
+     "loss_used": 0.0,
+     "net_real_gain": 48620.41,
+     "surtax": 0.0,
+     "tax_dividends": 8483.94,
+     "tax_gain": 12155.1,
+     "total": 20639.05
+    },
+    "2025": {
+     "loss_used": 0.0,
+     "net_real_gain": 66547.08,
+     "surtax": 0.0,
+     "tax_dividends": 9147.57,
+     "tax_gain": 16636.77,
+     "total": 25784.34
+    },
+    "2026": {
+     "loss_used": 0.0,
+     "net_real_gain": 27118.72,
+     "surtax": 0.0,
+     "tax_dividends": 6058.91,
+     "tax_gain": 6779.68,
+     "total": 12838.59
+    }
+   },
+   "end": "2026-09-29",
+   "gate_benchmark_variant": "annual",
+   "ils_nav_summaries": {
+    "annual_alpaca": {
+     "after_cost": {
+      "cagr": 0.06422372946582455,
+      "max_dd": 0.33424296595199066,
+      "sharpe": 0.6300590768272986,
+      "vol": 0.1080585548611928
+     },
+     "after_tax": {
+      "cagr": 0.05413354479794119,
+      "max_dd": 0.329882930680224,
+      "sharpe": 0.5751354946522808,
+      "vol": 0.100425883742489
+     },
+     "gross": {
+      "cagr": 0.06423795815372157,
+      "max_dd": 0.3342378235127187,
+      "sharpe": 0.6301881558813652,
+      "vol": 0.1080574537090509
+     }
+    },
+    "annual_alpaca_terminal_liquidation": {
+     "after_cost": {
+      "cagr": 0.06422372946582455,
+      "max_dd": 0.33424296595199066,
+      "sharpe": 0.6300590768272986,
+      "vol": 0.1080585548611928
+     },
+     "after_tax": {
+      "cagr": 0.05413354479794097,
+      "max_dd": 0.34747814769553587,
+      "sharpe": 0.5127265198766418,
+      "vol": 0.11595823980182017
+     },
+     "gross": {
+      "cagr": 0.06423795815372157,
+      "max_dd": 0.3342378235127187,
+      "sharpe": 0.6301881558813652,
+      "vol": 0.1080574537090509
+     }
+    },
+    "annual_ibkr": {
+     "after_cost": {
+      "cagr": 0.06421975022746929,
+      "max_dd": 0.3342478343518932,
+      "sharpe": 0.6300232214656178,
+      "vol": 0.10805881248143111
+     },
+     "after_tax": {
+      "cagr": 0.054129935526012085,
+      "max_dd": 0.32989386468905524,
+      "sharpe": 0.5751002972917549,
+      "vol": 0.10042611567625194
+     },
+     "gross": {
+      "cagr": 0.06423795815372157,
+      "max_dd": 0.3342378235127187,
+      "sharpe": 0.6301881558813652,
+      "vol": 0.1080574537090509
+     }
+    },
+    "monthly_alpaca": {
+     "after_cost": {
+      "cagr": 0.06379720263605981,
+      "max_dd": 0.34687272767537836,
+      "sharpe": 0.6120641272978014,
+      "vol": 0.11112440216289567
+     },
+     "after_tax": {
+      "cagr": 0.05338762238579586,
+      "max_dd": 0.3442220421184611,
+      "sharpe": 0.5523546952256757,
+      "vol": 0.10392784189474923
+     },
+     "gross": {
+      "cagr": 0.06384931357656387,
+      "max_dd": 0.34683150323871703,
+      "sharpe": 0.6125068432394956,
+      "vol": 0.11112399859083309
+     }
+    }
+   },
+   "n_days": 5469,
+   "n_trades_annual_alpaca": 44,
+   "paired_bootstrap_monthly_minus_annual": {
+    "bench": {
+     "after_cost": {
+      "cagr": 0.06422372946582455,
+      "max_dd": 0.33424296595199066,
+      "sharpe": 0.6300590768272986,
+      "vol": 0.1080585548611928
+     },
+     "after_tax": {
+      "cagr": 0.05413354479794119,
+      "max_dd": 0.329882930680224,
+      "sharpe": 0.5751354946522808,
+      "vol": 0.100425883742489
+     },
+     "gross": {
+      "cagr": 0.06423795815372157,
+      "max_dd": 0.3342378235127187,
+      "sharpe": 0.6301881558813652,
+      "vol": 0.1080574537090509
+     }
+    },
+    "block_length": 7.103813336966456,
+    "diff": {
+     "after_cost": {
+      "cagr": {
+       "ci_high": 0.002845180521531221,
+       "ci_low": -0.0038727587366001012,
+       "estimate": -0.00042652682976473955
+      },
+      "max_dd": {
+       "ci_high": 0.02746534225812187,
+       "ci_low": -0.007631391291464987,
+       "estimate": 0.0126297617233877
+      },
+      "sharpe": {
+       "ci_high": 0.011696103180190551,
+       "ci_low": -0.04994670921355448,
+       "estimate": -0.017994949529497206
+      }
+     },
+     "after_tax": {
+      "cagr": {
+       "ci_high": 0.0028858294088438454,
+       "ci_low": -0.004516027147180907,
+       "estimate": -0.0007459224121453278
+      },
+      "max_dd": {
+       "ci_high": 0.031011580224605116,
+       "ci_low": -0.00925960445802534,
+       "estimate": 0.014339111438237073
+      },
+      "sharpe": {
+       "ci_high": 0.01315152975745935,
+       "ci_low": -0.060020053022126645,
+       "estimate": -0.022780799426605047
+      }
+     },
+     "gross": {
+      "cagr": {
+       "ci_high": 0.002882213157493544,
+       "ci_low": -0.0038380632137116344,
+       "estimate": -0.00038864457715770406
+      },
+      "max_dd": {
+       "ci_high": 0.027429901927612396,
+       "ci_low": -0.007675627685638178,
+       "estimate": 0.012593679725998341
+      },
+      "sharpe": {
+       "ci_high": 0.01201411851570727,
+       "ci_low": -0.049670782962652184,
+       "estimate": -0.017681312641869673
+      }
+     }
+    },
+    "n_boot": 10000,
+    "n_obs": 5468,
+    "seed": 13,
+    "system": {
+     "after_cost": {
+      "cagr": 0.06379720263605981,
+      "max_dd": 0.34687272767537836,
+      "sharpe": 0.6120641272978014,
+      "vol": 0.11112440216289567
+     },
+     "after_tax": {
+      "cagr": 0.05338762238579586,
+      "max_dd": 0.3442220421184611,
+      "sharpe": 0.5523546952256757,
+      "vol": 0.10392784189474923
+     },
+     "gross": {
+      "cagr": 0.06384931357656387,
+      "max_dd": 0.34683150323871703,
+      "sharpe": 0.6125068432394956,
+      "vol": 0.11112399859083309
+     }
+    }
+   },
+   "start": "2005-01-03",
+   "usd_daily_rebalanced_adjusted_close_reference": {
+    "cagr": 0.08321209566714916,
+    "max_dd": 0.3139344948477063,
+    "sharpe": 0.7889783589685633,
+    "vol": 0.1088250831420068
+   },
+   "usd_pre_tax_summaries": {
+    "annual": {
+     "after_cost": {
+      "cagr": 0.08167621494660438,
+      "max_dd": 0.3019346115281277,
+      "sharpe": 0.8171338401240492,
+      "vol": 0.10253053072436963
+     },
+     "gross": {
+      "cagr": 0.08169067697450538,
+      "max_dd": 0.30187999189835,
+      "sharpe": 0.8172781952144629,
+      "vol": 0.10252853427713435
+     }
+    },
+    "monthly": {
+     "after_cost": {
+      "cagr": 0.08124269339092183,
+      "max_dd": 0.32189041561527076,
+      "sharpe": 0.7877698796044605,
+      "vol": 0.10634777689594821
+     },
+     "gross": {
+      "cagr": 0.08129565891247581,
+      "max_dd": 0.3218061128278047,
+      "sharpe": 0.7882387583855404,
+      "vol": 0.10634650277727842
+     }
+    }
+   },
+   "variant_with_higher_after_tax_sharpe_informational": "annual"
+  }
+ }
+}
