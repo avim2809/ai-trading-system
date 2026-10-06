@@ -52,14 +52,14 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.data.synthetic import DEFAULT_SYMBOLS, make_synthetic_prices  # noqa: E402
-from firm.patterns.ml import ppo_sizer  # noqa: E402
-from firm.patterns.ml.labeling import label_triple_barrier  # noqa: E402
-from firm.patterns.scanner import scan_symbol  # noqa: E402
+from firm.data.synthetic import DEFAULT_SYMBOLS, make_synthetic_prices
+from firm.patterns.ml import ppo_sizer
+from firm.patterns.ml.labeling import label_triple_barrier
+from firm.patterns.scanner import scan_symbol
 
 # Reuses the strategy's own split/dividend adjustment -- see
 # scripts/train_pattern_ml.py's identical import for the full rationale.
-from firm.strategies.pattern_recognition import _adjusted_ohlc  # noqa: E402
+from firm.strategies.pattern_recognition import _adjusted_ohlc
 
 log = logging.getLogger(__name__)
 

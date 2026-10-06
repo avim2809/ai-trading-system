@@ -37,8 +37,8 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.data.cache import ParquetCache  # noqa: E402
-from firm.data.schemas import FUNDAMENTAL_COLS, PRICE_COLS, UNIVERSE_COLUMNS  # noqa: E402
+from firm.data.cache import ParquetCache
+from firm.data.schemas import FUNDAMENTAL_COLS, PRICE_COLS
 
 log = logging.getLogger(__name__)
 

@@ -1,8 +1,11 @@
-import sys, json
+import json
+import sys
+
 sys.path.insert(0, sys.argv[1] + "/scripts"); sys.path.insert(0, sys.argv[1] + "/src")
-import pandas as pd
 from pathlib import Path
-from eodhd_clean import clean_bars, equity_calendar, cleaning_fingerprint
+
+import pandas as pd
+from eodhd_clean import clean_bars, cleaning_fingerprint, equity_calendar
 
 EODHD = Path(sys.argv[1]) / "data" / "research" / "eodhd" / "etfs"
 
@@ -30,7 +33,7 @@ for t in sorted(set(BOND+COMMOD+CASH+CORE)):
         "present": True,
         "first_date": str(d["date"].min().date()),
         "last_date": str(d["date"].max().date()),
-        "n_clean_bars": int(len(d)),
+        "n_clean_bars": len(d),
         "n_segments": int(raw.shape[0] and d["segment"].nunique()),
         "adv20_latest_usd": float(adv20),
         "clean_report": rep,

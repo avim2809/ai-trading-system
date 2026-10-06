@@ -260,6 +260,7 @@ class TestLLMAgentMixin:
         # that chain reaches the *real* module and silently bypasses this
         # fixture's monkeypatched sys.modules entry.
         import sys
+
         from firm.agents.llm.base_llm_agent import LLMAgentMixin
 
         monkeypatch.setattr(
@@ -274,6 +275,7 @@ class TestLLMAgentMixin:
 
     def test_compress_fallback_no_module(self, monkeypatch):
         import sys
+
         from firm.agents.llm.base_llm_agent import LLMAgentMixin
 
         # Ensure the compression module is NOT importable
@@ -1093,6 +1095,7 @@ class TestLLMRouter:
     @pytest.fixture()
     def client(self):
         from fastapi.testclient import TestClient
+
         from firm.api.app import create_app
         app = create_app()
         return TestClient(app)

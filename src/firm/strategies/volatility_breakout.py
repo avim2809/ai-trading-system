@@ -114,7 +114,7 @@ class VolatilityBreakoutStrategy(BaseStrategy):
             upper_break = range_high + breakout_multiplier * atr
             lower_break = range_low - breakout_multiplier * atr
 
-            if realized_vol > vol_threshold and vol_threshold > 0:
+            if realized_vol > vol_threshold > 0:
                 continue
 
             if current_close > upper_break:

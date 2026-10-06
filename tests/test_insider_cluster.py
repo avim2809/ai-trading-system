@@ -8,10 +8,10 @@ import pandas as pd
 import pytest
 
 from firm.strategies.insider_cluster import (
+    InsiderClusterStrategy,
     build_owner_activity_index,
     classify_owner,
     compute_cluster_events,
-    InsiderClusterStrategy,
 )
 
 

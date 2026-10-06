@@ -10,9 +10,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-import pandas as pd
-
 import backtrader as bt
+import pandas as pd
 
 from firm.agents._liquidity import estimate_adv_dollars, market_impact_pct
 from firm.backtest.commissions import PercentageCommission

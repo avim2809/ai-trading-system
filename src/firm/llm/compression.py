@@ -43,13 +43,12 @@ class TokenCompressor:
         if not self._lingua_checked:
             self._lingua_checked = True
             try:
-                from llmlingua import PromptCompressor
-
                 # PromptCompressor defaults device_map to "cuda" unconditionally
                 # (not auto-detected) — on a CPU-only torch install this makes
                 # transformers' model-loading warmup probe CUDA and raise
                 # AssertionError, so it must be set explicitly either way.
                 import torch
+                from llmlingua import PromptCompressor
                 device_map = "cuda" if torch.cuda.is_available() else "cpu"
 
                 self._lingua = PromptCompressor(

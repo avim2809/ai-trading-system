@@ -6,7 +6,7 @@ DanelfinProvider whose get_trade_ideas is mocked per-sector.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
 import pandas as pd
@@ -199,7 +199,7 @@ class TestSelectBestStocksHistorical:
             return pd.DataFrame()
 
         provider.get_historical_sector_scores = MagicMock(side_effect=fake_scan)
-        volume_filter = lambda sym: not sym.startswith("FAIL")  # noqa: E731
+        volume_filter = lambda sym: not sym.startswith("FAIL")
         selection = select_best_stocks_historical(
             provider, "2024-06-03", top_n_sectors=1, top_n_per_sector=5, volume_filter=volume_filter,
         )
@@ -219,7 +219,7 @@ class TestSelectBestStocksHistorical:
             return pd.DataFrame()
 
         provider.get_historical_sector_scores = MagicMock(side_effect=fake_scan)
-        volume_filter = lambda sym: sym in ("E0", "E1")  # noqa: E731 — only 2 pass, need 5
+        volume_filter = lambda sym: sym in ("E0", "E1")
         selection = select_best_stocks_historical(
             provider, "2024-06-03", top_n_sectors=1, top_n_per_sector=5, volume_filter=volume_filter,
         )
@@ -265,7 +265,7 @@ class TestSelectBestStocksHistorical:
 class TestBestStocksLedger:
     def test_full_rebalance_equal_weights(self):
         ledger = BestStocksLedger(initial_capital=100_000.0, cash=100_000.0)
-        asof = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        asof = datetime(2026, 1, 1, tzinfo=UTC)
         selection = [
             {"symbol": "AAA", "sector": "x", "aiscore": 9, "low_risk": 6, "average_volume_3m": 1e6, "sector_avg_aiscore": 9},
             {"symbol": "BBB", "sector": "x", "aiscore": 8, "low_risk": 6, "average_volume_3m": 1e6, "sector_avg_aiscore": 9},
@@ -279,7 +279,7 @@ class TestBestStocksLedger:
 
     def test_mark_to_market_appends_nav_history(self):
         ledger = BestStocksLedger(initial_capital=10_000.0, cash=0.0, holdings={"AAA": 100.0})
-        asof = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        asof = datetime(2026, 1, 1, tzinfo=UTC)
         nav = ledger.mark_to_market(asof, {"AAA": 110.0})
         assert nav == pytest.approx(11_000.0)
         assert len(ledger.nav_history) == 1
@@ -290,7 +290,7 @@ class TestBestStocksLedger:
             initial_capital=10_000.0, cash=0.0,
             holdings={"OLD": 100.0, "KEEP": 50.0},
         )
-        asof = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        asof = datetime(2026, 1, 1, tzinfo=UTC)
         fresh_selection = [
             {"symbol": "KEEP", "sector": "x", "aiscore": 8, "low_risk": 6, "average_volume_3m": 1e6, "sector_avg_aiscore": 8},
             {"symbol": "NEW", "sector": "x", "aiscore": 9, "low_risk": 6, "average_volume_3m": 1e6, "sector_avg_aiscore": 8},
@@ -305,7 +305,7 @@ class TestBestStocksLedger:
 
     def test_quarterly_replace_no_changes_when_nothing_dropped(self):
         ledger = BestStocksLedger(initial_capital=10_000.0, cash=0.0, holdings={"AAA": 100.0})
-        asof = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        asof = datetime(2026, 1, 1, tzinfo=UTC)
         fresh_selection = [{"symbol": "AAA", "sector": "x", "aiscore": 8, "low_risk": 6, "average_volume_3m": 1e6, "sector_avg_aiscore": 8}]
         ledger.quarterly_replace(asof, fresh_selection, {"AAA": 100.0})
         assert ledger.holdings == {"AAA": 100.0}
@@ -316,7 +316,7 @@ class TestBestStocksLedger:
             initial_capital=10_000.0, cash=0.0,
             holdings={"AAA": 50.0, "BBB": 200.0},  # drifted: AAA@100=5000, BBB@10=2000 -> unequal
         )
-        asof = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        asof = datetime(2026, 1, 1, tzinfo=UTC)
         prices = {"AAA": 100.0, "BBB": 10.0}
         ledger.annual_rebalance(asof, prices)
 
@@ -327,13 +327,13 @@ class TestBestStocksLedger:
 
     def test_due_for_quarterly_replace(self):
         ledger = BestStocksLedger(last_quarterly_replace="2026-01-01")
-        assert not ledger.due_for_quarterly_replace(datetime(2026, 2, 1, tzinfo=timezone.utc))
-        assert ledger.due_for_quarterly_replace(datetime(2026, 4, 5, tzinfo=timezone.utc))
+        assert not ledger.due_for_quarterly_replace(datetime(2026, 2, 1, tzinfo=UTC))
+        assert ledger.due_for_quarterly_replace(datetime(2026, 4, 5, tzinfo=UTC))
 
     def test_due_for_annual_rebalance(self):
         ledger = BestStocksLedger(last_full_rebalance="2025-01-01")
-        assert not ledger.due_for_annual_rebalance(datetime(2025, 6, 1, tzinfo=timezone.utc))
-        assert ledger.due_for_annual_rebalance(datetime(2026, 1, 5, tzinfo=timezone.utc))
+        assert not ledger.due_for_annual_rebalance(datetime(2025, 6, 1, tzinfo=UTC))
+        assert ledger.due_for_annual_rebalance(datetime(2026, 1, 5, tzinfo=UTC))
 
     def test_save_and_load_roundtrip(self, tmp_path):
         ledger = BestStocksLedger(

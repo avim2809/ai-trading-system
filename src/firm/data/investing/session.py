@@ -211,7 +211,7 @@ class InvestingSession:
         if self.storage_state_path.exists():
             self._authenticated = True
 
-    def __enter__(self) -> "InvestingSession":
+    def __enter__(self) -> InvestingSession:
         return self
 
     def __exit__(self, *_exc: object) -> None:

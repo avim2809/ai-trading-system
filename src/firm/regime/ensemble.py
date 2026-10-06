@@ -76,7 +76,7 @@ class EnsembleRegimeModel:
     def fitted(self) -> bool:
         return bool(self._members)
 
-    def fit(self, X: np.ndarray) -> "EnsembleRegimeModel":
+    def fit(self, X: np.ndarray) -> EnsembleRegimeModel:
         """Fit one :class:`GaussianRegimeModel` per seed.
 
         A member that fails to fit (numerical/convergence issue, distinct

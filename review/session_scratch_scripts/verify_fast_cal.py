@@ -1,7 +1,11 @@
-import sys, time
+import sys
+import time
+
 sys.path.insert(0, "scripts"); sys.path.insert(0, "src")
-import numpy as np, pandas as pd
+import numpy as np
+import pandas as pd
 import run_insider_cluster_evaluation as ev
+
 S = sys.argv[1]
 benches = {s: ev.load_series(ev.EODHD / "etfs" / f"{s}.parquet") for s in ("IWC", "IWM", "IJH")}
 rows = pd.read_parquet(f"{S}/runs/insider/events_evaluated.parquet")

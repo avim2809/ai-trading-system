@@ -23,7 +23,7 @@ import json
 import logging
 import math
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -34,8 +34,8 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import insider_cluster_preregistered_bars as prereg  # noqa: E402
-from fetch_eodhd_prices import norm_name, price_path  # noqa: E402
+import insider_cluster_preregistered_bars as prereg
+from fetch_eodhd_prices import norm_name, price_path
 
 log = logging.getLogger(__name__)
 
@@ -198,9 +198,9 @@ def summarize(df: pd.DataFrame, col: str, seed: int) -> dict:
     ok = np.isfinite(v)
     v, months = v[ok], df.loc[ok, "entry_date"].dt.to_period("M").astype(str).to_numpy()
     if len(v) < 30:
-        return {"n": int(len(v)), "mean": float(np.mean(v)) if len(v) else float("nan")}
+        return {"n": len(v), "mean": float(np.mean(v)) if len(v) else float("nan")}
     boot = month_cluster_boot(v, months, prereg.BOOTSTRAP["n_boot"], seed)
-    return {"n": int(len(v)), "months": int(len(np.unique(months))), "mean": float(v.mean()),
+    return {"n": len(v), "months": len(np.unique(months)), "mean": float(v.mean()),
             "median": float(np.median(v)), "hit_rate": float((v > 0).mean()),
             "lb": float(np.quantile(boot, ALPHA)), "ub": float(np.quantile(boot, 1 - ALPHA))}
 
@@ -372,8 +372,8 @@ def main() -> int:
         df = event_returns(ev_h, cache, benches, hold, last_market_date)
         df["hold_name"] = hname
         all_rows.append(df)
-        strict = df[df["name_ok"] == True]  # noqa: E712
-        res = {"n_evaluated_covered": int(len(df)), "n_primary_strict": int(len(strict)),
+        strict = df[df["name_ok"] == True]
+        res = {"n_evaluated_covered": len(df), "n_primary_strict": len(strict),
                "early_exit_rate": float(strict["early_exit"].mean()) if len(strict) else None}
         seed = prereg.BOOTSTRAP["seed"] + hold
         res["primary"] = summarize(strict, "xs_net", seed)
@@ -439,7 +439,7 @@ def main() -> int:
               "B_b": bars["A3"] and bars["A5"] and bars["A7"]}
     results.update({"bars_A": bars, "tier_D_condition": tier_d, "bars_B": tier_b,
                     "tier": prereg.classify(bars, tier_d, tier_b),
-                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "generated_at": datetime.now(UTC).isoformat(),
                     "prereg_at": prereg.PREREGISTERED_AT})
 
     # missing-data bias check (reported)
@@ -452,8 +452,8 @@ def main() -> int:
         Path(args.report).write_text(json.dumps(results, indent=2, default=float))
     if args.append_ledger:
         ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"family": "insider_cluster", "entries": []}
-        ledger["entries"].append({"date": datetime.now(timezone.utc).date().isoformat(), "fingerprint": fp,
-                                  "n_trials": int(len(trial_sr)), "trials": list(cal.columns),
+        ledger["entries"].append({"date": datetime.now(UTC).date().isoformat(), "fingerprint": fp,
+                                  "n_trials": len(trial_sr), "trials": list(cal.columns),
                                   "trial_daily_sharpes": [float(v) for v in trial_sr],
                                   "tier": results["tier"]})
         ledger["cumulative_trials"] = sum(e["n_trials"] for e in ledger["entries"])

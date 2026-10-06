@@ -50,16 +50,19 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from sklearn.metrics import accuracy_score, roc_auc_score  # noqa: E402
+from sklearn.metrics import accuracy_score, roc_auc_score
 
-from firm.data.synthetic import DEFAULT_SYMBOLS, make_synthetic_prices  # noqa: E402
-from firm.patterns.ml import xgb_classifier  # noqa: E402
-from firm.patterns.ml.feature_engineering import build_features  # noqa: E402
-from firm.patterns.ml.labeling import label_triple_barrier_with_exit  # noqa: E402
-from firm.patterns.ml.purged_cv import purged_kfold_splits  # noqa: E402
-from firm.patterns.ml.sample_weights import sample_weights_by_group  # noqa: E402
-from firm.patterns.sample_size import DEFAULT_SAMPLE_COUNTS_FILENAME, save_sample_counts  # noqa: E402
-from firm.patterns.scanner import scan_symbol  # noqa: E402
+from firm.data.synthetic import DEFAULT_SYMBOLS, make_synthetic_prices
+from firm.patterns.ml import xgb_classifier
+from firm.patterns.ml.feature_engineering import build_features
+from firm.patterns.ml.labeling import label_triple_barrier_with_exit
+from firm.patterns.ml.purged_cv import purged_kfold_splits
+from firm.patterns.ml.sample_weights import sample_weights_by_group
+from firm.patterns.sample_size import (
+    DEFAULT_SAMPLE_COUNTS_FILENAME,
+    save_sample_counts,
+)
+from firm.patterns.scanner import scan_symbol
 
 # Reuses the strategy's own split/dividend adjustment (scales raw high/low by
 # adj_close/close so high>=close>=low holds across split boundaries) rather
@@ -67,7 +70,7 @@ from firm.patterns.scanner import scan_symbol  # noqa: E402
 # docstring. That module is read-only for this change (per
 # docs/pattern_recognition_plan.md); importing its helper is not modifying
 # it. If that ever changes, inline a local copy here instead.
-from firm.strategies.pattern_recognition import _adjusted_ohlc  # noqa: E402
+from firm.strategies.pattern_recognition import _adjusted_ohlc
 
 log = logging.getLogger(__name__)
 

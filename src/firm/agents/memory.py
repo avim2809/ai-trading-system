@@ -513,9 +513,9 @@ class TradingMemoryLog:
     @classmethod
     def _sanity_check_recommendation(
         cls,
-        recommendation: "DailyReflectionRecommendation | None",
+        recommendation: DailyReflectionRecommendation | None,
         strategy_performance: dict[str, dict[str, float]] | None,
-    ) -> "DailyReflectionRecommendation | None":
+    ) -> DailyReflectionRecommendation | None:
         """Downgrade an LLM-proposed action to ``no_action`` when it isn't
         actually backed by that strategy's own realized return (2026-09-25).
 
@@ -611,7 +611,7 @@ class TradingMemoryLog:
         raw_return: float,
         alpha: float,
         llm_service: Any,
-    ) -> tuple[str, str, str, str, str, "DailyReflectionRecommendation | None"]:
+    ) -> tuple[str, str, str, str, str, DailyReflectionRecommendation | None]:
         """Shared LLM-call/retry/parse logic for both ``reflect()`` and
         ``reflect_day()`` — returns
         ``(verdict, what_worked, what_failed, lesson, reflection_text, recommendation)``.
@@ -752,7 +752,7 @@ class TradingMemoryLog:
         self,
         *,
         date: str,
-        recommendation: "DailyReflectionRecommendation | None",
+        recommendation: DailyReflectionRecommendation | None,
         raw_return: float,
         benchmark_return: float,
         alpha: float,

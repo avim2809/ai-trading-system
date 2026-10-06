@@ -41,7 +41,7 @@ DEFAULT_WINDOW_BARS = 32
 def _require_torch():
     try:
         import torch
-        import torch.nn as nn
+        from torch import nn
     except ImportError as exc:  # pragma: no cover - exercised only without the isolated env
         raise ImportError(
             "torch is required for firm.patterns.ml.cnn_validator -- run this "

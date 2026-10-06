@@ -99,7 +99,7 @@ class MarketRegimeDetector:
             return pd.Timestamp(proxy["date"].iloc[-1])
         return len(features)
 
-    def _fit_model(self, X) -> "GaussianRegimeModel | EnsembleRegimeModel":
+    def _fit_model(self, X) -> GaussianRegimeModel | EnsembleRegimeModel:
         if self.ensemble:
             return EnsembleRegimeModel(n_states=self.n_states, seeds=self.ensemble_seeds).fit(X)
         return GaussianRegimeModel(n_states=self.n_states, random_state=self.random_state).fit(X)

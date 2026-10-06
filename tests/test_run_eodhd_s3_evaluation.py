@@ -23,8 +23,8 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import run_eodhd_s3_evaluation as ev  # noqa: E402
-import eodhd_s3_bond_commodity_trend_preregistered_bars as prereg  # noqa: E402
+import eodhd_s3_bond_commodity_trend_preregistered_bars as prereg
+import run_eodhd_s3_evaluation as ev
 
 
 def make_dates(n: int, start: str = "2007-01-02") -> pd.DatetimeIndex:
@@ -150,7 +150,6 @@ class TestMonthlyCompounding:
 class TestBondState:
     def test_on_when_excess_positive_off_when_negative(self):
         dates = make_dates(130)
-        month_of = dates.to_period("M")
         close_ret = pd.DataFrame({"SHY": 0.0, "IEF": 0.0, "TLT": 0.0}, index=dates)
         # One bucket clearly beats cash every month, one clearly loses to cash.
         close_ret["SHY"] = 0.002

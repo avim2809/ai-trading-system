@@ -13,8 +13,8 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import run_standalone_strategy_evaluation as ev  # noqa: E402
-import standalone_strategy_preregistered_bars as prereg  # noqa: E402
+import run_standalone_strategy_evaluation as ev
+import standalone_strategy_preregistered_bars as prereg
 
 
 def test_fingerprint_stable_and_eleven_strategies():

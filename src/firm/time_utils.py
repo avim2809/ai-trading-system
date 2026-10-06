@@ -13,9 +13,9 @@ tz-aware values piecemeal (which would silently break PIT filtering).
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def utcnow() -> datetime:
     """Naive UTC "now" — the deprecation-safe equivalent of ``datetime.utcnow()``."""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)

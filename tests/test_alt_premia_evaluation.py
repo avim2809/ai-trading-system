@@ -17,8 +17,8 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import alt_premia_preregistered_bars as prereg  # noqa: E402
-import run_alt_premia_evaluation as ev  # noqa: E402
+import alt_premia_preregistered_bars as prereg
+import run_alt_premia_evaluation as ev
 
 
 class TestPrereg:

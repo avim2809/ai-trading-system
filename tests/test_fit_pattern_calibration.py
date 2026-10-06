@@ -19,7 +19,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from fit_pattern_calibration import (  # noqa: E402
+from fit_pattern_calibration import (
     _MIN_RESOLVED_FOR_CALIBRATION,
     _resolved_sample_from_history,
     _resolved_sample_from_synthetic_rule_based,
@@ -28,7 +28,7 @@ from fit_pattern_calibration import (  # noqa: E402
     main,
 )
 
-from firm.live.pattern_scan_history import PatternScanHistoryStore  # noqa: E402
+from firm.live.pattern_scan_history import PatternScanHistoryStore
 
 
 def _xgb_model_is_stale_relative_to_current_feature_schema() -> bool:

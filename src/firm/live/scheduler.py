@@ -11,9 +11,8 @@ import logging
 import os
 import shutil
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 from datetime import time as dt_time
-from datetime import timezone as dt_tz
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
@@ -146,7 +145,7 @@ def within_extended_hours_window(
     if session_cfg is None:
         return False
     tz = ZoneInfo(timezone)
-    ts = now if now.tzinfo is not None else now.replace(tzinfo=dt_tz.utc)
+    ts = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
     local = ts.astimezone(tz)
     if local.weekday() >= 5:
         return False
@@ -164,12 +163,11 @@ def trading_day_key(at: datetime, timezone: str = DEFAULT_MARKET_TIMEZONE) -> st
     Cycle timestamps are stored as naive UTC; this converts them before
     bucketing daily trade/turnover limits and decision-memory dates.
     """
-    from datetime import timezone as dt_tz
 
     tz = ZoneInfo(timezone)
     ts = at
     if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=dt_tz.utc)
+        ts = ts.replace(tzinfo=UTC)
     return ts.astimezone(tz).strftime("%Y-%m-%d")
 
 

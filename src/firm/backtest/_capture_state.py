@@ -24,7 +24,8 @@ import logging
 import os
 import socket
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ def _inbox_tag() -> str:
     return f"proc-{host}"
 
 
-def _append_inbox_json_line(entry: str, config: dict, cap: "_Capture") -> None:
+def _append_inbox_json_line(entry: str, config: dict, cap: _Capture) -> None:
     env = os.environ.get(LEDGER_ROOT_ENV)
     if not env and os.environ.get("PYTEST_CURRENT_TEST"):
         _warn_once("pytest-default-root", "trial capture: refusing the default host ledger root under pytest")
@@ -133,12 +134,12 @@ class _Capture:
                 self.metrics = {k: v for k, v in metrics.items() if isinstance(v, (int, float, str, bool))}
             if self.returns is not None and self.metrics is None:
                 r = self.returns.dropna()
-                self.metrics = {"n_obs": int(len(r))}
+                self.metrics = {"n_obs": len(r)}
         except Exception:
             log.debug("trial capture: finish() could not read result", exc_info=True)
 
 
-class capture_run:  # noqa: N801 - used as a context manager like a function
+class capture_run:
     """Context manager used at each entry point. Never raises; records only when outermost."""
 
     def __init__(self, entry: str, config: Any, seed: int | None = None) -> None:

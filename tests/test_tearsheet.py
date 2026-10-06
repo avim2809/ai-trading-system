@@ -8,7 +8,7 @@ import pytest
 
 quantstats = pytest.importorskip("quantstats")
 
-from firm.eval.tearsheet import render_tearsheet  # noqa: E402
+from firm.eval.tearsheet import render_tearsheet
 
 
 def _returns(n: int = 400) -> pd.Series:

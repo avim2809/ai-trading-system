@@ -15,7 +15,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from pattern_ml_preregistered_bars import (  # noqa: E402
+from pattern_ml_preregistered_bars import (
     BARS,
     PARAM_GRID,
     bars_fingerprint,

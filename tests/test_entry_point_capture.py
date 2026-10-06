@@ -53,7 +53,7 @@ def _child_env(tmp_path: Path) -> dict:
 
 def _git_repo(path: Path, dirty: bool) -> Path:
     path.mkdir(parents=True, exist_ok=True)
-    run = lambda *a: subprocess.run(["git", "-c", "safe.directory=*", *a], cwd=path, check=True, capture_output=True)  # noqa: E731
+    run = lambda *a: subprocess.run(["git", "-c", "safe.directory=*", *a], cwd=path, check=True, capture_output=True)
     run("init", "-q")
     (path / "a.txt").write_text("x")
     run("add", "a.txt")

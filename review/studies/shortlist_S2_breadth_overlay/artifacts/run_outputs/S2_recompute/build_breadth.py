@@ -35,7 +35,7 @@ import pandas as pd
 
 REPO = Path("/local/store/git/ai-trading-system")
 sys.path.insert(0, str(REPO / "scripts"))
-from eodhd_clean import clean_bars, equity_calendar  # noqa: E402
+from eodhd_clean import clean_bars, equity_calendar
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("build_breadth")

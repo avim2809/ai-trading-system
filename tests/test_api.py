@@ -8,22 +8,22 @@ from __future__ import annotations
 
 import json
 import time
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from firm.api.app import create_app
-
 # Reset the runs router singletons before each test module import so
 # tests don't leak state between runs.
 import firm.api.routers.runs as _runs_mod
+from firm.api.app import create_app
 
 
 @pytest.fixture(autouse=True)
 def _isolate_registry(tmp_path):
     """Give each test a fresh RunRegistry backed by a temp directory."""
-    from firm.experiments.registry import RunRegistry
     from firm.api.jobs import JobManager
+    from firm.experiments.registry import RunRegistry
 
     registry = RunRegistry(base_dir=str(tmp_path / "runs"))
     _runs_mod._registry = registry
@@ -149,8 +149,9 @@ class TestHealthBrokerConnectivity:
 
 class TestServerBindAddress:
     def test_defaults_to_loopback(self, monkeypatch):
-        import firm.api.app as app_mod
         import uvicorn
+
+        import firm.api.app as app_mod
 
         monkeypatch.delenv("FIRM_API_HOST", raising=False)
         captured = {}
@@ -160,8 +161,9 @@ class TestServerBindAddress:
         assert captured["port"] == 8000
 
     def test_respects_env_override(self, monkeypatch):
-        import firm.api.app as app_mod
         import uvicorn
+
+        import firm.api.app as app_mod
 
         monkeypatch.setenv("FIRM_API_HOST", "0.0.0.0")
         captured = {}
@@ -709,8 +711,10 @@ class TestLiveConfigRoundTrip:
         client.post("/api/live/stop")
 
     def test_trigger_skips_when_market_closed_unless_forced(self, client, monkeypatch):
-        import pandas as pd
         from unittest.mock import MagicMock
+
+        import pandas as pd
+
         import firm.data.providers.fallback as fallback_mod
         import firm.live.engine as engine_mod
 
@@ -762,8 +766,10 @@ class TestLiveClearEndpoints:
     def _mock_cycle_deps(self, monkeypatch):
         """run_cycle() otherwise builds a real orchestrator + FallbackProvider
         that make real network calls — mock both like test_trigger_* does."""
-        import pandas as pd
         from unittest.mock import MagicMock
+
+        import pandas as pd
+
         import firm.data.providers.fallback as fallback_mod
         import firm.live.engine as engine_mod
 
@@ -975,8 +981,10 @@ class TestLiveSleevedModeStart:
         no signals fire, but the whole pipeline including the sleeved-mode
         branch must survive it cleanly), then confirm GET /api/live/
         attribution reads from the real orchestrator's sleeve metrics."""
-        import pandas as pd
         from unittest.mock import MagicMock
+
+        import pandas as pd
+
         import firm.data.providers.fallback as fallback_mod
 
         mock_provider = MagicMock()
@@ -1015,8 +1023,10 @@ class TestLiveSleevedModeStart:
         test_attribution_endpoint_uses_sleeve_metrics_once_running above but
         for GET /api/live/attribution/history's raw per-strategy return
         series instead of collapsed metrics."""
-        import pandas as pd
         from unittest.mock import MagicMock
+
+        import pandas as pd
+
         import firm.data.providers.fallback as fallback_mod
 
         mock_provider = MagicMock()

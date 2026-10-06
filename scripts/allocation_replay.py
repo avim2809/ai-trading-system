@@ -32,8 +32,9 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import run_alt_premia_evaluation as ev  # noqa: E402  (data loading only)
-from firm.allocation.allocator import build_allocator  # noqa: E402
+import run_alt_premia_evaluation as ev
+
+from firm.allocation.allocator import build_allocator
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ def replay(allocation_cfg: dict, data_dir: Path, start: str, end: str | None = N
     years = len(ret) / 252
     by_year = {int(y): float((1 + g).prod() - 1) for y, g in ret.groupby(ret.index.year)}
     return {
-        "start": str(dates[0].date()), "end": str(dates[-1].date()), "n_days": int(len(ret)),
+        "start": str(dates[0].date()), "end": str(dates[-1].date()), "n_days": len(ret),
         "final_nav": float(nav_s.iloc[-1]),
         "cagr": float((nav_s.iloc[-1] / initial_nav) ** (1 / years) - 1),
         "vol": float(ret.std(ddof=1) * math.sqrt(252)),

@@ -68,7 +68,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import eodhd_clean as ec  # noqa: E402
+import eodhd_clean as ec
 
 log = logging.getLogger(__name__)
 

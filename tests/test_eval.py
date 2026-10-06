@@ -25,7 +25,6 @@ from firm.eval.plots import (
 from firm.eval.reports import BacktestReport
 from firm.portfolio.attribution import PerformanceAttribution
 
-
 # ======================================================================
 # Helpers
 # ======================================================================

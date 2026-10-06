@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -15,7 +14,6 @@ from firm.strategies import registry
 from firm.strategies.registry import (
     StrategyNotAllocatableError,
     StrategyStatus,
-    get,
     list_allocatable,
     list_strategies,
     require_allocatable,
@@ -53,7 +51,7 @@ def test_hard_status_refused_in_research_entry():
 
 def test_unknown_name_is_active():
     @registry.register("_dummy_lifecycle_test")
-    class _D:  # noqa: D401
+    class _D:
         pass
 
     try:

@@ -114,7 +114,8 @@ def health(request: Request):
 
 @router.get("/strategies")
 def strategies():
-    from firm.strategies import list_strategies, get as get_strategy
+    from firm.strategies import get as get_strategy
+    from firm.strategies import list_strategies
     names = list_strategies()
     result = []
     for name in names:

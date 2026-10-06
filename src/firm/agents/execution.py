@@ -19,7 +19,7 @@ caller supplies both the config and the broker.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -190,7 +190,7 @@ class ExecutionAgent(Agent):
             return ""
         ts = now if isinstance(now, datetime) else datetime.fromisoformat(str(now))
         if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
+            ts = ts.replace(tzinfo=UTC)
         return ts.astimezone(self._market_tz).strftime("%Y-%m-%d")
 
     def run(self, ctx: AgentContext, **inputs: Any) -> ExecutionReport:

@@ -54,7 +54,7 @@ def _validate_label_end(label_end: pd.Series | None) -> tuple[np.ndarray, np.nda
 def _embargo_count(embargo_pct: float, n: int) -> int:
     if not (0.0 <= embargo_pct < 1.0):
         raise ValueError(f"embargo_pct must be in [0, 1), got {embargo_pct}")
-    return int(math.ceil(embargo_pct * n - 1e-9))
+    return math.ceil(embargo_pct * n - 1e-9)
 
 
 def _train_indices(

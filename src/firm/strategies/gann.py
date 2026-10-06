@@ -70,7 +70,6 @@ from firm.contracts.models import Signal
 from firm.strategies.base import BaseStrategy, PitView
 from firm.strategies.registry import register
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

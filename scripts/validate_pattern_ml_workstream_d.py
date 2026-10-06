@@ -81,9 +81,10 @@ import json
 import logging
 import subprocess
 import sys
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -96,12 +97,12 @@ _SCRIPTS = Path(__file__).resolve().parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from firm.experiments.registry import RunRegistry  # noqa: E402
-from firm.experiments.runner import ExperimentRunner  # noqa: E402
+import measure_pattern_executable_expectancy as pit
+import pattern_ml_preregistered_bars as bars_module
+import validate_pattern_cnn_walkforward as cnn_wf
 
-import pattern_ml_preregistered_bars as bars_module  # noqa: E402
-import validate_pattern_cnn_walkforward as cnn_wf  # noqa: E402
-import measure_pattern_executable_expectancy as pit  # noqa: E402
+from firm.experiments.registry import RunRegistry
+from firm.experiments.runner import ExperimentRunner
 
 log = logging.getLogger("validate_pattern_ml_workstream_d")
 
@@ -440,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
         n_splits = min(2, bars_module.WALK_FORWARD_N_SPLITS)
     wf_start = args.dry_run_start_date if args.dry_run else bars_module.WALK_FORWARD_START_DATE
 
-    run_started_at = datetime.now(timezone.utc).isoformat()
+    run_started_at = datetime.now(UTC).isoformat()
     log.info(
         "Starting %s Workstream D evaluation: n_splits=%d start=%s bars_fingerprint=%s",
         "DRY-RUN" if args.dry_run else "REAL", n_splits, wf_start, bars_module.bars_fingerprint(),
@@ -477,7 +478,7 @@ def main(argv: list[str] | None = None) -> int:
 
     report = {
         "run_started_at": run_started_at,
-        "run_finished_at": datetime.now(timezone.utc).isoformat(),
+        "run_finished_at": datetime.now(UTC).isoformat(),
         "dry_run": bool(args.dry_run),
         "workstream_c_check": c_status,
         "bars_fingerprint": verdict["bars_fingerprint"],
@@ -501,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.dry_run:
         append_trial_history({
-            "date": datetime.now(timezone.utc).date().isoformat(),
+            "date": datetime.now(UTC).date().isoformat(),
             "source": "scripts/validate_pattern_ml_workstream_d.py (Workstream D pre-registered evaluation)",
             "n_folds": portfolio["n_folds"],
             "n_candidates": portfolio["n_candidates"],

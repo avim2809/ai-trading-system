@@ -40,7 +40,6 @@ from firm.portfolio.state import PortfolioState
 from firm.strategies.base import BaseStrategy, PitView
 from firm.strategies.registry import get, list_strategies
 
-
 # ---------------------------------------------------------------------------
 # Synthetic Data Factory
 # ---------------------------------------------------------------------------

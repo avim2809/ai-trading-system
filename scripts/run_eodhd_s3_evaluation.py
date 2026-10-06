@@ -65,10 +65,10 @@ import json
 import logging
 import math
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -78,10 +78,13 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import eodhd_s3_bond_commodity_trend_preregistered_bars as prereg  # noqa: E402
-from eodhd_clean import clean_bars, equity_calendar  # noqa: E402
-from firm.eval.overfitting import cscv_pbo, deflated_sharpe, _norm_ppf  # noqa: E402
-from run_alt_premia_evaluation import stationary_indices  # noqa: E402  (explicitly reused, per instruction)
+import eodhd_s3_bond_commodity_trend_preregistered_bars as prereg
+from eodhd_clean import clean_bars, equity_calendar
+from run_alt_premia_evaluation import (
+    stationary_indices,
+)
+
+from firm.eval.overfitting import cscv_pbo, deflated_sharpe
 
 log = logging.getLogger(__name__)
 
@@ -395,7 +398,7 @@ def bm3(inp: Inputs, stress: bool = False) -> pd.Series:
     return pd.Series(net, inp.dates, name="BM3_SPY_VT")
 
 
-def _monthly_lookup_target(monthly: pd.DataFrame, inp: Inputs, tickers: list[str]) -> Callable[[int, np.ndarray], "np.ndarray | None"]:
+def _monthly_lookup_target(monthly: pd.DataFrame, inp: Inputs, tickers: list[str]) -> Callable[[int, np.ndarray], np.ndarray | None]:
     """decide() that, on the first trading day of month M, targets the equal/zero
     weights computed for month label M-1 (the month that just completed)."""
     lookup = {lbl: row.to_numpy() for lbl, row in monthly.iterrows()}
@@ -707,7 +710,7 @@ def _tier_bars_for(sub: str, base: dict, stress: dict, plac: dict[str, np.ndarra
     c_full = window(base[variant] - inp.rf, w["start"], w["end"])
     res = {
         "sub_candidate": sub, "variant": variant, "window": w,
-        "n_days": int(len(c_full)),
+        "n_days": len(c_full),
         "sharpe": sharpe(c_full.to_numpy()),
         "cagr": float(np.prod(1 + window(base[variant], w["start"], w["end"]).to_numpy())
                       ** (prereg.TRADING_DAYS / len(c_full)) - 1),
@@ -743,7 +746,7 @@ def _tier_bars_for(sub: str, base: dict, stress: dict, plac: dict[str, np.ndarra
         js = pd.concat([cs, bs, rf_w], axis=1, keys=["c", "b", "rf"]).dropna()
         gap_stress = sharpe((js.c - js.rf).to_numpy()) - sharpe((js.b - js.rf).to_numpy())
         res["vs"][tag] = {
-            "benchmark": bm, "n_days": int(len(j)), "sharpe_c": sharpe(ce), "sharpe_b": sharpe(be),
+            "benchmark": bm, "n_days": len(j), "sharpe_c": sharpe(ce), "sharpe_b": sharpe(be),
             "gap": gap, "lb": lb, "ub": ub, "gap_half1": gap_h1, "gap_half2": gap_h2,
             "gap_stress_2x_costs": gap_stress,
             "A1": bool(tag == "primary" and gap > 0 and lb > 0),
@@ -828,9 +831,9 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
             audits[sub] = post_pass_audit(inp, base, sub)
 
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(), "fingerprint": fp,
+        "generated_at": datetime.now(UTC).isoformat(), "fingerprint": fp,
         "prereg_at": prereg.PREREGISTERED_AT, "data_end": prereg.DATA_END,
-        "alpha_one_sided": alpha, "pbo": pbo, "dsr_trials": int(len(trial_daily_sr)),
+        "alpha_one_sided": alpha, "pbo": pbo, "dsr_trials": len(trial_daily_sr),
         "dsr_prior_trials": prereg.DSR["prior_trials"],
         "results": results, "sanity_checks": checks, "post_pass_audits": audits,
         "prereg_issues": PREREG_ISSUES,
@@ -842,8 +845,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     if args.append_ledger:
         ledger = json.loads(LEDGER.read_text()) if LEDGER.exists() else {"family": "S3", "entries": []}
         ledger["entries"].append({
-            "date": datetime.now(timezone.utc).date().isoformat(), "fingerprint": fp,
-            "n_trials": int(len(trial_daily_sr)), "trials": VARIANT_NAMES,
+            "date": datetime.now(UTC).date().isoformat(), "fingerprint": fp,
+            "n_trials": len(trial_daily_sr), "trials": VARIANT_NAMES,
             "trial_daily_sharpes": [float(x) for x in trial_daily_sr],
             "tiers": {k: v["tier"] for k, v in results.items()},
         })

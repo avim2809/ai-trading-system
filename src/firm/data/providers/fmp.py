@@ -15,8 +15,8 @@ Uses the ``/stable`` endpoint family (post-Aug 2025). Endpoints:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Sequence
 
 import pandas as pd
 

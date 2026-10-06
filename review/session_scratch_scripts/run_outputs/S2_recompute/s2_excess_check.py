@@ -5,10 +5,11 @@ Does not change s2_recompute.py's own (already-final) numbers; this is a
 supplementary diagnostic only, run after my own numbers were final.
 """
 import sys
+
 sys.path.insert(0, "/tmp/claude-0/-local-store-git-ai-trading-system/c4c796e1-061f-42c7-9fa9-255931a43502/scratchpad/runs/S2_recompute")
-import s2_recompute as s2
 import numpy as np
 import pandas as pd
+import s2_recompute as s2
 
 calendar_full = s2.equity_calendar()
 window_mask_full = (calendar_full >= pd.Timestamp(s2.WINDOW_START)) & (calendar_full <= pd.Timestamp(s2.DATA_END))
@@ -75,6 +76,7 @@ for vname, spec in s2.VARIANTS.items():
 
 # DSR on excess-vs-BM2, prior_trials=206, matching primary's convention
 from firm.eval.overfitting import deflated_sharpe
+
 trial_excess_sharpes = np.array(trial_excess_sharpes)
 print("trial (period) excess sharpes:", trial_excess_sharpes)
 for vname, spec in s2.VARIANTS.items():

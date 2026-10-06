@@ -75,11 +75,10 @@ import hashlib
 import json
 import logging
 import math
-import re
 import sys
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 import pandas as pd
@@ -89,9 +88,10 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import eodhd_s5_crypto_momentum_preregistered_bars as prereg  # noqa: E402
-import eodhd_clean  # noqa: E402
-from firm.eval.overfitting import cscv_pbo, deflated_sharpe  # noqa: E402
+import eodhd_clean
+import eodhd_s5_crypto_momentum_preregistered_bars as prereg
+
+from firm.eval.overfitting import cscv_pbo, deflated_sharpe
 
 log = logging.getLogger(__name__)
 
@@ -775,7 +775,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     (out_dir / "build_meta.json").write_text(json.dumps({
         "n_files": len(files), "n_empty": tables["n_empty"], "n_cached_ever_eligible": tables["n_cached"],
         "n_union_pool": len(union_codes), "n_weeks": len(sundays),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
     }, indent=2))
     log.info("wrote build artifacts to %s", out_dir)
     return 0
@@ -989,7 +989,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     top10 = _top_contributors(results[primary_name]["held"], rets, col_of)
 
     report = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(UTC).isoformat(),
         "fingerprint_at_freeze": "30decf9398917c2e5229cfee3b186f9f1f9d623a814273ba5ac629a194dbd584",
         "fingerprint_recomputed": prereg.bars_fingerprint(),
         "preregistered_at": prereg.PREREGISTERED_AT,
@@ -1071,7 +1071,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
         ledger_path = _ROOT / "docs" / "s5_trial_history.json"
         ledger = json.loads(ledger_path.read_text()) if ledger_path.exists() else {"entries": []}
         ledger["entries"].append({
-            "appended_at": datetime.now(timezone.utc).isoformat(),
+            "appended_at": datetime.now(UTC).isoformat(),
             "fingerprint": prereg.bars_fingerprint(),
             "trial_daily_sharpes": trial_sharpes.tolist(),
             "variant_names": list(prereg.VARIANTS),

@@ -28,9 +28,10 @@ for p in (ROOT / "src", ROOT / "scripts"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
-import insider_cluster_preregistered_bars as prereg  # noqa: E402
-from fetch_eodhd_prices import norm_name, price_path  # noqa: E402
-from firm.eval.overfitting import cscv_pbo, deflated_sharpe  # noqa: E402
+import insider_cluster_preregistered_bars as prereg
+from fetch_eodhd_prices import norm_name, price_path
+
+from firm.eval.overfitting import cscv_pbo, deflated_sharpe
 
 EODHD = ROOT / "data" / "research" / "eodhd"
 INSIDER = ROOT / "data" / "research" / "insider"
@@ -272,11 +273,11 @@ def summarize(df: pd.DataFrame, col: str, seed: int) -> dict:
     finite = np.isfinite(v)
     v = v[finite]
     if len(v) < 30:
-        return {"n": int(len(v)), "mean": float(np.mean(v)) if len(v) else float("nan")}
+        return {"n": len(v), "mean": float(np.mean(v)) if len(v) else float("nan")}
     months = df.loc[finite, "entry_date"].dt.to_period("M").astype(str).to_numpy()
     boot = month_cluster_bootstrap_mean(v, months, N_BOOT, seed)
     return {
-        "n": int(len(v)), "months": int(len(np.unique(months))),
+        "n": len(v), "months": len(np.unique(months)),
         "mean": float(v.mean()), "median": float(np.median(v)),
         "hit_rate": float((v > 0).mean()),
         "lb": float(np.quantile(boot, ALPHA)), "ub": float(np.quantile(boot, 1 - ALPHA)),
@@ -457,8 +458,8 @@ def main() -> None:
         df = compute_event_returns(events_windowed, cache, benches, hold, data_end)
         df["hold_name"] = hname
         all_rows.append(df)
-        strict = df[df["name_ok"] == True]  # noqa: E712
-        res = {"n_evaluated_covered": int(len(df)), "n_primary_strict": int(len(strict)),
+        strict = df[df["name_ok"] == True]
+        res = {"n_evaluated_covered": len(df), "n_primary_strict": len(strict),
                "early_exit_rate": float(strict["early_exit"].mean()) if len(strict) else None}
         seed = SEED + hold
         res["primary"] = summarize(strict, "xs_net", seed)

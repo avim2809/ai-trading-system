@@ -24,10 +24,15 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from train_pattern_ml import build_dataset, main, run_purged_cv_report, time_ordered_split  # noqa: E402
+from train_pattern_ml import (
+    build_dataset,
+    main,
+    run_purged_cv_report,
+    time_ordered_split,
+)
 
-from firm.data.synthetic import make_synthetic_prices  # noqa: E402
-from firm.patterns.ml import xgb_classifier  # noqa: E402
+from firm.data.synthetic import make_synthetic_prices
+from firm.patterns.ml import xgb_classifier
 
 try:
     import xgboost  # noqa: F401

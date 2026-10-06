@@ -61,7 +61,7 @@ def record_unregistered(
     ret = None
     if returns is not None:
         ret = pd.Series(returns).dropna().astype(float)
-        n_obs = int(len(ret))
+        n_obs = len(ret)
         if n_obs > 2 and float(ret.std(ddof=1)) > 0:
             gross = float(ret.mean() / ret.std(ddof=1))  # per-period, NOT annualised
             skew = float(ret.skew())

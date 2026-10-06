@@ -49,7 +49,9 @@ class ExperimentRunner:
         self, config: dict, seed: int = 42, notes: str = ""
     ) -> ExperimentRun:
         """Execute a single experiment run (captured as one trial, P1-12)."""
-        from firm.backtest._capture_state import capture_run  # local import: no new top-level symbol
+        from firm.backtest._capture_state import (
+            capture_run,  # local import: no new top-level symbol
+        )
 
         with capture_run("ExperimentRunner.run", config, seed) as cap:
             result = self._run_impl(config, seed, notes)
@@ -621,8 +623,7 @@ class ExperimentRunner:
         for i in range(n_splits):
             window_start = start + timedelta(days=i * window_days)
             window_end = window_start + timedelta(days=window_days)
-            if window_end > end:
-                window_end = end
+            window_end = min(window_end, end)
 
             train_days = int(window_days * train_pct)
             train_start = window_start

@@ -31,7 +31,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ class RiskProfile:
     require_stop: bool = True
 
     @classmethod
-    def from_json(cls, path: str | Path) -> "RiskProfile":
+    def from_json(cls, path: str | Path) -> RiskProfile:
         data = json.loads(Path(path).read_text())
         known = set(cls.__dataclass_fields__)  # type: ignore[attr-defined]
         return cls(**{k: v for k, v in data.items() if k in known})
@@ -108,14 +108,14 @@ class Order:
     qty: float
     order_type: str = "market"  # "market" | "limit"
     price: float = 0.0
-    stop: Optional[float] = None
-    atr: Optional[float] = None
-    risk_amount: Optional[float] = None
+    stop: float | None = None
+    atr: float | None = None
+    risk_amount: float | None = None
 
     def notional(self) -> float:
         return abs(self.price * self.qty)
 
-    def derived_risk_amount(self) -> Optional[float]:
+    def derived_risk_amount(self) -> float | None:
         if self.risk_amount is not None:
             return self.risk_amount
         if self.stop is not None and self.price:
@@ -203,7 +203,7 @@ def guard_order(
     profile: RiskProfile,
     *,
     live: bool = False,
-    confirmation: Optional[str] = None,
+    confirmation: str | None = None,
     audit: Path | None = None,
 ) -> dict[str, Any]:
     """Run an order through the full safety pipeline and return the decision.

@@ -25,8 +25,8 @@ _SRC = Path(__file__).resolve().parents[1] / "src"
 if _SRC.exists() and str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from firm.backtest.run import execute_backtest  # noqa: E402
-from firm.config import get_settings  # noqa: E402
+from firm.backtest.run import execute_backtest
+from firm.config import get_settings
 
 log = logging.getLogger(__name__)
 

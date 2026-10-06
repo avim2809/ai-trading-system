@@ -12,7 +12,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import build_review_package as brp  # noqa: E402
+import build_review_package as brp
 
 
 def test_run_dirs_are_renamed_out_of_the_gitignored_runs_folder():

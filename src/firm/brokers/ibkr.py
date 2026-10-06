@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from firm.brokers.base import (
@@ -52,7 +52,7 @@ _IB_REQUEST_TIMEOUT_SECONDS = 20.0
 _IB_LOCK_ACQUIRE_TIMEOUT_SECONDS = 45.0
 
 try:
-    from ib_async import IB, Order, Stock, LimitOrder, MarketOrder, StopLimitOrder, StopOrder
+    from ib_async import IB, LimitOrder, MarketOrder, Order, Stock, StopLimitOrder, StopOrder
     from ib_async.ib import StartupFetch
 
     _HAS_IB = True
@@ -738,7 +738,7 @@ class IBKRBroker(Broker):
                 "Could not resolve exchange timezone %r; falling back to UTC "
                 "for market-hours check", cd.timeZoneId, exc_info=True,
             )
-            tz = timezone.utc
+            tz = UTC
         now = datetime.now(tz)
 
         is_open = False

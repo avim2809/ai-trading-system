@@ -6,7 +6,7 @@ import logging
 import os
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests
@@ -330,7 +330,7 @@ class NewsIngestor(BaseIngestor):
                 # ISO/RFC-822 string like the other providers -- normalize_date
                 # doesn't parse raw epoch ints, so convert explicitly.
                 epoch = article.get("datetime")
-                pub_dt = datetime.fromtimestamp(epoch, tz=timezone.utc) if epoch else None
+                pub_dt = datetime.fromtimestamp(epoch, tz=UTC) if epoch else None
                 metadata = {
                     "source": "finnhub",
                     "symbol": symbol,

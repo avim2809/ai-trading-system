@@ -67,7 +67,6 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from firm.patterns.extrema import zigzag_pivots
 from firm.patterns.scanner import scan_symbol

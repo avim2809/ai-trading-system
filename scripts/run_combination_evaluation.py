@@ -26,7 +26,7 @@ import logging
 import math
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -38,7 +38,7 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import combination_preregistered_bars as prereg  # noqa: E402
+import combination_preregistered_bars as prereg
 
 log = logging.getLogger(__name__)
 
@@ -103,10 +103,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         "candidate": args.candidate,
         "bars_fingerprint": prereg.bars_fingerprint(),
         "seconds": round(secs),
-        "n_days": int(len(rets)),
+        "n_days": len(rets),
         "portfolio": d.get("portfolio", {}),
         "turnover": d.get("turnover", {}),
-        "finished_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": datetime.now(UTC).isoformat(),
     }
     (out / f"{args.candidate}.meta.json").write_text(json.dumps(meta, indent=2, default=str))
     log.info("run %s done in %.0fs (%d days)", args.candidate, secs, len(rets))
@@ -192,7 +192,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     for (trs, tre, ts, te), m in zip(splits, fold_masks):
         f = full[m]
         per_fold.append({
-            "train": [trs, tre], "test": [ts, te], "n_days": int(len(f)),
+            "train": [trs, tre], "test": [ts, te], "n_days": len(f),
             "sharpe": {c: _sharpe(f[c].to_numpy()) for c in full},
             "total_return": {c: float(np.prod(1 + f[c].to_numpy()) - 1) for c in full},
             "max_dd": {c: _max_dd(f[c].to_numpy()) for c in full},
@@ -242,8 +242,8 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     report = {
         "bars_fingerprint": fp,
         "preregistered_at": prereg.PREREGISTERED_AT,
-        "evaluated_at": datetime.now(timezone.utc).isoformat(),
-        "n_full_days": int(len(full)), "n_oos_days": int(len(oos)),
+        "evaluated_at": datetime.now(UTC).isoformat(),
+        "n_full_days": len(full), "n_oos_days": len(oos),
         "prior_trials_from_ledger": prior, "this_run_trials": len(full.columns),
         "pbo": pbo, "per_fold": per_fold, "primary": results, "secondary": secondary,
     }
@@ -254,7 +254,7 @@ def cmd_evaluate(args: argparse.Namespace) -> int:
     if args.append_ledger:
         data = json.loads(LEDGER.read_text())
         data["entries"].append({
-            "date": datetime.now(timezone.utc).date().isoformat(),
+            "date": datetime.now(UTC).date().isoformat(),
             "source": "scripts/run_combination_evaluation.py (" + fp[:12] + ")",
             "n_trials": len(full.columns),
             "candidates": list(full.columns),

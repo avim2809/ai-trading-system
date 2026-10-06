@@ -168,7 +168,7 @@ class SolveResult:
 
 
 def estimate_covariance(
-    returns_by_symbol: dict[str, "Any"],
+    returns_by_symbol: dict[str, Any],
     symbols: list[str],
     lookback_days: int = _TRADING_DAYS_PER_YEAR,
 ) -> np.ndarray | None:
@@ -263,7 +263,7 @@ def diagonal_covariance(vols: dict[str, float], symbols: list[str]) -> np.ndarra
 
 
 def estimate_ic(
-    trailing_returns: "Any | None",
+    trailing_returns: Any | None,
     ic_prior: float = _IC_PRIOR_DEFAULT,
     ic_cap: float = _IC_CAP_DEFAULT,
     ir_ref: float = _IC_IR_REF_DEFAULT,
@@ -549,7 +549,7 @@ def _solve_qp(
     try:
         import cvxpy as cp
     except Exception:
-        log.error("cvxpy unavailable -- falling back to closed-form solve", exc_info=True)
+        log.exception("cvxpy unavailable -- falling back to closed-form solve")
         return None
 
     n = len(symbols)

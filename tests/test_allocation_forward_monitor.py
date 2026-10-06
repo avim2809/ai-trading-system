@@ -7,7 +7,6 @@ import hashlib
 import http.server
 import importlib
 import json
-import re
 import subprocess
 import sys
 import threading
@@ -23,14 +22,14 @@ for _p in (ROOT / "src", ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import firm  # noqa: E402
-from firm.monitoring import allocation_forward as m  # noqa: E402
+import firm
+from firm.monitoring import allocation_forward as m
 
 assert str(Path(firm.__file__).resolve()).startswith(str(ROOT)), firm.__file__
 
-import allocation_forward_test_preregistered as frozen  # noqa: E402
-import allocation_replay  # noqa: E402
-import run_alt_premia_evaluation as ev  # noqa: E402
+import allocation_forward_test_preregistered as frozen
+import allocation_replay
+import run_alt_premia_evaluation as ev
 
 CFG = yaml.safe_load((ROOT / "config" / "live_alpaca.yaml").read_text())["allocation"]
 FROZEN_FILES = [
@@ -94,10 +93,9 @@ def test_data_end_override_does_not_leak(inputs):
     assert orig == "2026-09-28"
     m.simulated_nav(CFG, inputs, "2026-09-30", "2026-10-15", 100_000.0)
     assert ev.prereg.DATA_END == "2026-09-28"
-    with pytest.raises(RuntimeError):
-        with m._data_end_override("2030-01-01"):
-            assert ev.prereg.DATA_END == "2030-01-01"
-            raise RuntimeError("boom")
+    with pytest.raises(RuntimeError), m._data_end_override("2030-01-01"):
+        assert ev.prereg.DATA_END == "2030-01-01"
+        raise RuntimeError("boom")
     assert ev.prereg.DATA_END == "2026-09-28"
     with pytest.raises(Exception):
         m.simulated_nav(CFG, inputs / "missing", "2026-09-30", "2026-10-15", 1.0)
@@ -409,6 +407,7 @@ def test_never_halts(daily_env, monkeypatch):
 
 def test_alert_uses_environ_only(monkeypatch):
     import dotenv
+
     import firm.live.notifications as n
     monkeypatch.setattr(dotenv, "dotenv_values", lambda *a, **k: (_ for _ in ()).throw(AssertionError("dotenv_values called")))
     seen = []

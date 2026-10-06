@@ -8,9 +8,9 @@ console script (declared in ``pyproject.toml``) maps to :func:`fetch_data_main`.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Sequence
 
 import pandas as pd
 

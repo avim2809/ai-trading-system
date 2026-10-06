@@ -32,7 +32,10 @@ from typing import Any
 
 import pandas as pd
 
-from firm.live.dynamic_universe_state import load_dynamic_universe_state, save_dynamic_universe_state
+from firm.live.dynamic_universe_state import (
+    load_dynamic_universe_state,
+    save_dynamic_universe_state,
+)
 from firm.time_utils import utcnow
 
 log = logging.getLogger(__name__)

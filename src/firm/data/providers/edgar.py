@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, NamedTuple, Sequence
+from typing import Any, NamedTuple
 
 import pandas as pd
 

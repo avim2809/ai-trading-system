@@ -332,7 +332,7 @@ class TestScorePatternMetaConfirmation:
         session.get_inputs.return_value = [input_stub]
         session.run.return_value = [np.array([0]), np.array([[1.0]])]
 
-        import unittest.mock as mock
+        from unittest import mock
         with mock.patch.object(xinf, "_load_session", lambda path: (session, (0,))):
             p_act = xinf.score_pattern_meta_confirmation(np.zeros(N_FEATURES), model_path="/tmp/meta.onnx")
 

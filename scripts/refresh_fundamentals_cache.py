@@ -18,9 +18,9 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
 
-from firm.live.fundamentals_refresh import refresh_fundamentals_cache  # noqa: E402
-from firm.live.provider_utils import load_live_yaml_defaults  # noqa: E402
-from firm.logging_setup import setup_logging  # noqa: E402
+from firm.live.fundamentals_refresh import refresh_fundamentals_cache
+from firm.live.provider_utils import load_live_yaml_defaults
+from firm.logging_setup import setup_logging
 
 
 def main() -> None:

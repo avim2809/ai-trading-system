@@ -18,7 +18,6 @@ import pytest
 from firm.live.pattern_scan_history import PatternScanHistoryStore
 from firm.live.pattern_scan_job import PatternScanJob, pattern_scan_enabled
 
-
 # ---------------------------------------------------------------------------
 # Env-var gating
 # ---------------------------------------------------------------------------

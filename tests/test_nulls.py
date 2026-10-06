@@ -155,7 +155,6 @@ def test_random_entry_preserves_exposure():
     pos = np.zeros(100)
     pos[10:20], pos[40:45], pos[60:80] = 1, -1, 1
     data = np.random.default_rng(0).normal(size=100)
-    counts = []
     out = random_entry_null(lambda d: pos, data, 50, 3, stat=lambda x: float(np.count_nonzero(x)))
     assert (out == 35).all()
     # lengths resampled from the empirical set when keep_holding_periods=False

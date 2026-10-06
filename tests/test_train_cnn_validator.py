@@ -21,7 +21,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from train_cnn_validator import time_ordered_split  # noqa: E402
+from train_cnn_validator import time_ordered_split
 
 
 class TestTimeOrderedSplit:

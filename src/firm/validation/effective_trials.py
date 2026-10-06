@@ -185,8 +185,8 @@ def gate_n(ledger_trials: pd.DataFrame, trial_returns: pd.DataFrame) -> TrialCou
     )
     base = max(ons, enb, mp, float(sums["raw_returns_bearing"]))
     other = sum(v for k, v in sums.items() if k != "raw_returns_bearing")
-    gate = int(math.ceil(base - 1e-9)) + other
-    sens = gate - sums["legacy_estimate"] - (int(math.ceil(base - 1e-9)) - sums["raw_returns_bearing"])
+    gate = math.ceil(base - 1e-9) + other
+    sens = gate - sums["legacy_estimate"] - (math.ceil(base - 1e-9) - sums["raw_returns_bearing"])
     return TrialCount(
         raw_returns_bearing=sums["raw_returns_bearing"], effective_onc=float(ons), effective_enb=float(enb),
         effective_mp=float(mp), legacy_ledgered=sums["legacy_ledgered"], legacy_estimate=sums["legacy_estimate"],

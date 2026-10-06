@@ -7,7 +7,6 @@ from datetime import date, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from alpaca.data.enums import DataFeed
 
 from firm.data.providers.alpaca import AlpacaProvider

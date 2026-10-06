@@ -1,6 +1,9 @@
-import sys, json
+import json
+import sys
+
 sys.path.insert(0, sys.argv[1] + "/scripts")
 from eodhd_clean import equity_calendar
+
 cal = equity_calendar("etfs_full")
 
 def midpoint(start, end):

@@ -53,7 +53,7 @@ def reallocation_params(cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def compute_recommendation(
-    engine: "LiveTradingEngine",
+    engine: LiveTradingEngine,
     *,
     metric: str = DEFAULT_METRIC,
     floor_pct: float = DEFAULT_FLOOR_PCT,
@@ -99,7 +99,7 @@ def compute_recommendation(
     }
 
 
-def run_scheduled_capital_reallocation_check(engine: "LiveTradingEngine") -> None:
+def run_scheduled_capital_reallocation_check(engine: LiveTradingEngine) -> None:
     """APScheduler entrypoint -- computes and logs the current
     recommendation. No-op unless ``capital_reallocation.enabled`` is set
     on the engine's own config; never applies anything (see module

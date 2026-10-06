@@ -20,8 +20,7 @@ _SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-import run_eodhd_s4_evaluation as r  # noqa: E402
-
+import run_eodhd_s4_evaluation as r
 
 # ---------------------------------------------------------------------------
 # adv_bucket_bps
@@ -181,7 +180,7 @@ class TestSegmentBoundaryMidHold:
 
 class TestDelistingAndStress:
     def test_early_exit_uses_last_clean_close_not_scheduled_exit(self):
-        T, M = 10, 1
+        T = 10
         col_of = {"D": 0}
         last_pos_of = {"D": 4}     # the series stops at position 4 (delisted)
         month_ends = pd.DatetimeIndex(["2000-01-31"])

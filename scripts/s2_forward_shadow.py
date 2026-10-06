@@ -27,7 +27,7 @@ import math
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -38,9 +38,10 @@ for _p in (_ROOT / "src", _ROOT / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import eodhd_breadth as eb  # noqa: E402
-import s2_forward_preregistered as pre  # noqa: E402
-from firm.allocation.calendar import first_trading_day_of_month, is_us_trading_day  # noqa: E402
+import eodhd_breadth as eb
+import s2_forward_preregistered as pre
+
+from firm.allocation.calendar import first_trading_day_of_month
 
 log = logging.getLogger(__name__)
 
@@ -218,7 +219,7 @@ def perf(nav: pd.Series, cash_ret: pd.Series) -> dict:
     cagr = float((nav.iloc[-1] / nav.iloc[0]) ** (1 / yrs) - 1) if len(nav) > 1 else float("nan")
     sd = ex.std(ddof=1)
     return {"sharpe": float(ex.mean() / sd * math.sqrt(252)) if sd and sd > 0 else float("nan"),
-            "cagr": cagr, "max_dd": dd, "calmar": float(cagr / dd) if dd > 0 else float("nan"), "days": int(len(r))}
+            "cagr": cagr, "max_dd": dd, "calmar": float(cagr / dd) if dd > 0 else float("nan"), "days": len(r)}
 
 
 def completed_episodes(cuts: list[bool]) -> int:
@@ -279,11 +280,12 @@ def append_decision(state: Path, rec: dict) -> None:
 def notify(severity: str, message: str, **extra) -> None:
     try:
         from dotenv import dotenv_values
+
         from firm.live.notifications import _post_webhook
         url = os.environ.get("ALERT_WEBHOOK_URL") or dotenv_values(_ROOT / ".env").get("ALERT_WEBHOOK_URL")
         if url:
             _post_webhook(url, {"kind": "s2_forward_shadow", "severity": severity, "message": message,
-                                "timestamp": datetime.now(timezone.utc).isoformat(), **extra}, timeout=10)
+                                "timestamp": datetime.now(UTC).isoformat(), **extra}, timeout=10)
         else:
             log.warning("no ALERT_WEBHOOK_URL; not notifying: %s", message)
     except Exception as exc:  # a failed alert must never fail the ledger
@@ -318,7 +320,7 @@ def rebuild_ledger(state: Path, client) -> dict:
 def cmd_run(args) -> int:
     state = Path(args.state_dir)
     client = client_from_env()
-    today = datetime.now(timezone.utc).date()
+    today = datetime.now(UTC).date()
     market_today = today
     start = date.fromisoformat(pre.START["first_check_day"])
     spy_hist = fetch_adj(client, "SPY.US", (start - timedelta(days=HISTORY_DAYS)).isoformat())
@@ -351,7 +353,7 @@ def cmd_run(args) -> int:
         rec = {"check_day": f.isoformat(), "signal_asof": asof.isoformat(), "status": status, "reason": why,
                "breadth": cur["breadth"], "eligible": cur["eligible"], "with_bar": cur["with_bar"],
                "cut": cuts, "weights_v1": weights_for(cuts["overlay_v1"]),
-               "forward_fingerprint": pre.bars_fingerprint(), "computed_at": datetime.now(timezone.utc).isoformat()}
+               "forward_fingerprint": pre.bars_fingerprint(), "computed_at": datetime.now(UTC).isoformat()}
         if args.dry_run:
             print(json.dumps(rec, indent=1, default=str))
             continue
@@ -365,7 +367,7 @@ def cmd_run(args) -> int:
         return 0
     led = rebuild_ledger(state, client)
     nav = led["nav"]
-    summary = {"run_at": datetime.now(timezone.utc).isoformat(), "last_session": led["last_session"],
+    summary = {"run_at": datetime.now(UTC).isoformat(), "last_session": led["last_session"],
                "checks": len(load_decisions(state)),
                "nav_last": None if nav.empty else {p: float(nav[p].iloc[-1]) for p in PORTFOLIOS}}
     (state / "status.json").write_text(json.dumps(summary, indent=1))
@@ -394,7 +396,7 @@ def cmd_validate(args) -> int:
         rows.append({"asof": str(a.date()), "live_breadth": r["breadth"], "frozen_breadth": float(f["pct_above_200sma"]),
                      "diff_pp": db, "live_eligible": r["eligible"], "frozen_eligible": int(f["eligible_count"]),
                      "eligible_diff_pct": de, "pass": ok})
-    out = {"validated_at": datetime.now(timezone.utc).isoformat(), "n_dates": len(rows), "all_pass": ok_all,
+    out = {"validated_at": datetime.now(UTC).isoformat(), "n_dates": len(rows), "all_pass": ok_all,
            "rule": pre.INTEGRITY["launch_validation"]["rule"], "rows": rows}
     Path(args.out).write_text(json.dumps(out, indent=1))
     print(json.dumps({"all_pass": ok_all, "n_dates": len(rows),
@@ -427,7 +429,7 @@ def cmd_export(args) -> int:
     state = Path(args.state_dir)
     decisions = load_decisions(state)
     nav = pd.read_csv(state / "nav.csv") if (state / "nav.csv").exists() else pd.DataFrame()
-    Path(args.out).write_text(json.dumps({"exported_at": datetime.now(timezone.utc).isoformat(),
+    Path(args.out).write_text(json.dumps({"exported_at": datetime.now(UTC).isoformat(),
                                           "forward_fingerprint": pre.bars_fingerprint(),
                                           "decisions": decisions, "nav": nav.to_dict("records")}, indent=1, default=str))
     return 0

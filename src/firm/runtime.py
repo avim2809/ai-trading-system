@@ -105,17 +105,16 @@ def build_orchestrator(config: dict):
     wrap quant agents with their LLM-enhanced variants, and ``strategies``
     to wire alpha strategies into the analysts.
     """
-    from firm.agents.orchestrator import Orchestrator
-
     from firm.agents.analysts.fundamental import FundamentalAnalyst
-    from firm.agents.analysts.technical import TechnicalAnalyst
     from firm.agents.analysts.sentiment import SentimentAnalyst
-    from firm.agents.research.bull import BullResearcher
-    from firm.agents.research.bear import BearResearcher
-    from firm.agents.research.debate import DebateAgent
-    from firm.agents.trader import TraderAgent
-    from firm.agents.risk import RiskAgent
+    from firm.agents.analysts.technical import TechnicalAnalyst
     from firm.agents.execution import ExecutionAgent
+    from firm.agents.orchestrator import Orchestrator
+    from firm.agents.research.bear import BearResearcher
+    from firm.agents.research.bull import BullResearcher
+    from firm.agents.research.debate import DebateAgent
+    from firm.agents.risk import RiskAgent
+    from firm.agents.trader import TraderAgent
 
     agent_modes: dict = config.get("agent_modes", {})
     llm_config: dict = dict(config.get("llm_config") or {})
@@ -441,7 +440,7 @@ def run_backtest_from_config(
     config: dict,
     prices_df: pd.DataFrame,
     universe: list[str],
-) -> tuple[BacktestEngine, "BacktestReport"]:  # noqa: F821
+) -> tuple[BacktestEngine, BacktestReport]:  # noqa: F821
     """Setup + run + report in one call (captured as one trial, P1-12)."""
     from firm.backtest._capture_state import capture_run  # local import: no new top-level symbol
 
@@ -455,7 +454,7 @@ def _run_backtest_from_config_impl(
     config: dict,
     prices_df: pd.DataFrame,
     universe: list[str],
-) -> tuple[BacktestEngine, "BacktestReport"]:  # noqa: F821
+) -> tuple[BacktestEngine, BacktestReport]:  # noqa: F821
     """Setup + run + report in one call.  Used by both CLI and API."""
     # Fundamentals/sentiment: same ParquetCache keys as ``fetch-data`` so
     # multi_factor / event_driven / sentiment backtests match live when

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 from firm.live.news_guard import (
@@ -20,31 +20,31 @@ NFP = Event(
     title="US Non-Farm Payrolls",
     currency="USD",
     impact="High",
-    when=datetime(2026, 7, 2, 13, 30, tzinfo=timezone.utc),
+    when=datetime(2026, 7, 2, 13, 30, tzinfo=UTC),
 )
 
 
 class TestDecision:
     def test_blocks_inside_window(self):
-        at = datetime(2026, 7, 2, 13, 25, tzinfo=timezone.utc)  # 5 min before
+        at = datetime(2026, 7, 2, 13, 25, tzinfo=UTC)  # 5 min before
         res = decide("SPY", at, [NFP])
         assert res["decision"] == "block"
         assert res["blocking_event"]["currency"] == "USD"
 
     def test_approves_outside_window(self):
-        at = datetime(2026, 7, 2, 10, 0, tzinfo=timezone.utc)  # hours before
+        at = datetime(2026, 7, 2, 10, 0, tzinfo=UTC)  # hours before
         res = decide("SPY", at, [NFP])
         assert res["decision"] == "approve"
         assert res["next_event"] is not None
 
     def test_after_window_approves(self):
-        at = datetime(2026, 7, 2, 14, 0, tzinfo=timezone.utc)  # 30 min after
+        at = datetime(2026, 7, 2, 14, 0, tzinfo=UTC)  # 30 min after
         res = decide("SPY", at, [NFP])
         assert res["decision"] == "approve"
 
     def test_unrelated_currency_not_blocked(self):
         # A pure EUR instrument should ignore a USD-only event.
-        at = datetime(2026, 7, 2, 13, 30, tzinfo=timezone.utc)
+        at = datetime(2026, 7, 2, 13, 30, tzinfo=UTC)
         res = decide("DAX", at, [NFP])
         assert res["decision"] == "approve"
 

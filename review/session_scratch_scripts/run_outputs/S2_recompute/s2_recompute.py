@@ -22,9 +22,10 @@ import pandas as pd
 REPO = Path("/local/store/git/ai-trading-system")
 sys.path.insert(0, str(REPO / "scripts"))
 sys.path.insert(0, str(REPO / "src"))
-from eodhd_clean import clean_bars, equity_calendar  # noqa: E402
-from firm.eval.overfitting import cscv_pbo, deflated_sharpe  # noqa: E402
-from run_alt_premia_evaluation import stationary_indices  # noqa: E402
+from eodhd_clean import clean_bars, equity_calendar
+from run_alt_premia_evaluation import stationary_indices
+
+from firm.eval.overfitting import cscv_pbo, deflated_sharpe
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("s2_recompute")
