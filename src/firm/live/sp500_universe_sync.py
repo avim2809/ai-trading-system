@@ -45,7 +45,10 @@ import pandas as pd
 
 from firm.data.providers.fmp import FMPProvider
 from firm.live.danelfin_universe_sync import compute_universe_update
-from firm.live.dynamic_universe_state import load_dynamic_universe_state, save_dynamic_universe_state
+from firm.live.dynamic_universe_state import (
+    load_dynamic_universe_state,
+    save_dynamic_universe_state,
+)
 from firm.live.sp500_sector_cache import fetch_sp500_constituents_from_github, load_sector_cache
 from firm.time_utils import utcnow
 

@@ -105,7 +105,6 @@ def create_app() -> FastAPI:
     )
 
     import firm.strategies  # noqa: F401 — ensure @register decorators fire at startup
-
     from firm.api.routers import agents, decisions, live, logs, meta, patterns, runs, system
     application.include_router(meta.router, prefix="/api", tags=["meta"])
     application.include_router(runs.router, prefix="/api", tags=["runs"])

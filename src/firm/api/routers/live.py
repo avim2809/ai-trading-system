@@ -291,7 +291,7 @@ def _get_queue(request: Request):
     return queue
 
 
-def _get_trade_history(app) -> "TradeHistoryStore":
+def _get_trade_history(app) -> TradeHistoryStore:
     from firm.live.trade_history import TradeHistoryStore
 
     store = getattr(app.state, "trade_history", None)
@@ -1449,8 +1449,8 @@ def get_live_config(request: Request) -> dict[str, Any]:
     scheduler = getattr(request.app.state, "live_scheduler", None)
 
     if engine is None:
-        from firm.strategies.registry import list_strategies
         from firm.live.provider_utils import load_live_yaml_defaults
+        from firm.strategies.registry import list_strategies
 
         all_strategies = list_strategies()
         yaml_defaults = load_live_yaml_defaults()

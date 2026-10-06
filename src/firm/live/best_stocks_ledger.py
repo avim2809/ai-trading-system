@@ -54,7 +54,7 @@ class BestStocksLedger:
     # ------------------------------------------------------------------
 
     @classmethod
-    def load(cls, path: str | Path) -> "BestStocksLedger":
+    def load(cls, path: str | Path) -> BestStocksLedger:
         p = Path(path)
         if not p.exists():
             return cls()
@@ -190,7 +190,7 @@ class BestStocksLedger:
     def rebalance_via_broker(
         self,
         asof: datetime,
-        broker: "IBKRBroker",
+        broker: IBKRBroker,
         rebalance_kind: str,
         target_selection: list[dict] | None = None,
     ) -> None:
