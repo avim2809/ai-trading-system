@@ -9,6 +9,9 @@
 #   fixed in the charter, working value 9%).
 # Frozen inputs that this schema has no field for (to be recorded in scripts/core_v1_preregistered.py, which P3-11 freezes
 # BEFORE any run, and re-verified by P3-08 step 1). sha256 at drafting time (2026-10-05); the owner must re-check at approval:
+#   Gates version 2 (owner-signed Amendment 1, 2026-10-06): the gate-7 benchmark is the PINNED ANNUAL BM2 variant
+#   (gate_variant: annual, uses_higher_after_tax_sharpe_of_the_two: false); monthly BM2 is a reported sensitivity only.
+#   The gates_hash below is the plain-file sha256 (re-computed 2026-10-06); universe, stress and tax hashes were re-verified unchanged.
 #   config/universe_etf.yaml    379cb0d4611f46561b1125c72276803ea590ab3de136bcfb3d0ce6a9696d3514   (frozen 14-ETF universe, 2026-10-05)
 #   config/stress_periods.yaml  9b165c652cc7616fc4f441f00350a12a42e9145db9a261f9ab6e2004e9496f20
 #   config/tax_il.yaml          1badbc38c33a8321929d03d4bafe339b22600e5c312a026bfaa6153683585856
@@ -48,7 +51,7 @@ metrics:
   - after_tax_after_cost_sharpe_vs_bm2
   - correlation_to_bm2
   - effective_number_of_bets
-gates_hash: a2ad524590376bb43fa0fd13ecc030181015a98575aeef8c7677fdaf623ed5be   # sha256 of the gates file at drafting time
+gates_hash: bcecaec9ef44163596e27459779a124747d382c8068bf0607d4793df79f71540   # plain-file sha256 of the gates file (gates version 2, Amendment 1, 2026-10-06)
 charter_ref: research/charters/core_v1.md
 falsification: >-
   The hypothesis is rejected (and the accepted outcome is the passive portfolio, BM2 or the owner's 92/8 book) if the frozen

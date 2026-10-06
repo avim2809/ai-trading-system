@@ -20,7 +20,7 @@ import core_v1_preregistered as pre  # noqa: E402
 
 DRAFT = ROOT / "plan" / "drafts" / "P3-11" / "core_v1_prereg_DRAFT.yaml"
 # Pinned at freeze: any edit to the frozen constants changes this and must be a new pre-registration.
-PINNED_FINGERPRINT = "9fe358a86960a4b29536ebc49d164253b61d7a2828afd58da09646a4b66a9e58"
+PINNED_FINGERPRINT = "7826fb035a5c756e2cee990b2f3e088b0f3b88caa7d77572e8e2d5013712b46a"
 PINNED_WEIGHTS_SHA256 = "6eb94e426e90a832b4a7c1778f36212bd2e1503d6cdb3e89141d45f8df3d0d83"
 
 
@@ -28,6 +28,13 @@ def test_fingerprint_stable_and_pinned():
     fp = pre.bars_fingerprint()
     assert fp == pre.bars_fingerprint() and re.fullmatch(r"[0-9a-f]{64}", fp)
     assert fp == PINNED_FINGERPRINT
+
+
+def test_gate7_benchmark_variant_pinned_annual_monthly_sensitivity():
+    assert (pre.BENCHMARK_GATE_VARIANT, pre.BENCHMARK_SENSITIVITY_VARIANT) == ("annual", "monthly")
+    b = next(v["benchmark"] for v in yaml.safe_load((ROOT / pre.GATES_FILE).read_text()).values()
+             if isinstance(v, dict) and isinstance(v.get("benchmark"), dict))
+    assert b["uses_higher_after_tax_sharpe_of_the_two"] is False and b["gate_variant"] == "annual"
 
 
 def test_fingerprint_changes_with_a_constant(monkeypatch):
