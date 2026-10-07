@@ -213,9 +213,13 @@ def test_results_json_machine_readable_with_provenance(e2e):
     assert r["trial_ids"] and all(r["trial_ids"].values())
 
 
-def test_unfrozen_min_active_fraction_leaves_gate_five_insufficient(e2e):
+def test_frozen_min_active_fraction_is_read_from_the_prereg_module_so_gate_five_can_decide(e2e):
+    st = e2e["out"]["results"]["stress"]
+    assert st["min_active_fraction"] == pre.MIN_ACTIVE_FRACTION == 0.5
     o = next(x for x in e2e["out"]["outcomes"] if x["test_id"] == "G-RESEARCH-5")
-    assert o["status"] == "insufficient" and "min_active_fraction" in o["reason"]
+    assert "not frozen" not in o["reason"]
+    # on the 1,100-day synthetic panel most episodes lie outside the data (unusable), which is the only reason gate 5 can still be insufficient
+    assert o["status"] in ("pass", "fail") or "episodes not scored ok" in o["reason"]
 
 
 def test_pbo_with_a_three_config_grid_is_uninformative_and_cannot_pass(e2e):
@@ -225,12 +229,14 @@ def test_pbo_with_a_three_config_grid_is_uninformative_and_cannot_pass(e2e):
 
 def test_robustness_reestimates_scalars_so_mean_abs_forecast_is_ten(e2e):
     perts = e2e["out"]["results"]["robustness"]["perturbations"]
-    assert len(perts) == 2 * len(P.perturbable_names(GATES)["assessed"])
+    assert len(perts) == 2 * len(P.perturbable_names(GATES, frozen=pre.FROZEN_LIMITS)["assessed"]) == 54
     assert all(abs(p["mean_abs_forecast_after_reestimation"] - 10.0) < 1e-6 for p in perts)
-    un = e2e["out"]["results"]["robustness"]["unassessed"]
-    assert "vol_ewma_span" in un
+    assert {p["param"] for p in perts} >= {"vol_ewma_span", "max_vol_scale", "instrument_risk_cap_multiple"}
+    assert e2e["out"]["results"]["robustness"]["unassessed"] == []
     o = next(x for x in e2e["out"]["outcomes"] if x["test_id"] == "G-RESEARCH-6")
-    assert o["status"] in ("insufficient", "fail")                                    # never a pass while parameters are unassessed
+    assert "not assessed" not in o["reason"] and o["status"] in ("pass", "fail")      # all 27 parameters perturbed: a real verdict
+    sl = e2e["out"]["sizing_layer"]
+    assert sl["frozen"]["vol_ewma_span"] == pre.VOL_EWMA_SPAN and sl["selected_config_diagnostics"]["n_days"] > 0
 
 
 def test_stress_reference_uses_the_registered_bootstrap_horizon(e2e):
@@ -266,7 +272,7 @@ def test_every_step_is_a_registered_trial_and_provenance_verifies(e2e, led):
     n = len(SYMS)
     assert kinds["constant_estimation"] == 11 + n + n + 1
     assert kinds["grid"] == 3 and kinds["cost_stress"] == 2 and kinds["comparison"] == 1
-    assert kinds["robustness"] == 2 * len(P.perturbable_names(GATES)["assessed"]) and kinds["stress_suite"] == 10 and kinds["benchmark"] == 3
+    assert kinds["robustness"] == 2 * len(P.perturbable_names(GATES, frozen=pre.FROZEN_LIMITS)["assessed"]) == 54 and kinds["stress_suite"] == 10 and kinds["benchmark"] == 3
     GR.verify_provenance({"trial_ids": list(e2e["out"]["trial_ids"].values())}, tr)
     bad = tr.copy()
     bad.loc[bad.index[3], "mode"] = "exploratory"

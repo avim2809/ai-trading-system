@@ -19,6 +19,15 @@
 #   CPCV selection rule (argmax of training-group net Sharpe, per gates), data cleaning version (v3, OD-14), and the
 #   cleaning look-ahead disclosure (full-window v2/v3 cleaning looks ahead up to 5 bars; the P2-02 loader applies
 #   clean(raw[date <= asof])).
+# RE-FREEZE (batch 20, 2026-10-06T20:58:05Z, before any real run; supersedes the approved 20261006_core_v1.yaml, whose module fingerprint
+# 7826fb03... has 0 real trials and was never run). Added, each chosen WITHOUT performance input (sources in scripts/core_v1_preregistered.py):
+#   * min_active_fraction (gate 5) = 0.5: a simple majority of the 14-ETF universe active at an episode start; any 7 ETFs span >= 3 asset
+#     classes (the minimum for a 0.40 class cap). Convention, owner-confirm.
+#   * vol_ewma_span (gate 6) = 252 trading days: the slow EWMA of P4-03, one year, vs the 35-day instrument span. Convention, owner-confirm.
+#   * max_vol_scale = 1.5 and instrument_risk_cap_multiple = 2.0: the gates robustness_parameters values (= config/risk.yaml).
+#   * the P4-03 layer (vol scale, instrument risk-contribution cap, gross cap) is wired into the evaluation sizing path; all 27 gate-6
+#     parameters are perturbed (54 robustness rows). The 0.40 class risk cap is NOT applied (not a gate-6 parameter; would be an exemption).
+# Unchanged: grid (12), weights scheme, seed 20261005, family N 31, universe, tau (charter), gates hash, annual gate-7 variant.
 # Ledger accounting: n_planned_trials is capped by the schema at max_grid_size (12). The P3-11 estimation trials (kind
 # constant_estimation) and the P3-08 robustness / cost_stress / stress_suite / benchmark / comparison runs are ADDITIONAL ledger
 # trials; they are enumerated with expected counts in scripts/core_v1_preregistered.py and all count toward N (OD-09, raw count).
@@ -51,6 +60,8 @@ metrics:
   - after_tax_after_cost_sharpe_vs_bm2
   - correlation_to_bm2
   - effective_number_of_bets
+  - stress_episode_active_fraction_vs_floor_0_5
+  - robustness_all_27_parameters_perturbed
 gates_hash: bcecaec9ef44163596e27459779a124747d382c8068bf0607d4793df79f71540   # plain-file sha256 of the gates file (gates version 2, Amendment 1, 2026-10-06)
 charter_ref: research/charters/core_v1.md
 falsification: >-
@@ -59,7 +70,9 @@ falsification: >-
   net Sharpe <= 0 at 2x cost, PBO >= 0.5 with prob_oos_loss >= 0.5, a stress-episode loss above 1.5x the bootstrap p95 reference,
   a +/-25% parameter perturbation cutting net Sharpe below 70% of the chosen value, more than 20% of days at the gross cap, after-tax
   after-cost Sharpe not above BM2 (with correlation to BM2 above 0.3), DSR below 0.95 at the raw trial count N, or fewer than 7 of
-  9 positive CPCV paths. Only Tier A supports a claim of no contradiction with an edge. No re-run, grid change or threshold change
+  9 positive CPCV paths. Gate 5 is scored only for episodes with at least half of the 14-ETF universe active (min_active_fraction 0.5,
+  frozen in the core_v1 module); gate 6 perturbs all 27 numeric core parameters including vol_ewma_span 252, max_vol_scale 1.5 and
+  instrument_risk_cap_multiple 2.0. Only Tier A supports a claim of no contradiction with an edge. No re-run, grid change or threshold change
   after viewing any result; any change is a new pre-registration.
 post_seal_data_declaration: No data after 2026-09-30 was examined.
 approver: ""             # OWNER fills (identity)

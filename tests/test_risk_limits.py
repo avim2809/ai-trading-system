@@ -368,3 +368,71 @@ def test_no_live_imports():
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
     assert out.returncode == 0, out.stdout + out.stderr
+
+
+# ---- batch 20: optional research-backtest options of apply_caps (defaults unchanged) ----------------------------------------------------------
+def _random_case(rng, n=8, k_classes=4):
+    names = [f"X{i}" for i in range(n)]
+    classes = [f"c{i % k_classes}" for i in range(n)]
+    a = rng.normal(size=(n, n + 10)) * 0.01
+    vols = rng.uniform(0.5, 3.0, n)
+    cov = pd.DataFrame(a @ a.T * np.outer(vols, vols) * 252, index=names, columns=names)
+    w = pd.Series(rng.uniform(0.02, 0.3, n), index=names)
+    return names, classes, cov, w
+
+
+def test_closed_form_solver_matches_bisection_on_random_cases():
+    rng = np.random.default_rng(11)
+    n_bound = 0
+    for _ in range(60):
+        names, classes, cov, w = _random_case(rng)
+        lim = make_limits(names, classes, max_instrument_risk_mult=2.0, max_class_risk_share=0.6)
+        try:
+            ref = apply_caps(w, cov, lim)
+        except RuntimeError:
+            continue                                   # slow-fixed-point case: covered below
+        fast = apply_caps(w, cov, lim, solver="closed_form")
+        np.testing.assert_allclose(fast.weights.to_numpy(), ref.weights.to_numpy(), rtol=1e-8, atol=1e-10)
+        assert fast.gross_cap_bound == ref.gross_cap_bound and fast.instrument_cap_bound == ref.instrument_cap_bound
+        n_bound += any(ref.instrument_cap_bound.values()) or any(ref.class_cap_bound.values())
+    assert n_bound >= 10                               # the comparison exercised binding caps
+
+
+def test_closed_form_scale_puts_the_share_exactly_on_the_cap():
+    rng = np.random.default_rng(5)
+    names, classes, cov, w = _random_case(rng, n=6, k_classes=6)
+    lim = make_limits(names, classes, max_instrument_risk_mult=1.0, max_class_risk_share=1.0)
+    res = apply_caps(w, cov, lim, solver="closed_form", tol=1e-12, max_sweeps=500, on_nonconvergence="return")
+    rc = risk_contributions(res.weights, cov)
+    assert (rc <= 1.0 / 6.0 + 1e-6).all()
+
+
+def test_nonconvergence_raises_by_default_and_returns_the_last_iterate_on_request():
+    rng = np.random.default_rng(0)
+    names = [f"X{i}" for i in range(14)]
+    classes = [f"c{i}" for i in range(14)]
+    for _ in range(300):
+        a = rng.normal(size=(14, 34)) * 0.01
+        vols = rng.uniform(0.5, 3, 14)
+        cov = pd.DataFrame(a @ a.T * np.outer(vols, vols) * 252, index=names, columns=names)
+        w = pd.Series(rng.uniform(0.01, 0.25, 14), index=names)
+        lim = make_limits(names, classes, share={s: 1.0 / 14 for s in names}, max_instrument_risk_mult=1.2, max_class_risk_share=1.0)
+        try:
+            apply_caps(w, cov, lim)
+        except RuntimeError:
+            res = apply_caps(w, cov, lim, solver="closed_form", max_sweeps=3, on_nonconvergence="return")
+            assert "nonconverged" in res.breaches_clipped and (res.weights <= w + 1e-12).all()      # only ever scaled down
+            with pytest.raises(RuntimeError, match="did not converge in 3 sweeps"):
+                apply_caps(w, cov, lim, solver="closed_form", max_sweeps=3)
+            return
+    pytest.fail("no non-converging case found; tighten the instrument cap multiple")
+
+
+def test_apply_caps_option_validation():
+    names, classes, cov = five()
+    lim = make_limits(names, classes)
+    w = pd.Series(0.1, index=names)
+    with pytest.raises(ValueError, match="solver"):
+        apply_caps(w, cov, lim, solver="newton")
+    with pytest.raises(ValueError, match="on_nonconvergence"):
+        apply_caps(w, cov, lim, on_nonconvergence="ignore")

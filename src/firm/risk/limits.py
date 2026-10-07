@@ -237,12 +237,36 @@ def vol_scale(sigma_ewma: float, limits: RiskLimits) -> float:
     return float(min(limits.tau / sigma_ewma, limits.max_vol_scale))
 
 
+def _closed_form_scale(w: np.ndarray, c: np.ndarray, members: np.ndarray, cap: float) -> float | None:
+    """Exact scale on ``members`` with risk share == cap (``solver="closed_form"``; ``None`` if the share cannot be diluted).
+
+    With ``x = w`` scaled by k on the members: ``share(k) = (k^2 a + k b) / (k^2 a + 2 k b + d)`` where ``a = w_M' C_MM w_M``,
+    ``b = w_M' C_M,rest w_rest``, ``d = w_rest' C_rest w_rest``; ``share(k) = cap`` is the quadratic
+    ``a (1 - cap) k^2 + b (1 - 2 cap) k - cap d = 0`` whose positive root is returned (the stable form of the quadratic formula).
+    """
+    mask = np.zeros(len(w), dtype=bool)
+    mask[members] = True
+    wm = w[mask]
+    u = c @ w
+    var0 = float(w @ u)
+    a = float(wm @ c[np.ix_(mask, mask)] @ wm)
+    b = float(wm @ u[mask]) - a
+    d = var0 - a - 2.0 * b
+    if not d > 0 or not a > 0:
+        return None
+    A, B = a * (1.0 - cap), b * (1.0 - 2.0 * cap)
+    disc = math.sqrt(max(B * B + 4.0 * A * cap * d, 0.0))
+    k = 2.0 * cap * d / (B + disc) if B > 0 else (-B + disc) / (2.0 * A)
+    return float(min(max(k, _MIN_SCALE), 1.0))
+
+
 def _group_scale_to_cap(
-    w: np.ndarray, c: np.ndarray, members: np.ndarray, cap: float
+    w: np.ndarray, c: np.ndarray, members: np.ndarray, cap: float, *, solver: str = "bisection", tol: float = _FIXED_POINT_TOL
 ) -> float | None:
     """Scale in (0, 1] on ``members`` so their risk share is <= cap after the rest is re-normalised.
 
     Returns 1.0 if already within the cap, ``None`` if no scale can satisfy it (share cannot be diluted).
+    ``solver="bisection"`` (default, the P4-03 rule) or ``"closed_form"`` (the exact quadratic root, same fixed point, much faster).
     """
 
     def share(k: float) -> float:
@@ -250,8 +274,10 @@ def _group_scale_to_cap(
         x[members] *= k
         return float(_rc(x, c)[members].sum())
 
-    if share(1.0) <= cap + _FIXED_POINT_TOL:
+    if share(1.0) <= cap + tol:
         return 1.0
+    if solver == "closed_form":
+        return _closed_form_scale(w, c, members, cap)
     if share(_MIN_SCALE) > cap:
         return None
     lo, hi = _MIN_SCALE, 1.0  # share(lo) <= cap (feasible side), share(hi) > cap
@@ -266,8 +292,20 @@ def _group_scale_to_cap(
     return lo
 
 
-def apply_caps(weights: pd.Series, cov_annual: pd.DataFrame, limits: RiskLimits) -> LimitResult:
-    """Long-only, instrument-RC cap, class-RC cap, gross cap, margin. Idempotent for fixed inputs."""
+def apply_caps(
+    weights: pd.Series, cov_annual: pd.DataFrame, limits: RiskLimits, *, solver: Literal["bisection", "closed_form"] = "bisection",
+    max_sweeps: int = _FIXED_POINT_ITERS, tol: float = _FIXED_POINT_TOL, on_nonconvergence: Literal["raise", "return"] = "raise",
+) -> LimitResult:
+    """Long-only, instrument-RC cap, class-RC cap, gross cap, margin. Idempotent for fixed inputs.
+
+    The keyword-only options default to the P4-03 rule (bisection, 50 sweeps, 1e-10, non-convergence raises) and exist for research
+    backtests that call this once per day: ``solver="closed_form"`` solves each group scale exactly, ``max_sweeps`` / ``tol`` bound the
+    fixed point, and ``on_nonconvergence="return"`` keeps the last (down-scaled) iterate and lists ``"nonconverged"`` in ``breaches_clipped``
+    instead of raising.
+    """
+    if solver not in ("bisection", "closed_form") or on_nonconvergence not in ("raise", "return"):
+        raise ValueError("solver must be 'bisection'|'closed_form' and on_nonconvergence 'raise'|'return'")
+    nonconverged = False
     names = list(weights.index)
     w = weights.to_numpy(dtype=float).copy()
     if not np.isfinite(w).all():
@@ -315,13 +353,13 @@ def apply_caps(weights: pd.Series, cov_annual: pd.DataFrame, limits: RiskLimits)
             for k in held_classes
         }
 
-        for sweep in range(_FIXED_POINT_ITERS + 1):
+        for sweep in range(max_sweeps + 1):
             changed = False
             for i in held:
                 key = f"i:{names[i]}"
                 if key in skip or w[i] == 0:
                     continue
-                k = _group_scale_to_cap(w, c, np.array([i]), inst_cap[i])
+                k = _group_scale_to_cap(w, c, np.array([i]), inst_cap[i], solver=solver, tol=tol)
                 if k is None:
                     log.warning("instrument cap infeasible for %s: skipped", names[i])
                     skip.add(key)
@@ -334,7 +372,7 @@ def apply_caps(weights: pd.Series, cov_annual: pd.DataFrame, limits: RiskLimits)
                 key = f"c:{cls}"
                 if key in skip:
                     continue
-                k = _group_scale_to_cap(w, c, mem, limits.max_class_risk_share)
+                k = _group_scale_to_cap(w, c, mem, limits.max_class_risk_share, solver=solver, tol=tol)
                 if k is None:
                     log.warning("class cap infeasible for %s: skipped", cls)
                     skip.add(key)
@@ -345,13 +383,18 @@ def apply_caps(weights: pd.Series, cov_annual: pd.DataFrame, limits: RiskLimits)
                     changed = True
             if not changed:
                 break
-            if sweep == _FIXED_POINT_ITERS:
-                raise RuntimeError(
-                    f"risk-contribution caps did not converge in {_FIXED_POINT_ITERS} sweeps"
-                )
+            if sweep == max_sweeps:
+                if on_nonconvergence == "raise":
+                    raise RuntimeError(
+                        f"risk-contribution caps did not converge in {max_sweeps} sweeps"
+                    )
+                log.warning("risk-contribution caps did not converge in %d sweeps: last iterate kept", max_sweeps)
+                nonconverged = True
     clipped += [f"instrument:{n}" for n, b in inst_bound.items() if b]
     clipped += [f"class:{k}" for k, b in class_bound.items() if b]
     clipped += [f"infeasible:{s}" for s in sorted(skip)]
+    if nonconverged:
+        clipped.append("nonconverged")
 
     # uniform scalings below leave every risk share unchanged, so the caps above still hold afterwards
     scaled, gross_bound = gross_cap_scale(dict(zip(names, w.tolist())), cap=limits.max_gross)

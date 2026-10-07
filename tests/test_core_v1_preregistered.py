@@ -20,7 +20,8 @@ import core_v1_preregistered as pre
 
 DRAFT = ROOT / "plan" / "drafts" / "P3-11" / "core_v1_prereg_DRAFT.yaml"
 # Pinned at freeze: any edit to the frozen constants changes this and must be a new pre-registration.
-PINNED_FINGERPRINT = "7826fb035a5c756e2cee990b2f3e088b0f3b88caa7d77572e8e2d5013712b46a"
+PINNED_FINGERPRINT = "6274c43219d3c7fe1fe9d9686bd6a8cfe3c643fc32aaf68d86116279746c2bba"   # batch-20 re-freeze (supersedes 7826fb03...)
+PINNED_DRAFT_SPEC_HASH = "b964385057cf7a7ef25b5f14f36ce2551f0511adff86dbca968ce1874a9bdbf0"
 PINNED_WEIGHTS_SHA256 = "6eb94e426e90a832b4a7c1778f36212bd2e1503d6cdb3e89141d45f8df3d0d83"
 
 
@@ -179,3 +180,95 @@ def test_charter_with_placeholder_front_matter_is_refused(tmp_path):
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     with pytest.raises(pre.PreregError, match="charter invalid"):
         pre.verify_charter(tmp_path)
+
+
+# ---- batch-20 re-freeze: gate-5 coverage floor and the P4-03 limits layer -------------------------------------------------------------------------
+def test_refreeze_values_and_their_sources():
+    gates = yaml.safe_load((ROOT / pre.GATES_FILE).read_text())
+    rp = gates["robustness_parameters"]
+    assert pre.MIN_ACTIVE_FRACTION == 0.5 and 0 < pre.MIN_ACTIVE_FRACTION <= 1
+    assert pre.VOL_EWMA_SPAN == 252 and isinstance(pre.VOL_EWMA_SPAN, int)
+    assert rp["vol_ewma_span"]["value"] is None                     # still null in the gates; frozen here
+    assert pre.MAX_VOL_SCALE == rp["max_vol_scale"]["value"] == 1.5
+    assert pre.INSTRUMENT_RISK_CAP_MULTIPLE == rp["instrument_risk_cap_multiple"]["value"] == 2.0
+    assert pre.CLASS_RISK_CAP_APPLIED == 1.0
+    assert pre.FROZEN_LIMITS == {"vol_ewma_span": 252}
+    risk = yaml.safe_load((ROOT / "config" / "risk.yaml").read_text())
+    assert risk["max_vol_scale"] == pre.MAX_VOL_SCALE and risk["max_instrument_risk_mult"] == pre.INSTRUMENT_RISK_CAP_MULTIPLE
+    assert pre._risk_yaml_mismatches() == []
+
+
+def test_every_new_value_is_in_the_fingerprint(monkeypatch):
+    before = pre.bars_fingerprint()
+    for name, val in (("MIN_ACTIVE_FRACTION", 0.6), ("VOL_EWMA_SPAN", 126), ("MAX_VOL_SCALE", 2.0),
+                      ("INSTRUMENT_RISK_CAP_MULTIPLE", 3.0), ("CLASS_RISK_CAP_APPLIED", 0.4)):
+        monkeypatch.setattr(pre, name, val)
+        assert pre.bars_fingerprint() != before, name
+        monkeypatch.undo()
+    assert pre.bars_fingerprint() == before
+
+
+def test_min_active_fraction_is_structurally_sound():
+    """Universe metadata only (no data): the floor needs at least 3 asset classes, and every named episode meets it at its start."""
+    import pandas as pd
+
+    uni = yaml.safe_load((ROOT / "config" / "universe_etf.yaml").read_text())
+    n = len(pre.UNIVERSE)
+    need = -(-int(pre.MIN_ACTIVE_FRACTION * n * 1000) // 1000)                      # ceil(0.5 * 14) = 7
+    sizes = sorted((len(m) for m in pre.ASSET_CLASSES.values()), reverse=True)
+    assert need == 7 and sum(sizes[:2]) < need                                       # any 7 instruments span >= 3 classes
+    assert need >= 3 and -(-1 // 0.40) <= 3                                          # 0.40 class cap needs >= 3 held classes
+    first = {str(i["symbol"]): pd.Timestamp(i["first_trade_date"]) for i in uni["instruments"]}
+    sp = yaml.safe_load((ROOT / "config/stress_periods.yaml").read_text())
+    episodes = next(v for v in sp.values() if isinstance(v, list) and v and "name" in v[0])
+    for e in episodes:
+        start = pd.Timestamp(e["start"])
+        active = sum(1 for t in first.values() if t + pd.offsets.BDay(pre.ENTRY_GATE_DAYS) <= start)
+        assert active / n >= pre.MIN_ACTIVE_FRACTION, e["name"]
+
+
+def test_all_27_gate6_parameters_are_covered_by_the_frozen_module():
+    from firm.research import core_v1_pipeline as P
+
+    gates = yaml.safe_load((ROOT / pre.GATES_FILE).read_text())
+    names = P.perturbable_names(gates, frozen=pre.FROZEN_LIMITS)
+    assert names["unassessed"] == [] and len(names["assessed"]) == pre.N_ROBUSTNESS_PARAMS == 27
+    assert pre.EXPECTED_LEDGER_ROWS["robustness"] == 54 and pre.NEW_RAW_ROWS == 122
+
+
+def test_unchanged_by_the_refreeze():
+    """Everything the owner said to keep: weights scheme, seed, family-N semantics, universe, gates hash, annual gate variant, grid."""
+    assert pre.SEED == 20261005 and pre.FAMILY_N == 31 and pre.FAMILY_N_ROW_KINDS == ("grid",)
+    assert pre.INSTRUMENT_WEIGHT_SCHEME == "handcrafted_one_group_per_asset_class" and pre.INSTRUMENT_WEIGHTS_SHA256 == PINNED_WEIGHTS_SHA256
+    assert pre.GATES_SHA256 == "bcecaec9ef44163596e27459779a124747d382c8068bf0607d4793df79f71540"
+    assert pre.BENCHMARK_GATE_VARIANT == "annual" and len(pre.GRID) == 12 and len(pre.UNIVERSE) == 14
+    assert pre.FILE_HASHES["config/universe_etf.yaml"] == "379cb0d4611f46561b1125c72276803ea590ab3de136bcfb3d0ce6a9696d3514"
+
+
+def test_draft_yaml_is_a_valid_new_spec_with_the_refreeze_content():
+    from firm.research import prereg as PR
+
+    d = yaml.safe_load(DRAFT.read_text())
+    assert d["approver"] == "" and d["approved_at_utc"] == ""                       # the owner fills both
+    spec = PR.spec_from_dict({**d, "approver": "owner", "approved_at_utc": "2026-10-07T00:00:00Z"})
+    assert PR.validate_spec(spec) == [] and PR.spec_hash(spec) == PINNED_DRAFT_SPEC_HASH
+    assert spec.gates_hash == pre.GATES_SHA256 and "min_active_fraction 0.5" in spec.falsification
+    assert "robustness_all_27_parameters_perturbed" in spec.metrics
+    old = yaml.safe_load((ROOT / "research" / "preregistration" / "20261006_core_v1.yaml").read_text())
+    assert PR.spec_hash(PR.spec_from_dict(old)) != PINNED_DRAFT_SPEC_HASH            # a genuinely new pre-registration
+    assert d["param_grid"] == old["param_grid"] and d["universe"] == old["universe"] and d["family"] == old["family"] == "core_v1"
+
+
+def test_verify_before_run_refuses_a_drifted_risk_limit(tmp_path):
+    (tmp_path / "config").mkdir()
+    for rel in pre.FILE_HASHES:
+        (tmp_path / rel).write_bytes((ROOT / rel).read_bytes())
+    risk = yaml.safe_load((ROOT / "config" / "risk.yaml").read_text())
+    risk["max_vol_scale"] = 2.0
+    (tmp_path / "config" / "risk.yaml").write_text(yaml.safe_dump(risk))
+    with pytest.raises(pre.PreregError, match="frozen limits changed"):
+        pre.verify_before_run(tmp_path)
+    risk["max_vol_scale"], risk["vol_ewma_span"] = 1.5, 63
+    (tmp_path / "config" / "risk.yaml").write_text(yaml.safe_dump(risk))
+    with pytest.raises(pre.PreregError, match="vol_ewma_span"):
+        pre.verify_before_run(tmp_path)

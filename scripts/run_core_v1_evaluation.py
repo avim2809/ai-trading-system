@@ -131,7 +131,8 @@ def load_constants(consts: dict) -> P.ConstantsBundle:
     return P.ConstantsBundle(scalars={k: float(v) for k, v in consts["scalars"].items()}, survivors=surv, rho=rho, idm=float(consts["idm"]),
                              instrument_weights={k: float(v) for k, v in consts["instrument_weights"].items()},
                              group_weights={k: float(v) for k, v in consts["group_weights"].items()},
-                             window=(consts["window"][0], consts["window"][1]))
+                             window=(consts["window"][0], consts["window"][1]),
+                             asset_class={m: c for c, members in pre.ASSET_CLASSES.items() for m in members})
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -322,7 +323,7 @@ def run_robustness(sel_cfg: dict, panel, constants, consts_raw: dict, base, ledg
     with the perturbed definitions (so mean |f| = 10 holds before the Sharpe is computed); the speed filter, FDM and IDM stay fixed unless the
     perturbed parameter is one of their own inputs (``speed_cost_max_fraction``, ``fdm_cap``, ``idm_cap``)."""
     sel_params, ids = P.with_config(base, sel_cfg, pre.SPEED_SUBSETS)
-    names = P.perturbable_names(gates)
+    names = P.perturbable_names(gates, frozen=pre.FROZEN_LIMITS)
     win = constants.window
     held_fdm = {s: P.fdm_for(constants, s, ids, sel_params, capped=False)[1] for s in panel.symbols}
     out = []
@@ -361,7 +362,7 @@ def run_stress(sel: P.RunResult, panel, vol, gates: dict, charter_proc: dict, ta
                draws: int, seed: int) -> dict:
     ret = sel.engine.excess_returns.loc[eval_index]
     mult = float(gates["g_research"]["stress"]["max_loss_multiple_of_charter_max_dd"])
-    min_frac = getattr(pre, "MIN_ACTIVE_FRACTION", None)
+    min_frac = getattr(pre, "MIN_ACTIVE_FRACTION", None)    # frozen in the re-frozen prereg module; None only if an old module is used (gate 5 insufficient)
     cache: dict[int, float] = {}
 
     def ref(n: int) -> float:
@@ -507,7 +508,7 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
     out_dir.mkdir(parents=True, exist_ok=True)
     constants = load_constants(consts)
     tau = float(consts["tau"])
-    base = P.params_from_gates(gates, tau)
+    base = P.params_from_gates(gates, tau, frozen=pre.FROZEN_LIMITS)     # P4-03 layer on: all 27 gate-6 parameters are perturbable
     grid = grid or build_grid()
     seed = int(ctx.seed or pre.SEED)
     ledger_reader = ledger_reader or L.trials
@@ -552,6 +553,9 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
     dsr_block.pop("_index")
     mech = {"ok": True, "detail": f"charter {charter.get('path')} approved at commit {charter.get('approved_commit')}; verified before the first core_v1 row"}
     results = {"dsr": dsr_block, "pbo": pbo, "cpcv": cpcv, "cost_stress": cost, "stress": stress, "robustness": rob, "benchmark": bench, "mechanism": mech}
+    sizing_layer = {"frozen": {"vol_ewma_span": base.vol_ewma_span, "max_vol_scale": base.max_vol_scale,
+                                          "instrument_risk_cap_multiple": base.instrument_risk_cap_multiple,
+                                          "class_risk_cap_applied": P.CLASS_RISK_CAP_APPLIED}, "selected_config_diagnostics": sel_run.limits}
     outcomes = GR.evaluate_g_research(results, gates)
     kelly = GR.evaluate_kelly_bound({"tau": tau, "deflated_sharpe_annual": deflated_sharpe_annual(dsr_block["sharpe"], n_family, dsr_block["var_sr"])}, gates)
     outcomes.append(kelly)
@@ -573,7 +577,8 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
         "deviations": ["family membership of N=31 is provisional (gates family_membership_confirmed_by_owner: false)",
                        "legacy trial lengths are unknown: var_sr assumes they equal the candidate's (conservative)",
                        "H4 family streams: one active family, so the family-level ENB is diagnostic only",
-                       "robustness: parameters without a value in gates or not used by this sizing path are listed as unassessed (gate 6 insufficient)",
+                       "robustness: all 27 parameters are perturbed (P4-03 layer wired in; a parameter that cannot be perturbed would be listed unassessed, gate 6 insufficient)",
+                       "P4-03 sizing layer: vol scale, instrument risk cap and gross cap; the 0.40 class cap is not applied (not a gate-6 parameter)",
                        "rf is None throughout (Sharpe versus zero), as in P2-05"],
         "known_leakage": KNOWN_LEAKAGE,
     }
@@ -582,7 +587,7 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
                    "core_only_100 (engine, pre-tax, annualised)": {"sharpe": bench["core_only_100"]["net_sharpe_annual_pre_tax"]}}
     md = GR.render_report(outcomes, tier, meta, comparators)
     out = {"tier": tier, "tier_reason": reason, "outcomes": [dataclasses.asdict(o) for o in outcomes], "results": results, "h4": h4, "meta": meta,
-           "selected_config": sel_cfg, "selected_index": sel_i, "grid_sharpes_per_period": [float(x) for x in grid_sr],
+           "selected_config": sel_cfg, "selected_index": sel_i, "sizing_layer": sizing_layer, "grid_sharpes_per_period": [float(x) for x in grid_sr],
            "trial_ids": ctx.trial_ids, "ledger_rows_registered": len(ctx.trial_ids),
            "expected_ledger_rows": {"grid": pre.EXPECTED_GRID_ROWS, **pre.EXPECTED_LEDGER_ROWS}}
     P.dump_json(out, out_dir / "results.json")

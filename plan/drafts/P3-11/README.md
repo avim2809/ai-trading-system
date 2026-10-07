@@ -51,3 +51,45 @@ Order matters (`is_approved` and gate 8 need the charter commit to be older than
   `gates_yaml_sha256` (a2ad5245...); the charter must record `bcecaec9...` or `verify_charter` will refuse it. Owner action.
 - Owner action (unchanged): index the module in the protected prereg INDEX (draft entry in `plan/drafts/P1-09/INDEX.yaml`, freeze_commit valid only
   without squashing), else `test_every_frozen_prereg_module_is_indexed` and `test_every_frozen_module_indexed` keep failing.
+
+## Notes on the batch-20 RE-FREEZE (w20a, 2026-10-06, before any real run) and the exact owner steps
+
+Why: the approved freeze (module fingerprint `7826fb03...`, YAML spec hash `23ab08a4...`, 0 real trials, never run) left `min_active_fraction`
+(gate 5) and `vol_ewma_span` / `max_vol_scale` / `instrument_risk_cap_multiple` (gate 6) unfrozen, so a Tier A was unreachable by construction. This
+is a NEW pre-registration; nothing was run on real data and no value was chosen from performance. Full list with sources: `reports/w20a_report.md`
+and the comments in `scripts/core_v1_preregistered.py`.
+
+Frozen values (owner-confirm the two conventions NOW; after any run they are fixed):
+
+| value | frozen as | non-performance source |
+|---|---|---|
+| `MIN_ACTIVE_FRACTION` (gate 5) | 0.5 | simple majority of the 14-ETF universe; any 7 ETFs span >= 3 asset classes (ceil(1/0.40) = 3, `config/risk.yaml`). Convention, **owner-confirm** |
+| `VOL_EWMA_SPAN` (gate 6) | 252 | P4-03 "slow EWMA"; one year vs the 35-day instrument span. Convention, **owner-confirm** |
+| `MAX_VOL_SCALE` | 1.5 | gates `robustness_parameters` (= `config/risk.yaml`) |
+| `INSTRUMENT_RISK_CAP_MULTIPLE` | 2.0 | gates `robustness_parameters` (= `config/risk.yaml`) |
+| class risk cap (0.40) | NOT applied (1.0) | not a gate-6 parameter; applying it would be an unperturbed parameter. **owner-confirm** |
+
+Unchanged: grid (12), weights scheme (handcrafted, one group per asset class), seed 20261005, family N 31, universe, tau (charter), gates hash
+`bcecaec9...`, annual gate-7 variant, expected ledger rows (robustness 54: all 27 parameters now perturbable; total 122).
+The charter needs NO edit (it carries the gates hash only, and the gates file is untouched).
+
+Owner steps, in order:
+
+1. Review the five values above. Change them now or never (a change = another new freeze). Optionally merge the branch
+   `batch20/core-v1-refreeze` WITHOUT squashing (the INDEX `freeze_commit` is only valid if its history survives).
+2. Copy `plan/drafts/P3-11/core_v1_prereg_DRAFT.yaml` to `research/preregistration/<YYYYMMDD>_core_v1.yaml` with today's date (NOT the existing
+   `20261006_core_v1.yaml`, which stays on disk untouched; its stem must differ). Fill `approver` and `approved_at_utc` (`date -u +%Y-%m-%dT%H:%M:%SZ`,
+   later than the charter's commit time). Check: `python -c "from firm.research import prereg as P; s=P.load_spec('<file>'); print(P.validate_spec(s), P.spec_hash(s))"`
+   (expect `[]` and `b964385057cf7a7ef25b5f14f36ce2551f0511adff86dbca968ce1874a9bdbf0`; a different hash means a field was edited).
+3. Edit `research/preregistration/INDEX.yaml` (family names are unique, so the old entries are renamed and the new ones reuse the names). Use
+   `plan/drafts/P1-09/INDEX.yaml` as the template:
+   a. the old YAML entry `family: core_v1` (spec hash `23ab08a4...`, file `20261006_core_v1.yaml`): rename to `core_v1_20261006`, `status: SUPERSEDED`,
+      notes "superseded-by core_v1 re-freeze 2026-10-06 (0 trials, never run)". Keep every other field (the file is immutable).
+   b. the module entry `core_v1_module`: replace `fingerprint`, `freeze_commit`, `freeze_time_utc` and notes with the values in the draft INDEX
+      (the module path stays; the old fingerprint `7826fb03...` is recorded in the notes; one file has one fingerprint at HEAD).
+   c. add the new YAML entry `family: core_v1`, `kind: yaml`, the new `yaml_path`, `fingerprint` = the spec hash from step 2, `freeze_commit` / `freeze_time_utc`
+      = the commit that adds the YAML and its committer time in UTC (`git log -1 --format=%cI <commit>`), `fingerprint_source: none`, `status: APPROVED`.
+4. Run `python -c "from firm.research import prereg as P; print(P.verify_index(P.load_index()))"` (expect `[]`) and commit YAML + INDEX in one
+   CODEOWNERS-reviewed commit. The drivers pass `prereg='core_v1'`, which resolves to the new entry.
+5. Everything else in `reports/w19a_report.md` section 5 (ACL, red-team rows, integrity-test drafts, trial-history baseline, ADAPTERS entry)
+   still applies unchanged.
