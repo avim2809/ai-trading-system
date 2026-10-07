@@ -151,13 +151,25 @@ entries:
   fingerprint_source: trial_history
   status: RUN
   notes: ''
+- family: core_v1_20261006
+  kind: yaml
+  module_path: null
+  yaml_path: research/preregistration/20261006_core_v1.yaml
+  fingerprint: 23ab08a4b264f8e57283d9d78ef405b756a70ac3a38fdea2806eee7915f8d850
+  freeze_commit: 4b739975a7369ce25dd0abdf683101bf96ace1a8
+  freeze_time_utc: '2026-10-06T16:34:40Z'
+  ledger_path: null
+  fingerprint_source: none
+  status: SUPERSEDED
+  notes: superseded by the core_v1 re-freeze (0 trials, never run); owner-approved
+    core_v1 pre-registration
 - family: core_v1_module
   kind: frozen_module
   module_path: scripts/core_v1_preregistered.py
   yaml_path: null
-  fingerprint: 7826fb035a5c756e2cee990b2f3e088b0f3b88caa7d77572e8e2d5013712b46a
-  freeze_commit: f5f9b01bd90629e6b0ed241aa217ca20dbc19344
-  freeze_time_utc: '2026-10-06T08:05:53Z'
+  fingerprint: 6274c43219d3c7fe1fe9d9686bd6a8cfe3c643fc32aaf68d86116279746c2bba
+  freeze_commit: d711ec34d5878ab49a2f74c28eaba3029661c779
+  freeze_time_utc: '2026-10-06T21:55:31Z'
   ledger_path: null
   fingerprint_source: freeze_commit
   status: APPROVED
@@ -165,10 +177,10 @@ entries:
 - family: core_v1
   kind: yaml
   module_path: null
-  yaml_path: research/preregistration/20261006_core_v1.yaml
-  fingerprint: 23ab08a4b264f8e57283d9d78ef405b756a70ac3a38fdea2806eee7915f8d850
-  freeze_commit: 4b739975a7369ce25dd0abdf683101bf96ace1a8
-  freeze_time_utc: '2026-10-06T16:34:40Z'
+  yaml_path: research/preregistration/20261007_core_v1.yaml
+  fingerprint: b964385057cf7a7ef25b5f14f36ce2551f0511adff86dbca968ce1874a9bdbf0
+  freeze_commit: 13a828bd1c2f8f3e70c6ada18ffec57ae68e0e7e
+  freeze_time_utc: '2026-10-07T09:44:20Z'
   ledger_path: null
   fingerprint_source: none
   status: APPROVED
