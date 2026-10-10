@@ -15,6 +15,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+ADDENDA_BEFORE_RUN = {p.name for p in (ROOT / "research" / "preregistration").glob("*addendum*")}
 for p in (ROOT / "scripts", ROOT / "src"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
@@ -76,7 +77,7 @@ def test_constants_json_has_every_required_key(run):
 def test_writes_only_the_three_report_files_and_nothing_under_preregistration(run):
     out = run[1]
     assert sorted(p.name for p in out.iterdir()) == ["constants.json", "constants.md", "constants_addendum.draft.yaml"]
-    assert not list((ROOT / "research" / "preregistration").glob("*addendum*"))
+    assert {p.name for p in (ROOT / "research" / "preregistration").glob("*addendum*")} == ADDENDA_BEFORE_RUN   # the driver wrote none (an owner-adopted one may exist)
     with pytest.raises(ValueError, match="preregistration"):
         D.write_constants(ROOT / "research" / "preregistration" / "x.json", {}, {})
 

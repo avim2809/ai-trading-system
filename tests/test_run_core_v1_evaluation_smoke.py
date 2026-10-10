@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+ADDENDA_BEFORE_RUN = {p.name for p in (ROOT / "research" / "preregistration").glob("*addendum*")}
 for p in (ROOT / "scripts", ROOT / "src"):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
@@ -290,7 +291,7 @@ def test_trial_history_draft_written_outside_docs(e2e):
     h = json.loads((e2e["odir"] / "drafts" / "core_v1_trial_history.json").read_text())
     assert h["family"] == "core_v1" and len(h["entries"]) == 1 and h["entries"][0]["n_trials"] == 3
     assert not (ROOT / "docs" / "core_v1_trial_history.json").exists()
-    assert not list((ROOT / "research" / "preregistration").glob("*addendum*"))
+    assert {p.name for p in (ROOT / "research" / "preregistration").glob("*addendum*")} == ADDENDA_BEFORE_RUN   # the driver wrote none (an owner-adopted one may exist)
 
 
 def test_nothing_written_under_protected_dirs_by_the_runs(e2e):
