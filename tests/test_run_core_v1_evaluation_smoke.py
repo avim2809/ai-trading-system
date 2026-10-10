@@ -297,3 +297,30 @@ def test_trial_history_draft_written_outside_docs(e2e):
 def test_nothing_written_under_protected_dirs_by_the_runs(e2e):
     st = subprocess.run(["git", "-c", "safe.directory=*", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True, check=False).stdout
     assert "research/preregistration" not in st and "tests/integrity" not in st and "config/gates.yaml" not in st
+
+
+def test_a_second_attempt_in_the_same_ledger_records_the_first_and_keeps_gate_n(e2e, led):
+    """The documented re-run: grid rows from an earlier (incomplete) attempt stay in the ledger untouched, are listed in results.json,
+    gate N stays the frozen family N, and the duplicate-inflated DSR is a sensitivity only."""
+    first = e2e["out"]
+    n_grid = len(e2e["grid"])
+    assert first["prior_attempts"]["count"] == 0
+    before = L.trials(family="core_v1")
+    ctx = P.LedgerCtx(mode="registered", prereg="core_v1", snapshot_id="synthetic", seed=pre.SEED, fingerprint="fp")
+    odir = e2e["odir"].parent / "eval_rerun"
+    second = E.run_evaluation(
+        e2e["panel"], consts=json.loads((e2e["cdir"] / "constants.json").read_text()), gates=GATES, ctx=ctx, out_dir=odir,
+        charter={"path": "charter", "approved_commit": "abc"}, charter_proc={"path_length_days": 500, "seed": pre.SEED},
+        code_commit="abc", periods_path=ROOT / "config" / "stress_periods.yaml", tax_cfg=AT.load_tax_config(ROOT / "config" / "tax_il.yaml"),
+        cost_cfg=P.CM.load_cost_config(), asset_classes={"equity": ["SPY"], "bonds": ["IEF"], "gold": ["GLD"]}, grid=e2e["grid"], draws=100,
+        n_boot=100, trial_history_path=odir / "drafts" / "core_v1_trial_history.json")
+    pa = second["prior_attempts"]
+    old_grid_ids = before[before["config"].map(lambda c: c.get("kind") == "grid") & (before["mode"] == "registered")]["trial_id"].tolist()
+    assert pa["count"] == n_grid == len(old_grid_ids) and pa["trial_ids"] == old_grid_ids and pa["reason"] and pa["first_timestamp"]
+    after = L.trials(family="core_v1")
+    assert after.iloc[: len(before)]["trial_id"].tolist() == before["trial_id"].tolist()      # earlier rows untouched, new ones appended
+    assert second["meta"]["n_gate"] == pre.FAMILY_N and second["results"]["dsr"]["n_gate"] == pre.FAMILY_N
+    assert second["results"]["dsr"]["n_family_plus_prior_attempt"] == pre.FAMILY_N + n_grid
+    assert any("prior attempt" in s for s in second["meta"]["sensitivities"])
+    persisted = json.loads((odir / "results.json").read_text())
+    assert persisted["prior_attempts"]["count"] == n_grid
