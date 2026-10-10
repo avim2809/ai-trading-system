@@ -1,0 +1,62 @@
+# ADOPTED AUTOMATICALLY 2026-10-10T18:20:49Z by /root/core_v1_chain.sh after structural validation (format, hashes, bounds, ledger match).
+# The owner WAIVED the human review of the constants before the evaluation (decision 2026-10-06, see plan/OWNER_DECISIONS.md).
+family: core_v1
+kind: constants_addendum
+status: DRAFT_FOR_OWNER_COPY
+copy_to: research/preregistration/core_v1_constants_addendum.yaml (CODEOWNERS-reviewed
+  owner commit; the driver never writes there)
+constants_json: research/reports/core_v1/constants.json
+constants_json_sha256: 77cbac0332e03d44077e4ea207746d80d3cd0924dac52ad555a8ea835926373b
+code_commit: 514cd3c7bfbdc78e501e7371010b87503b1e956a
+prereg_module_fingerprint: 6274c43219d3c7fe1fe9d9686bd6a8cfe3c643fc32aaf68d86116279746c2bba
+gates_sha256: bcecaec9ef44163596e27459779a124747d382c8068bf0607d4793df79f71540
+instrument_weights_sha256: 6eb94e426e90a832b4a7c1778f36212bd2e1503d6cdb3e89141d45f8df3d0d83
+data_snapshot_id: ab5d0a987833b9e7f24bf1cf7d3a5d01661b5c8a4a9b843feaa03b1829491a0f
+window:
+- '1994-02-02'
+- '2026-09-29'
+seed: 20261005
+ledger_trial_ids:
+  constant_estimation:scalar:ewmac_2: a62ed38a1dc849e893322ad852be1813
+  constant_estimation:scalar:ewmac_4: 6277b5e458a94328bbbd9030a3cc78da
+  constant_estimation:scalar:ewmac_8: 8e15a7cb0b7c40e3bb20d37842631a2a
+  constant_estimation:scalar:ewmac_16: cd046d04a3b24e94b392b1279baa977c
+  constant_estimation:scalar:ewmac_32: 1137c16fd6d04a57ab46b7926b330fd0
+  constant_estimation:scalar:ewmac_64: d07648c7ad744ca9af185c56ffb056e2
+  constant_estimation:scalar:breakout_20: f4d9fb3b6093430aa08e0bc70d9fdf3e
+  constant_estimation:scalar:breakout_40: daad7eefe500459d80c0ab5c94c8581c
+  constant_estimation:scalar:breakout_80: 1df4f0d32bc14a9eb430e1c3d1e0d95a
+  constant_estimation:scalar:breakout_160: b646b4f3a7c54db9929771dbd42d6382
+  constant_estimation:scalar:breakout_320: 1fae505720f64db18d2efe0dff7b796d
+  constant_estimation:speed_filter:SPY: 2138da1c6bc0416d9084ec6cc5dfa2e1
+  constant_estimation:speed_filter:IWM: 0fdc032e9cfd45b391bd757c18b6f65b
+  constant_estimation:speed_filter:QQQ: 53dffb9ffddf43bb9bb98a1c66683800
+  constant_estimation:speed_filter:EFA: c32cde7a1e6244969b13ffb3dafe67d3
+  constant_estimation:speed_filter:EEM: 47bf384b820a4e15a077c02093cdb801
+  constant_estimation:speed_filter:SHY: 3f8bf88452b24cdc81d5d59eedb5dcc1
+  constant_estimation:speed_filter:IEF: 6f1d01249651454fb18e96bc750f5fdd
+  constant_estimation:speed_filter:TLT: 5c0bad341c6e43b59a66e68a6e7d9d5f
+  constant_estimation:speed_filter:TIP: b10839b739b44a3e99692306760e0dcd
+  constant_estimation:speed_filter:LQD: 20b19292ac894724957999db35232d67
+  constant_estimation:speed_filter:HYG: 8ae1a052d070436ebb48ba87111c478a
+  constant_estimation:speed_filter:GLD: 87219561026b4d8aa21f2046c971f688
+  constant_estimation:speed_filter:DBC: 0ce0ee8336bc41e1acc4faae403da362
+  constant_estimation:speed_filter:IYR: 3f609b8994884ed39b23c2800c17d91a
+  constant_estimation:fdm:SPY: af905bd72e3e4514970544ef3dce9b5f
+  constant_estimation:fdm:IWM: b9f58d24268e4705a9ac54e757de19e4
+  constant_estimation:fdm:QQQ: 0b6f42181720428e849ef6b2b9ee3b75
+  constant_estimation:fdm:EFA: 45e53299793247169083a0724110f69c
+  constant_estimation:fdm:EEM: 6fdc09d4518c46c5850cdccdc41cda9d
+  constant_estimation:fdm:SHY: 1564c61776ca4be4ac3f27723e65a7fb
+  constant_estimation:fdm:IEF: 581054fc679f4e0f89bd27e17273532d
+  constant_estimation:fdm:TLT: 5d06cc20a4e8491f8f4f47bb5164d559
+  constant_estimation:fdm:TIP: 754f29541de54a8785b2d0b36b9cd1bb
+  constant_estimation:fdm:LQD: 5e30999398164930831d56657177a025
+  constant_estimation:fdm:HYG: 5c3c45b46450446d86ad516d7ee02fda
+  constant_estimation:fdm:GLD: 9c71da18dbd14cfa9ba35a5aea8bb1b6
+  constant_estimation:fdm:DBC: b967edf54303435bbbfb5457b0969265
+  constant_estimation:fdm:IYR: c30df239cfe14b8e89b945c712b378c1
+  constant_estimation:idm:all: fecbe79d2a8342e59efd3e93db73573a
+n_ledger_rows_by_kind:
+  constant_estimation: 40
+declaration: No data after 2026-09-30 was examined.
