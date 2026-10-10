@@ -279,3 +279,16 @@ def test_load_dividends_pit_and_unadjusted(env):
     assert list(out["amount"]) == [0.41, 0.51]  # post-seal dividend dropped; unadjusted value used; missing file skipped
     with pytest.raises(HoldoutAccessError):
         load_dividends(["AAA"], asof=SEAL, data_root=env.root)
+
+
+def test_load_dividends_skips_schemaless_empty_file(env):
+    """An ETF that never paid a dividend (GLD) has an empty parquet with NO columns: skipped, the others still load."""
+    from firm.data.etf_loader import load_dividends
+
+    d = env.root / "corporate_actions" / "dividends"
+    d.mkdir(parents=True)
+    pd.DataFrame().to_parquet(d / "GLD.parquet", index=False)
+    pd.DataFrame({"date": pd.to_datetime(["2025-12-19"]), "value": [0.4], "unadjustedValue": [0.4]}).to_parquet(d / "AAA.parquet", index=False)
+    out = load_dividends(["GLD", "AAA"], asof=LAST, data_root=env.root)
+    assert list(out["symbol"]) == ["AAA"] and list(out["amount"]) == [0.4]
+    assert load_dividends(["GLD"], asof=LAST, data_root=env.root).empty

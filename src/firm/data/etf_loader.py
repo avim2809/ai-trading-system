@@ -157,6 +157,9 @@ def load_dividends(symbols: list[str], *, asof: dt.date, data_root: Path | None 
             log.warning("no dividend file for %s", sym)
             continue
         df = _read_raw(p, asof)
+        if df.empty:   # an ETF that pays no dividends (e.g. GLD) has a schema-less empty file: nothing to add, not an error
+            log.info("dividend file for %s has no rows before %s: skipped", sym, asof)
+            continue
         col = "unadjustedValue" if "unadjustedValue" in df.columns else "value"
         frames.append(pd.DataFrame({"date": df["date"], "symbol": sym, "amount": pd.to_numeric(df[col], errors="coerce")}))
     if not frames:
