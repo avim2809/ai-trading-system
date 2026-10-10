@@ -57,6 +57,7 @@ from firm.reporting import diversification_report as DR
 from firm.reporting import gate_report as GR
 from firm.research import core_v1_pipeline as P
 from firm.research import ledger as L
+from firm.research import legacy_adapters as LA
 from firm.research import run_guards as G
 from firm.research import seal
 from firm.validation import cv as CV
@@ -77,6 +78,8 @@ LEGACY_VAR_SR_SOURCES = {          # var_sr_family name -> (legacy source file, 
     "alt_premia_C1": ("docs/alt_premia_trial_history.json", "C1_btc_trend"),
     **{f"eodhd_s3_trial_{k}": ("docs/S3_trial_history.json", k - 1) for k in range(1, 6)},
 }
+PRIOR_ATTEMPT_REASON = ("earlier evaluation attempt registered the grid, then stopped before any gate was computed "
+                        "(legacy var_sr source unresolved: StartupError); its rows are kept, never deleted or edited")
 N_RAW_SENSITIVITIES = {"raw_N_463": 463, "ledgered_N_210": 210}
 KNOWN_LEAKAGE = [
     "pooled scalars, speed filter, FDM and IDM were estimated on the full window (P3-11) and are not re-estimated on the CPCV training groups",
@@ -220,31 +223,93 @@ def run_pbo(matrix: pd.DataFrame, S: int, family_variant_count: int) -> dict:
 # ---------------------------------------------------------------------------------------------------------------------
 # DSR and variance
 # ---------------------------------------------------------------------------------------------------------------------
-def legacy_family_sharpes(ledger_trials: pd.DataFrame, names: list[str]) -> tuple[dict[str, float], list[float]]:
-    """Per-period Sharpes of the legacy members of ``var_sr_family`` (from the legacy ledger rows), and every legacy per-period Sharpe in
-    the ledger (for the all-family sensitivity). Raises if a named member cannot be resolved or the periods_per_year differ."""
-    leg = ledger_trials[ledger_trials["mode"] == "legacy"]
+def _docs_member_sharpe(docs_dir: Path, name: str) -> float:
+    """The per-period Sharpe of one legacy ``var_sr_family`` member, read from the frozen docs/*_trial_history.json it means (the true source)."""
+    if name not in LEGACY_VAR_SR_SOURCES:
+        raise StartupError(f"no legacy source declared for var_sr_family member {name!r}: refusing to guess (add it to LEGACY_VAR_SR_SOURCES)")
+    src, key = LEGACY_VAR_SR_SOURCES[name]
+    path = Path(docs_dir) / Path(src).name
+    if not path.is_file():
+        raise StartupError(f"legacy source {src} for var_sr_family member {name} does not exist under {docs_dir}")
+    entries = json.loads(path.read_text(encoding="utf-8")).get("entries", [])
+    if len(entries) != 1:
+        raise StartupError(f"{src} has {len(entries)} entries; var_sr_family member {name} is ambiguous (expected exactly one)")
+    e = entries[0]
+    names, sharpes = e.get("trials") or e.get("variant_names"), e.get("trial_daily_sharpes")
+    if not names or not sharpes or len(names) != len(sharpes):
+        raise StartupError(f"{src}: trial names and trial_daily_sharpes do not line up (var_sr_family member {name})")
+    if isinstance(key, str):
+        if key not in names:
+            raise StartupError(f"{src}: no trial named {key!r} for var_sr_family member {name}")
+        j = names.index(key)
+    else:
+        j = int(key)
+        if not 0 <= j < len(sharpes):
+            raise StartupError(f"{src}: index {j} out of range for var_sr_family member {name}")
+    v = float(sharpes[j])
+    if not math.isfinite(v):
+        raise StartupError(f"{src}: non-finite Sharpe for var_sr_family member {name}")
+    return v
+
+
+def _ledger_legacy_rows(ledger_trials: pd.DataFrame) -> pd.DataFrame:
+    if "mode" not in ledger_trials.columns:
+        return ledger_trials.iloc[0:0]
+    return ledger_trials[ledger_trials["mode"] == "legacy"]
+
+
+def legacy_ledger_present(ledger_trials: pd.DataFrame, names: list[str]) -> bool:
+    """True when the ledger holds the backfilled legacy row of every legacy member's source file."""
+    leg = _ledger_legacy_rows(ledger_trials)
+    if "source_file" not in leg.columns:
+        return False
+    have = set(leg["source_file"])
+    return all(LEGACY_VAR_SR_SOURCES[n][0] in have for n in names if n in LEGACY_VAR_SR_SOURCES)
+
+
+def legacy_family_sharpes(ledger_trials: pd.DataFrame, names: list[str], docs_dir: Path | None = None) -> tuple[dict[str, float], list[float]]:
+    """Per-period Sharpes of the legacy members of ``var_sr_family``, and every legacy per-period Sharpe (for the all-family sensitivity).
+
+    The values come from the frozen docs/*_trial_history.json files (the ledger backfill of them is an owner step and may not have been run).
+    When the ledger DOES hold the backfilled row of a member's source file, it must agree with the file exactly (else ``StartupError``), and
+    its periods_per_year must be 252. A member without a declared source, or that cannot be resolved, raises naming the member."""
+    docs = Path(docs_dir) if docs_dir is not None else ROOT / "docs"
+    leg = _ledger_legacy_rows(ledger_trials)
     out: dict[str, float] = {}
     for name in names:
         if name == "core_v1_grid":
             continue
+        out[name] = _docs_member_sharpe(docs, name)
         src, key = LEGACY_VAR_SR_SOURCES[name]
-        rows = leg[leg["source_file"] == src]
+        rows = leg[leg["source_file"] == src] if "source_file" in leg.columns else leg.iloc[0:0]
         if rows.empty:
-            raise StartupError(f"legacy ledger rows for {src} are missing (var_sr_family member {name})")
+            continue
         cfg = rows.iloc[0]["config"]
         trials = cfg.get("trials") or cfg.get("variant_names")
-        sharpes = cfg["trial_daily_sharpes"]
         j = trials.index(key) if isinstance(key, str) else int(key)
-        out[name] = float(sharpes[j])
-        if rows.iloc[0]["periods_per_year"] not in (252, None) and not pd.isna(rows.iloc[0]["periods_per_year"]):
+        if float(cfg["trial_daily_sharpes"][j]) != out[name]:
+            raise StartupError(f"ledger legacy row for {src} disagrees with the file for var_sr_family member {name}")
+        ppy = rows.iloc[0]["periods_per_year"]
+        if ppy not in (252, None) and not pd.isna(ppy):
             raise StartupError("refusing to pool trials with different periods_per_year")
     allv: list[float] = []
-    for _, r in leg.iterrows():
-        v = (r["config"] or {}).get("trial_daily_sharpes")
+    for rec in LA.iter_legacy_rows(docs):
+        v = rec.config.get("trial_daily_sharpes")
         if isinstance(v, list):
             allv += [float(x) for x in v if x is not None and math.isfinite(float(x))]
     return out, allv
+
+
+def detect_prior_attempts(ledger_trials: pd.DataFrame, family: str, *, reason: str) -> dict:
+    """Registered ``kind='grid'`` rows already in the ledger for ``family`` (an earlier, incomplete attempt). Read-only: nothing is modified."""
+    cols = {"mode", "family", "config", "trial_id"}
+    if not cols <= set(ledger_trials.columns):
+        return {"count": 0, "trial_ids": [], "timestamps": [], "first_timestamp": None, "last_timestamp": None, "reason": reason}
+    sel = ledger_trials[(ledger_trials["mode"] == "registered") & (ledger_trials["family"] == family)
+                        & ledger_trials["config"].map(lambda c: isinstance(c, dict) and c.get("kind") == "grid")]
+    ts = [str(x) for x in sel["created_at"]] if "created_at" in sel.columns else []
+    return {"count": len(sel), "trial_ids": [str(x) for x in sel["trial_id"]], "timestamps": ts,
+            "first_timestamp": min(ts) if ts else None, "last_timestamp": max(ts) if ts else None, "reason": reason}
 
 
 def dsr_or_none(sr, n_obs, skew, kurt, n_trials, var_sr):
@@ -255,7 +320,7 @@ def dsr_or_none(sr, n_obs, skew, kurt, n_trials, var_sr):
 
 
 def build_dsr(sel_ret: pd.Series, grid_sharpes: np.ndarray, legacy: dict[str, float], all_legacy: list[float], gates: dict, n_family: int,
-              n_raw: int) -> dict:
+              n_raw: int, n_prior_attempt: int = 0) -> dict:
     """Gate DSR at the FAMILY N with the length-adjusted var_sr floored at the grid variance, the raw-count DSR beside it, and the sensitivities."""
     sr, skew, kurt, n_obs = SS.moments(sel_ret.to_numpy(float))
     fam = list(legacy.values())
@@ -271,6 +336,9 @@ def build_dsr(sel_ret: pd.Series, grid_sharpes: np.ndarray, legacy: dict[str, fl
              "dsr": dsr_or_none(sr, n_obs, skew, kurt, n_family, var_adj), "dsr_raw_n": dsr_or_none(sr, n_obs, skew, kurt, n_raw, var_adj),
              "dsr_unadjusted_var": dsr_or_none(sr, n_obs, skew, kurt, n_family, var_unadj),
              "dsr_all_family_var": dsr_or_none(sr, n_obs, skew, kurt, n_family, var_all)}
+    if n_prior_attempt:       # the earlier attempt's duplicate grid rows counted again: a sensitivity, never the gate N
+        block["n_family_plus_prior_attempt"] = int(n_family) + int(n_prior_attempt)
+        block["dsr_family_plus_prior_attempt"] = dsr_or_none(sr, n_obs, skew, kurt, block["n_family_plus_prior_attempt"], var_adj)
     for name, n in N_RAW_SENSITIVITIES.items():
         block[f"dsr_{name}"] = dsr_or_none(sr, n_obs, skew, kurt, n, var_adj)
     return block
@@ -503,7 +571,8 @@ def append_trial_history(path: Path, entry: dict, family: str = pre.FAMILY) -> N
 def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCtx, out_dir: Path, charter: dict, charter_proc: dict, code_commit: str,
                    periods_path: Path, tax_cfg: AT.TaxConfig, cost_cfg: dict, asset_classes: dict[str, list[str]], grid: list[dict] | None = None,
                    draws: int = 10_000, n_boot: int = 10_000, trial_history_path: Path | None = None, ledger_reader=None,
-                   prereg_hash: str | None = None, pbo_blocks: int = 16, speed_subsets: dict | None = None) -> dict:
+                   prereg_hash: str | None = None, pbo_blocks: int = 16, speed_subsets: dict | None = None,
+                   prior_attempt_reason: str = PRIOR_ATTEMPT_REASON) -> dict:
     """Steps 2-10. ``panel`` real (main) or synthetic (tests). Returns the results dict (also written to results.json / REPORT.md)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     constants = load_constants(consts)
@@ -512,6 +581,9 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
     grid = grid or build_grid()
     seed = int(ctx.seed or pre.SEED)
     ledger_reader = ledger_reader or L.trials
+    # an earlier incomplete attempt leaves registered grid rows behind; the ledger is append-only and does not reject a duplicate config, so the
+    # grid is registered again, the old rows are listed here, and the gate N stays the frozen family N (the duplicates are a sensitivity only)
+    prior = detect_prior_attempts(ledger_reader(), ctx.family, reason=prior_attempt_reason)
 
     # grid, matrix, selection
     M_full, runs = run_grid(grid, panel, constants, base, ctx, speed_subsets)
@@ -528,7 +600,8 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
     led = ledger_reader()
     legacy, all_legacy = legacy_family_sharpes(led, [n for n in gates["var_sr_family"]])
     n_family = int(pre.FAMILY_N)
-    dsr_block = build_dsr(sel_ret, grid_sr, legacy, all_legacy, gates, n_family, n_raw=ET.gate_n(led, pd.DataFrame()).gate_n)
+    dsr_block = build_dsr(sel_ret, grid_sr, legacy, all_legacy, gates, n_family, n_raw=ET.gate_n(led, pd.DataFrame()).gate_n,
+                         n_prior_attempt=prior["count"])
     dsr_block["_index"] = eval_index
     # gate 3 (CPCV), gate 2 (PBO)
     cpcv = run_cpcv(M, select_argmax, pre.CPCV["n_groups"], pre.CPCV["k_test_groups"], embargo_pct=pre.EMBARGO_PCT)
@@ -551,6 +624,7 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
     dsr_block["n_raw"] = int(n_raw_end)
     dsr_block["dsr_raw_n"] = dsr_or_none(dsr_block["sharpe"], dsr_block["n_obs"], dsr_block["skew"], dsr_block["kurt"], n_raw_end, dsr_block["var_sr"])
     dsr_block.pop("_index")
+    backfilled = legacy_ledger_present(led_end, list(gates["var_sr_family"]))
     mech = {"ok": True, "detail": f"charter {charter.get('path')} approved at commit {charter.get('approved_commit')}; verified before the first core_v1 row"}
     results = {"dsr": dsr_block, "pbo": pbo, "cpcv": cpcv, "cost_stress": cost, "stress": stress, "robustness": rob, "benchmark": bench, "mechanism": mech}
     sizing_layer = {"frozen": {"vol_ewma_span": base.vol_ewma_span, "max_vol_scale": base.max_vol_scale,
@@ -568,6 +642,8 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
         "n_gate": n_family, "n_raw": int(n_raw_end), "var_sr": dsr_block["var_sr"], "var_sr_source": dsr_block["var_sr_source"], "enb": h4["enb_asset_class"],
         "enb_threshold": h4["enb_threshold"], "tier_label": "family-N" if tier == "A" else None, "tier_reason": reason,
         "sensitivities": [f"DSR at family N {n_family}: {dsr_block['dsr']}", f"DSR at raw N {n_raw_end}: {dsr_block['dsr_raw_n']}",
+                          *([(f"DSR at family N + prior attempt's {prior['count']} duplicate grid rows = {dsr_block['n_family_plus_prior_attempt']}: "
+                              f"{dsr_block['dsr_family_plus_prior_attempt']}")] if prior["count"] else []),
                           f"DSR at N=463: {dsr_block.get('dsr_raw_N_463')}", f"DSR at N=210: {dsr_block.get('dsr_ledgered_N_210')}",
                           f"DSR with unadjusted var_sr {dsr_block['var_sr_unadjusted']:.3g}: {dsr_block['dsr_unadjusted_var']}",
                           f"DSR with all-family var_sr {dsr_block['var_sr_all_family']:.3g}: {dsr_block['dsr_all_family_var']}",
@@ -580,15 +656,21 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
                        "robustness: all 27 parameters are perturbed (P4-03 layer wired in; a parameter that cannot be perturbed would be listed unassessed, gate 6 insufficient)",
                        "P4-03 sizing layer: vol scale, instrument risk cap and gross cap; the 0.40 class cap is not applied (not a gate-6 parameter)",
                        "rf is None throughout (Sharpe versus zero), as in P2-05"],
-        "known_leakage": KNOWN_LEAKAGE,
+        "known_leakage": KNOWN_LEAKAGE, "legacy_ledger_backfilled": backfilled,
     }
+    if not backfilled:
+        meta["deviations"].append("the ledger has no backfilled legacy rows for the var_sr legacy members: their Sharpes were read from the frozen docs files, "
+                                  "and n_raw counts only the ledger rows present (it excludes the census legacy rows: see the N=463 / N=210 sensitivities)")
+    if prior["count"]:
+        meta["deviations"].append(f"{prior['count']} registered grid rows from an earlier incomplete attempt are in the ledger ({prior['reason']}); "
+                                  f"the grid was registered again; gate N stays the frozen family N {n_family}")
     comparators = {"BM2 annual (gate, after tax, annualised)": {"sharpe": bench["sharpe_bm2"]},
                    f"BM2 {bench['sensitivity_variant']} (sensitivity)": {"sharpe": bench["sensitivity_monthly_bm2"]["sharpe_bm2"]},
                    "core_only_100 (engine, pre-tax, annualised)": {"sharpe": bench["core_only_100"]["net_sharpe_annual_pre_tax"]}}
     md = GR.render_report(outcomes, tier, meta, comparators)
     out = {"tier": tier, "tier_reason": reason, "outcomes": [dataclasses.asdict(o) for o in outcomes], "results": results, "h4": h4, "meta": meta,
            "selected_config": sel_cfg, "selected_index": sel_i, "sizing_layer": sizing_layer, "grid_sharpes_per_period": [float(x) for x in grid_sr],
-           "trial_ids": ctx.trial_ids, "ledger_rows_registered": len(ctx.trial_ids),
+           "prior_attempts": prior, "trial_ids": ctx.trial_ids, "ledger_rows_registered": len(ctx.trial_ids),
            "expected_ledger_rows": {"grid": pre.EXPECTED_GRID_ROWS, **pre.EXPECTED_LEDGER_ROWS}}
     P.dump_json(out, out_dir / "results.json")
     (out_dir / "REPORT.md").write_text(md, encoding="utf-8")
