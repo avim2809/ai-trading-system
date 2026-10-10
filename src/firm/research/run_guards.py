@@ -53,6 +53,7 @@ SEALED_PATHS = (
     "docs/s2_forward_snapshot.json",
 )
 ETF_STORE = "data/research/eodhd/etfs_full"
+LIVE_CHECKOUT = Path("/local/store/git/ai-trading-system")   # the ACL and the data live here; a run worktree holds only tracked files
 REDTEAM_DOC = "docs/GUARDRAIL_REDTEAM.md"
 MAX_MEMORY_CAP_BYTES = 6 * 2**30   # above this the "cap" does not protect a host with ~5 GB free
 _ET = ZoneInfo("America/New_York")
@@ -118,18 +119,20 @@ def redteam_passed(path: Path) -> bool:
 def seal_preflight(
     repo_dir: Path,
     *,
+    data_root: Path | None = None,
     euid: Callable[[], int] = os.geteuid,
     access: Callable[[str, int], bool] = os.access,
 ) -> dict:
     """Refuse (``PreflightError``) unless non-root, sealed paths unreadable, ETF store readable, red-team pass recorded."""
     repo = Path(repo_dir)
+    root = Path(data_root) if data_root is not None else repo   # sealed paths and the ETF store are judged where the ACL and the data are
     uid = int(euid())
     if uid == 0:
         raise PreflightError("refusing to run as root (the seal rests on the research user's missing read access)")
-    leaks = [p for p in SEALED_PATHS if access(str(repo / p), os.R_OK)]
+    leaks = [p for p in SEALED_PATHS if access(str(root / p), os.R_OK)]
     if leaks:
         raise PreflightError(f"sealed path(s) readable by this process, the ACL is missing: {leaks}")
-    etf_ok = bool(access(str(repo / ETF_STORE), os.R_OK | os.X_OK))
+    etf_ok = bool(access(str(root / ETF_STORE), os.R_OK | os.X_OK))
     if not etf_ok:
         raise PreflightError(f"ETF store {ETF_STORE} (etfs_full) is not readable; traverse on data/ and read on data/research/eodhd are required")
     if not redteam_passed(repo / REDTEAM_DOC):

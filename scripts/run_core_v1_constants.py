@@ -256,7 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO)
     # guards first, before anything is read; none can be skipped
-    G.seal_preflight(ROOT, euid=lambda: os.geteuid(), access=lambda p, m: os.access(p, m))
+    G.seal_preflight(ROOT, data_root=G.LIVE_CHECKOUT, euid=lambda: os.geteuid(), access=lambda p, m: os.access(p, m))
     G.assert_in_window(clock=lambda: G.current_utc())
     G.require_memory_cap()
     facts = pre.verify_before_run(ROOT)             # frozen inputs + charter (tau, approval commit); STOP on PreregError
