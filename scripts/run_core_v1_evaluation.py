@@ -463,30 +463,75 @@ def no_cpi_config(cfg: AT.TaxConfig) -> AT.TaxConfig:
     return dataclasses.replace(cfg, inflation_adjust=False, assumptions=a)
 
 
-def candidate_navs(sel: P.RunResult, panel, cfg: AT.TaxConfig, eval_index) -> dict[str, pd.Series]:
-    """Candidate NAV (ILS) in the three states (gross, after cost, after tax) through the same tax model as the benchmark."""
+MIN_FX_WINDOW_DAYS = 1260   # ~5 trading years: a shorter FX-covered gate-7 window is not judged, it is refused (fail closed)
+
+
+def gate7_window(panel, eval_index, *, min_days: int = MIN_FX_WINDOW_DAYS) -> dict:
+    """Gate-7 window (owner decision 2026-10-11, option 1): the AFTER-TAX benchmark and the gate-7 comparison are judged from the first date the
+    USD/ILS series has data (never extrapolated backwards) to the end of the evaluation window; every other gate and every pre-tax number keeps
+    the full frozen window. A recorded deviation, not a window re-freeze. Fails closed when the sub-window has fewer than ``min_days`` days."""
+    fx = panel.fx
+    fx = None if fx is None else fx.dropna()
+    if fx is None or not len(fx):
+        raise StartupError("gate 7 needs USD/ILS (panel.fx is missing or empty): the after-tax benchmark cannot be computed")
+    fx_first = pd.Timestamp(fx.index.min())
+    ei = pd.DatetimeIndex(eval_index)
+    days = ei[ei >= fx_first]
+    if len(days) < int(min_days):
+        raise StartupError(f"gate-7 FX-covered window {fx_first.date()} .. {ei[-1].date()} has {len(days)} trading days, fewer than the minimum "
+                           f"{int(min_days)} (full evaluation window {ei[0].date()} .. {ei[-1].date()}): refusing to judge gate 7 on a short sample")
+    truncated = bool(days[0] > ei[0])
+    dev = (f"gate 7 (after-tax benchmark and comparison) is judged on the FX-covered sub-window {days[0].date()} .. {days[-1].date()} "
+           f"({len(days)} of {len(ei)} trading days) because USD/ILS begins {fx_first.date()}; the candidate's record before it is excluded from "
+           f"the after-tax comparison only; every other gate and every pre-tax number keeps the full window {ei[0].date()} .. {ei[-1].date()}"
+           ) if truncated else None
+    return {"window_start": str(days[0].date()), "window_end": str(days[-1].date()), "n_days": len(days), "full_window_start": str(ei[0].date()),
+            "fx_first_date": str(fx_first.date()), "fx_truncated": truncated, "deviation": dev}
+
+
+def candidate_navs(sel: P.RunResult, panel, cfg: AT.TaxConfig, eval_index, entry: pd.Timestamp | None = None) -> dict[str, pd.Series]:
+    """Candidate NAV (ILS) in the three states (gross, after cost, after tax) through the same tax model as the benchmark.
+
+    ``entry``: when USD/ILS starts after the panel does, the tax model cannot start earlier (no FX extrapolation), so the candidate is
+    entered at ``entry`` (first panel date with FX) holding its then-current engine positions, funded with its engine equity that day, fresh
+    cost basis at the entry close; the benchmark starts the same way on the same date. ``None`` keeps the original full-history path."""
     syms = panel.symbols
+    pos, close, raw = sel.engine.positions, panel.close, panel.raw_close
     costs = None
     tr = sel.engine.trades
     if len(tr):
-        costs = tr.pivot_table(index="date", columns="symbol", values="total", aggfunc="sum").reindex(index=sel.engine.positions.index, columns=syms).fillna(0.0)
-    trades = P.tax_model_trades(sel.engine.positions, panel.close, panel.raw_close, panel.dividends, syms, cost_usd=costs)
+        costs = tr.pivot_table(index="date", columns="symbol", values="total", aggfunc="sum").reindex(index=pos.index, columns=syms).fillna(0.0)
+    cash0 = P.INITIAL_CAPITAL
+    if entry is not None:
+        eq = P.INITIAL_CAPITAL * (1.0 + sel.engine.returns.fillna(0.0)).cumprod()
+        cash0 = float(eq.loc[:entry].iloc[-1])
+        pos, close, raw = pos.loc[entry:], close.loc[entry:], raw.loc[entry:]
+        costs = None if costs is None else costs.loc[entry:]
+    trades = P.tax_model_trades(pos, close, raw, panel.dividends, syms, cost_usd=costs)
     trades = trades[trades["date"].isin(eval_index) | (trades["date"] < eval_index[0])]
-    cpi = pd.Series(1.0, index=panel.close.index)
+    cpi = pd.Series(1.0, index=raw.index)
     dom = dict.fromkeys(syms, "US")
     div = panel.dividends if panel.dividends is not None else pd.DataFrame({"date": [], "symbol": [], "amount": []})
-    common = {"prices_usd": panel.raw_close, "fx_usdils": panel.fx, "cpi": cpi, "dividends": div, "domicile": dom, "cfg": cfg,
-              "initial_cash_usd": P.INITIAL_CAPITAL}
+    common = {"prices_usd": raw, "fx_usdils": panel.fx, "cpi": cpi, "dividends": div, "domicile": dom, "cfg": cfg, "initial_cash_usd": cash0}
     gross = AT.apply_tax(trades.assign(cost_usd=0.0), taxes=False, **common)
     after_cost = AT.apply_tax(trades, taxes=False, **common)
     after_tax = AT.apply_tax(trades, taxes=True, **common)
     return {"gross": gross["nav_after_tax_ils"], "after_cost": after_cost["nav_after_tax_ils"], "after_tax": after_tax["nav_after_tax_ils"]}
 
 
+def _fx_entry(panel, win: dict) -> pd.Timestamp | None:
+    """First panel date with USD/ILS when it is later than the panel's first date, else None (the original path)."""
+    first = pd.Timestamp(win["fx_first_date"])
+    idx = panel.close.index
+    return None if first <= idx[0] else idx[idx >= first][0]
+
+
 def run_benchmark(sel: P.RunResult, panel, constants, base, gates: dict, ledger_ctx, tax_cfg: AT.TaxConfig, cost_cfg: dict, eval_index,
-                  n_boot: int, seed: int, rationale_claimed: bool) -> dict:
+                  n_boot: int, seed: int, rationale_claimed: bool, min_fx_window_days: int = MIN_FX_WINDOW_DAYS) -> dict:
     cfg = no_cpi_config(tax_cfg)
-    start = eval_index[0]
+    win = gate7_window(panel, eval_index, min_days=min_fx_window_days)
+    full_start = eval_index[0]
+    start = pd.Timestamp(win["window_start"])
     px = panel.raw_close.loc[start:, ["SPY", "IEF"]]
     div = panel.dividends if panel.dividends is not None else pd.DataFrame({"date": [], "symbol": [], "amount": []})
     div = div[pd.to_datetime(div["date"]) >= start]
@@ -494,8 +539,12 @@ def run_benchmark(sel: P.RunResult, panel, constants, base, gates: dict, ledger_
     variant, gate_frame, both = AT.gate_benchmark_bm2(px, panel.fx, cpi, div, cfg, cost_cfg, gates=gates, cost_spec=P.COST_SPEC,
                                                       initial_usd=P.INITIAL_CAPITAL)
     sens_name = pre.BENCHMARK_SENSITIVITY_VARIANT
-    nav_c = {k: v.loc[start:] for k, v in candidate_navs(sel, panel, cfg, eval_index).items()}
+    nav_c = {k: v.loc[start:] for k, v in candidate_navs(sel, panel, cfg, eval_index, entry=_fx_entry(panel, win)).items()}
     bench = {s: gate_frame[s] for s in AT.STATES}
+    for s_ in AT.STATES:           # candidate and benchmark must cover IDENTICAL dates, in every state and for the sensitivity variant too
+        if not (nav_c[s_].index.equals(bench[s_].index) and nav_c[s_].index.equals(both[sens_name][s_].index)):
+            raise RuntimeError(f"gate 7: candidate and benchmark {s_} NAVs cover different dates ({nav_c[s_].index[0].date()}..{nav_c[s_].index[-1].date()} "
+                               f"vs {bench[s_].index[0].date()}..{bench[s_].index[-1].date()})")
     cmp_gate = AT.compare(nav_c, bench, n_boot=n_boot, seed=seed)
     cmp_sens = AT.compare(nav_c, {s: both[sens_name][s] for s in AT.STATES}, n_boot=n_boot, seed=seed)
     for name, frame, kind_key in ((variant, both[variant], "bm2_gate"), (sens_name, both[sens_name], "bm2_sensitivity")):
@@ -504,11 +553,12 @@ def run_benchmark(sel: P.RunResult, panel, constants, base, gates: dict, ledger_
                             detail={"variant": name, "role": kind_key, "after_tax_sharpe": AT.summarise(frame["after_tax"]).sharpe}, returns=r):
             pass
     # core_only_100 re-run through the engine (parity): 60/40 SPY/IEF at 100% of capital, monthly plus 2-point drift band
-    ptx = panel.close.loc[start:, ["SPY", "IEF"]]
+    # pre-tax and USD: keeps the full frozen window (the FX truncation applies to the after-tax comparison only)
+    ptx = panel.close.loc[full_start:, ["SPY", "IEF"]]
     tg = P.core_only_100_targets(ptx, P.INITIAL_CAPITAL)
     eng = P.VE.run_vector_backtest(
         ptx, tg, {"SPY": 1.0, "IEF": 1.0}, P.make_cost_fn(panel, None), P.VE.EngineConfig(initial_capital=P.INITIAL_CAPITAL, allow_short=False),
-        adv=panel.adv.loc[start:, ["SPY", "IEF"]], vol_pct=(panel.ret[["SPY", "IEF"]].rolling(60, min_periods=20).std().bfill().loc[start:].fillna(0.01)),
+        adv=panel.adv.loc[full_start:, ["SPY", "IEF"]], vol_pct=(panel.ret[["SPY", "IEF"]].rolling(60, min_periods=20).std().bfill().loc[full_start:].fillna(0.01)),
         ledger_ctx=P.VE.LedgerContext(family="core_v1_engine", mode="exploratory", data_snapshot_id=ledger_ctx.snapshot_id, seed=ledger_ctx.seed,
                                       config={"label": "core_only_100", "outer_mode": ledger_ctx.mode}))
     with P.logged_trial(ledger_ctx, "benchmark", "core_only_100", "engine", params=ledger_ctx.default_params, detail={"band_abs": P.CORE_ONLY_BAND_ABS},
@@ -531,7 +581,8 @@ def run_benchmark(sel: P.RunResult, panel, constants, base, gates: dict, ledger_
                                         for s in AT.STATES},
             "core_only_100": {"net_sharpe_annual_pre_tax": float(SS.moments(eng.excess_returns.to_numpy(float))[0] * SQRT_PPY),
                               "n_trades": int(eng.meta["n_trades"])},
-            "tax_assumptions": AT.describe_assumptions(cfg).splitlines(), "block_length": cmp_gate["block_length"], "n_boot": n_boot, "seed": seed}
+            "tax_assumptions": AT.describe_assumptions(cfg).splitlines(), "block_length": cmp_gate["block_length"], "n_boot": n_boot, "seed": seed,
+            **win}
 
 
 def run_h4(sel: P.RunResult, panel, asset_classes: dict[str, list[str]], bm2_ret: pd.Series, stress_periods, gates: dict, trial_ids: list[str],
@@ -568,7 +619,7 @@ def append_trial_history(path: Path, entry: dict, family: str = pre.FAMILY) -> N
     p.write_text(json.dumps(P.jsonable(doc), indent=1, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCtx, out_dir: Path, charter: dict, charter_proc: dict, code_commit: str,
+def run_evaluation(panel: P.Panel, *, min_fx_window_days: int = MIN_FX_WINDOW_DAYS, consts: dict, gates: dict, ctx: P.LedgerCtx, out_dir: Path, charter: dict, charter_proc: dict, code_commit: str,
                    periods_path: Path, tax_cfg: AT.TaxConfig, cost_cfg: dict, asset_classes: dict[str, list[str]], grid: list[dict] | None = None,
                    draws: int = 10_000, n_boot: int = 10_000, trial_history_path: Path | None = None, ledger_reader=None,
                    prereg_hash: str | None = None, pbo_blocks: int = 16, speed_subsets: dict | None = None,
@@ -586,9 +637,11 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
     prior = detect_prior_attempts(ledger_reader(), ctx.family, reason=prior_attempt_reason)
 
     # grid, matrix, selection
-    M_full, runs = run_grid(grid, panel, constants, base, ctx, speed_subsets)
     vol = P.vol_annual(panel, base)
     eval_start = vol.dropna(how="all").index[0]
+    # fail closed BEFORE any registered row is written: a too-short FX-covered gate-7 window must not burn a grid
+    gate7_window(panel, panel.close.index[panel.close.index >= eval_start], min_days=min_fx_window_days)
+    M_full, runs = run_grid(grid, panel, constants, base, ctx, speed_subsets)
     M = M_full.loc[eval_start:]
     eval_index = M.index
     sel_i = select_argmax(M.to_numpy(float))
@@ -613,8 +666,9 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
     # gate 6 (robustness)
     rob = run_robustness(sel_cfg, panel, constants, consts, base, ctx, gates, float(dsr_block["sharpe"]), sel_run, eval_index)
     # gate 7 (benchmark) and H4
-    bench = run_benchmark(sel_run, panel, constants, base, gates, ctx, tax_cfg, cost_cfg, eval_index, n_boot, seed, rationale_claimed=False)
-    bm2_ret = _bm2_returns(panel, gates, tax_cfg, cost_cfg, eval_index)
+    bench = run_benchmark(sel_run, panel, constants, base, gates, ctx, tax_cfg, cost_cfg, eval_index, n_boot, seed, rationale_claimed=False,
+                          min_fx_window_days=min_fx_window_days)
+    bm2_ret = _bm2_returns(panel, gates, tax_cfg, cost_cfg, eval_index, min_fx_window_days)
     h4 = run_h4(sel_run, panel, asset_classes, bm2_ret, SU.load_stress_periods(str(periods_path)), gates,
                 [t for t in ctx.trial_ids.values() if t][:1] or ["n/a"], eval_index)
 
@@ -658,6 +712,8 @@ def run_evaluation(panel: P.Panel, *, consts: dict, gates: dict, ctx: P.LedgerCt
                        "rf is None throughout (Sharpe versus zero), as in P2-05"],
         "known_leakage": KNOWN_LEAKAGE, "legacy_ledger_backfilled": backfilled,
     }
+    if bench["fx_truncated"]:
+        meta["deviations"].insert(0, bench["deviation"])
     if not backfilled:
         meta["deviations"].append("the ledger has no backfilled legacy rows for the var_sr legacy members: their Sharpes were read from the frozen docs files, "
                                   "and n_raw counts only the ledger rows present (it excludes the census legacy rows: see the N=463 / N=210 sensitivities)")
@@ -688,9 +744,11 @@ def _accepts_family(fn) -> bool:
     return "family" in inspect.signature(fn).parameters
 
 
-def _bm2_returns(panel, gates, tax_cfg, cost_cfg, eval_index) -> pd.Series:
+def _bm2_returns(panel, gates, tax_cfg, cost_cfg, eval_index, min_fx_window_days: int = MIN_FX_WINDOW_DAYS) -> pd.Series:
+    """BM2 after-cost ILS returns for the H4 family diagnostic: FX-covered sub-window only (NaN before it once reindexed; the diagnostic's
+    pairwise-overlap rule handles that; the gate quantity, the asset-class ENB, uses no ILS series)."""
     cfg = no_cpi_config(tax_cfg)
-    start = eval_index[0]
+    start = pd.Timestamp(gate7_window(panel, eval_index, min_days=min_fx_window_days)["window_start"])
     px = panel.raw_close.loc[start:, ["SPY", "IEF"]]
     div = panel.dividends if panel.dividends is not None else pd.DataFrame({"date": [], "symbol": [], "amount": []})
     div = div[pd.to_datetime(div["date"]) >= start]
