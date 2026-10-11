@@ -159,6 +159,7 @@ def e2e(tmp_path_factory):
     for rec in LA.iter_legacy_rows(ROOT / "docs"):
         L.record_trial(rec)
     panel = P.synthetic_panel(seed=21, n_days=1100, symbols=SYMS, start="2007-01-03")
+    panel = P.Panel(**{**panel.__dict__, "fx": panel.fx.iloc[500:]})     # USD/ILS starts after the panel (and after the evaluation window) starts
     weights = {s: 1.0 / len(SYMS) for s in SYMS}
     win = (str(panel.close.index[0].date()), str(panel.close.index[-1].date()))
     ctx1 = P.LedgerCtx(mode="registered", prereg="core_v1", snapshot_id="synthetic", seed=pre.SEED, fingerprint="fp")
@@ -173,7 +174,7 @@ def e2e(tmp_path_factory):
         panel, consts=consts, gates=GATES, ctx=ctx2, out_dir=odir, charter={"path": "research/charters/core_v1.md", "approved_commit": "abc"},
         charter_proc={"path_length_days": 500, "seed": pre.SEED}, code_commit="abc", periods_path=ROOT / "config" / "stress_periods.yaml",
         tax_cfg=AT.load_tax_config(ROOT / "config" / "tax_il.yaml"), cost_cfg=P.CM.load_cost_config(),
-        asset_classes={"equity": ["SPY"], "bonds": ["IEF"], "gold": ["GLD"]}, grid=grid, draws=200, n_boot=200,
+        asset_classes={"equity": ["SPY"], "bonds": ["IEF"], "gold": ["GLD"]}, grid=grid, draws=200, n_boot=200, min_fx_window_days=250,
         trial_history_path=odir / "drafts" / "core_v1_trial_history.json")
     yield {"est": est, "out": out, "odir": odir, "cdir": cdir, "ctx2": ctx2, "ctx1": ctx1, "before": before, "root": root, "grid": grid, "panel": panel}
     mp.undo()
@@ -259,6 +260,30 @@ def test_benchmark_uses_the_pinned_annual_variant_with_monthly_sensitivity(e2e):
     assert b["core_only_100"]["n_trades"] > 0
 
 
+def test_gate7_is_judged_on_the_fx_covered_subwindow_and_says_so(e2e):
+    b = e2e["out"]["results"]["benchmark"]
+    fx0 = str(e2e["panel"].fx.index[0].date())
+    assert b["fx_truncated"] is True and b["fx_first_date"] == fx0 and b["window_start"] == fx0 and b["full_window_start"] < fx0
+    assert b["n_days"] >= 250
+    md = (e2e["odir"] / "REPORT.md").read_text()
+    o = next(x for x in e2e["out"]["outcomes"] if x["test_id"] == "G-RESEARCH-7")
+    assert "FX-covered sub-window" in o["reason"] and md.count("FX-covered sub-window") >= 2
+    assert any("FX-covered sub-window" in d for d in e2e["out"]["meta"]["deviations"])
+
+
+def test_too_short_fx_window_refuses_before_any_ledger_row(e2e, led):
+    n_before = len(L.trials(family="core_v1"))
+    ctx = P.LedgerCtx(mode="registered", prereg="core_v1", snapshot_id="synthetic", seed=pre.SEED, fingerprint="fp")
+    with pytest.raises(E.StartupError, match="FX-covered window"):
+        E.run_evaluation(
+            e2e["panel"], consts=json.loads((e2e["cdir"] / "constants.json").read_text()), gates=GATES, ctx=ctx, out_dir=e2e["odir"].parent / "eval_short",
+            charter={"path": "c", "approved_commit": "abc"}, charter_proc={"path_length_days": 500, "seed": pre.SEED}, code_commit="abc",
+            periods_path=ROOT / "config" / "stress_periods.yaml", tax_cfg=AT.load_tax_config(ROOT / "config" / "tax_il.yaml"),
+            cost_cfg=P.CM.load_cost_config(), asset_classes={"equity": ["SPY"], "bonds": ["IEF"], "gold": ["GLD"]}, grid=e2e["grid"], draws=50,
+            n_boot=50)                                                       # default minimum 1260 days > the 600-day synthetic FX window
+    assert len(L.trials(family="core_v1")) == n_before
+
+
 def test_h4_enb_is_reported_and_decides_tier_d_on_a_miss(e2e):
     h4 = e2e["out"]["h4"]
     assert h4["enb_threshold"] == 2.5 and h4["n_asset_classes"] == 3
@@ -313,7 +338,7 @@ def test_a_second_attempt_in_the_same_ledger_records_the_first_and_keeps_gate_n(
         charter={"path": "charter", "approved_commit": "abc"}, charter_proc={"path_length_days": 500, "seed": pre.SEED},
         code_commit="abc", periods_path=ROOT / "config" / "stress_periods.yaml", tax_cfg=AT.load_tax_config(ROOT / "config" / "tax_il.yaml"),
         cost_cfg=P.CM.load_cost_config(), asset_classes={"equity": ["SPY"], "bonds": ["IEF"], "gold": ["GLD"]}, grid=e2e["grid"], draws=100,
-        n_boot=100, trial_history_path=odir / "drafts" / "core_v1_trial_history.json")
+        n_boot=100, min_fx_window_days=250, trial_history_path=odir / "drafts" / "core_v1_trial_history.json")
     pa = second["prior_attempts"]
     old_grid_ids = before[before["config"].map(lambda c: c.get("kind") == "grid") & (before["mode"] == "registered")]["trial_id"].tolist()
     assert pa["count"] == n_grid == len(old_grid_ids) and pa["trial_ids"] == old_grid_ids and pa["reason"] and pa["first_timestamp"]

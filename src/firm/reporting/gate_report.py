@@ -245,8 +245,16 @@ def _g7(res: Mapping | None, g: Mapping) -> TestOutcome:
     margin = _num(res.get("margin"))
     claimed = bool(res.get("rationale_claimed"))
     gap = sc - sb
-    low_corr_branch = corr <= cmax and claimed
     val = {**res, "gap": gap, "correlation_max": cmax, "benchmark_variant": b.get("gate_variant")}
+    if res.get("fx_truncated"):      # recorded deviation (owner decision 2026-10-11): the verdict below is on the FX-covered sub-window only
+        o = _g7_verdict(tid, val, gap, corr, cmax, margin, claimed)
+        return TestOutcome(tid, o.value, o.status, f"{o.reason} [FX-covered sub-window {res.get('window_start')} .. {res.get('window_end')}, "
+                           f"{res.get('n_days')} days; USD/ILS begins {res.get('fx_first_date')}; full window starts {res.get('full_window_start')}]")
+    return _g7_verdict(tid, val, gap, corr, cmax, margin, claimed)
+
+
+def _g7_verdict(tid, val, gap, corr, cmax, margin, claimed) -> TestOutcome:
+    low_corr_branch = corr <= cmax and claimed
     if gap <= 0:
         if low_corr_branch:
             return TestOutcome(tid, val, "pass", f"fails the point estimate (gap {gap:+.3f}) but correlation {corr:.2f} <= {cmax} with the charter rationale")
