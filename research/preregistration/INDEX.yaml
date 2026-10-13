@@ -183,5 +183,5 @@ entries:
   freeze_time_utc: '2026-10-07T09:44:20Z'
   ledger_path: null
   fingerprint_source: none
-  status: APPROVED
+  status: RUN
   notes: owner-approved core_v1 pre-registration
