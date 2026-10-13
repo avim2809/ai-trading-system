@@ -1,0 +1,54 @@
+{
+ "entries": [
+  {
+   "date": "2026-10-13",
+   "fingerprint": "6274c43219d3c7fe1fe9d9686bd6a8cfe3c643fc32aaf68d86116279746c2bba",
+   "ledger_trial_ids": {
+    "grid:grid:0": "5644e1923aaf48b9a25690a0adaa3c3a",
+    "grid:grid:1": "12b73da0fa444c8a9b28d73cc21c6454",
+    "grid:grid:10": "d44536de2d614887bed2160b1bf08a7c",
+    "grid:grid:11": "506e61f0888b410c91e7bbd668063380",
+    "grid:grid:2": "a8830cd4890f431a966899be5722fc9c",
+    "grid:grid:3": "afe95e9aede84d7bba78f43408711f3d",
+    "grid:grid:4": "f9f74dc1f4fc48898f3a3d7ae64c249d",
+    "grid:grid:5": "0e017bc3d5c1482994be3f261e67043c",
+    "grid:grid:6": "12ef361ef8db4a67b800799e31eba10e",
+    "grid:grid:7": "e92e77e7975b4227a40aebf432aa6893",
+    "grid:grid:8": "b2d4030cd37145fe91a7716684876c0e",
+    "grid:grid:9": "e4443c009e744628826fee4b9540be64"
+   },
+   "n_trials": 12,
+   "selected_index": 4,
+   "tier": "D",
+   "trial_daily_sharpes": [
+    0.05977361146214757,
+    0.059235466474069326,
+    0.060812297063626654,
+    0.05998686979707303,
+    0.06099715433086371,
+    0.05982861613596636,
+    0.05806952469386528,
+    0.05807058645524941,
+    0.059371286861854736,
+    0.058993523939623316,
+    0.06055274782134344,
+    0.058506856013019484
+   ],
+   "trials": [
+    "{\"buffer_fraction\": 0.05, \"forecast_cap\": 15.0, \"speed_subset\": \"all\"}",
+    "{\"buffer_fraction\": 0.05, \"forecast_cap\": 15.0, \"speed_subset\": \"drop_fastest\"}",
+    "{\"buffer_fraction\": 0.1, \"forecast_cap\": 15.0, \"speed_subset\": \"all\"}",
+    "{\"buffer_fraction\": 0.1, \"forecast_cap\": 15.0, \"speed_subset\": \"drop_fastest\"}",
+    "{\"buffer_fraction\": 0.2, \"forecast_cap\": 15.0, \"speed_subset\": \"all\"}",
+    "{\"buffer_fraction\": 0.2, \"forecast_cap\": 15.0, \"speed_subset\": \"drop_fastest\"}",
+    "{\"buffer_fraction\": 0.05, \"forecast_cap\": 20.0, \"speed_subset\": \"all\"}",
+    "{\"buffer_fraction\": 0.05, \"forecast_cap\": 20.0, \"speed_subset\": \"drop_fastest\"}",
+    "{\"buffer_fraction\": 0.1, \"forecast_cap\": 20.0, \"speed_subset\": \"all\"}",
+    "{\"buffer_fraction\": 0.1, \"forecast_cap\": 20.0, \"speed_subset\": \"drop_fastest\"}",
+    "{\"buffer_fraction\": 0.2, \"forecast_cap\": 20.0, \"speed_subset\": \"all\"}",
+    "{\"buffer_fraction\": 0.2, \"forecast_cap\": 20.0, \"speed_subset\": \"drop_fastest\"}"
+   ]
+  }
+ ],
+ "family": "core_v1"
+}
