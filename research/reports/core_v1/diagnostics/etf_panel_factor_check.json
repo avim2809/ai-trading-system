@@ -1,0 +1,1236 @@
+{
+ "asof": "2026-09-30",
+ "engine_returns_readonly": {
+  "2005+": {
+   "cagr_ils_of_usd_path": 0.006029695213738195,
+   "cagr_usd": 0.02249923422360056,
+   "days": 5469,
+   "fx_cagr_usdils": -0.016107140679051835,
+   "sharpe_ann": 0.961556828485026,
+   "vol_ann": 0.02346234506525126
+  },
+  "file_sha256": "08cdd73f4e00bbca0d9c0ffcf59db01e687c16b869b619f440d9e1eb91d095a2",
+  "first": "1993-01-29",
+  "full": {
+   "cagr_usd": 0.02066153129103898,
+   "days": 8474,
+   "sharpe_ann": 0.9535096062124576,
+   "vol_ann": 0.021720381893763234
+  },
+  "last": "2026-09-29",
+  "n": 8474
+ },
+ "hash_mismatch_vs_manifest": [],
+ "input_sha256": {
+  "corporate_actions/dividends/DBC.parquet": "9e0d540b7a32a423cf3048722db46a0098602d4d39277669f439b2861fc1b8aa",
+  "corporate_actions/dividends/EEM.parquet": "054d85d8b15c6078c8b9c72e6a3368cd8afbd3f619900d65bd030acd567bb8a7",
+  "corporate_actions/dividends/EFA.parquet": "8293b1a5ad5746db245c7683cb9789b367a0a71b936f89aa2ef5ed2348dfb5c2",
+  "corporate_actions/dividends/GLD.parquet": "a95748a8a394e6ce7e531bb7b7136b2eabba83bc94732d275878b88b93290d11",
+  "corporate_actions/dividends/HYG.parquet": "b9dd89c954439edd0f5cc914bea934cbba1e27c6fc572b0c2099f171d0d88393",
+  "corporate_actions/dividends/IEF.parquet": "fa67506c6840cfb8875a52379ed192756aa74c3dbd1f34b82751a14f20e021e0",
+  "corporate_actions/dividends/IWM.parquet": "90a379369f30bbb16a9f7ece77a99dd9fd22345d7c953e3c598d802dc45f048e",
+  "corporate_actions/dividends/IYR.parquet": "35e7fdf4e274fc537afd8e377c92716a5f3a2156aa03118151d2962cb39e41c7",
+  "corporate_actions/dividends/LQD.parquet": "7c8e60cc06241f314f3483aed4c6add391dec7a636f3a9f9852d167df5bc27f9",
+  "corporate_actions/dividends/QQQ.parquet": "259f5971765162498057dd0bb1249a474c4d25e39cade8ebb50bcfaf5d62e78b",
+  "corporate_actions/dividends/SHY.parquet": "f3fe90848c63adf45c5259a29209444e72a6bf9ba38d8cfc42ab58998f44f9e0",
+  "corporate_actions/dividends/SPY.parquet": "a5abecd1acc9c5e410115967de220334e2b7d0b602520169885f7da1ca3b97f1",
+  "corporate_actions/dividends/TIP.parquet": "45ba41901a2c3b8886131aa877e7434b60c10196241dd82bb0e8e1206414e19d",
+  "corporate_actions/dividends/TLT.parquet": "abed9a63ec1fbb6a938d364691fcdce4e51db7bca87c3794303064ca60c3e6c5",
+  "etfs_full/DBC.parquet": "c4e17b0e238b078e0ce002b3dd9d58e61a3fdb9066b0840699cc0dd0674bf252",
+  "etfs_full/EEM.parquet": "25790692bd9f823db7e0650dce63526021198e679dee65758ec2c66054a1ab1d",
+  "etfs_full/EFA.parquet": "1245cd9d7a23e758c764d4e83237a6f146a1ae228cadcb51ad088a31b11b76ff",
+  "etfs_full/GLD.parquet": "450fecd087eb1fb65e7e61d563387bd743d894a4f0ed021f2d83e00c624b7d73",
+  "etfs_full/HYG.parquet": "ec31bb79f4cd516a9c73da9eb40a3c296060337c2e3db2f13a5ff21f2eba0e72",
+  "etfs_full/IEF.parquet": "76a85998a8bd5131838c35e3de52527d6aa6c16692d91a04726da788e3520f54",
+  "etfs_full/IWM.parquet": "5325f45333ccb22c536c545beaf877c0e2a44a3ac940d4ef418509cc24232533",
+  "etfs_full/IYR.parquet": "ac9f8a7fabcfec649032e55fe85d6c3f0c71cefc64e37918ddbef06620c79e4d",
+  "etfs_full/LQD.parquet": "c0298c8b616a60821e4de8e22709a5109d0bfe5a6ad213ac99ac77dcb83dc0bc",
+  "etfs_full/QQQ.parquet": "61dba1d67050bb2ec462a9a1e9f775cbf7e3d89ca19209111abd892d8907fcee",
+  "etfs_full/SHY.parquet": "bb5c18b3de3a0a9a6ec658b2c52601c1ea162bb8428fbc9b200bb6287dcbfc1d",
+  "etfs_full/SPY.parquet": "cdd7b74a7db1a60123901d443aa6f5dc4263663e4735b2a3808b10c522e19aef",
+  "etfs_full/TIP.parquet": "6de02a861117b41a1a64800d057083e9461a784d08f952963eeb7c516ceb009d",
+  "etfs_full/TLT.parquet": "4e34d04037e36a34e0da94594bcbc222548655ead27789e851ab86148c595a51"
+ },
+ "manifest_sha256": "7c10622467d5e439e523283155790eb40a0108e63664b854c34f78c130f0126d",
+ "split_events": [
+  {
+   "date": "2005-06-09",
+   "split_ratio_k": 2,
+   "symbol": "IWM",
+   "vol252_before": 0.162838946632037
+  },
+  {
+   "date": "2000-03-20",
+   "split_ratio_k": 2,
+   "symbol": "QQQ",
+   "vol252_before": 0.383755301361958
+  },
+  {
+   "date": "2005-06-09",
+   "split_ratio_k": 3,
+   "symbol": "EFA",
+   "vol252_before": 0.121560924857616
+  },
+  {
+   "date": "2005-06-09",
+   "split_ratio_k": 3,
+   "symbol": "EEM",
+   "vol252_before": 0.174683284382311
+  },
+  {
+   "date": "2008-07-24",
+   "split_ratio_k": 3,
+   "symbol": "EEM",
+   "vol252_before": 0.35856507601114623
+  },
+  {
+   "date": "2024-12-23",
+   "split_ratio_k": 1,
+   "symbol": "DBC",
+   "vol252_before": 0.13933034590938584
+  },
+  {
+   "date": "2005-06-09",
+   "split_ratio_k": 2,
+   "symbol": "IYR",
+   "vol252_before": 0.15814677095594687
+  }
+ ],
+ "split_loss_estimate": {
+  "drag_pts_per_year": {
+   "A_upper_all_long_tau_delivered": 1.4467661036003654,
+   "B_scaled_to_realised_vol": 0.33556104576517304
+  },
+  "events": [
+   {
+    "date": "2005-06-09",
+    "loss_over_end_equity_A": 0.017841352586144464,
+    "loss_over_equity_A": 0.028662035841132184,
+    "notional_over_equity_A": 0.05732407168226437,
+    "split_ratio_k": 2,
+    "symbol": "IWM",
+    "vol252_before": 0.162838946632037
+   },
+   {
+    "date": "2005-06-09",
+    "loss_over_end_equity_A": 0.0955987152951153,
+    "loss_over_equity_A": 0.15357881589553377,
+    "notional_over_equity_A": 0.2303682238433006,
+    "split_ratio_k": 3,
+    "symbol": "EFA",
+    "vol252_before": 0.121560924857616
+   },
+   {
+    "date": "2005-06-09",
+    "loss_over_end_equity_A": 0.06652650416762443,
+    "loss_over_equity_A": 0.10687446692345982,
+    "notional_over_equity_A": 0.16031170038518971,
+    "split_ratio_k": 3,
+    "symbol": "EEM",
+    "vol252_before": 0.174683284382311
+   },
+   {
+    "date": "2008-07-24",
+    "loss_over_end_equity_A": 0.034742747887979694,
+    "loss_over_equity_A": 0.052066372739040204,
+    "notional_over_equity_A": 0.0780995591085603,
+    "split_ratio_k": 3,
+    "symbol": "EEM",
+    "vol252_before": 0.35856507601114623
+   },
+   {
+    "date": "2005-06-09",
+    "loss_over_end_equity_A": 0.055112103346602395,
+    "loss_over_equity_A": 0.08853729411901373,
+    "notional_over_equity_A": 0.17707458823802746,
+    "split_ratio_k": 2,
+    "symbol": "IYR",
+    "vol252_before": 0.15814677095594687
+   }
+  ],
+  "realised_over_target_vol": 0.2606927229472362,
+  "tau": 0.09
+ },
+ "windows": {
+  "2005+": {
+   "DBC": {
+    "annual_mismatch_pts": -0.04328214427069543,
+    "bars": 5195,
+    "cagr_adjusted": 0.024471096675580117,
+    "cagr_raw_plus_div_reinvested": 0.02490391811828707,
+    "cagr_raw_price": 0.013015792760423528,
+    "ex_dates": 9,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.011244660937261486,
+    "factor_steps_without_dividend": [],
+    "first": "2006-02-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": -5.418999922174471e-07,
+    "matched_step_minus_expected_sum": -4.877099929957024e-06,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.011244587446557198,
+    "years": 20.652
+   },
+   "EEM": {
+    "annual_mismatch_pts": 10.304712406527972,
+    "bars": 5469,
+    "cagr_adjusted": 0.07329138149024272,
+    "cagr_raw_plus_div_reinvested": -0.029755742575036992,
+    "cagr_raw_price": -0.04875436957411661,
+    "ex_dates": 44,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.1207129478806541,
+    "factor_steps_without_dividend": [
+     [
+      "2005-06-09",
+      2.000002492723787
+     ],
+     [
+      "2008-07-24",
+      2.000003443949349
+     ]
+    ],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 1.2987909677281663e-07,
+    "matched_step_minus_expected_sum": 5.714680258003932e-06,
+    "n_steps_without_dividend": 2,
+    "raw_jumps_gt20pct": [
+     [
+      "2005-06-09",
+      -0.6649188082341435
+     ],
+     [
+      "2008-07-24",
+      -0.6789858685481283
+     ],
+     [
+      "2008-10-13",
+      0.2276985743380855
+     ],
+     [
+      "2008-10-28",
+      0.2559585492227978
+     ]
+    ],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [
+     [
+      "2005-06-09",
+      2.000002492723787
+     ],
+     [
+      "2008-07-24",
+      2.000003443949349
+     ]
+    ],
+    "table_div_yield_per_year": 0.01962497701515076,
+    "years": 21.736
+   },
+   "EFA": {
+    "annual_mismatch_pts": 5.180765310090285,
+    "bars": 5469,
+    "cagr_adjusted": 0.06161640726003226,
+    "cagr_raw_plus_div_reinvested": 0.009808754159129407,
+    "cagr_raw_price": -0.019135751719934868,
+    "ex_dates": 41,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.07911386908544013,
+    "factor_steps_without_dividend": [
+     [
+      "2005-06-09",
+      1.999989240386669
+     ]
+    ],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": -1.403817913787286e-07,
+    "matched_step_minus_expected_sum": -5.755653446527873e-06,
+    "n_steps_without_dividend": 1,
+    "raw_jumps_gt20pct": [
+     [
+      "2005-06-09",
+      -0.6653498921654677
+     ]
+    ],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [
+     [
+      "2005-06-09",
+      1.999989240386669
+     ]
+    ],
+    "table_div_yield_per_year": 0.02856989774763047,
+    "years": 21.736
+   },
+   "GLD": {
+    "annual_mismatch_pts": -4.440892098500626e-14,
+    "bars": 5469,
+    "cagr_adjusted": 0.105806818002528,
+    "cagr_raw_plus_div_reinvested": 0.10580681800252845,
+    "cagr_raw_price": 0.105806818002528,
+    "ex_dates": 0,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.0,
+    "factor_steps_without_dividend": [],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": null,
+    "matched_step_minus_expected_sum": 0.0,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.0,
+    "years": 21.736
+   },
+   "HYG": {
+    "annual_mismatch_pts": -0.029588929114199303,
+    "bars": 4899,
+    "cagr_adjusted": 0.04802556270523062,
+    "cagr_raw_plus_div_reinvested": 0.04832145199637261,
+    "cagr_raw_price": -0.015254732755043188,
+    "ex_dates": 233,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.06228026068561193,
+    "factor_steps_without_dividend": [],
+    "first": "2007-04-11",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 1.981305111203125e-06,
+    "matched_step_minus_expected_sum": 0.0004616440909103281,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.06225653865814452,
+    "years": 19.469
+   },
+   "IEF": {
+    "annual_mismatch_pts": -0.007271155670007801,
+    "bars": 5469,
+    "cagr_adjusted": 0.02961926279282112,
+    "cagr_raw_plus_div_reinvested": 0.0296919743495212,
+    "cagr_raw_price": 0.0022853755725795732,
+    "ex_dates": 260,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.026906318057192385,
+    "factor_steps_without_dividend": [],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 3.819281244355712e-07,
+    "matched_step_minus_expected_sum": 9.930131235324851e-05,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.026901557613946404,
+    "years": 21.736
+   },
+   "IWM": {
+    "annual_mismatch_pts": 3.389284305080431,
+    "bars": 5469,
+    "cagr_adjusted": 0.08439270296845791,
+    "cagr_raw_plus_div_reinvested": 0.0504998599176536,
+    "cagr_raw_price": 0.03656694454539622,
+    "ex_dates": 87,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.045105871600167394,
+    "factor_steps_without_dividend": [
+     [
+      "2005-06-09",
+      1.0000006547616094
+     ]
+    ],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": -6.696047190057946e-07,
+    "matched_step_minus_expected_sum": -5.8255610553504134e-05,
+    "n_steps_without_dividend": 1,
+    "raw_jumps_gt20pct": [
+     [
+      "2005-06-09",
+      -0.4950984363606903
+     ]
+    ],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [
+     [
+      "2005-06-09",
+      1.0000006547616094
+     ]
+    ],
+    "table_div_yield_per_year": 0.013218876399702774,
+    "years": 21.736
+   },
+   "IYR": {
+    "annual_mismatch_pts": 3.282182080790541,
+    "bars": 5469,
+    "cagr_adjusted": 0.05888621717751996,
+    "cagr_raw_plus_div_reinvested": 0.02606439636961455,
+    "cagr_raw_price": -0.01078596482543781,
+    "ex_dates": 87,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.06806217222564416,
+    "factor_steps_without_dividend": [
+     [
+      "2005-06-09",
+      1.000002804887366
+     ]
+    ],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 8.705145735221599e-08,
+    "matched_step_minus_expected_sum": 7.573476789642791e-06,
+    "n_steps_without_dividend": 1,
+    "raw_jumps_gt20pct": [
+     [
+      "2005-06-09",
+      -0.49944733933364915
+     ],
+     [
+      "2008-12-01",
+      -0.2061114439784303
+     ]
+    ],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [
+     [
+      "2005-06-09",
+      1.000002804887366
+     ]
+    ],
+    "table_div_yield_per_year": 0.03617257788719102,
+    "years": 21.736
+   },
+   "LQD": {
+    "annual_mismatch_pts": -0.01244477007824596,
+    "bars": 5469,
+    "cagr_adjusted": 0.036874599096324845,
+    "cagr_raw_plus_div_reinvested": 0.036999046797107304,
+    "cagr_raw_price": -0.0042119832319076345,
+    "ex_dates": 260,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.04043187393661554,
+    "factor_steps_without_dividend": [],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 9.672493743776575e-07,
+    "matched_step_minus_expected_sum": 0.0002514848373381909,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.04042042468352093,
+    "years": 21.736
+   },
+   "QQQ": {
+    "annual_mismatch_pts": -0.0019519715056759424,
+    "bars": 5469,
+    "cagr_adjusted": 0.15268826564172433,
+    "cagr_raw_plus_div_reinvested": 0.1527077853567811,
+    "cagr_raw_price": 0.144179598086283,
+    "ex_dates": 87,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.007408964713899055,
+    "factor_steps_without_dividend": [],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": -2.4396147336501246e-07,
+    "matched_step_minus_expected_sum": -2.1224648182756084e-05,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.0074105762846133965,
+    "years": 21.736
+   },
+   "SHY": {
+    "annual_mismatch_pts": -0.003802121795715152,
+    "bars": 5469,
+    "cagr_adjusted": 0.019268503588594,
+    "cagr_raw_plus_div_reinvested": 0.01930652480655115,
+    "cagr_raw_price": -0.0001584374818106582,
+    "ex_dates": 260,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.019243666708546468,
+    "factor_steps_without_dividend": [],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 2.405934808674512e-07,
+    "matched_step_minus_expected_sum": 6.255430502553731e-05,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.019240774533549602,
+    "years": 21.736
+   },
+   "SPY": {
+    "annual_mismatch_pts": -0.015992674129683415,
+    "bars": 5469,
+    "cagr_adjusted": 0.10879552645013857,
+    "cagr_raw_plus_div_reinvested": 0.1089554531914354,
+    "cagr_raw_price": 0.0887820903942853,
+    "ex_dates": 87,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.0182145915785684,
+    "factor_steps_without_dividend": [],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 1.6851729932047036e-07,
+    "matched_step_minus_expected_sum": 1.4661005040880921e-05,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.01821385646787479,
+    "years": 21.736
+   },
+   "TIP": {
+    "annual_mismatch_pts": -0.015863548935723948,
+    "bars": 5469,
+    "cagr_adjusted": 0.030889781325667443,
+    "cagr_raw_plus_div_reinvested": 0.031048416815024682,
+    "cagr_raw_price": -0.0007760409474074637,
+    "ex_dates": 191,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.031198636912398842,
+    "factor_steps_without_dividend": [],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 9.646939931577882e-07,
+    "matched_step_minus_expected_sum": 0.00018425655269313756,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.031189745412770756,
+    "years": 21.736
+   },
+   "TLT": {
+    "annual_mismatch_pts": -0.008926794123875759,
+    "bars": 5469,
+    "cagr_adjusted": 0.027246185567219472,
+    "cagr_raw_plus_div_reinvested": 0.02733545350845823,
+    "cagr_raw_price": -0.005782751189147728,
+    "ex_dates": 260,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.032681151562157146,
+    "factor_steps_without_dividend": [],
+    "first": "2005-01-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 6.317984893943719e-07,
+    "matched_step_minus_expected_sum": 0.0001642676072425367,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.032673566515615336,
+    "years": 21.736
+   }
+  },
+  "full": {
+   "DBC": {
+    "annual_mismatch_pts": -0.04328214427069543,
+    "bars": 5195,
+    "cagr_adjusted": 0.024471096675580117,
+    "cagr_raw_plus_div_reinvested": 0.02490391811828707,
+    "cagr_raw_price": 0.013015792760423528,
+    "ex_dates": 9,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.011244660937261486,
+    "factor_steps_without_dividend": [],
+    "first": "2006-02-03",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": -5.418999922174471e-07,
+    "matched_step_minus_expected_sum": -4.877099929957024e-06,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.011244587446557198,
+    "years": 20.652
+   },
+   "EEM": {
+    "annual_mismatch_pts": 9.823125952396893,
+    "bars": 5904,
+    "cagr_adjusted": 0.10060011292670645,
+    "cagr_raw_plus_div_reinvested": 0.002368853402737514,
+    "cagr_raw_price": -0.016544136544284882,
+    "ex_dates": 47,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.1125381074232518,
+    "factor_steps_without_dividend": [
+     [
+      "2005-06-09",
+      2.000002492723787
+     ],
+     [
+      "2008-07-24",
+      2.000003443949349
+     ]
+    ],
+    "first": "2003-04-11",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 2.841737585227783e-08,
+    "matched_step_minus_expected_sum": 1.335616665057058e-06,
+    "n_steps_without_dividend": 2,
+    "raw_jumps_gt20pct": [
+     [
+      "2005-06-09",
+      -0.6649188082341435
+     ],
+     [
+      "2008-07-24",
+      -0.6789858685481283
+     ],
+     [
+      "2008-10-13",
+      0.2276985743380855
+     ],
+     [
+      "2008-10-28",
+      0.2559585492227978
+     ]
+    ],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [
+     [
+      "2005-06-09",
+      2.000002492723787
+     ],
+     [
+      "2008-07-24",
+      2.000003443949349
+     ]
+    ],
+    "table_div_yield_per_year": 0.018915032994198566,
+    "years": 23.469
+   },
+   "EFA": {
+    "annual_mismatch_pts": 4.512147534136202,
+    "bars": 6315,
+    "cagr_adjusted": 0.06509338441243528,
+    "cagr_raw_plus_div_reinvested": 0.01997190907107327,
+    "cagr_raw_price": -0.007437441210832452,
+    "ex_dates": 47,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.07052771709318337,
+    "factor_steps_without_dividend": [
+     [
+      "2005-06-09",
+      1.999989240386669
+     ]
+    ],
+    "first": "2001-08-17",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": -1.853443720354907e-07,
+    "matched_step_minus_expected_sum": -8.711185485668063e-06,
+    "n_steps_without_dividend": 1,
+    "raw_jumps_gt20pct": [
+     [
+      "2005-06-09",
+      -0.6653498921654677
+     ]
+    ],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [
+     [
+      "2005-06-09",
+      1.999989240386669
+     ]
+    ],
+    "table_div_yield_per_year": 0.026788025854906184,
+    "years": 25.117
+   },
+   "GLD": {
+    "annual_mismatch_pts": -4.440892098500626e-14,
+    "bars": 5499,
+    "cagr_adjusted": 0.1035940386530958,
+    "cagr_raw_plus_div_reinvested": 0.10359403865309624,
+    "cagr_raw_price": 0.1035940386530958,
+    "ex_dates": 0,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.0,
+    "factor_steps_without_dividend": [],
+    "first": "2004-11-18",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": null,
+    "matched_step_minus_expected_sum": 0.0,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.0,
+    "years": 21.862
+   },
+   "HYG": {
+    "annual_mismatch_pts": -0.029588929114199303,
+    "bars": 4899,
+    "cagr_adjusted": 0.04802556270523062,
+    "cagr_raw_plus_div_reinvested": 0.04832145199637261,
+    "cagr_raw_price": -0.015254732755043188,
+    "ex_dates": 233,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.06228026068561193,
+    "factor_steps_without_dividend": [],
+    "first": "2007-04-11",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 1.981305111203125e-06,
+    "matched_step_minus_expected_sum": 0.0004616440909103281,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.06225653865814452,
+    "years": 19.469
+   },
+   "IEF": {
+    "annual_mismatch_pts": -0.008338362456128401,
+    "bars": 6083,
+    "cagr_adjusted": 0.032278389486030123,
+    "cagr_raw_plus_div_reinvested": 0.03236177311059141,
+    "cagr_raw_price": 0.003205252260306546,
+    "ex_dates": 290,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.028568261545831166,
+    "factor_steps_without_dividend": [],
+    "first": "2002-07-26",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 5.328124643166616e-07,
+    "matched_step_minus_expected_sum": 0.00015451561465183185,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.028562014604454587,
+    "years": 24.178
+   },
+   "IWM": {
+    "annual_mismatch_pts": 3.0213561394238697,
+    "bars": 6624,
+    "cagr_adjusted": 0.08502731305711464,
+    "cagr_raw_plus_div_reinvested": 0.05481375166287594,
+    "cagr_raw_price": 0.043257198320676205,
+    "ex_dates": 87,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.03925741963438785,
+    "factor_steps_without_dividend": [
+     [
+      "2000-06-21",
+      0.0005706438906711853
+     ],
+     [
+      "2000-09-20",
+      0.0034043782143895474
+     ],
+     [
+      "2000-12-13",
+      0.004566185237252496
+     ],
+     [
+      "2001-03-09",
+      0.0020278078855926474
+     ],
+     [
+      "2001-06-08",
+      0.002771644093984227
+     ],
+     [
+      "2001-10-01",
+      0.003679798580546123
+     ],
+     [
+      "2001-12-14",
+      0.0029076030216101945
+     ],
+     [
+      "2002-03-08",
+      0.0011669238608698063
+     ],
+     [
+      "2002-06-14",
+      0.0026535498485529274
+     ],
+     [
+      "2002-09-13",
+      0.003336043897120833
+     ],
+     [
+      "2002-12-13",
+      0.004836160270170087
+     ],
+     [
+      "2003-03-07",
+      0.002277463421801018
+     ],
+     [
+      "2003-06-13",
+      0.0016443194223008106
+     ],
+     [
+      "2003-09-12",
+      0.002347585146217135
+     ],
+     [
+      "2003-12-12",
+      0.003465602307313409
+     ],
+     [
+      "2003-12-16",
+      0.0021678144427115242
+     ],
+     [
+      "2004-03-26",
+      0.001833894772851341
+     ],
+     [
+      "2004-06-25",
+      0.0026458349588243113
+     ],
+     [
+      "2004-09-24",
+      0.002357180529728664
+     ],
+     [
+      "2004-12-23",
+      0.0031881872804842004
+     ],
+     [
+      "2005-06-09",
+      1.0000006547616094
+     ]
+    ],
+    "first": "2000-05-26",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": -6.696047190057946e-07,
+    "matched_step_minus_expected_sum": -5.8255610553504134e-05,
+    "n_steps_without_dividend": 21,
+    "raw_jumps_gt20pct": [
+     [
+      "2005-06-09",
+      -0.4950984363606903
+     ]
+    ],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [
+     [
+      "2005-06-09",
+      1.0000006547616094
+     ]
+    ],
+    "table_div_yield_per_year": 0.010906740775019779,
+    "years": 26.344
+   },
+   "IYR": {
+    "annual_mismatch_pts": 2.7596071629076846,
+    "bars": 6604,
+    "cagr_adjusted": 0.08018202667192109,
+    "cagr_raw_plus_div_reinvested": 0.052585955042844246,
+    "cagr_raw_price": 0.012105989661896688,
+    "ex_dates": 106,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.06509627190040129,
+    "factor_steps_without_dividend": [
+     [
+      "2005-06-09",
+      1.000002804887366
+     ]
+    ],
+    "first": "2000-06-19",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 3.455825339705265e-07,
+    "matched_step_minus_expected_sum": 3.663174860087581e-05,
+    "n_steps_without_dividend": 1,
+    "raw_jumps_gt20pct": [
+     [
+      "2005-06-09",
+      -0.49944733933364915
+     ],
+     [
+      "2008-12-01",
+      -0.2061114439784303
+     ]
+    ],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [
+     [
+      "2005-06-09",
+      1.000002804887366
+     ]
+    ],
+    "table_div_yield_per_year": 0.03871860017865871,
+    "years": 26.278
+   },
+   "LQD": {
+    "annual_mismatch_pts": -0.012542871158904845,
+    "bars": 6083,
+    "cagr_adjusted": 0.042821559262142816,
+    "cagr_raw_plus_div_reinvested": 0.042946987973731865,
+    "cagr_raw_price": 0.00010514437241426755,
+    "ex_dates": 290,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.04182493841627715,
+    "factor_steps_without_dividend": [],
+    "first": "2002-07-26",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 1.1716512844538956e-06,
+    "matched_step_minus_expected_sum": 0.0003397788724916297,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.04181117127554385,
+    "years": 24.178
+   },
+   "QQQ": {
+    "annual_mismatch_pts": 2.751840626395885,
+    "bars": 6932,
+    "cagr_adjusted": 0.10862904823480202,
+    "cagr_raw_plus_div_reinvested": 0.08111064197084317,
+    "cagr_raw_price": 0.07440522668962979,
+    "ex_dates": 89,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.031356929322415066,
+    "factor_steps_without_dividend": [
+     [
+      "2000-03-20",
+      0.9999994780325603
+     ]
+    ],
+    "first": "1999-03-10",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": -2.424501295236812e-07,
+    "matched_step_minus_expected_sum": -2.1578061527607623e-05,
+    "n_steps_without_dividend": 1,
+    "raw_jumps_gt20pct": [
+     [
+      "2000-03-20",
+      -0.5141003948110547
+     ]
+    ],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [
+     [
+      "2000-03-20",
+      0.9999994780325603
+     ]
+    ],
+    "table_div_yield_per_year": 0.006204543100451183,
+    "years": 27.556
+   },
+   "SHY": {
+    "annual_mismatch_pts": -0.003605382202342966,
+    "bars": 6083,
+    "cagr_adjusted": 0.019361205232864442,
+    "cagr_raw_plus_div_reinvested": 0.019397259054887872,
+    "cagr_raw_price": -7.636809439559578e-05,
+    "ex_dates": 290,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.019252532738638674,
+    "factor_steps_without_dividend": [],
+    "first": "2002-07-26",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 2.1680339477786592e-07,
+    "matched_step_minus_expected_sum": 6.287298448558111e-05,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.01924961322554259,
+    "years": 24.178
+   },
+   "SPY": {
+    "annual_mismatch_pts": 0.6672422925000587,
+    "bars": 8474,
+    "cagr_adjusted": 0.10819367474139852,
+    "cagr_raw_plus_div_reinvested": 0.10152125181639793,
+    "cagr_raw_price": 0.08854144942064401,
+    "ex_dates": 87,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.017892689386226467,
+    "factor_steps_without_dividend": [
+     [
+      "1993-03-19",
+      0.004723601214811968
+     ],
+     [
+      "1993-06-18",
+      0.007087509341750398
+     ],
+     [
+      "1993-09-17",
+      0.006226014401282676
+     ],
+     [
+      "1993-12-17",
+      0.006200380170750197
+     ],
+     [
+      "1994-03-18",
+      0.005770597067838779
+     ],
+     [
+      "1994-06-17",
+      0.006612531871605265
+     ],
+     [
+      "1994-09-16",
+      0.00608727166149392
+     ],
+     [
+      "1994-12-16",
+      0.007966357471962171
+     ],
+     [
+      "1995-03-13",
+      0.005470227825890017
+     ],
+     [
+      "1995-06-16",
+      0.005876650158408214
+     ],
+     [
+      "1995-09-15",
+      0.005341310172223945
+     ],
+     [
+      "1995-12-15",
+      0.006021570874083837
+     ],
+     [
+      "1996-03-15",
+      0.004449458190646238
+     ],
+     [
+      "1996-06-21",
+      0.005299244286094185
+     ],
+     [
+      "1996-09-20",
+      0.00514512575487136
+     ],
+     [
+      "1996-12-20",
+      0.005448916405150328
+     ],
+     [
+      "1997-03-21",
+      0.003832780332202468
+     ],
+     [
+      "1997-06-20",
+      0.003894988665631871
+     ],
+     [
+      "1997-09-19",
+      0.0036718116809577594
+     ],
+     [
+      "1997-12-19",
+      0.003973717399115895
+     ],
+     [
+      "1998-03-20",
+      0.00287698283287785
+     ],
+     [
+      "1998-06-19",
+      0.0031825398518723347
+     ],
+     [
+      "1998-09-18",
+      0.0035261133394137723
+     ],
+     [
+      "1998-12-18",
+      0.0033200209480273024
+     ],
+     [
+      "1999-03-19",
+      0.0024249368925128856
+     ],
+     [
+      "1999-06-18",
+      0.0030192076767912024
+     ],
+     [
+      "1999-09-17",
+      0.002818367912443165
+     ],
+     [
+      "1999-12-17",
+      0.0024514007577991492
+     ],
+     [
+      "2000-03-17",
+      0.0025395232308973448
+     ],
+     [
+      "2000-06-16",
+      0.002357039321786214
+     ],
+     [
+      "2000-09-15",
+      0.0025348646743776904
+     ],
+     [
+      "2000-12-15",
+      0.0030696146540161173
+     ],
+     [
+      "2001-03-16",
+      0.0026884560332030016
+     ],
+     [
+      "2001-06-15",
+      0.0028482660479209887
+     ],
+     [
+      "2001-09-21",
+      0.0037535285447352074
+     ],
+     [
+      "2001-12-21",
+      0.0034368607622969893
+     ],
+     [
+      "2002-03-15",
+      0.0028644547731144776
+     ],
+     [
+      "2002-06-21",
+      0.0035048887526585304
+     ],
+     [
+      "2002-09-20",
+      0.004484543395722573
+     ],
+     [
+      "2002-12-20",
+      0.004912711973636963
+     ],
+     [
+      "2003-03-21",
+      0.004037482078484089
+     ],
+     [
+      "2003-06-20",
+      0.0036147077161170493
+     ],
+     [
+      "2003-09-19",
+      0.0038384902619834627
+     ],
+     [
+      "2003-12-19",
+      0.0047218909332966685
+     ],
+     [
+      "2004-03-19",
+      0.0035033066267333712
+     ],
+     [
+      "2004-06-18",
+      0.003647037538052178
+     ],
+     [
+      "2004-09-17",
+      0.004160746881177291
+     ],
+     [
+      "2004-11-15",
+      0.0029642801812459485
+     ],
+     [
+      "2004-12-17",
+      0.004722577030723318
+     ]
+    ],
+    "first": "1993-01-29",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 1.6851729932047036e-07,
+    "matched_step_minus_expected_sum": 1.4661005040880921e-05,
+    "n_steps_without_dividend": 49,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.011759906188879144,
+    "years": 33.665
+   },
+   "TIP": {
+    "annual_mismatch_pts": -0.015571124883773102,
+    "bars": 5739,
+    "cagr_adjusted": 0.0329774009666961,
+    "cagr_raw_plus_div_reinvested": 0.03313311221553383,
+    "cagr_raw_price": 0.0009201617567056175,
+    "ex_dates": 201,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.031525574141442296,
+    "factor_steps_without_dividend": [],
+    "first": "2003-12-05",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 1.1167555597250605e-06,
+    "matched_step_minus_expected_sum": 0.00022446786750473716,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.0315154654649789,
+    "years": 22.817
+   },
+   "TLT": {
+    "annual_mismatch_pts": -0.012123708723121851,
+    "bars": 6083,
+    "cagr_adjusted": 0.03274049940347812,
+    "cagr_raw_plus_div_reinvested": 0.03286173649070934,
+    "cagr_raw_price": -0.0022006678614235886,
+    "ex_dates": 289,
+    "ex_dates_matched_offset_1day": 0,
+    "ex_dates_not_trading_days": [],
+    "ex_dates_unmatched": [],
+    "factor_drift_per_year": 0.03441904082297501,
+    "factor_steps_without_dividend": [],
+    "first": "2002-07-26",
+    "last": "2026-09-29",
+    "matched_step_minus_expected_mean": 8.376375206474725e-07,
+    "matched_step_minus_expected_sum": 0.00024207724346711956,
+    "n_steps_without_dividend": 0,
+    "raw_jumps_gt20pct": [],
+    "splits_unadjusted_or_factor_jumps_gt5pct": [],
+    "table_div_yield_per_year": 0.03440852838444578,
+    "years": 24.178
+   }
+  }
+ }
+}
