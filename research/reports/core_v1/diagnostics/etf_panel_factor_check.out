@@ -1,0 +1,63 @@
+manifest 7c10622467d5e439e523283155790eb40a0108e63664b854c34f78c130f0126d | input files hashed: 28 | mismatches vs manifest: []
+  9e0d540b7a32a423cf3048722db46a0098602d4d39277669f439b2861fc1b8aa corporate_actions/dividends/DBC.parquet
+  054d85d8b15c6078c8b9c72e6a3368cd8afbd3f619900d65bd030acd567bb8a7 corporate_actions/dividends/EEM.parquet
+  8293b1a5ad5746db245c7683cb9789b367a0a71b936f89aa2ef5ed2348dfb5c2 corporate_actions/dividends/EFA.parquet
+  a95748a8a394e6ce7e531bb7b7136b2eabba83bc94732d275878b88b93290d11 corporate_actions/dividends/GLD.parquet
+  b9dd89c954439edd0f5cc914bea934cbba1e27c6fc572b0c2099f171d0d88393 corporate_actions/dividends/HYG.parquet
+  fa67506c6840cfb8875a52379ed192756aa74c3dbd1f34b82751a14f20e021e0 corporate_actions/dividends/IEF.parquet
+  90a379369f30bbb16a9f7ece77a99dd9fd22345d7c953e3c598d802dc45f048e corporate_actions/dividends/IWM.parquet
+  35e7fdf4e274fc537afd8e377c92716a5f3a2156aa03118151d2962cb39e41c7 corporate_actions/dividends/IYR.parquet
+  7c8e60cc06241f314f3483aed4c6add391dec7a636f3a9f9852d167df5bc27f9 corporate_actions/dividends/LQD.parquet
+  259f5971765162498057dd0bb1249a474c4d25e39cade8ebb50bcfaf5d62e78b corporate_actions/dividends/QQQ.parquet
+  f3fe90848c63adf45c5259a29209444e72a6bf9ba38d8cfc42ab58998f44f9e0 corporate_actions/dividends/SHY.parquet
+  a5abecd1acc9c5e410115967de220334e2b7d0b602520169885f7da1ca3b97f1 corporate_actions/dividends/SPY.parquet
+  45ba41901a2c3b8886131aa877e7434b60c10196241dd82bb0e8e1206414e19d corporate_actions/dividends/TIP.parquet
+  abed9a63ec1fbb6a938d364691fcdce4e51db7bca87c3794303064ca60c3e6c5 corporate_actions/dividends/TLT.parquet
+  c4e17b0e238b078e0ce002b3dd9d58e61a3fdb9066b0840699cc0dd0674bf252 etfs_full/DBC.parquet
+  25790692bd9f823db7e0650dce63526021198e679dee65758ec2c66054a1ab1d etfs_full/EEM.parquet
+  1245cd9d7a23e758c764d4e83237a6f146a1ae228cadcb51ad088a31b11b76ff etfs_full/EFA.parquet
+  450fecd087eb1fb65e7e61d563387bd743d894a4f0ed021f2d83e00c624b7d73 etfs_full/GLD.parquet
+  ec31bb79f4cd516a9c73da9eb40a3c296060337c2e3db2f13a5ff21f2eba0e72 etfs_full/HYG.parquet
+  76a85998a8bd5131838c35e3de52527d6aa6c16692d91a04726da788e3520f54 etfs_full/IEF.parquet
+  5325f45333ccb22c536c545beaf877c0e2a44a3ac940d4ef418509cc24232533 etfs_full/IWM.parquet
+  ac9f8a7fabcfec649032e55fe85d6c3f0c71cefc64e37918ddbef06620c79e4d etfs_full/IYR.parquet
+  c0298c8b616a60821e4de8e22709a5109d0bfe5a6ad213ac99ac77dcb83dc0bc etfs_full/LQD.parquet
+  61dba1d67050bb2ec462a9a1e9f775cbf7e3d89ca19209111abd892d8907fcee etfs_full/QQQ.parquet
+  bb5c18b3de3a0a9a6ec658b2c52601c1ea162bb8428fbc9b200bb6287dcbfc1d etfs_full/SHY.parquet
+  cdd7b74a7db1a60123901d443aa6f5dc4263663e4735b2a3808b10c522e19aef etfs_full/SPY.parquet
+  6de02a861117b41a1a64800d057083e9461a784d08f952963eeb7c516ceb009d etfs_full/TIP.parquet
+  4e34d04037e36a34e0da94594bcbc222548655ead27789e851ab86148c595a51 etfs_full/TLT.parquet
+
+== window full
+sym   jumps splits exD unmatched steps_nodiv  cagr_adj  cagr_reinv  mismatch_pts
+SPY       0      0   87         0         49    10.819     10.152        0.667
+IWM       1      1   87         0         21     8.503      5.481        3.021
+QQQ       1      1   89         0          1    10.863      8.111        2.752
+EFA       1      1   47         0          1     6.509      1.997        4.512
+EEM       4      2   47         0          2    10.060      0.237        9.823
+SHY       0      0  290         0          0     1.936      1.940       -0.004
+IEF       0      0  290         0          0     3.228      3.236       -0.008
+TLT       0      0  289         0          0     3.274      3.286       -0.012
+TIP       0      0  201         0          0     3.298      3.313       -0.016
+LQD       0      0  290         0          0     4.282      4.295       -0.013
+HYG       0      0  233         0          0     4.803      4.832       -0.030
+GLD       0      0    0         0          0    10.359     10.359       -0.000
+DBC       0      0    9         0          0     2.447      2.490       -0.043
+IYR       2      1  106         0          1     8.018      5.259        2.760
+
+== window 2005+
+sym   jumps splits exD unmatched steps_nodiv  cagr_adj  cagr_reinv  mismatch_pts
+SPY       0      0   87         0          0    10.880     10.896       -0.016
+IWM       1      1   87         0          1     8.439      5.050        3.389
+QQQ       0      0   87         0          0    15.269     15.271       -0.002
+EFA       1      1   41         0          1     6.162      0.981        5.181
+EEM       4      2   44         0          2     7.329     -2.976       10.305
+SHY       0      0  260         0          0     1.927      1.931       -0.004
+IEF       0      0  260         0          0     2.962      2.969       -0.007
+TLT       0      0  260         0          0     2.725      2.734       -0.009
+TIP       0      0  191         0          0     3.089      3.105       -0.016
+LQD       0      0  260         0          0     3.687      3.700       -0.012
+HYG       0      0  233         0          0     4.803      4.832       -0.030
+GLD       0      0    0         0          0    10.581     10.581       -0.000
+DBC       0      0    9         0          0     2.447      2.490       -0.043
+IYR       2      1   87         0          1     5.889      2.606        3.282
