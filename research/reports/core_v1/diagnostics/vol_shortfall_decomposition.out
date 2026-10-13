@@ -1,0 +1,25 @@
+== window 2005+ 2005-01-03..2026-09-29 (5469 days)  stored engine vol 2.346%  (x0.261 of tau)  corr(replay S5, stored) 0.990
+  S0_unit_forecast_10                    vol   9.572%  ratio-to-previous  1.064  mean gross  1.991  mean n held 13.71
+  S1_combined_forecast                   vol   7.478%  ratio-to-previous  0.781  mean gross  1.666  mean n held  9.94
+  S2_vol_scale                           vol   8.770%  ratio-to-previous  1.173  mean gross  2.003  mean n held  9.94
+  S3_buffer                              vol   8.749%  ratio-to-previous  0.998  mean gross  2.015  mean n held 13.71
+  S4_instrument_cap                      vol   7.895%  ratio-to-previous  0.902  mean gross  1.810  mean n held 13.71
+  S5_gross_cap_final                     vol   3.762%  ratio-to-previous  0.476  mean gross  0.854  mean n held 13.17
+  X_gross_cap_without_instrument_cap     vol   4.373%  ratio-to-previous    nan  mean gross  0.934  mean n held 12.95
+  S6_equity_denominator                  vol   2.346%  ratio-to-previous  0.624  mean gross    nan  mean n held   nan
+  forecast {"active_instrument_days": 74984, "frac_at_cap": 0.19009388669582844, "frac_combined_zero": 0.2748186279739678, "frac_days_all_instruments_flat": 0.008593892850612543, "mean_abs_combined_unfloored": 9.099924261654794, "mean_combined_floored": 7.234043938232247, "mean_combined_unfloored_signed": 5.368163614809701}
+  vol_scale {"frac_at_cap": 0.287986834887548, "implied_sigma_hat_median": 0.07044062221104012, "max": 1.5, "mean": 1.2503441203950356, "min": 0.7953531572677719, "raw_weight_gross_mean": 1.6656021864676944}
+== window full 1994-02-02..2026-09-29 (8218 days)  stored engine vol 2.205%  (x0.245 of tau)  corr(replay S5, stored) 0.981
+  S0_unit_forecast_10                    vol   7.960%  ratio-to-previous  0.884  mean gross  1.395  mean n held 10.08
+  S1_combined_forecast                   vol   6.255%  ratio-to-previous  0.786  mean gross  1.171  mean n held  7.29
+  S2_vol_scale                           vol   7.444%  ratio-to-previous  1.190  mean gross  1.426  mean n held  7.29
+  S3_buffer                              vol   7.415%  ratio-to-previous  0.996  mean gross  1.432  mean n held 10.06
+  S4_instrument_cap                      vol   6.613%  ratio-to-previous  0.892  mean gross  1.269  mean n held 10.06
+  S5_gross_cap_final                     vol   3.297%  ratio-to-previous  0.499  mean gross  0.621  mean n held  9.70
+  X_gross_cap_without_instrument_cap     vol   3.847%  ratio-to-previous    nan  mean gross  0.688  mean n held  9.55
+  S6_equity_denominator                  vol   2.206%  ratio-to-previous  0.669  mean gross    nan  mean n held   nan
+  forecast {"active_instrument_days": 82870, "frac_at_cap": 0.1904790635935803, "frac_combined_zero": 0.2773259321829371, "frac_days_all_instruments_flat": 0.0636407885130202, "mean_abs_combined_unfloored": 9.115687426638022, "mean_combined_floored": 7.222520782637316, "mean_combined_unfloored_signed": 5.3293541386366075}
+  vol_scale {"frac_at_cap": 0.5057573073516386, "implied_sigma_hat_median": 0.06, "max": 1.5, "mean": 1.327134883513775, "min": 0.7953531572677719, "raw_weight_gross_mean": 1.1712331649319259}
+replay sizing diagnostics {"class_cap_bound_days": 0, "infeasible_cap_days": 2355, "instrument_cap_bound_days": 5018, "n_days": 8474, "nonconverged_cap_days": 24}
+held weight share {"frac_days_cap_set_infeasible_among_held_days": 0.28927650165827296, "frac_days_nothing_held": 0.009369676320272573, "mean_when_any_held": 0.6996069278958358}
+host ledger unchanged: size 600599 mtime 1791876271
