@@ -1,6 +1,6 @@
 # Proposal: what, if anything, to research next (after core_v1 Tier D)
 
-Status: PROPOSAL for owner review, 2026-10-13. Nothing here is built, approved or pre-registered. Written for the owner.
+Status: DECIDED 2026-10-13 by the owner: option A+D (stop active research; work the live prerequisites). If a successor design is ever built it stays ETF long-only with gross <= 1.0 (no futures, no margin). Original proposal text below, unchanged.
 
 ## Where we are
 
