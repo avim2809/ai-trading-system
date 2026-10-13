@@ -18,10 +18,10 @@ Four independent point failures each force Tier D on their own: the Kelly bound,
 | G6 robustness | **fail** | gross-cap days 42.3% > 20% |
 | G7 after-tax vs BM2 | **fail** (see anomaly) | gap -0.562 vs BM2, correlation 0.55 so the correlation branch does not apply; judged on the FX-covered sub-window 2005-01-03..2026-09-29 (5,469 days) |
 | G8 charter order | **pass** | charter approved at 76303104 before the first core_v1 row |
-| Kelly bound | **fail** | tau 0.09 > max tau 0.0144 (50% haircut on the deflated Sharpe). Undeflated variant, informational: 0.2421, also below... see note |
+| Kelly bound | **fail** | tau 0.09 > max tau 0.0144 (50% haircut on the deflated Sharpe). The undeflated variant (informational only) would allow tau up to 0.2421. |
 | H4 ENB | **miss** | asset-class ENB 2.448 < 2.5 |
 
-Note on the Kelly line: the informational undeflated bound (tau <= 0.2421) is above tau 0.09. Only the gate reading (deflated, 50% haircut) fails.
+Note on the Kelly line: only the gate reading (deflated Sharpe, 50% haircut) fails; the undeflated figure is shown for information.
 
 ## Sensitivities (reported, never gate)
 
