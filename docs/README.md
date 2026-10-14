@@ -60,6 +60,7 @@ output.
 | Doc | Status |
 |---|---|
 | `research_findings_beyond_equities_2026_09_30.md` | External research on options, FX, CFDs, futures and more, with corrections |
+| `research_active_vs_passive_2026_10_14.md` (+ `.json`) | Deep-research evidence review (2026-10-14): active versus passive for a small Israeli-resident investor, the multiple-testing debate, unlevered trend and risk parity; supports staying passive; currency, tax and BTC angles unverified |
 | `futures_data_vendor_comparison_2026_09.md`, `futures_trend_integration_sketch.md` | Futures trend: needs Norgate data plus 34–56 days of engineering; owner to decide |
 | `longer_dataset_options.md` | Survivorship-free data vendors (reference) |
 | `research_brief_eodhd_findings.md` | Owner's external shortlist of EODHD-testable ideas (not yet pre-registered) |
