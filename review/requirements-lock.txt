@@ -108,7 +108,7 @@ nvidia-nccl-cu13==2.30.7
 nvidia-nvjitlink==13.4.92
 nvidia-nvshmem-cu13==3.4.5
 nvidia-nvtx==13.0.85
-oauthlib==3.3.1
+oauthlib==4.0.0
 onnx==1.23.0
 onnx-ir==1.0.0
 onnxmltools==1.16.0
