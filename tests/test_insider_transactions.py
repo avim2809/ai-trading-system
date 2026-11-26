@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import zipfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pandas as pd
 import pytest
@@ -264,4 +265,6 @@ class TestDiscoverQuarters:
 
         out = it.discover_quarters(session=FakeSession(), rate_limiter=it.RateLimiter(max_per_second=1000))
         assert out["2006q1"].endswith("2006q1_form345.zip")
-        assert out["2026q2"].startswith("https://www.sec.gov")
+        parsed = urlparse(out["2026q2"])
+        assert parsed.scheme == "https"
+        assert parsed.hostname == "www.sec.gov"
