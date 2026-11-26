@@ -1,3 +1,4 @@
+- [Project repo orientation](project_repo_orientation_nov26.md) — architecture, OPS/RESEARCH boundaries, and source-of-truth pointers for future work
 - [IBKR paper trading setup status](project_ibkr_paper_trading_setup.md) — blockers/state for IBKR paper; 8/5: root cause was 2 IB connections sharing 1 thread, fixed + verified 22/22 orders submit
 - [Alpaca parallel instance](project_alpaca_parallel_instance.md) — 8/5: second live paper instance (Alpaca) alongside IBKR, one checkout param'd via FIRM_API_PORT/FIRM_DATA_DIR/FIRM_LIVE_CONFIG (disk-constrained host)
 - [Data pipeline & backtest reliability](project_data_pipeline_and_backtest_reliability.md) — 6 real bugs in fallback provider/fetch-data/walk-forward found running real data end to end
