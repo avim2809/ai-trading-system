@@ -211,6 +211,7 @@ class LiveTradingEngine:
         self._enabled_strategies: list[str] = list(config.get("strategies") or self._all_strategy_names())
         initial_capital = config.get("initial_capital", 100_000)
         self._portfolio = PortfolioState(initial_capital=initial_capital)
+        self._portfolio_synced_from_broker = False
         self._cycle_count = 0
         self._cycle_history: list[CycleResult] = []
         self._running = False
@@ -575,6 +576,13 @@ class LiveTradingEngine:
     # this only absorbs float representation noise, not real quantity.
     _RECONCILE_POSITION_TOLERANCE = 1e-4
 
+    def _sync_portfolio_from_broker(self) -> list[dict[str, Any]]:
+        discrepancies = sync_portfolio_from_broker(
+            self._broker, self._portfolio, prices=None
+        )
+        self._portfolio_synced_from_broker = True
+        return discrepancies
+
     def _internal_net_position(self) -> tuple[float, dict[str, float]]:
         """This engine's current belief about net cash/holdings.
 
@@ -621,6 +629,19 @@ class LiveTradingEngine:
         read as drift.
         """
         now = utcnow()
+        if not self._portfolio_synced_from_broker:
+            result = {
+                "status": "unknown",
+                "checked_at": now.isoformat(),
+                "reason": (
+                    "internal portfolio has not yet been synchronized with "
+                    "the broker after startup"
+                ),
+                "discrepancies": [],
+            }
+            self._last_reconciliation = result
+            return result
+
         try:
             account = self._broker.get_account()
             broker_positions = self._broker.get_positions()
@@ -2363,9 +2384,7 @@ class LiveTradingEngine:
             # last restart while the broker held real positions the whole
             # time -- reconciliation looked catastrophically broken when
             # the actual cause was just "never got a chance to sync".
-            discrepancies = sync_portfolio_from_broker(
-                self._broker, self._portfolio, prices=None
-            )
+            discrepancies = self._sync_portfolio_from_broker()
             result.discrepancies = discrepancies
 
             prices = self._resolve_cycle_prices(pit_view)
@@ -3055,7 +3074,7 @@ class LiveTradingEngine:
             result.error = "skipped: extended-hours cycle not used in allocation mode"
             return
 
-        discrepancies = sync_portfolio_from_broker(self._broker, self._portfolio, prices=None)
+        discrepancies = self._sync_portfolio_from_broker()
         result.discrepancies = discrepancies
         if self._consecutive_broker_failures:
             log.warning(

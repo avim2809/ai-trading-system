@@ -352,6 +352,7 @@ def _make_reconciliation_engine(
     capital_allocation_mode: str = "blended",
     sleeve_portfolios: dict[str, PortfolioState] | None = None,
     initial_capital: float = 100_000,
+    portfolio_synced: bool = True,
 ):
     """A LiveTradingEngine with a MagicMock orchestrator standing in for
     the real agent pipeline -- check_reconciliation only reads
@@ -367,9 +368,11 @@ def _make_reconciliation_engine(
         mock_orch.capital_allocation_mode = capital_allocation_mode
         mock_orch._sleeve_portfolios = sleeve_portfolios or {}
         mock_build.return_value = mock_orch
-        return LiveTradingEngine(
+        engine = LiveTradingEngine(
             config=config, broker=broker, data_feed=feed, approval_queue=queue,
         )
+    engine._portfolio_synced_from_broker = portfolio_synced
+    return engine
 
 
 class TestPositionReconciliation:
@@ -381,6 +384,27 @@ class TestPositionReconciliation:
     in test_scheduler.py), so it's safe to call as often as a caller likes,
     including directly via GET /api/live/reconciliation, without pushing a
     notification every time."""
+
+    def test_startup_mismatch_is_unknown_until_first_broker_sync(self, tmp_path):
+        broker = MockBroker(initial_cash=100_000)
+        broker.connect()
+        broker.submit_order(OrderRequest(symbol="AAPL", side="buy", quantity=10))
+        engine = _make_reconciliation_engine(
+            broker, tmp_path, portfolio_synced=False,
+        )
+
+        result = engine.check_reconciliation()
+
+        assert result["status"] == "unknown"
+        assert result["discrepancies"] == []
+        assert "not yet been synchronized" in result["reason"]
+
+        engine._sync_portfolio_from_broker()
+        result = engine.check_reconciliation()
+
+        assert result["status"] == "ok"
+        assert result["discrepancies"] == []
+        assert engine.portfolio.holdings == {"AAPL": 10}
 
     def test_detects_genuine_mismatch(self, tmp_path):
         broker = MockBroker(initial_cash=100_000)
