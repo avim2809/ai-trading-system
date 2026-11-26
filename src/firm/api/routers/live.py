@@ -1202,9 +1202,12 @@ def live_reconciliation(request: Request) -> dict[str, Any]:
 
     Queries the broker fresh on every call (read-only — see
     ``LiveTradingEngine.check_reconciliation``, which never submits/cancels
-    an order or corrects portfolio state) rather than only returning the
-    last scheduled result, so "are we in sync right now" doesn't require
-    waiting for the next periodic run.
+    an order or corrects portfolio state) after the engine's first successful
+    portfolio sync. Before that sync, it returns ``status="unknown"`` rather
+    than comparing real broker positions to the engine's intentionally empty
+    startup book. It does not alert and does not merely return the last
+    scheduled result, so "are we in sync right now" doesn't require waiting
+    for the next periodic run once startup sync is complete.
     """
     engine = getattr(request.app.state, "live_engine", None)
     if engine is None:
